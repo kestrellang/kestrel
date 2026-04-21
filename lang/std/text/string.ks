@@ -37,7 +37,7 @@ public struct StringIterator: Iterator {
             return .None
         }
         // Decode UTF-8 at current position
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](self.ptr.asRaw().raw);
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.ptr.asRaw().raw);
         let result = decodeUtf8(rawPtr, self.length, at: self.index);
         if let .Some(decoded) = result {
             self.index = self.index + decoded.bytesConsumed;
@@ -90,7 +90,7 @@ public struct SplitIterator: Iterator {
                 return .None
             }
             // Decode one code point
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](self.ptr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.ptr.asRaw().raw);
             let result = decodeUtf8(rawPtr, self.length, at: self.index);
             if let .Some(decoded) = result {
                 self.index = self.index + decoded.bytesConsumed;
@@ -174,7 +174,7 @@ public struct SplitWhereIterator: Iterator {
         var matchIndex: Int64 = self.index;
         while self.index < self.length and found == false {
             // Decode UTF-8 at current position
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](self.ptr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.ptr.asRaw().raw);
             let result = decodeUtf8(rawPtr, self.length, at: self.index);
             if let .Some(decoded) = result {
                 if self.predicate(decoded.char) {
@@ -330,7 +330,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
                 let newPtr = allocated.cast[UInt8]();
                 // Copy bytes from literal
                 let srcPtr: lang.ptr[lang.i8] = ptr;
-                let dstPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](newPtr.asRaw().raw);
+                let dstPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](newPtr.asRaw().raw);
                 let _ = memcpy(dstPtr, srcPtr, length);
                 self.storage = RcBox(StringStorage(
                     ptr: newPtr,
@@ -380,22 +380,22 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
     /// A view over the raw UTF-8 bytes.
     public var bytes: BytesView {
-        BytesView(ptr: lang.cast_ptr[lang.i8](self.ptr().asRaw().raw), length: self.len())
+        BytesView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
     /// A view over the Unicode code points.
     public var chars: CharsView {
-        CharsView(ptr: lang.cast_ptr[lang.i8](self.ptr().asRaw().raw), length: self.len())
+        CharsView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
     /// A view over the extended grapheme clusters.
     public var graphemes: GraphemesView {
-        GraphemesView(ptr: lang.cast_ptr[lang.i8](self.ptr().asRaw().raw), length: self.len())
+        GraphemesView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
     /// A view over the lines in the string.
     public var lines: LinesView {
-        LinesView(ptr: lang.cast_ptr[lang.i8](self.ptr().asRaw().raw), length: self.len())
+        LinesView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
     // ========================================================================
@@ -436,7 +436,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         if self.len() == Int64(intLiteral: 0) {
             return .None
         }
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](self.ptr().asRaw().raw);
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw);
         let result = decodeUtf8(rawPtr, self.len(), at: Int64(intLiteral: 0));
         if let .Some(decoded) = result {
             .Some(decoded.char)
@@ -456,7 +456,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var lastChar: Char? = .None;
         var i: Int64 = Int64(intLiteral: 0);
         while i < myLen {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: i);
             if let .Some(decoded) = result {
                 lastChar = .Some(decoded.char);
@@ -484,14 +484,14 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var byteIndex: Int64 = Int64(intLiteral: 0);
         while byteIndex < myLen {
             if charIndex == index {
-                let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+                let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
                 let result = decodeUtf8(rawPtr, myLen, at: byteIndex);
                 if let .Some(decoded) = result {
                     return .Some(decoded.char)
                 }
                 return .None
             }
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: byteIndex);
             if let .Some(decoded) = result {
                 byteIndex = byteIndex + decoded.bytesConsumed;
@@ -628,7 +628,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         self.grow(self.len() + utf8Len);
         var s = self.storage.getValue();
         // Encode to buffer
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](s.ptr.asRaw().raw);
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
         let written = encodeUtf8(c, rawPtr, at: s.len);
         s.len = s.len + written;
         self.storage.setValue(s)
@@ -719,7 +719,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         let myPtr = self.ptr();
         var i: Int64 = Int64(intLiteral: 0);
         while i < myLen {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: i);
             if let .Some(decoded) = result {
                 if predicate(decoded.char) {
@@ -876,7 +876,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var realStart: Int64 = Int64(intLiteral: 0);
         var done: Bool = false;
         while realStart < myLen and done == false {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: realStart);
             if let .Some(decoded) = result {
                 if predicate(decoded.char) {
@@ -902,7 +902,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var lastNonMatch: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
         while i < myLen {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: i);
             if let .Some(decoded) = result {
                 if predicate(decoded.char) == false {
@@ -978,7 +978,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var realStart: Int64 = Int64(intLiteral: 0);
         var done: Bool = false;
         while realStart < myLen and done == false {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: realStart);
             if let .Some(decoded) = result {
                 if predicate(decoded.char) {
@@ -1000,7 +1000,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var lastNonMatch: Int64 = Int64(intLiteral: 0);
         var i: Int64 = Int64(intLiteral: 0);
         while i < myLen {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[lang.i8](myPtr.asRaw().raw);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
             let result = decodeUtf8(rawPtr, myLen, at: i);
             if let .Some(decoded) = result {
                 if predicate(decoded.char) == false {

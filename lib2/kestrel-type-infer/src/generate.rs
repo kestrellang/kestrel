@@ -8,7 +8,7 @@ use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
 use crate::constraint::{CallArg, Constraint, labels_match};
@@ -89,7 +89,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 instantiate_entity_with_args(ctx, *entity, explicit_type_args);
             // Record type arg vars so MIR lowering can retrieve the resolved types
             if !type_arg_vars.is_empty() {
-                ctx.type_args.insert(id, type_arg_vars);
+                ctx.record_type_args(id, type_arg_vars, span.clone());
             }
             // Track type parameter references — invalid unless consumed by MethodCall/Call
             if ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::TypeParameter) {
@@ -360,7 +360,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
                 // Body must match result type — use the arm body's span so
                 // mismatch diagnostics point at the offending arm, not the
-                // match keyword.
+                // match keyword. Never-arms don't pin the result (see the
+                // `Never` branch in `unify`); if every arm turns out to be
+                // Never, `default_never_fallback` settles it.
                 let body_tv = gen_expr(ctx, hir, arm.body);
                 let body_span = expr_span(hir, arm.body);
                 ctx.equal(body_tv, result_tv, body_span);
@@ -785,8 +787,17 @@ fn gen_struct_init(
                 .map(|tp| tp.0.clone())
                 .unwrap_or_default();
             let init_fresh: Vec<TyVar> = init_type_params.iter().map(|_| ctx.fresh()).collect();
-            if !init_fresh.is_empty() {
-                ctx.type_args.insert(expr_id, init_fresh.clone());
+            // Record the COMPLETE type-arg list (struct params first, then the
+            // init's own method-level params) so MIR lowering sees the full
+            // shape expected by the init function. Init functions inherit
+            // their parent struct's type_params as their leading MIR
+            // type_params — the recorded list has to match that layout exactly,
+            // otherwise MIR lowering will silently double-count via the
+            // prepend-struct-args fallback in emit_call_maybe_init.
+            if !fresh_args.is_empty() || !init_fresh.is_empty() {
+                let mut all: Vec<TyVar> = fresh_args.clone();
+                all.extend(init_fresh.iter().copied());
+                ctx.record_type_args(expr_id, all, span.clone());
             }
             let mut init_subs = struct_subs.clone();
             for (&e, &tv) in init_type_params.iter().zip(init_fresh.iter()) {
@@ -1133,10 +1144,8 @@ fn instantiate_entity_inner(
                     })
                     .collect();
 
-                let ret_tv = qctx
-                    .query(LowerTypeAnnotation { entity, root })
-                    .map(|hir_ty| lower_hir_ty_with_subs(ctx, &hir_ty, &subs))
-                    .unwrap_or_else(|| ctx.fresh());
+                let ret_hir = qctx.query(LowerCallableReturnType { entity, root });
+                let ret_tv = lower_hir_ty_with_subs(ctx, &ret_hir, &subs);
 
                 ctx.function(param_tvs, ret_tv)
             } else {

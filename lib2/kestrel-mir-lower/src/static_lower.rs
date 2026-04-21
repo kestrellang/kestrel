@@ -14,11 +14,14 @@
 //! function is prepended to `main`'s entry block so statics are initialized
 //! before user code runs.
 
-use kestrel_ast_builder::{Body, Settable};
+use std::path::PathBuf;
+
+use kestrel_ast_builder::{Attributes, Body, FileId, FilePath, Settable};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
-    BasicBlock, Callee, FunctionDef, FunctionId, FunctionKind, Immediate, LocalDef, MirBody, MirTy,
-    Place, Rvalue, Statement, StatementKind, StaticDef, StaticId, Terminator, Value,
+    BasicBlock, Callee, FileConstantData, FunctionDef, FunctionId, FunctionKind, Immediate,
+    LocalDef, MirBody, MirTy, Place, Rvalue, Statement, StatementKind, StaticDef, StaticId,
+    Terminator, Value,
 };
 
 use crate::body_lower::lower_function_body;
@@ -37,11 +40,48 @@ pub fn lower_static(ctx: &mut LowerCtx, entity: Entity) -> StaticId {
     let ty = resolve_type_annotation(ctx, entity);
     let is_mutable = ctx.world.get::<Settable>(entity).is_some();
 
-    let mut def = StaticDef::new(entity, name, ty);
+    let mut def = StaticDef::new(entity, name, ty.clone());
     if is_mutable {
         def = def.mutable();
     }
+    if let Some(fc) = extract_file_constant(ctx, entity, &ty) {
+        def = def.with_file_constant(fc);
+    }
     ctx.module.add_static(def)
+}
+
+/// Read the `@fileconstant("path")` attribute (if any) and build a
+/// `FileConstantData`. The path is resolved relative to the containing source
+/// file's directory so the bytes can be read at codegen time.
+fn extract_file_constant(ctx: &LowerCtx, entity: Entity, ty: &MirTy) -> Option<FileConstantData> {
+    let attrs = ctx.world.get::<Attributes>(entity)?;
+    let attr = attrs.0.iter().find(|a| a.name == "fileconstant")?;
+
+    // @fileconstant takes a single string-literal positional arg.
+    let raw = &attr.args.first()?.value;
+    let relative_path = strip_quotes(raw)?;
+
+    // Element type: `LiteralSlice[T]` → T.
+    let element_ty = match ty {
+        MirTy::Named { type_args, .. } if type_args.len() == 1 => type_args[0].clone(),
+        _ => return None,
+    };
+
+    // Base path: the directory of the source file containing this declaration.
+    let file_entity = ctx.world.get::<FileId>(entity)?.0;
+    let file_path = ctx.world.get::<FilePath>(file_entity)?;
+    let base_path = PathBuf::from(&file_path.0).parent().map(PathBuf::from);
+
+    Some(FileConstantData {
+        relative_path: relative_path.to_string(),
+        element_ty,
+        base_path,
+    })
+}
+
+/// Strip surrounding double quotes from an attribute string-literal arg.
+fn strip_quotes(raw: &str) -> Option<&str> {
+    raw.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
 }
 
 /// After all items are lowered, synthesize the `__kestrel_init_statics`

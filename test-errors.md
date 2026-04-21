@@ -302,8 +302,8 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 
 # Stdlib
 
-Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-21).
-Result: **169 passed · 34 failed** (same counts as 2026-04-20, but most "Codegen symbol not found: `Array.init`" tests have moved past link to new downstream failures — Cranelift verifier i64/i8 mismatches and runtime assertion failures).
+Run: `file_tests --test-threads=1 stdlib` on `feature/incremental-hecs` (2026-04-21, third run).
+Result: **183 passed · 21 failed** (−3 vs. second 2026-04-21 run). Fixed in this window: `@fileconstant` MIR-lowering drop (−3: `char_case_conversion`, `string/case_conversion`, `views/graphemes_view`).
 
 Previously resolved categories:
 - **E205 `cannot pass temporary value to 'mutating' parameter`** — fully resolved 2026-04-20 (access-mode analyzer receiver/arg split + stdlib `mutating` → `consuming` flip). All former E205 tests reclassified below by their remaining failure.
@@ -311,31 +311,7 @@ Previously resolved categories:
 - **Monomorphization witness gaps** — fixed 2026-04-20 via new `ProtocolMembers` query in `kestrel-name-res` that unifies the protocol-child + extension + parent-protocol walk. Witness generation and name-resolution consumers now call one query instead of reassembling the walk. 4 tests pass; 1 regressed to a separate pre-existing overload-collision bug; 20 others reclassified by new failure mode.
 - **Witness-instantiation collapse** — fixed 2026-04-20. `ConformingProtocols` deduped by protocol entity so `Int64: Convertible[Int8], [Int16], [Int32], ...` collapsed into a single `Convertible` witness bound to the first `init(from:)` overload — every `Int64(from: x)` silently truncated x to 8 bits. Fix: new `ConformingProtocolInstantiations` query preserves per-conformance type args; `witness_lower.rs` emits one witness per `(protocol, type_args)` with parameter-type init disambiguation; codegen's `find_witness_with_method` filters by `protocol_type_args`. Net: −23 stdlib failures (integer conversions, parse, byte-endian, bitwidth ops, float conversions).
 - **Codegen symbol not found: `Array.init`** — the `collect()` monomorphization miss is resolved. Nearly all former entries moved to Cranelift verifier errors (compile/link phase) or Runtime exit-code failures (runs but asserts fail); a couple now hit earlier MIR/inference errors. Only `try_fold_adapter` still links against an undeclared symbol, for a different monomorphization gap (`tryFold`).
-
-## Cranelift verifier — `call_indirect` closure/witness arg has i64 where i8 expected
-
-Iterator adapters that wrap another iterator and call `.next()` through a call_indirect produce a signature mismatch: argument 2 (the witness env / thick-closure env pointer) has type `i64` but the callee signature declares `i8`. The verifier rejects the function before codegen completes. Likely the generic signature for a `next` returning the abstract `Item` is being synthesized with the Item payload lowered to `i8` (default/placeholder) and then the call site passes the correctly-typed `i64` env. Fix probably lives in the thick-closure env ABI or in how the monomorphizer substitutes `Item` into the witness signature.
-
-- [ ] `stdlib/iterator/filter_map_explicit.ks` — `FilterMapIterator.next`: `call_indirect.i64 sig4, v73(v75, v74, v77)` — `arg 2 (v77) has type i64, expected i8`
-- [ ] `stdlib/iterator/filter_map_flatten.ks` — `FilterMapIterator.next` (Optional payload) — same pattern
-- [ ] `stdlib/iterator/inspect_adapter.ks` — `InspectIterator.next` — same pattern
-- [ ] `stdlib/iterator/intersperse_adapter.ks` — 3 sites in `Test.main` — same pattern
-- [ ] `stdlib/iterator/map_filter_collect.ks` — `MapIterator.next` — same pattern
-- [ ] `stdlib/iterator/take_skip_methods.ks` — `TakeWhileIterator.next` — same pattern
-- [ ] `stdlib/views/string_iter.ks` — `MapIterator<StringIterator, Char>.next` — same pattern
-
-## Cranelift verifier — `load.i64` / direct call through pointer typed i8
-
-Same family as the bucket above, but the i8-typed value is the *base address* of a `load.i64` (with "invalid pointer width (got 8, expected 64)"). Suggests the witness-field load itself is producing i8 rather than i64. Likely shares root cause with the call_indirect arg bucket.
-
-- [ ] `stdlib/iterator/flatten_iterator.ks` — `FlattenIterator.next`: `v81 = load.i64 v79` where `v79 has type i8`, plus `v82 = load.i64 v79+8`
-- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — `IntersperseWithIterator.next` — same pattern
-
-## Witness overload collision
-
-When a protocol extension declares two methods with the same name but different arities (e.g. `isSorted()` and `isSorted(by:)` on `Iterator`), the witness table stores them under the same key and `IndexMap::insert` keeps only the last one. Calls to the dropped overload fail at codegen with Cranelift arg-count errors. Needs witness keys that include the arity or label-set, not just the method name.
-
-- [ ] `stdlib/iterator/is_sorted_checks.ks` — `mismatched argument count: got 2, expected 3` — two `isSorted` methods collide; arity-0 variant is dropped
+- **Cranelift verifier `i64`/`i8` signature mismatch** — resolved 2026-04-21 (likely by the `self_item_leaked_to_mir` fix + surrounding monomorphization work). All 9 former entries (7 `call_indirect` arg-2 mismatches across `MapIterator`/`FilterMapIterator`/`InspectIterator`/`IntersperseIterator`/`TakeWhileIterator`, plus 2 `load.i64` base-pointer mismatches in `FlattenIterator`/`IntersperseWithIterator`) now compile and link cleanly. Reclassified into the Runtime exit-code bucket below by their new failure mode (8 SIGSEGV, 1 assert-failure exit 1).
 
 ## Witness not found for abstract associated type
 
@@ -343,16 +319,6 @@ Extension methods that require additional protocol conformances on `Iterator.Ite
 
 - [ ] `stdlib/iterator/min_max_sorted.ks` — `method 'compare' not found in witness for std.iter.Iterator.Item: Comparable`; also `add`/`multiply`
 - [ ] `stdlib/iterator/utility_adapters.ks` — `method 'equals' not found in witness for std.iter.Iterator.Item: Equatable`
-
-## Codegen symbol not found
-
-Monomorphization miss for a specific generic function. (The `Array.init` / `collect()` variant of this bucket is now empty — all former entries moved past linking.)
-
-- [ ] `stdlib/iterator/try_fold_adapter.ks` — `call to undeclared function: tryFold` — generic `tryFold` instantiation never emitted
-
-## MIR lowering panic
-
-- [ ] `stdlib/array/misc_extensions.ks` — `PANIC: declared type of variable var12 doesn't match type of value v91` (was `call to undeclared function: Array.init(count:generator:)`; now crashes earlier during MIR/lowering)
 
 ## Type inference / bind errors
 
@@ -363,21 +329,22 @@ Monomorphization miss for a specific generic function. (The `Array.init` / `coll
 
 ## Diagnostic-wording mismatches
 
-- [ ] `stdlib/array/subscript_assignment.ks` — line 10 expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
+- [x] `stdlib/array/subscript_assignment.ks` — line 10 expected `cannot assign to temporary value`, got E202 `cannot assign to this expression`
 
 ## Runtime exit-code failures (compile OK, assert/behavior wrong)
 
 Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation.
 
-- [ ] `stdlib/char/char_case_conversion.ks` — exit -1 (likely SIGKILL / segfault)
-- [ ] `stdlib/dictionary/dictionary_subscripts.ks` — exit 6
 - [ ] `stdlib/io/io_error_types.ks` — exit 2
+- [ ] `stdlib/iterator/filter_map_explicit.ks` — SIGSEGV (was Cranelift verifier `i64`/`i8` mismatch in `FilterMapIterator.next`)
+- [ ] `stdlib/iterator/filter_map_flatten.ks` — SIGSEGV (was Cranelift verifier mismatch, Optional payload)
+- [ ] `stdlib/iterator/flatten_iterator.ks` — SIGSEGV (was Cranelift verifier `load.i64 v79` where `v79 has type i8` in `FlattenIterator.next`)
 - [ ] `stdlib/iterator/fuse_and_cycle.ks` — exit 1 (was `Array.init` codegen-link failure)
-- [ ] `stdlib/iterator/min_by_max_by.ks` — exit 2
+- [ ] `stdlib/iterator/inspect_adapter.ks` — SIGSEGV (was Cranelift verifier mismatch in `InspectIterator.next`)
+- [ ] `stdlib/iterator/intersperse_adapter.ks` — SIGSEGV (was Cranelift verifier mismatch, 3 sites in `Test.main`)
+- [ ] `stdlib/iterator/intersperse_with_adapter.ks` — SIGSEGV (was Cranelift verifier `load.i64`/i8 mismatch in `IntersperseWithIterator.next`)
+- [ ] `stdlib/iterator/map_filter_collect.ks` — SIGSEGV (was Cranelift verifier mismatch in `MapIterator.next`)
 - [ ] `stdlib/iterator/peekable_adapter.ks` — exit 2
-- [ ] `stdlib/iterator/reduce_adapter.ks` — exit 2
-- [ ] `stdlib/string/case_conversion.ks` — exit 7
-- [ ] `stdlib/views/bytes_view_iter.ks` — exit 2 (was `Array.init` codegen-link failure)
-- [ ] `stdlib/views/chars_view_iter_and_count.ks` — exit 3 (was `Array.init` codegen-link failure)
-- [ ] `stdlib/views/graphemes_view.ks` — exit 1 (was `Array.init` codegen-link failure)
+- [ ] `stdlib/iterator/take_skip_methods.ks` — exit 1 (was Cranelift verifier mismatch in `TakeWhileIterator.next`)
+- [ ] `stdlib/views/string_iter.ks` — SIGSEGV (was Cranelift verifier mismatch in `MapIterator<StringIterator, Char>.next`)
 

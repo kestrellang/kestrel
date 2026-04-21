@@ -115,7 +115,7 @@ extend String {
 
         // Allocate memory
         let rawPtr: lang.ptr[lang.i8] = malloc(totalSize.raw);
-        let ptr = Pointer(raw: lang.cast_ptr[UInt8](rawPtr));
+        let ptr = Pointer(raw: lang.cast_ptr[_, UInt8](rawPtr));
 
         // Copy bytes if allocation succeeded
         if ptr.isNull == false {

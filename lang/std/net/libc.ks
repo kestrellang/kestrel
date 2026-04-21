@@ -106,7 +106,7 @@ public func socket(domain: Int32, type_: Int32, proto: Int32) -> Int32 {
 
 /// Binds a socket to an address. Returns 0 on success, -1 on error.
 public func bind(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
-    Int32(raw: libc_bind(sockfd.raw, lang.cast_ptr[lang.i8](addr.raw), addrlen.raw))
+    Int32(raw: libc_bind(sockfd.raw, lang.cast_ptr[_, lang.i8](addr.raw), addrlen.raw))
 }
 
 /// Listens for connections. Returns 0 on success, -1 on error.
@@ -117,17 +117,17 @@ public func listen(sockfd: Int32, backlog: Int32) -> Int32 {
 /// Accepts a connection. Returns new fd or -1 on error.
 /// Pass null pointers to ignore client address.
 public func accept(sockfd: Int32, addr: Pointer[UInt8], addrlen: Pointer[Int32]) -> Int32 {
-    Int32(raw: libc_accept(sockfd.raw, lang.cast_ptr[lang.i8](addr.raw), lang.cast_ptr[lang.i32](addrlen.raw)))
+    Int32(raw: libc_accept(sockfd.raw, lang.cast_ptr[_, lang.i8](addr.raw), lang.cast_ptr[_, lang.i32](addrlen.raw)))
 }
 
 /// Receives data from a socket. Returns bytes read, 0 on close, -1 on error.
 public func recv(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -> Int64 {
-    Int64(raw: libc_recv(sockfd.raw, lang.cast_ptr[lang.i8](buf.raw), len.raw, flags.raw))
+    Int64(raw: libc_recv(sockfd.raw, lang.cast_ptr[_, lang.i8](buf.raw), len.raw, flags.raw))
 }
 
 /// Sends data on a socket. Returns bytes sent or -1 on error.
 public func send(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -> Int64 {
-    Int64(raw: libc_send(sockfd.raw, lang.cast_ptr[lang.i8](buf.raw), len.raw, flags.raw))
+    Int64(raw: libc_send(sockfd.raw, lang.cast_ptr[_, lang.i8](buf.raw), len.raw, flags.raw))
 }
 
 /// Closes a file descriptor. Returns 0 on success, -1 on error.
@@ -137,7 +137,7 @@ public func close(fd: Int32) -> Int32 {
 
 /// Sets a socket option. Returns 0 on success, -1 on error.
 public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Pointer[UInt8], optlen: Int32) -> Int32 {
-    Int32(raw: libc_setsockopt(sockfd.raw, level.raw, optname.raw, lang.cast_ptr[lang.i8](optval.raw), optlen.raw))
+    Int32(raw: libc_setsockopt(sockfd.raw, level.raw, optname.raw, lang.cast_ptr[_, lang.i8](optval.raw), optlen.raw))
 }
 
 /// Converts host byte order to network byte order (16-bit).
@@ -147,7 +147,7 @@ public func htons(hostshort: UInt16) -> UInt16 {
 
 /// Connects a socket to a remote address. Returns 0 on success, -1 on error.
 public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
-    Int32(raw: libc_connect(sockfd.raw, lang.cast_ptr[lang.i8](addr.raw), addrlen.raw))
+    Int32(raw: libc_connect(sockfd.raw, lang.cast_ptr[_, lang.i8](addr.raw), addrlen.raw))
 }
 
 /// Resolves a hostname to socket addresses.
@@ -166,16 +166,16 @@ public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int3
 ///   offset 40: ai_next     (ptr)
 public func getaddrinfo(node: Pointer[UInt8], service: Pointer[UInt8], hints: Pointer[UInt8], res: Pointer[Pointer[UInt8]]) -> Int32 {
     Int32(raw: libc_getaddrinfo(
-        lang.cast_ptr[lang.i8](node.raw),
-        lang.cast_ptr[lang.i8](service.raw),
-        lang.cast_ptr[lang.i8](hints.raw),
-        lang.cast_ptr[lang.ptr[lang.i8]](res.raw)
+        lang.cast_ptr[_, lang.i8](node.raw),
+        lang.cast_ptr[_, lang.i8](service.raw),
+        lang.cast_ptr[_, lang.i8](hints.raw),
+        lang.cast_ptr[_, lang.ptr[lang.i8]](res.raw)
     ))
 }
 
 /// Frees the addrinfo linked list returned by getaddrinfo().
 public func freeaddrinfo(res: Pointer[UInt8]) {
-    libc_freeaddrinfo(lang.cast_ptr[lang.i8](res.raw))
+    libc_freeaddrinfo(lang.cast_ptr[_, lang.i8](res.raw))
 }
 
 /// Returns the current errno value.

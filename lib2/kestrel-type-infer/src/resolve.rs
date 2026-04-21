@@ -11,7 +11,9 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
+use kestrel_hir_lower::{
+    LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
+};
 use kestrel_name_res::{
     ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution,
     expand_protocol_closure_in_place,
@@ -768,26 +770,22 @@ impl WorldResolver<'_> {
             vec![]
         };
 
-        // Build return type from TypeAnnotation
+        // Build return type. Fields/properties are typed by their annotation
+        // (no annotation = Error; a field without a type is malformed).
+        // Callables go through the central `LowerCallableReturnType` query
+        // so the unit default is applied in one place.
         let return_type = match &member_kind {
-            MemberKind::Field { .. } | MemberKind::ComputedProperty { .. } => {
-                // Fields/properties: return the field type
-                self.ctx
-                    .query(LowerTypeAnnotation {
-                        entity: member,
-                        root: self.root,
-                    })
-                    .unwrap_or(HirTy::Error(Span::synthetic(0)))
-            },
-            _ => {
-                // Methods/inits/subscripts: return type from annotation
-                self.ctx
-                    .query(LowerTypeAnnotation {
-                        entity: member,
-                        root: self.root,
-                    })
-                    .unwrap_or_else(|| HirTy::Tuple(vec![], Span::synthetic(0)))
-            },
+            MemberKind::Field { .. } | MemberKind::ComputedProperty { .. } => self
+                .ctx
+                .query(LowerTypeAnnotation {
+                    entity: member,
+                    root: self.root,
+                })
+                .unwrap_or(HirTy::Error(Span::synthetic(0))),
+            _ => self.ctx.query(LowerCallableReturnType {
+                entity: member,
+                root: self.root,
+            }),
         };
 
         // Get where clauses
@@ -915,13 +913,10 @@ impl WorldResolver<'_> {
 
         // Lower param types and return type from the protocol method
         let param_types = self.build_param_types(method);
-        let return_type = self
-            .ctx
-            .query(LowerTypeAnnotation {
-                entity: method,
-                root: self.root,
-            })
-            .unwrap_or(HirTy::Tuple(Vec::new(), Span::synthetic(0)));
+        let return_type = self.ctx.query(LowerCallableReturnType {
+            entity: method,
+            root: self.root,
+        });
 
         let where_clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
             entity: method,

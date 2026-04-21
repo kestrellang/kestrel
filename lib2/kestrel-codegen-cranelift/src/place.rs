@@ -87,10 +87,6 @@ fn load_or_ptr(
         ptr
     } else {
         let cl_ty = types::translate_type(ty, ctx.target);
-        if matches!(ty, MirTy::Error) && std::env::var("KESTREL_DEBUG_LOADS").is_ok() {
-            let bt = std::backtrace::Backtrace::force_capture();
-            eprintln!("load_or_ptr ERROR TY backtrace:\n{bt}");
-        }
         builder
             .ins()
             .load(cl_ty, MemFlags::new(), ptr, Offset32::new(0))
@@ -283,9 +279,18 @@ pub fn compile_place_write(
             let parent_ty =
                 common::get_place_type(ctx.module, state.body, parent, &state.subst, &ctx.layouts)?;
 
+            if std::env::var("KESTREL_FIELD_DEBUG").is_ok() {
+                eprintln!(
+                    "[FIELD-WRITE] func={} parent_ty={:?} name={} subst={:?}",
+                    state.func_def.name, parent_ty, name, state.subst
+                );
+            }
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
                     let type_args = common::substitute_type_args(type_args, &state.subst);
+                    if std::env::var("KESTREL_FIELD_DEBUG").is_ok() {
+                        eprintln!("[FIELD-WRITE]   type_args after subst: {:?}", type_args);
+                    }
 
                     match ctx.layouts.resolve_named(*entity) {
                         NamedKind::Struct(struct_id) => {
@@ -296,6 +301,13 @@ pub fn compile_place_write(
                                 &type_args,
                                 name,
                             )?;
+                            if std::env::var("KESTREL_FIELD_DEBUG").is_ok() {
+                                eprintln!(
+                                    "[FIELD-WRITE]   offset={} field_ty={:?} is_agg={}",
+                                    offset, field_ty,
+                                    is_aggregate(&field_ty, &mut ctx.layouts)
+                                );
+                            }
                             let field_ptr = builder.ins().iadd_imm(parent_ptr, offset as i64);
 
                             if is_aggregate(&field_ty, &mut ctx.layouts) {

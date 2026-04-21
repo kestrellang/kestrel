@@ -26,6 +26,8 @@ OUT=$(mktemp /tmp/kts2.XXXXXX.out)
 echo "OUT=$OUT"
 ```
 
+Where XXXXXX is a randomly generated string based on the timestamp
+
 Remember the path — every later step (`nohup`, watchdog `tail`, `grep` inspection) must reference `$OUT` (or the literal path), never `$OUT`.
 
 Also check for active runs from other agents before launching a full suite:
@@ -81,9 +83,11 @@ Monitor command:
     sleep 5
   done
   echo "TEST_DONE"
-  passed=$(grep -cE "\.\.\. ok$" "$OUT")
-  failed=$(grep -cE "\.\.\. FAILED$" "$OUT")
-  echo "PASSED=$passed FAILED=$failed"
+  # Parse the summary line ("test result: FAILED. N passed; M failed; ...").
+  # Do NOT grep `... FAILED$` — datatest-stable line-wraps long test names,
+  # so the FAILED marker often lands on its own line and would be undercounted.
+  summary=$(awk '/^test result:/ { print; exit }' "$OUT")
+  echo "$summary"
 ```
 
 Set `timeout_ms` to ~3600000 (1h) and `persistent: false`. Never use `pkill -9 -f file_tests-` — it will kill other agents' runs too.
@@ -93,17 +97,25 @@ Set `timeout_ms` to ~3600000 (1h) and `persistent: false`. Never use `pkill -9 -
 While running or after:
 
 ```bash
-# Counts so far
-grep -cE "\.\.\. ok$" $OUT         # passed
-grep -cE "\.\.\. FAILED$" $OUT      # failed
-tail -3 $OUT                        # current test
+# Final counts (authoritative — use after the run ends)
+awk '/^test result:/ { print }' $OUT   # → "test result: FAILED. N passed; M failed; ..."
 
-# All failures with their test paths
-grep "FAILED$" $OUT
+# Progress counts mid-run (passed count is reliable; failed is NOT — see note below)
+grep -cE "\.\.\. ok$" $OUT
+tail -3 $OUT                            # current test
 
-# Failure messages (datatest-stable prints them at end after "failures:")
+# All failing test paths (robust — datatest-stable wraps long names, so the
+# FAILED marker may land on its own line; parse the trailing "failures:" block instead)
+sed -n '/^failures:$/,/^test result:/p' $OUT | grep "^    run_ks_test::" | sed 's/^    //'
+
+# Full failure messages with diagnostics
 sed -n '/^failures:$/,/^test result:/p' $OUT
 ```
+
+**Do not** use `grep -cE "\.\.\. FAILED$"` for counts: datatest-stable line-wraps
+long test names, so the `FAILED` marker often lands on its own line and gets
+missed. The summary line (`test result: FAILED. N passed; M failed`) is the
+only authoritative count — it appears at the very end of the output.
 
 ## Filtering — running a subset
 

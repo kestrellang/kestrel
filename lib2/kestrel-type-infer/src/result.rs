@@ -388,5 +388,14 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 literal_kind_name(*literal)
             )
         },
+        InferError::UnresolvedTypeParam { param, .. } => {
+            let name = ctx
+                .query_ctx
+                .get::<kestrel_ast_builder::Name>(*param)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| "_".into());
+            format!("cannot infer type parameter '{}'", name)
+        },
+        InferError::CannotInferType { .. } => "could not infer type".into(),
     }
 }

@@ -109,7 +109,7 @@ func lastError() -> Error {
 /// Returns true if a file or directory exists at the given path.
 public func fileExists(path: String) -> Bool {
     let cpath = path.toCString();
-    let result = libc_access(lang.cast_ptr[lang.i8](cpath.raw.raw), F_OK().raw);
+    let result = libc_access(lang.cast_ptr[_, lang.i8](cpath.raw.raw), F_OK().raw);
     cpath.free();
     Int32(raw: result) == 0
 }
@@ -143,7 +143,7 @@ func statMode(path: String) -> Optional[Int32] {
     let buf = malloc(STAT_BUF_SIZE().raw);
     let _ = memset(buf, 0, STAT_BUF_SIZE().raw);
 
-    let result = libc_stat(lang.cast_ptr[lang.i8](cpath.raw.raw), buf);
+    let result = libc_stat(lang.cast_ptr[_, lang.i8](cpath.raw.raw), buf);
     cpath.free();
 
     if Int32(raw: result) != 0 {
@@ -152,7 +152,7 @@ func statMode(path: String) -> Optional[Int32] {
     }
 
     let modePtr = lang.ptr_offset(buf, ST_MODE_OFFSET().raw);
-    let modeRaw = lang.ptr_read(lang.cast_ptr[lang.i16](modePtr));
+    let modeRaw = lang.ptr_read(lang.cast_ptr[_, lang.i16](modePtr));
     let mode = Int32(raw: lang.cast_i16_i32(modeRaw));
 
     free(buf);
@@ -166,7 +166,7 @@ func statMode(path: String) -> Optional[Int32] {
 /// Creates a directory at the given path.
 public func mkdir(path: String) -> Result[(), Error] {
     let cpath = path.toCString();
-    let result = libc_mkdir(lang.cast_ptr[lang.i8](cpath.raw.raw), MODE_DIR_DEFAULT().raw);
+    let result = libc_mkdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw), MODE_DIR_DEFAULT().raw);
     cpath.free();
 
     if Int32(raw: result) != 0 {
@@ -200,7 +200,7 @@ public func mkdirAll(path: String) -> Result[(), Error] {
 /// Removes an empty directory.
 public func removeDir(path: String) -> Result[(), Error] {
     let cpath = path.toCString();
-    let result = libc_rmdir(lang.cast_ptr[lang.i8](cpath.raw.raw));
+    let result = libc_rmdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
     cpath.free();
 
     if Int32(raw: result) != 0 {
@@ -214,7 +214,7 @@ public func removeDir(path: String) -> Result[(), Error] {
 public func listDir(path: String) -> Array[String] {
     var result = Array[String]();
     let cpath = path.toCString();
-    let dirp = libc_opendir(lang.cast_ptr[lang.i8](cpath.raw.raw));
+    let dirp = libc_opendir(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
     cpath.free();
 
     if Bool(boolLiteral: lang.ptr_is_null(dirp)) {
@@ -228,7 +228,7 @@ public func listDir(path: String) -> Array[String] {
         }
 
         let namePtr = lang.ptr_offset(entry, DIRENT_NAME_OFFSET().raw);
-        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[UInt8](namePtr)));
+        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](namePtr)));
         let name = String(from: cstr);
 
         if name.equals(".") or name.equals("..") {
@@ -249,7 +249,7 @@ public func listDir(path: String) -> Array[String] {
 /// Deletes a file.
 public func remove(path: String) -> Result[(), Error] {
     let cpath = path.toCString();
-    let result = libc_unlink(lang.cast_ptr[lang.i8](cpath.raw.raw));
+    let result = libc_unlink(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
     cpath.free();
 
     if Int32(raw: result) != 0 {
@@ -262,7 +262,7 @@ public func remove(path: String) -> Result[(), Error] {
 public func rename(from: String, to: String) -> Result[(), Error] {
     let cfrom = from.toCString();
     let cto = to.toCString();
-    let result = libc_rename(lang.cast_ptr[lang.i8](cfrom.raw.raw), lang.cast_ptr[lang.i8](cto.raw.raw));
+    let result = libc_rename(lang.cast_ptr[_, lang.i8](cfrom.raw.raw), lang.cast_ptr[_, lang.i8](cto.raw.raw));
     cfrom.free();
     cto.free();
 
@@ -280,7 +280,7 @@ public func rename(from: String, to: String) -> Result[(), Error] {
 public func symlink(target: String, path: String) -> Result[(), Error] {
     let ctarget = target.toCString();
     let cpath = path.toCString();
-    let result = libc_symlink(lang.cast_ptr[lang.i8](ctarget.raw.raw), lang.cast_ptr[lang.i8](cpath.raw.raw));
+    let result = libc_symlink(lang.cast_ptr[_, lang.i8](ctarget.raw.raw), lang.cast_ptr[_, lang.i8](cpath.raw.raw));
     ctarget.free();
     cpath.free();
 
@@ -296,7 +296,7 @@ public func readlink(path: String) -> Result[String, Error] {
     let bufsize: Int64 = 1024;
     let buf = malloc(bufsize.raw);
 
-    let bytesRead = libc_readlink(lang.cast_ptr[lang.i8](cpath.raw.raw), buf, bufsize.raw);
+    let bytesRead = libc_readlink(lang.cast_ptr[_, lang.i8](cpath.raw.raw), buf, bufsize.raw);
     cpath.free();
 
     if Int64(raw: bytesRead) < 0 {
@@ -309,7 +309,7 @@ public func readlink(path: String) -> Result[String, Error] {
     var i: Int64 = 0;
     let count = Int64(raw: bytesRead);
     while i < count {
-        let byte = lang.ptr_read(lang.cast_ptr[lang.i8](lang.ptr_offset(buf, i.raw)));
+        let byte = lang.ptr_read(lang.cast_ptr[_, lang.i8](lang.ptr_offset(buf, i.raw)));
         let ch = UInt8(raw: byte);
         result.appendByte(ch);
         i = i + 1
@@ -326,7 +326,7 @@ public func readlink(path: String) -> Result[String, Error] {
 /// Changes the permissions of a file or directory.
 public func chmod(path: String, mode: Int32) -> Result[(), Error] {
     let cpath = path.toCString();
-    let result = libc_chmod(lang.cast_ptr[lang.i8](cpath.raw.raw), mode.raw);
+    let result = libc_chmod(lang.cast_ptr[_, lang.i8](cpath.raw.raw), mode.raw);
     cpath.free();
 
     if Int32(raw: result) != 0 {
@@ -350,7 +350,7 @@ public func getcwd() -> String {
         return String()
     }
 
-    let cstr = CString(raw: Pointer(raw: lang.cast_ptr[UInt8](buf)));
+    let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](buf)));
     let s = String(from: cstr);
     free(buf);
     s

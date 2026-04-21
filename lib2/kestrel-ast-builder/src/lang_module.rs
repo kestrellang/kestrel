@@ -179,18 +179,37 @@ fn seed_generic_fn(
     params: &[(&str, AstType)],
     ret: AstType,
 ) {
+    seed_generic_fn_multi(world, lang, name, &["T"], params, ret);
+}
+
+/// Seed a generic intrinsic function with an explicit list of type parameters.
+/// Each name becomes a `TypeParameter` entity in declaration order; parameter
+/// and return types may refer to them with `param_ty("Name")`.
+fn seed_generic_fn_multi(
+    world: &mut World,
+    lang: Entity,
+    name: &str,
+    type_param_names: &[&str],
+    params: &[(&str, AstType)],
+    ret: AstType,
+) {
     let e = world.spawn();
     world.set(e, NodeKind::Function);
     world.set(e, Name(name.into()));
     world.set(e, Vis::Public);
     world.set(e, Intrinsic);
 
-    // Type parameter T
-    let t = world.spawn();
-    world.set(t, NodeKind::TypeParameter);
-    world.set(t, Name("T".into()));
-    world.set_parent(t, e);
-    world.set(e, TypeParams(vec![t]));
+    let type_params: Vec<Entity> = type_param_names
+        .iter()
+        .map(|tp_name| {
+            let t = world.spawn();
+            world.set(t, NodeKind::TypeParameter);
+            world.set(t, Name((*tp_name).into()));
+            world.set_parent(t, e);
+            t
+        })
+        .collect();
+    world.set(e, TypeParams(type_params));
 
     world.set(
         e,
@@ -466,10 +485,17 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         &[("ptr", ptr_t.clone()), ("offset", i64_ty.clone())],
         ptr_t.clone(),
     );
-    // cast_ptr accepts any pointer type and returns ptr[T].
-    // Input uses ptr[_] so it doesn't constrain the source type.
-    let ptr_any = ptr_of(AstType::Inferred(Span::synthetic(0)));
-    seed_generic_fn(world, lang, "cast_ptr", &[("ptr", ptr_any)], ptr_t.clone());
+    // cast_ptr reinterprets a ptr[From] as ptr[To]. Callers supply `From`
+    // as `_` to let inference fill it from the argument: the canonical form
+    // is `lang.cast_ptr[_, To](p)`.
+    seed_generic_fn_multi(
+        world,
+        lang,
+        "cast_ptr",
+        &["From", "To"],
+        &[("ptr", ptr_of(param_ty("From")))],
+        ptr_of(param_ty("To")),
+    );
     seed_generic_fn(world, lang, "sizeof", &[], i64_ty.clone());
     seed_generic_fn(world, lang, "alignof", &[], i64_ty.clone());
 

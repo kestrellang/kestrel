@@ -893,6 +893,54 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         method_args
     }
 
+    /// Resolve method-level type args for a method-call expression, with a fallback
+    /// to the explicit HIR type args when inference produces any `MirTy::Error`.
+    fn resolve_method_type_args(
+        &mut self,
+        expr_id: HirExprId,
+        hir_type_args: Option<&[kestrel_hir::ty::HirTy]>,
+    ) -> Vec<MirTy> {
+        let mut args = self.resolve_type_args(expr_id);
+        if args.iter().any(|a| matches!(a, MirTy::Error)) {
+            if let Some(hir_args) = hir_type_args {
+                if !hir_args.is_empty() {
+                    args = hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
+                }
+            }
+        }
+        args
+    }
+
+    /// Emit a method call, routing to witness or direct dispatch based on whether
+    /// the resolved method is declared on a protocol.
+    ///
+    /// Single funnel for method dispatch. Callers supply the resolved method
+    /// entity, the receiver's MIR type, and already-resolved method-level
+    /// type args (post-HIR-fallback). The witness-vs-direct decision and any
+    /// receiver-type-arg prepending live here — never duplicate these at a
+    /// call site. For witness calls, receiver information flows in via
+    /// `Callee::Witness::self_type`; for direct calls, inherited struct
+    /// type params are prepended to the method type args.
+    fn emit_method_dispatch(
+        &mut self,
+        resolved_entity: Entity,
+        receiver_ty: MirTy,
+        method_type_args: Vec<MirTy>,
+        call_args: Vec<CallArg>,
+        result_ty: MirTy,
+    ) -> Value {
+        let callee = if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
+            self.ctx.register_name(protocol);
+            let method_key = self.witness_method_key_of(resolved_entity);
+            Callee::witness(protocol, method_key, receiver_ty, method_type_args)
+        } else {
+            self.ctx.register_name(resolved_entity);
+            let type_args = self.prepend_receiver_type_args(&receiver_ty, method_type_args);
+            Callee::method(resolved_entity, type_args, receiver_ty)
+        };
+        self.emit_call(callee, call_args, result_ty)
+    }
+
     /// Check if an entity is lang.panic or lang.panic_unwind.
     fn is_panic_intrinsic(&self, entity: Entity) -> bool {
         use kestrel_ast_builder::{Intrinsic, Name};
@@ -1851,9 +1899,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
             let is_init_call = self.is_init_function(func_entity).is_some();
             let mut type_args = self.resolve_type_args(expr_id);
-            // For non-init calls, fall back to the callee Def's type args.
-            // Init calls skip this: emit_call_maybe_init prepends struct type
-            // args from result_ty, so picking them up from the Def would double them.
+            // Non-init calls fall back to the callee Def's type args when the
+            // call expression itself has none. Init calls skip this fallback
+            // because the Def carries the struct's type args on the receiver
+            // path (e.g. `Array[T]`), while `resolve_type_args(expr_id)`
+            // already gives the full init-arg list; picking up the Def args
+            // would double the struct portion.
             if type_args.is_empty() && !is_init_call {
                 type_args = self.resolve_type_args(callee_expr);
             }
@@ -2113,19 +2164,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     };
                     let mut call_args = vec![receiver_arg];
                     call_args.extend(self.lower_call_args(args));
-                    self.ctx.register_name(resolved_entity);
-                    let mut method_type_args = self.resolve_type_args(expr_id);
-                    if method_type_args.iter().any(|a| matches!(a, MirTy::Error)) {
-                        if let Some(hir_args) = hir_type_args {
-                            if !hir_args.is_empty() {
-                                method_type_args =
-                                    hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
-                            }
-                        }
-                    }
-                    let type_args = self.prepend_receiver_type_args(&field_ty, method_type_args);
-                    let callee = Callee::method(resolved_entity, type_args, field_ty);
-                    return self.emit_call(callee, call_args, result_ty);
+                    let method_type_args =
+                        self.resolve_method_type_args(expr_id, hir_type_args);
+                    return self.emit_method_dispatch(
+                        resolved_entity,
+                        field_ty,
+                        method_type_args,
+                        call_args,
+                        result_ty,
+                    );
                 }
             }
         }
@@ -2164,32 +2211,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let explicit_count = args.len();
             let call_args = self.expand_default_args(call_args, resolved_entity, explicit_count);
 
-            // Check if the method is from a protocol (needs Witness dispatch).
-            if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
-                self.ctx.register_name(protocol);
-                let method_type_args = self.resolve_type_args(expr_id);
-                let method_key = self.witness_method_key_of(resolved_entity);
-                let callee =
-                    Callee::witness(protocol, method_key, receiver_ty.clone(), method_type_args);
-                return self.emit_call(callee, call_args, result_ty);
-            }
-
-            self.ctx.register_name(resolved_entity);
-            let mut method_type_args = self.resolve_type_args(expr_id);
-            // Fall back to explicit HIR type args when inference returns Error
-            if method_type_args.iter().any(|a| matches!(a, MirTy::Error)) {
-                if let Some(hir_args) = hir_type_args {
-                    if !hir_args.is_empty() {
-                        method_type_args =
-                            hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
-                    }
-                }
-            }
-            // Prepend receiver's struct type_args — inherited type_params come first
-            let type_args = self.prepend_receiver_type_args(&receiver_ty, method_type_args);
-
-            let callee = Callee::method(resolved_entity, type_args, receiver_ty);
-            self.emit_call(callee, call_args, result_ty)
+            let method_type_args = self.resolve_method_type_args(expr_id, hir_type_args);
+            self.emit_method_dispatch(
+                resolved_entity,
+                receiver_ty,
+                method_type_args,
+                call_args,
+                result_ty,
+            )
         } else {
             // Unresolved method — emit error
             Value::Immediate(Immediate::error())
@@ -2278,23 +2307,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
             call_args.insert(0, self_ref);
 
-            // Ensure Direct init callees have self_type and struct type_args set.
-            // Init functions inherit type_params from their parent struct, so the
-            // struct's type_args must be prepended for correct mangling/substitution.
+            // Direct init callees need `self_type` set (for mangling) —
+            // `type_args` comes from upstream (`resolve_type_args(expr_id)` +
+            // `infer_parent_type_args`), which already supplies the complete
+            // struct-first list.
             let callee = match callee {
                 Callee::Direct {
                     func,
                     type_args,
                     self_type: None,
-                } => {
-                    // Prepend struct type args, then append init's own type args.
-                    // e.g., Array[Int64].init[I](from:) needs [Int64, Range[Int64]]
-                    let type_args = self.prepend_receiver_type_args(&result_ty, type_args);
-                    Callee::Direct {
-                        func,
-                        type_args,
-                        self_type: Some(result_ty.clone()),
-                    }
+                } => Callee::Direct {
+                    func,
+                    type_args,
+                    self_type: Some(result_ty.clone()),
                 },
                 other => other,
             };

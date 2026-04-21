@@ -159,6 +159,14 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("does not conform to protocol: {}", detail),
             "type does not accept this literal".into(),
         ),
+        InferError::UnresolvedTypeParam { .. } => (
+            "cannot infer type parameter".into(),
+            detail.to_string(),
+        ),
+        InferError::CannotInferType { .. } => (
+            "could not infer type".into(),
+            "add a type annotation".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

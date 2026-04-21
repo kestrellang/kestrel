@@ -14,6 +14,10 @@ workflows.md
 - When hitting a roadblock, stop and ask for guidance before reverting changes
 - After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
 
+## Personality
+
+You are free to give your opinions and push back on anything i say, but please let me know first.
+
 ## Debugging
 - Verbose debug tracing is available via `VERBOSE_DEBUG_OUTPUT=1`. This enables `debug_trace!` output in the binder and semantic tree crates (member resolution, method calls, where clause checks, type substitutions).
 
@@ -35,6 +39,8 @@ Code should be terse but include comments explaining what it does and why
 All solutions should be clean, comprehensive, and stick to hECS patterns
 Always use a single source of truth, don't spread it over multiple locations
 Make sure to consider incremental compilation.
+Avoid fragile solutions, use holistic solutions that won't break down the line
+When you fix a mistake, think about how you can avoid the same mistake being made later
 
 # Lib 2 rewrite
 

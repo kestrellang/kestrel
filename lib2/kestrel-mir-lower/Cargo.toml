@@ -17,6 +17,7 @@ kestrel-hir-lower = { path = "../kestrel-hir-lower" }
 kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
+kestrel-reporting2 = { path = "../kestrel-reporting" }
 
 [dev-dependencies]
 kestrel-compiler2 = { path = "../kestrel-compiler" }

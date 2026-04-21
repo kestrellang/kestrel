@@ -291,6 +291,17 @@ Historical: `generate.rs` discarded explicit type args from `HirExpr::MethodCall
 - [x] `stdlib/memory/memory_allocator.ks` — fixed by witness-instantiation-collapse
 - [x] `stdlib/memory/memory_raw_pointer.ks` — fixed by witness-instantiation-collapse
 
+### `Self.Item` in protocol extension leaked to codegen as `AssociatedProjection(Named(protocol), …)` (2026-04-21)
+
+Bare `Item` inside `extend Iterator { func collect() -> Array[Item] }` lowered to `AssocProjection { base: HirTy::Protocol(Iterator), assoc: Item }`. HIR has no `SelfType` variant, so name-resolution collapses `Self` inside `extend Protocol` to the protocol entity itself. MIR then produced `AssociatedProjection { base: Named(Iterator), protocol: Iterator, name: "Item" }` — codegen's `substitute_type_with_self` couldn't map the base back to the concrete self, the projection layout defaulted to `ptr` (8 bytes), and sub-i64 `Item` types (UInt8, Char, Grapheme, …) silently read back as garbage. Fix at MIR lowering: when HIR's `AssocProjection.base` is the owning protocol, emit `Named(assoc_typealias, [])` — the existing `resolve_assoc_type_substs` pass resolves that via witness lookup. Also plumbed `self_type` into `resolve_assoc_type_substs` (subst candidates tried first so `Array.init[I](from: I)` resolves `I.Iter` via `I`, not `Self`). Principled fix deferred — see `kestrel-hir-lower/src/AGENTS.md`.
+
+- [x] `stdlib/views/bytes_view_iter.ks` — was exit 2, wrong collected bytes
+- [x] `stdlib/views/chars_view_iter_and_count.ks` — was exit 3
+- [x] `stdlib/array/misc_extensions.ks` — was MIR lowering panic
+- [x] `stdlib/iterator/min_by_max_by.ks` — was exit 2
+- [x] `stdlib/iterator/reduce_adapter.ks` — was exit 2
+- [x] `stdlib/iterator/try_fold_adapter.ks` — was undeclared-symbol link error
+
 ### Integer literal overflow silently returned 0 (2026-04-21)
 
 `parse_int` in `lib2/kestrel-hir-lower/src/pat.rs` used `i64::from_str` and `unwrap_or(0)`, so any integer literal above `i64::MAX` (e.g. `UInt64.maxValue = 18446744073709551615`, `2^63 = 9223372036854775808`) silently parsed to `0`. All three UInt64 runtime failures had the same shape: a literal past the i64 range was read as zero, so `UInt64.maxValue.isZero` was true, `maxVal.addChecked(one)` returned `Some(1)`, and `highBit.leadingZeros` was 64 instead of 0. Fix: fall back to `u64::from_str_radix` on overflow and reinterpret the bit pattern as i64 — applies to decimal, hex, octal, and binary literals.
@@ -298,3 +309,35 @@ Historical: `generate.rs` discarded explicit type args from `HirExpr::MethodCall
 - [x] `stdlib/uint64/uint64_bitwidth_and_conversion.ks` — was exit 5 (`highBit.leadingZeros != 0`)
 - [x] `stdlib/uint64/uint64_boundaries_and_constants.ks` — was exit 7 (`maxVal.isZero`)
 - [x] `stdlib/uint64/uint64_overflow_behavior.ks` — was exit 3 (`maxVal.addChecked(one).isSome()`)
+
+### Witness overload collision — `isSorted` arity-0 dropped from witness table (2026-04-21)
+
+Protocol extension with two same-named methods (`isSorted()` and `isSorted(by:)` on `Iterator`) collided in the witness table because `IndexMap::insert` keyed only on method name. Calls to the dropped overload failed with Cranelift arg-count errors. Resolved as collateral of the 2026-04-21 fixes in this session.
+
+- [x] `stdlib/iterator/is_sorted_checks.ks` — was `mismatched argument count: got 2, expected 3`
+
+### Unresolved method-level type parameters now reported instead of leaking `MirTy::Error` (2026-04-21)
+
+`tryFold[Acc, E]` called with a closure that only returns `.Ok(...)` left `E` unbound. Lib1 would have silently defaulted `E` to `Never` via `apply_never_defaults` (solver.rs:101). Lib2 didn't port that pass, so the unresolved `E` leaked through inference as `MirTy::Error`, the mangler encoded `X` in the instantiation symbol, and monomorphize phantom-skipped it — producing a link-time "call to undeclared function".
+
+Fix: skip the never-default entirely. Added a new `InferError::UnresolvedTypeParam` variant and a phase-4 pass in `lib2/kestrel-type-infer/src/solver.rs` (`report_unresolved_type_params`) that walks `ctx.type_args`, resolves each TyVar, and emits a diagnostic at the call site for any still-`Unresolved { literal: None }` slot. Poisons the TyVar so downstream constraints absorb silently. `try_fold_adapter.ks` now annotates the binding explicitly; `try_fold_unconstrained_error_type.ks` is the new diagnostic test that asserts the error fires when the annotation is missing.
+
+- [x] `stdlib/iterator/try_fold_adapter.ks` — was `call to undeclared function: tryFold`; now passes after binding-type annotation
+
+### Dictionary `subscript(key:inserting:)` removed — stdlib API contract mismatch (2026-04-21)
+
+The `inserting:` subscript's doc-comment promised "If the key doesn't exist, the default is inserted and returned," but the getter never inserted — only the setter did. Commit 59de94b8 (2026-04-03) had removed the in-getter `self.insert(…)` to silence an analyzer complaint that a non-`mutating get` was mutating `self`. That broke the documented contract, so `dictionary_subscripts.ks` (migrated from lib1, where the getter still inserted) exited 6 at `if dict.contains(50) == false`.
+
+Design choice: drop `inserting:` rather than add `mutating get`. Without mutating get, `inserting:` and the existing `default:` subscript are behaviorally identical for bare reads, and `default:` already supports the compound-assign accumulator pattern (`counts(k, default: 0) += 1`) via its setter. A subscript read that silently inserts is the least defensible version of the API — surprising, hurts debuggability, and an explicit mutating method (`getOrInsert`) is the right shape if real use cases emerge.
+
+Fix: deleted the `subscript(key:inserting:)` block from `lang/std/collections/dictionary.ks` and simplified the test to exercise `default:` + `unwrap:` only.
+
+- [x] `stdlib/dictionary/dictionary_subscripts.ks` — was exit 6
+
+### `@fileconstant` dropped during lib2 MIR lowering (2026-04-21)
+
+`@fileconstant("data/…bin")` on stdlib unicode case-mapping statics was parsed into an `Attributes` ECS component but lib2's MIR lowering never read it — codegen took the zero-init path, so `UPPER_STAGE1`-class `LiteralSlice` globals ended up in `__DATA.__bss` with null data pointers. Any subscript read segfaulted; the ASCII fast path in `toUppercase` hid it for `'a'→'A'` but `'A'.toUppercase()` tripped straight into the subscript. Fix at `lib2/kestrel-mir-lower/src/static_lower.rs::extract_file_constant`: read the `Attributes` component, walk `FileId → FilePath` for the source file's directory, extract element type from `LiteralSlice[T]`'s `Named.type_args[0]`, populate `StaticDef.file_constant_data`. Also moved `FilePath` from `kestrel-compiler2::components` to `kestrel-ast-builder::components` so MIR-lower can read it without a cyclic dep. Codegen's existing rodata-embed path was already correct.
+
+- [x] `stdlib/char/char_case_conversion.ks` — was exit -1 SIGSEGV on `'A'.toUppercase()` (also previously on the macOS-UNE skip list)
+- [x] `stdlib/string/case_conversion.ks` — was exit 7 (`titlecased` used the same broken case-mapping tables)
+- [x] `stdlib/views/graphemes_view.ks` — was exit 1 (grapheme break tables `GBP_STAGE1`/`GBP_STAGE2` are also `@fileconstant`)

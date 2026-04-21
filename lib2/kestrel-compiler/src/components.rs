@@ -2,6 +2,4 @@
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceText(pub String);
 
-/// Display path for diagnostics rendering.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FilePath(pub String);
+pub use kestrel_ast_builder::FilePath;

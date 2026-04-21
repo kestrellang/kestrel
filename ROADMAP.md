@@ -648,6 +648,10 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 - [x] Consolidate type transformations
 - [x] Refactor semantic model and passes
 - [ ] Incremental compilation
+- [ ] Introduce `HirTy::SelfType`
+  - Currently HIR has no SelfType variant; name-res collapses `Self` into its nearest binding (inside `extend Protocol`, that's the protocol entity itself). This conflates `Self` with the protocol and leaked to codegen — sub-i64 `Item` types read back as garbage until worked around in MIR lowering 2026-04-21.
+  - Principled fix: add `HirTy::SelfType`, have `build_self_hir_ty` emit it for protocol Self, lower to `MirTy::SelfType`. Remove the MIR-lowering workaround (`kestrel-mir-lower/src/ty.rs` — the `AssocProjection { base: HirTy::Protocol(P) } if P == protocol` branch) and the `self_type` fallback in `resolve_assoc_type_substs` (`kestrel-codegen-cranelift/src/function.rs`).
+  - Defer until the in-flight type-inference tightening settles — concurrent HIR structural changes would make regression bisection hard. See `lib2/kestrel-hir-lower/src/AGENTS.md` for the site list to audit.
 
 ### Tooling
 
@@ -684,6 +688,7 @@ See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-
 
 - [ ] Lazy properties — `lazy let expensive = compute()`
 - [ ] Property observers — `willSet` / `didSet` blocks
+- [ ] `mutating get` on computed properties and subscripts — lets a getter modify `self` (value types only); call site requires a `var` receiver. Unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)` (removed 2026-04-21 because without `mutating get` the documented "insert default on miss" contract can't be honored). See `test-errors-fixed.md` → "Dictionary `subscript(key:inserting:)` removed".
 - [ ] Conditional conformance — e.g. `Box[T]: Copyable where T: Copyable`
 
 ## Version 0.19: Standard Library & Polish

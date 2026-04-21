@@ -37,7 +37,7 @@ func libc_exit(code: lang.i32)
 /// The command's stdout/stderr go directly to the terminal.
 public func spawn(command: String) -> Int32 {
     let ccmd = command.toCString();
-    let rawStatus = libc_system(lang.cast_ptr[lang.i8](ccmd.raw.raw));
+    let rawStatus = libc_system(lang.cast_ptr[_, lang.i8](ccmd.raw.raw));
     ccmd.free();
     // system() returns the exit status in the upper bits on POSIX
     // Shift right by 8 to get the actual exit code
@@ -51,8 +51,8 @@ public func captureOutput(command: String) -> String {
     let ccmd = command.toCString();
     let modeStr = "r".toCString();
     let stream = libc_popen(
-        lang.cast_ptr[lang.i8](ccmd.raw.raw),
-        lang.cast_ptr[lang.i8](modeStr.raw.raw)
+        lang.cast_ptr[_, lang.i8](ccmd.raw.raw),
+        lang.cast_ptr[_, lang.i8](modeStr.raw.raw)
     );
     ccmd.free();
     modeStr.free();
@@ -70,7 +70,7 @@ public func captureOutput(command: String) -> String {
         if Bool(boolLiteral: lang.ptr_is_null(line)) {
             break
         }
-        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[UInt8](buf)));
+        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](buf)));
         output = output + String(from: cstr)
     }
 

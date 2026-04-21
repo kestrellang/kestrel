@@ -4,7 +4,8 @@
 //! 1. Main solving — iterate until fixpoint
 //! 2. Apply literal defaults for unconstrained literals
 //! 3. Solve again with defaults applied
-//! 4. Default remaining unconstrained TyVars to Error
+//! 4. Report any unresolved generic type parameters at call sites
+//! 5. Report any remaining unsolved constraints as errors
 
 use crate::constraint::{CallArg, Constraint, labels_match};
 use crate::ctx::InferCtx;
@@ -13,13 +14,14 @@ use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
+use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir::Builtin;
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_span2::Span;
 
 /// Run the full solver: fixpoint loop, literal defaults, final fixpoint,
 /// then report any remaining unsolved constraints as errors.
-pub fn solve(ctx: &mut InferCtx<'_>) {
+pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Phase 1: main solving
     fixpoint(ctx);
 
@@ -29,8 +31,186 @@ pub fn solve(ctx: &mut InferCtx<'_>) {
     // Phase 3: solve again with defaults
     fixpoint(ctx);
 
-    // Phase 4: report remaining unsolved constraints as errors
+    // Phase 4: report unresolved type parameters at generic call sites.
+    // Runs before `report_unsolved` so unresolved TyVars are poisoned
+    // and downstream cascade constraints get suppressed silently.
+    report_unresolved_type_params(ctx);
+
+    // Phase 4.25: never-fallback. Any TyVar that `unify` saw meet `Never`
+    // while still unresolved (so the Never-branch intentionally didn't
+    // bind it — see `unify.rs`) but which fixpoint hasn't since pinned to
+    // anything else gets defaulted to `Never` now. Mirror of Rust's
+    // `never_type_fallback`: divergent match arms, branches that always
+    // return, loops whose only break values are `!`, etc.
+    default_never_fallback(ctx);
+
+    // Phase 4.5: report any expression or local whose TyVar stayed unresolved.
+    // These slots would otherwise surface as `MirTy::Error` downstream and
+    // trigger misleading Cranelift type-mismatch panics. Runs after phase 4
+    // so we don't double-report type-args that were already diagnosed there.
+    report_unresolved_slots(ctx, hir);
+
+    // Phase 5: report remaining unsolved constraints as errors
     report_unsolved(ctx);
+}
+
+/// Diagnose type parameters at generic call sites that inference couldn't
+/// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
+/// fallback) — we deliberately don't, to avoid silent witness-selection
+/// drift. Each unresolved slot becomes an `UnresolvedTypeParam` error
+/// pointing at the call site, with the param's name in the label.
+fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
+    // Snapshot to avoid borrow conflicts when we call `report_error`/`poison`.
+    let entries: Vec<(kestrel_hir::body::HirExprId, Vec<TyVar>, Span)> = ctx
+        .type_args
+        .iter()
+        .filter_map(|(&expr, tvs)| {
+            ctx.type_arg_spans
+                .get(&expr)
+                .map(|sp| (expr, tvs.clone(), sp.clone()))
+        })
+        .collect();
+
+    for (expr, tvs, span) in entries {
+        // Map each TyVar back to its originating TypeParameter entity
+        // via the resolved callee's `TypeParams` component. Without a
+        // resolution (e.g. the call errored upstream) we can't name
+        // the param, so skip — the upstream error already covers it.
+        let Some(&callee) = ctx.resolutions.get(&expr) else {
+            continue;
+        };
+        let params: Vec<Entity> = ctx
+            .query_ctx
+            .get::<TypeParams>(callee)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+
+        for (i, &tv) in tvs.iter().enumerate() {
+            let resolved = ctx.resolve(tv);
+            // Only truly unconstrained slots — skip literals (they get
+            // defaults in phase 2) and anything already poisoned.
+            if !matches!(
+                &ctx.types[resolved.0 as usize],
+                TySlot::Unresolved { literal: None }
+            ) {
+                continue;
+            }
+            let Some(&param) = params.get(i) else {
+                continue;
+            };
+            ctx.report_error(InferError::UnresolvedTypeParam {
+                param,
+                span: span.clone(),
+            });
+            ctx.poison(tv);
+        }
+    }
+}
+
+/// Bind any TyVar that `unify` saw meet `Never` (with the Unresolved
+/// side deliberately left unbound) to `Never`, if fixpoint settled with
+/// no other constraint pinning it. Rust's `never_type_fallback`.
+fn default_never_fallback(ctx: &mut InferCtx<'_>) {
+    let targets: Vec<TyVar> = ctx.never_fallback_targets.iter().copied().collect();
+    for tv in targets {
+        let resolved = ctx.resolve(tv);
+        if matches!(&ctx.types[resolved.0 as usize], TySlot::Unresolved { .. }) {
+            ctx.types[resolved.0 as usize] = TySlot::Resolved(TyKind::Never);
+        }
+    }
+}
+
+/// Diagnose expressions and locals whose TyVar never got pinned down by the
+/// time solving finished. These are the slots that would otherwise silently
+/// become `MirTy::Error` in lowering (e.g. from `ResolvedTy::Error` or a
+/// leaked `HirTy::Infer`) and produce a Cranelift type-mismatch panic during
+/// codegen. Points the diagnostic at the expression or local binding's span
+/// so the user can add an annotation.
+///
+/// Skips slots that are already poisoned with `TyKind::Error` — an earlier
+/// error already covers them.
+fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    // Snapshot the entries so we can mutate `ctx` while iterating.
+    let expr_entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> = ctx
+        .expr_types
+        .iter()
+        .map(|(&id, &tv)| (id, tv))
+        .collect();
+    let local_entries: Vec<(kestrel_hir::res::LocalId, TyVar)> = ctx
+        .local_types
+        .iter()
+        .map(|(&id, &tv)| (id, tv))
+        .collect();
+
+    // Only report one diagnostic per statement/expression tree — otherwise a
+    // single unresolvable subexpression produces a cascade of errors across
+    // every parent expression that inherited its type.
+    let mut seen_spans: std::collections::HashSet<(usize, std::ops::Range<usize>)> =
+        std::collections::HashSet::new();
+
+    for (id, tv) in expr_entries {
+        let resolved = ctx.resolve(tv);
+        if !matches!(&ctx.types[resolved.0 as usize], TySlot::Unresolved { .. }) {
+            continue;
+        }
+        // Skip expressions whose HIR is `Error` — `FromHir` already covers them.
+        let expr = &hir.exprs[id];
+        if matches!(expr, HirExpr::Error { .. }) {
+            continue;
+        }
+        let span = expr_span(expr);
+        let key = (span.file_id, span.range());
+        if !seen_spans.insert(key) {
+            continue;
+        }
+        ctx.report_error(InferError::CannotInferType { span: span.clone() });
+        ctx.poison(tv);
+    }
+
+    for (id, tv) in local_entries {
+        let resolved = ctx.resolve(tv);
+        if !matches!(&ctx.types[resolved.0 as usize], TySlot::Unresolved { .. }) {
+            continue;
+        }
+        let local = &hir.locals[id];
+        let key = (local.span.file_id, local.span.range());
+        if !seen_spans.insert(key) {
+            continue;
+        }
+        ctx.report_error(InferError::CannotInferType {
+            span: local.span.clone(),
+        });
+        ctx.poison(tv);
+    }
+}
+
+/// Extract the `Span` from any `HirExpr` variant.
+fn expr_span(expr: &HirExpr) -> &Span {
+    match expr {
+        HirExpr::Literal { span, .. }
+        | HirExpr::Tuple { span, .. }
+        | HirExpr::Array { span, .. }
+        | HirExpr::Dict { span, .. }
+        | HirExpr::Closure { span, .. }
+        | HirExpr::Local(_, span)
+        | HirExpr::Def(_, _, span)
+        | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Field { span, .. }
+        | HirExpr::TupleIndex { span, .. }
+        | HirExpr::ImplicitMember { span, .. }
+        | HirExpr::Call { span, .. }
+        | HirExpr::MethodCall { span, .. }
+        | HirExpr::ProtocolCall { span, .. }
+        | HirExpr::If { span, .. }
+        | HirExpr::Loop { span, .. }
+        | HirExpr::Match { span, .. }
+        | HirExpr::Break { span, .. }
+        | HirExpr::Continue { span, .. }
+        | HirExpr::Return { span, .. }
+        | HirExpr::Assign { span, .. }
+        | HirExpr::Block { span, .. }
+        | HirExpr::Error { span } => span,
+    }
 }
 
 /// Run rounds until no progress, with a safety cap to prevent unbounded spins
@@ -1048,7 +1228,7 @@ fn emit_resolved_call(
 
     // Store type args if any
     if !fresh_type_args.is_empty() {
-        ctx.type_args.insert(expr, fresh_type_args);
+        ctx.record_type_args(expr, fresh_type_args, span.clone());
     }
 
     // Emit where clause constraints
@@ -1487,7 +1667,7 @@ fn solve_member(
     };
 
     if !fresh_params.is_empty() {
-        ctx.type_args.insert(expr, fresh_params.clone());
+        ctx.record_type_args(expr, fresh_params.clone(), span.clone());
     }
 
     // Build type param substitution map:
@@ -1771,7 +1951,7 @@ fn solve_implicit(
         subs.push((param, fresh));
     }
     if !fresh_params.is_empty() {
-        ctx.type_args.insert(expr, fresh_params.clone());
+        ctx.record_type_args(expr, fresh_params.clone(), span.clone());
     }
 
     // Coerce argument types against parameter types

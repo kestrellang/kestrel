@@ -130,7 +130,7 @@ func libc_lseek(fd: lang.i32, offset: lang.i64, whence: lang.i32) -> lang.i64
 
 /// Opens a file. Returns file descriptor or -1 on error.
 public func open(path: Pointer[UInt8], flags: Int32, mode: Int32) -> Fd {
-    Int32(raw: libc_open(lang.cast_ptr[lang.i8](path.raw), flags.raw, mode.raw))
+    Int32(raw: libc_open(lang.cast_ptr[_, lang.i8](path.raw), flags.raw, mode.raw))
 }
 
 /// Closes a file descriptor. Returns 0 on success, -1 on error.
@@ -140,12 +140,12 @@ public func close(fd: Int32) -> Int32 {
 
 /// Reads from a file descriptor. Returns bytes read, 0 on EOF, -1 on error.
 public func read(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    Int64(raw: libc_read(fd.raw, lang.cast_ptr[lang.i8](buf.raw), count.raw))
+    Int64(raw: libc_read(fd.raw, lang.cast_ptr[_, lang.i8](buf.raw), count.raw))
 }
 
 /// Writes to a file descriptor. Returns bytes written or -1 on error.
 public func write(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    Int64(raw: libc_write(fd.raw, lang.cast_ptr[lang.i8](buf.raw), count.raw))
+    Int64(raw: libc_write(fd.raw, lang.cast_ptr[_, lang.i8](buf.raw), count.raw))
 }
 
 /// Seeks to a position in a file. Returns new position or -1 on error.

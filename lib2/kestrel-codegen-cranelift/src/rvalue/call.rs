@@ -39,11 +39,17 @@ pub fn compile_call(
             type_args,
             self_type,
         } => {
-            // Resolve the concrete type args
-            let concrete_type_args = common::substitute_type_args(type_args, &state.subst);
+            // Resolve the concrete type args. Propagate the caller's self_type
+            // so `SelfType` in a direct callee's type_args (e.g. the
+            // `FuseIterator[Self]` type arg emitted for `fuse()` inside
+            // `extend Iterator`) is substituted with the caller's concrete self.
+            let concrete_type_args: Vec<MirTy> = type_args
+                .iter()
+                .map(|a| substitute_type_with_self(a, &state.subst, state.self_type.as_ref()))
+                .collect();
             let concrete_self = self_type
                 .as_ref()
-                .map(|st| substitute_type(st, &state.subst));
+                .map(|st| substitute_type_with_self(st, &state.subst, state.self_type.as_ref()));
 
             let func_id_mir = ctx.entity_to_func.get(func).ok_or_else(|| {
                 let name = ctx.module.resolve_name(*func);

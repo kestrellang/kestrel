@@ -115,6 +115,31 @@ pub enum InferError {
         literal: LiteralKind,
         span: Span,
     },
+
+    /// A generic type parameter at a call/ref site couldn't be inferred —
+    /// no argument, receiver, or context constrained it. Typically happens
+    /// when a type parameter only appears in an unused branch of the return
+    /// type (e.g. `E` in `Result[T, E]` when the closure only returns `.Ok`).
+    ///
+    /// Instead of silently defaulting to `Never` (lib1's behavior), we
+    /// require the user to annotate — either at the call (`f[T, U](...)`)
+    /// or at the binding (`let x: Result[T, U] = f(...)`).
+    UnresolvedTypeParam {
+        /// The TypeParameter entity whose name is shown in the diagnostic.
+        param: Entity,
+        /// The call site's span — used as the diagnostic's primary label.
+        span: Span,
+    },
+
+    /// An expression or local's type stayed fully unresolved through solving —
+    /// no constraint pinned it down, and it isn't a generic-call type arg
+    /// (which `UnresolvedTypeParam` handles). Points at the expression / local
+    /// binding so the user can add an annotation.
+    ///
+    /// Reported by the phase-4.5 sweep in `solver::report_unresolved_slots`.
+    /// Before this existed, the slot silently became `MirTy::Error` in
+    /// downstream lowering and triggered a Cranelift type-mismatch panic.
+    CannotInferType { span: Span },
 }
 
 impl InferError {
@@ -137,7 +162,9 @@ impl InferError {
             | Self::TypeArgCountMismatch { span, .. }
             | Self::NoMatchingOverload { span, .. }
             | Self::ItWrongArity { span, .. }
-            | Self::LiteralNotAccepted { span, .. } => span,
+            | Self::LiteralNotAccepted { span, .. }
+            | Self::UnresolvedTypeParam { span, .. }
+            | Self::CannotInferType { span, .. } => span,
         }
     }
 }

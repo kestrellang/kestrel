@@ -94,7 +94,7 @@ impl QueryFn for InferBody {
         generate::generate(&mut infer_ctx, &hir, &param_types, return_ty);
 
         // Solve
-        solver::solve(&mut infer_ctx);
+        solver::solve(&mut infer_ctx, &hir);
 
         // Build output
         Some(result::build_result(&infer_ctx))

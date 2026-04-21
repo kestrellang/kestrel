@@ -12,5 +12,5 @@ public struct Pointer[T] {
 }
 
 public func testCastPtr[T]() -> Pointer[T] {
-    Pointer(raw: lang.cast_ptr[T](lang.ptr_null()))
+    Pointer(raw: lang.cast_ptr[_, T](lang.ptr_null()))
 }

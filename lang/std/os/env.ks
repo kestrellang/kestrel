@@ -23,14 +23,14 @@ func libc_getenv(name: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
 /// Gets an environment variable by name. Returns None if not set.
 public func getenv(name: String) -> Optional[String] {
     let cname = name.toCString();
-    let result = libc_getenv(lang.cast_ptr[lang.i8](cname.raw.raw));
+    let result = libc_getenv(lang.cast_ptr[_, lang.i8](cname.raw.raw));
     cname.free();
 
     if Bool(boolLiteral: lang.ptr_is_null(result)) {
         return .None
     }
 
-    let cstr = CString(raw: Pointer(raw: lang.cast_ptr[UInt8](result)));
+    let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](result)));
     .Some(String(from: cstr))
     // Note: do not free result - it points to environ memory
 }

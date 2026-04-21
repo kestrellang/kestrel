@@ -33,6 +33,9 @@ pub enum CodegenError {
     DataSection(String),
     /// Error during monomorphization.
     Monomorphization(String),
+    /// MIR lowering produced one or more `MirTy::Error` locations. Codegen
+    /// is not safe to run; see accumulated diagnostics for details.
+    MirLoweringErrors(usize),
 }
 
 impl fmt::Display for CodegenError {
@@ -53,6 +56,10 @@ impl fmt::Display for CodegenError {
             Self::Unsupported(msg) => write!(f, "unsupported: {msg}"),
             Self::DataSection(msg) => write!(f, "data section error: {msg}"),
             Self::Monomorphization(msg) => write!(f, "monomorphization error: {msg}"),
+            Self::MirLoweringErrors(n) => write!(
+                f,
+                "MIR lowering produced {n} unresolved-type error(s); see diagnostics"
+            ),
         }
     }
 }

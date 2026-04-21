@@ -400,3 +400,80 @@ func caller[T](f: T) where T: Factory {
         call_type_args,
     );
 }
+
+/// Regression: `gen_struct_init` used to only record the init's method-level
+/// type params (skipping the entry entirely when the init had none). MIR
+/// lowering saw an empty `type_args` for the expression and fell back to
+/// `infer_parent_type_args` + the `prepend_receiver_type_args` workaround in
+/// `emit_call_maybe_init`, which double-counted the struct args and tripped
+/// the monomorphizer's arity check (`Array.init`, `Slice.init`, etc.) with
+/// "dispatch bug: has 2 type arg(s), function expects 1". The fix records
+/// the COMPLETE list (struct params first, then method-level) so the
+/// emit_call_maybe_init prepend is no longer load-bearing.
+#[test]
+fn struct_init_records_struct_type_args() {
+    let source = r#"
+module TestMod
+struct Box[T] {
+    init(value value: T) { }
+}
+func caller(b: Bool) { Box(value: b) }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "caller");
+
+    // `Box(value: b)` should record exactly 1 type arg — the struct's T,
+    // resolved to whatever `b`'s inferred type is. An empty record (the
+    // old behavior) means MIR lowering has to reconstruct it from
+    // `result_ty`, which triggered the double-count bug.
+    let call_type_args: Vec<_> = typed
+        .type_args
+        .values()
+        .filter(|args| !args.is_empty())
+        .collect();
+    assert_eq!(
+        call_type_args.len(),
+        1,
+        "expected a non-empty type_args record for the `Box(value: b)` init call; got: {:#?}",
+        typed.type_args,
+    );
+    assert_eq!(
+        call_type_args[0].len(),
+        1,
+        "Box has 1 struct type param and the init has 0 method-level params → recorded list must have length 1; got: {:#?}",
+        call_type_args[0],
+    );
+}
+
+/// Sibling to `struct_init_records_struct_type_args`: when the init has its
+/// own method-level type params, the recorded list must put the struct's
+/// params FIRST, then the method-level params — matching the layout MIR
+/// `collect_inherited_type_params` produces for the init function.
+#[test]
+fn struct_init_records_struct_params_before_method_params() {
+    let source = r#"
+module TestMod
+struct Box[T] {
+    init[I](value value: T, other other: I) { }
+}
+func caller(b: Bool, n: Bool) { Box(value: b, other: n) }
+"#;
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "caller");
+
+    // The recorded list must have length 2 (T + I), in that order. The actual
+    // resolved types depend on inference's solving — the structural check
+    // here is the length/shape, not the concrete resolutions.
+    let shaped: Vec<_> = typed
+        .type_args
+        .values()
+        .filter(|args| args.len() == 2)
+        .collect();
+    assert!(
+        !shaped.is_empty(),
+        "expected a 2-element type_args record for Box[T].init[I] call; got: {:#?}",
+        typed.type_args,
+    );
+}

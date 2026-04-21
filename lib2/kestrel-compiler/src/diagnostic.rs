@@ -169,6 +169,23 @@ impl ToDiagnostic for ResolvedInferError<'_> {
             InferError::LiteralNotAccepted { .. } => Diagnostic::error()
                 .with_message("type mismatch: does not conform to protocol")
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+
+            InferError::UnresolvedTypeParam { .. } => Diagnostic::error()
+                .with_message("cannot infer type parameter")
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
+                .with_notes(vec![
+                    "no argument or context constrains this type parameter; \
+                     annotate it explicitly at the call (e.g. `f[_, Int64](...)`) \
+                     or at the binding (e.g. `let x: T = f(...)`)"
+                        .into(),
+                ]),
+
+            InferError::CannotInferType { .. } => Diagnostic::error()
+                .with_message("could not infer type")
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message("add a type annotation to resolve this"),
+                ]),
         }
     }
 }

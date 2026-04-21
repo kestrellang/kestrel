@@ -77,6 +77,12 @@ pub struct MirModule {
     /// Maps entity references to their qualified names so display works
     /// without the ECS.
     pub entity_names: IndexMap<Entity, String>,
+
+    /// Number of `MirTy::Error` locations detected by the post-lowering
+    /// validator. Nonzero means some upstream phase (bind/inference/type
+    /// lowering) silently fell back to `MirTy::Error`; codegen must not run
+    /// because Cranelift's IR type-checker would panic.
+    pub lowering_error_count: usize,
 }
 
 impl MirModule {
@@ -94,6 +100,7 @@ impl MirModule {
             entry_point: None,
             module_init: None,
             entity_names: IndexMap::new(),
+            lowering_error_count: 0,
         }
     }
 

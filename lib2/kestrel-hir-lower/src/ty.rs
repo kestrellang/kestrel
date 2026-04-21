@@ -515,6 +515,41 @@ impl QueryFn for LowerTypeAnnotation {
     }
 }
 
+/// Query: lower a callable entity's declared return type.
+///
+/// Applies the language rule so every consumer gets the same answer:
+/// if the callable has an explicit `-> T` (`TypeAnnotation`), lower it;
+/// otherwise default to unit `()`. This replaces ad-hoc `unwrap_or` chains
+/// that previously each picked their own fallback (fresh TyVar, unit, or
+/// Error) at different call sites.
+///
+/// Initializers have no annotation and are treated as returning unit here.
+/// Their "actual" return is the parent struct, but every consumer of init
+/// calls (solve_member, emit_call_maybe_init) wires up the result via a
+/// dedicated `self` slot, so the declared return is immaterial — making it
+/// unit matches that convention and keeps the query total.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct LowerCallableReturnType {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for LowerCallableReturnType {
+    type Output = HirTy;
+
+    fn describe(&self) -> String {
+        format!("LowerCallableReturnType(entity={:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> HirTy {
+        ctx.query(LowerTypeAnnotation {
+            entity: self.entity,
+            root: self.root,
+        })
+        .unwrap_or_else(|| HirTy::Tuple(Vec::new(), Span::synthetic(0)))
+    }
+}
+
 /// Query: lower a declaration entity's Callable param types to HirTy.
 ///
 /// Reads the `Callable` component and lowers each param's type annotation.

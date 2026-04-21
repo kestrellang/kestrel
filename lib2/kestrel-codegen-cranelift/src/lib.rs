@@ -71,6 +71,13 @@ fn compile_inner(
     target: &TargetConfig,
     options: &CodegenOptions,
 ) -> Result<CompilationResult, CodegenError> {
+    // Bail out if MIR lowering produced any `MirTy::Error` locations. Proceeding
+    // to Cranelift would panic inside `def_var` with a misleading type-mismatch
+    // message; the accumulated diagnostics describe the real cause.
+    if module.lowering_error_count > 0 {
+        return Err(CodegenError::MirLoweringErrors(module.lowering_error_count));
+    }
+
     // Phase 1: Collect all monomorphized function instantiations
     let mono_set = monomorphize::collect_all(module).map_err(|errors| {
         let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();

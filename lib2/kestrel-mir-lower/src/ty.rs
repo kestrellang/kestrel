@@ -6,7 +6,7 @@
 use kestrel_ast_builder::{Name, NodeKind};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_mir::MirTy;
 
 use crate::context::LowerCtx;
@@ -22,6 +22,18 @@ pub fn resolve_type_annotation(ctx: &mut LowerCtx, entity: Entity) -> MirTy {
         Some(ty) => lower_type(ctx, &ty),
         None => MirTy::Unit,
     }
+}
+
+/// Resolve a callable entity's return type via the central
+/// `LowerCallableReturnType` query, then lower to MirTy. Use this for
+/// function/initializer/subscript/deinit returns so the "no annotation =
+/// unit" rule lives in exactly one place.
+pub fn resolve_callable_return_type(ctx: &mut LowerCtx, entity: Entity) -> MirTy {
+    let hir_ty = ctx.query.query(LowerCallableReturnType {
+        entity,
+        root: ctx.root,
+    });
+    lower_type(ctx, &hir_ty)
 }
 
 /// Resolve a Callable entity's parameter types via the query system.
@@ -43,6 +55,16 @@ pub fn resolve_callable_types(ctx: &mut LowerCtx, entity: Entity) -> Vec<Option<
 /// Lower a HirTy to a MirTy.
 pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
     match ty {
+        // Bare `Self` inside `extend P` / `protocol P` lowers at HIR level to
+        // `HirTy::Protocol(P)` (HIR has no SelfType variant — see
+        // lib2/kestrel-hir-lower/src/AGENTS.md). Re-tag it as `MirTy::SelfType`
+        // so monomorphization substitutes it with the concrete caller type;
+        // otherwise `fuse() -> FuseIterator[Self]` produces
+        // `FuseIterator[Named(Iterator)]` and the type arg never gets
+        // substituted, corrupting the adapter's layout.
+        HirTy::Protocol { entity, .. } if ctx.current_self_protocol == Some(*entity) => {
+            MirTy::SelfType
+        },
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
         | HirTy::Protocol { entity, args, .. } => lower_named_type(ctx, *entity, args),
@@ -64,9 +86,56 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
             ctx.register_name(*entity);
             MirTy::TypeParam(*entity)
         },
-        // Alias uses and associated-type projections should be reduced by
-        // inference before MIR. If they reach here something upstream is broken.
-        HirTy::AliasUse { .. } | HirTy::AssocProjection { .. } => MirTy::Error,
+        // AliasUse should be reduced by inference before MIR. If it reaches
+        // here something upstream is broken.
+        HirTy::AliasUse { .. } => MirTy::Error,
+        // AssocProjection — abstract `T.Item` references that can't be resolved
+        // until monomorphization (e.g. in generic struct field types like
+        // `var current: I.Item?` on `FlattenIterator[I]`). Preserve as
+        // MirTy::AssociatedProjection so the monomorphizer can resolve it via
+        // the witness table for the concrete I.
+        //
+        // Special case: bare `Item` inside `extend <P>` (where P is the owning
+        // protocol) is lowered with `base = Protocol(P)` by HIR-lower. At MIR
+        // level that becomes `Named(P)`, which the monomorphizer can't map to
+        // the concrete self type because it isn't a `TypeParam` or `SelfType`.
+        // Collapse this case to `Named(assoc_typealias, [])` so the existing
+        // `resolve_assoc_type_substs` walk in codegen (which already handles
+        // `Named(TypeAlias)` via witness lookup) resolves it to the concrete
+        // Item type. Without this, small-`Item` iterators (UInt8 / Char /
+        // Grapheme / …) leak an unresolved projection into layout, which
+        // defaults to ptr — caller/callee sizes then disagree and elements
+        // read back as garbage.
+        HirTy::AssocProjection { base, assoc, .. } => {
+            // The assoc entity is a TypeAlias living on a Protocol. Its parent
+            // is the protocol entity; its Name is the associated-type name.
+            let (protocol, name) = match (
+                ctx.world.parent_of(*assoc),
+                ctx.world.get::<Name>(*assoc).map(|n| n.0.clone()),
+            ) {
+                (Some(p), Some(n)) => (p, n),
+                _ => return MirTy::Error,
+            };
+            // Bare `Item` inside `extend <protocol>`: base HIR is the owning
+            // protocol. Emit `Named(assoc_typealias)` so codegen's assoc-type
+            // resolver handles it.
+            if let HirTy::Protocol { entity, .. } = base.as_ref() {
+                if *entity == protocol {
+                    ctx.register_name(*assoc);
+                    return MirTy::Named {
+                        entity: *assoc,
+                        type_args: Vec::new(),
+                    };
+                }
+            }
+            let base_ty = lower_type(ctx, base);
+            ctx.register_name(protocol);
+            MirTy::AssociatedProjection {
+                base: Box::new(base_ty),
+                protocol,
+                name,
+            }
+        },
         HirTy::Never(_) => MirTy::Never,
         HirTy::Infer(_) => MirTy::Error, // shouldn't happen after inference
         HirTy::Error(_) => MirTy::Error,

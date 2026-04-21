@@ -42,9 +42,20 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         (TySlot::Resolved(TyKind::Error), _) | (_, TySlot::Resolved(TyKind::Error)) => Ok(()),
 
         // Never (bottom type): unifies with anything.
-        // If the other side is Unresolved, don't bind — let other constraints resolve it.
-        (TySlot::Resolved(TyKind::Never), TySlot::Unresolved { .. })
-        | (TySlot::Unresolved { .. }, TySlot::Resolved(TyKind::Never)) => Ok(()),
+        // Never + Unresolved: don't bind — a sibling constraint may yet pin
+        // the slot to a concrete type (e.g. one match arm is `return`, the
+        // other is `Int`; the result should be `Int`). Instead, record the
+        // Unresolved side so the post-fixpoint never-fallback (mirror of
+        // Rust's `never_type_fallback`) can default it to Never if nothing
+        // else ever constrained it.
+        (TySlot::Resolved(TyKind::Never), TySlot::Unresolved { .. }) => {
+            ctx.never_fallback_targets.insert(b);
+            Ok(())
+        },
+        (TySlot::Unresolved { .. }, TySlot::Resolved(TyKind::Never)) => {
+            ctx.never_fallback_targets.insert(a);
+            Ok(())
+        },
         (TySlot::Resolved(TyKind::Never), _) | (_, TySlot::Resolved(TyKind::Never)) => Ok(()),
 
         // Both unresolved: link them, merge literal markers.

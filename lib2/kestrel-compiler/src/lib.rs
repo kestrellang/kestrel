@@ -485,6 +485,8 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::ItWrongArity { .. } => "ItWrongArity",
         InferError::LiteralNotAccepted { .. } => "LiteralNotAccepted",
+        InferError::UnresolvedTypeParam { .. } => "UnresolvedTypeParam",
+        InferError::CannotInferType { .. } => "CannotInferType",
     }
 }
 
@@ -575,6 +577,12 @@ fn format_error(err: &InferError) -> String {
                 "LiteralNotAccepted {:?} at {}:{}",
                 literal, span.file_id, span.start
             )
+        },
+        InferError::UnresolvedTypeParam { .. } => {
+            format!("UnresolvedTypeParam at {}:{}", span.file_id, span.start)
+        },
+        InferError::CannotInferType { .. } => {
+            format!("CannotInferType at {}:{}", span.file_id, span.start)
         },
     }
 }

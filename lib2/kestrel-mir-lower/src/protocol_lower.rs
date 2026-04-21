@@ -6,7 +6,7 @@ use kestrel_mir::{AssociatedTypeDef, ProtocolDef, ProtocolId, ProtocolMethodDef,
 use kestrel_name_res::conformances::ConformingProtocols;
 
 use crate::context::LowerCtx;
-use crate::ty::{resolve_callable_types, resolve_type_annotation};
+use crate::ty::{resolve_callable_return_type, resolve_callable_types, resolve_type_annotation};
 
 /// Lower a protocol entity into a MIR ProtocolDef.
 pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) -> ProtocolId {
@@ -66,8 +66,8 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) -> ProtocolId {
                     .map(|n| n.0.clone())
                     .unwrap_or_default();
 
-                // Resolve return type
-                let ret_ty = resolve_type_annotation(ctx, child);
+                // Resolve return type via the central callable-return query.
+                let ret_ty = resolve_callable_return_type(ctx, child);
                 let mut method = ProtocolMethodDef::new(method_name, ret_ty);
 
                 // Add type parameters for the method itself

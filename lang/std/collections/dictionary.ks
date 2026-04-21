@@ -390,29 +390,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         }
     }
 
-    /// Accesses the value for the given key, inserting a default if missing.
-    ///
-    /// If the key doesn't exist, the default is inserted and returned.
-    /// Useful for accumulating values.
-    ///
-    /// Example:
-    ///     var counts: [String: Int64] = [:]
-    ///     counts("apple", inserting: 0) += 1  // inserts 0, then increments
-    ///     counts("apple", inserting: 0) += 1  // just increments
-    ///     counts("apple")  // Some(2)
-    public subscript(key: K, inserting defaultValue: V) -> V {
-        get {
-            let maybeValue = self(key);
-            match maybeValue {
-                .Some(v) => v,
-                .None => defaultValue
-            }
-        }
-        set {
-            let _ = self.insert( key, newValue);
-        }
-    }
-
     /// Accesses the value for the given key, panicking if missing.
     ///
     /// Use when you're certain the key exists.

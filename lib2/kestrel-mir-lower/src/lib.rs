@@ -22,6 +22,7 @@ mod resolved_ty;
 mod static_lower;
 mod struct_lower;
 pub mod ty;
+mod validate;
 mod witness_lower;
 
 pub use context::LowerCtx;
@@ -41,7 +42,13 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
     // after all items are known (we need per-static init thunks registered
     // before main-injection runs).
     static_lower::synthesize_static_inits(&mut ctx);
-    ctx.finish()
+    // Validate that no `MirTy::Error` escaped into the built module. Any that
+    // did signals an upstream bind/inference failure whose fallback leaked
+    // through; surface it as a compiler error before codegen trips on it.
+    let err_count = validate::validate_no_error_types(&ctx, &ctx.module);
+    let mut module = ctx.finish();
+    module.lowering_error_count = err_count;
+    module
 }
 
 #[cfg(test)]

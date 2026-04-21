@@ -57,6 +57,12 @@ pub struct Name(pub String);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FileId(pub Entity);
 
+/// Display path for the file entity (set by the compiler when a source is added).
+/// Used for diagnostics and for resolving `@fileconstant` paths relative to the
+/// source file's directory.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FilePath(pub String);
+
 /// Visibility modifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Vis {

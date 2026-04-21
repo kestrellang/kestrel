@@ -20,6 +20,15 @@ pub enum MonomorphizeError {
     FunctionNotFound { name: String },
     /// A type mismatch during witness pattern matching.
     TypeMismatch { expected: String, found: String },
+    /// An instantiation arrived at the monomorphizer with a type-arg count
+    /// that does not match the function's declared `type_params` arity.
+    /// Always a dispatch bug in MIR lowering: some call site constructed a
+    /// callee whose `type_args` length is wrong for the target function.
+    TypeArgArityMismatch {
+        function: String,
+        expected: usize,
+        got: usize,
+    },
 }
 
 impl fmt::Display for MonomorphizeError {
@@ -46,6 +55,14 @@ impl fmt::Display for MonomorphizeError {
             Self::TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {expected}, found {found}")
             },
+            Self::TypeArgArityMismatch {
+                function,
+                expected,
+                got,
+            } => write!(
+                f,
+                "dispatch bug: call to '{function}' has {got} type arg(s), function expects {expected}"
+            ),
         }
     }
 }

@@ -20,6 +20,13 @@ pub struct LowerCtx<'a> {
     pub synthetic_entity_counter: u32,
     /// Global closure counter for unique naming across all functions.
     pub closure_counter: u32,
+    /// The protocol entity for which we're currently lowering a method (either
+    /// from a `protocol P { … }` or `extend P { … }` where `P` is a protocol).
+    /// When set, `HirTy::Protocol { entity: P }` is lowered as `MirTy::SelfType`
+    /// instead of `Named(P)` — `Self` inside `extend P` becomes `HirTy::Protocol(P)`
+    /// at HIR level (no SelfType variant) and must be re-tagged here so
+    /// monomorphization substitutes it with the concrete caller type.
+    pub current_self_protocol: Option<Entity>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -32,6 +39,7 @@ impl<'a> LowerCtx<'a> {
             module: MirModule::new(name),
             synthetic_entity_counter: 0,
             closure_counter: 0,
+            current_self_protocol: None,
         }
     }
 

@@ -42,7 +42,7 @@ public struct RawPointer: Equatable, FFISafe, Hash {
 
     /// Casts this raw pointer to a typed pointer.
     public func cast[T]() -> Pointer[T] {
-        Pointer(raw: lang.cast_ptr[T](self.raw))
+        Pointer(raw: lang.cast_ptr[_, T](self.raw))
     }
 
     /// Offsets the pointer by the given number of bytes.
@@ -93,12 +93,12 @@ public struct Pointer[T]: Equatable, Hash {
 
     /// The memory address as an unsigned integer.
     public var address: UInt64 {
-        UInt64(intLiteral: lang.ptr_to_address(lang.cast_ptr[lang.i8](self._raw)))
+        UInt64(intLiteral: lang.ptr_to_address(lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
     /// Returns true if this is a null pointer.
     public var isNull: Bool {
-        Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[lang.i8](self._raw)))
+        Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
     /// Reads the value at this pointer location.
@@ -119,12 +119,12 @@ public struct Pointer[T]: Equatable, Hash {
 
     /// Converts to an untyped raw pointer.
     public func asRaw() -> RawPointer {
-        RawPointer(raw: lang.cast_ptr[lang.i8](self._raw))
+        RawPointer(raw: lang.cast_ptr[_, lang.i8](self._raw))
     }
 
     /// Casts this pointer to a pointer of a different type.
     public func cast[U]() -> Pointer[U] {
-        Pointer(raw: lang.cast_ptr[U](lang.cast_ptr[lang.i8](self._raw)))
+        Pointer(raw: lang.cast_ptr[_, U](lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
     /// Compares two pointers for equality by address.

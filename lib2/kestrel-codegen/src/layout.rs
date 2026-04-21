@@ -368,6 +368,20 @@ pub fn substitute_type(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
     substitute_type_with_self(ty, subst, None)
 }
 
+fn contains_self_type(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::SelfType => true,
+        MirTy::Pointer(i) | MirTy::Ref(i) | MirTy::RefMut(i) => contains_self_type(i),
+        MirTy::Tuple(es) => es.iter().any(contains_self_type),
+        MirTy::Named { type_args, .. } => type_args.iter().any(contains_self_type),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(contains_self_type) || contains_self_type(ret)
+        },
+        MirTy::AssociatedProjection { base, .. } => contains_self_type(base),
+        _ => false,
+    }
+}
+
 /// Substitute type parameters and SelfType in a type.
 /// `self_type` provides the concrete type for `MirTy::SelfType` (used in protocol
 /// extension methods where Self is abstract until monomorphization).
@@ -424,10 +438,27 @@ pub fn substitute_type_with_self(
             base,
             protocol,
             name,
-        } => MirTy::AssociatedProjection {
-            base: Box::new(sub(base)),
-            protocol: *protocol,
-            name: name.clone(),
+        } => {
+            // Associated types inside a protocol extension (e.g. `Item` in
+            // `extend Iterator { func collect() -> Array[Item] }`) lower with
+            // `base = Named(protocol)` — HIR represents bare `Item` as
+            // `AssocProjection { base: self_protocol, ... }`. At monomorphization
+            // time we want that to behave like `SelfType`, so substitute it
+            // with the caller-supplied `self_type` before recursing. Without
+            // this, the projection never becomes concrete and layout defaults
+            // to ptr (8 bytes), which disagrees with the actual Item layout
+            // for sub-i64 types (UInt8, Char-as-UInt32, etc.).
+            let sub_base = match base.as_ref() {
+                MirTy::Named { entity, type_args } if type_args.is_empty() && entity == protocol => {
+                    self_type.cloned().unwrap_or_else(|| sub(base))
+                },
+                _ => sub(base),
+            };
+            MirTy::AssociatedProjection {
+                base: Box::new(sub_base),
+                protocol: *protocol,
+                name: name.clone(),
+            }
         },
 
         MirTy::FuncThin { params, ret } => MirTy::FuncThin {

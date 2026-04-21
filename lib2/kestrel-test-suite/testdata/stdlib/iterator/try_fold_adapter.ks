@@ -5,10 +5,13 @@ module Test
 
         func main() -> lang.i64 {
             // tryFold: fold where combine returns Result
-            // Successful fold - all Ok
-            let result = [1, 2, 3, 4].iter().tryFold(initial: 0, combine: { (acc, x) in
-                .Ok(acc + x)
-            });
+            // Successful fold - all Ok. The error type `E` is unused here,
+            // so it needs an explicit annotation (see try_fold_unconstrained_error_type.ks
+            // for the diagnostic we emit when the annotation is missing).
+            let result: std.result.Result[std.num.Int64, std.num.Int64] =
+                [1, 2, 3, 4].iter().tryFold(initial: 0, combine: { (acc, x) in
+                    .Ok(acc + x)
+                });
             match result {
                 .Ok(v) => { if v != 10 { return 1 } },
                 .Err(_) => { return 2 }

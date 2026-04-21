@@ -142,9 +142,31 @@ impl<'a> CollectionContext<'a> {
         self.processing_func_id = Some(inst.func_id);
         let func = &self.module.functions[inst.func_id.index()];
 
+        // Boundary check: an instantiation reaching the monomorphizer must
+        // have exactly as many type args as the function declares. A mismatch
+        // here is a dispatch bug (some call site built a callee with wrong
+        // arity); silently truncating via `build_subst`'s `zip` would produce
+        // a subtly-wrong instantiation that fails cryptically later. Under-
+        // specification is still legitimately skipped below in `scan_callee`
+        // (phantom instantiations), so by the time we dequeue an inst, arity
+        // must match.
+        if func.type_params.len() != inst.type_args.len() {
+            self.errors.push(MonomorphizeError::TypeArgArityMismatch {
+                function: self.module.resolve_name(func.entity).to_string(),
+                expected: func.type_params.len(),
+                got: inst.type_args.len(),
+            });
+            return;
+        }
+
         // Build substitution map for this instantiation, including associated types
         let mut subst = build_subst(func, &inst.type_args);
-        crate::function::resolve_assoc_type_substs(self.module, func, &mut subst);
+        crate::function::resolve_assoc_type_substs(
+            self.module,
+            func,
+            &mut subst,
+            inst.self_type.as_ref(),
+        );
 
         // Scan function body for callees
         let Some(body) = &func.body else { return };
@@ -186,7 +208,13 @@ impl<'a> CollectionContext<'a> {
                 };
 
                 // Substitute type args using the current instantiation's substitution
-                let concrete_type_args = common::substitute_type_args(type_args, subst);
+                // and propagate parent_self so `SelfType` appearing as a type argument
+                // (e.g. `FuseIterator[Self]` inside `extend Iterator`) is resolved to
+                // the caller's concrete self type.
+                let concrete_type_args: Vec<MirTy> = type_args
+                    .iter()
+                    .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref()))
+                    .collect();
 
                 // Resolve self type: only inherit parent's self_type if the callee
                 // actually uses SelfType in its signature. Static methods on other types
@@ -195,7 +223,7 @@ impl<'a> CollectionContext<'a> {
                 let callee_func = &self.module.functions[func_id.index()];
                 let concrete_self = self_type
                     .as_ref()
-                    .map(|st| substitute_type(st, subst))
+                    .map(|st| substitute_type_with_self(st, subst, parent_self.as_ref()))
                     .or_else(|| {
                         if self.func_uses_self_type(callee_func) {
                             parent_self.clone()
@@ -209,6 +237,10 @@ impl<'a> CollectionContext<'a> {
                 // 2. Insufficient type_args for the callee's type_params (missing
                 //    inherited struct type_args — correctly-resolved versions are
                 //    discovered through call paths that propagate full type info)
+                //
+                // MirTy::Error is caught earlier by MIR-lower's validate pass
+                // (which short-circuits `compile_inner`), so we don't re-check
+                // for it here.
                 if concrete_type_args.iter().any(|a| has_type_param(a)) {
                     return;
                 }
@@ -488,3 +520,4 @@ fn has_type_param(ty: &MirTy) -> bool {
         _ => false,
     }
 }
+

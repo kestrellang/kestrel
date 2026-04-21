@@ -53,6 +53,12 @@ pub struct InferCtx<'a> {
     /// Inferred type arguments for generic calls.
     pub(crate) type_args: HashMap<HirExprId, Vec<TyVar>>,
 
+    /// Span of the call/ref expression for each `type_args` entry.
+    /// Used by the phase-4 unresolved-type-param diagnostic so we can
+    /// point at the right call site without threading HirBody through
+    /// the solver.
+    pub(crate) type_arg_spans: HashMap<HirExprId, Span>,
+
     // === Bookkeeping ===
     /// Type assigned to each HirExpr during constraint generation.
     pub(crate) expr_types: HashMap<HirExprId, TyVar>,
@@ -87,6 +93,16 @@ pub struct InferCtx<'a> {
     pub(crate) closure_flex: HashSet<TyVar>,
     /// Implicit-it closure TyVars: 1 param named "it", requires exactly 1-param context.
     pub(crate) closure_it: HashSet<TyVar>,
+
+    /// TyVars that were unified with `Never` while still unresolved.
+    /// `unify(Never, Unresolved)` is intentionally a no-op — Never is
+    /// the bottom type and shouldn't pin a TyVar that a sibling arm
+    /// might still make concrete. But if fixpoint ends and no other
+    /// constraint has touched the var, Rust's never-fallback rule says
+    /// "it's Never": the entries here get defaulted to Never in phase
+    /// 4.25. Populated by `unify::unify`; drained by
+    /// `default_never_fallback`.
+    pub(crate) never_fallback_targets: HashSet<TyVar>,
 
     /// Bidirectional hint for the *element* type of the next array literal to be
     /// lowered. Set by `HirStmt::Let` when the annotation is `Array[E]`; read and
@@ -128,6 +144,7 @@ impl<'a> InferCtx<'a> {
             resolutions: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),
+            type_arg_spans: HashMap::new(),
             expr_types: HashMap::new(),
             local_types: HashMap::new(),
             return_ty: TyVar(0),
@@ -138,6 +155,7 @@ impl<'a> InferCtx<'a> {
             type_param_defs: HashMap::new(),
             closure_flex: HashSet::new(),
             closure_it: HashSet::new(),
+            never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
         }
     }
@@ -291,6 +309,14 @@ impl<'a> InferCtx<'a> {
         let idx = self.types.len() as u32;
         self.types.push(TySlot::Resolved(TyKind::Error));
         TyVar(idx)
+    }
+
+    /// Record the instantiated type args for a call/ref expression along
+    /// with its source span. Both maps must stay in sync so phase-4 can
+    /// report unresolved type parameters at the right site.
+    pub fn record_type_args(&mut self, expr: HirExprId, tvs: Vec<TyVar>, span: Span) {
+        self.type_args.insert(expr, tvs);
+        self.type_arg_spans.insert(expr, span);
     }
 
     // ===== Resolution =====

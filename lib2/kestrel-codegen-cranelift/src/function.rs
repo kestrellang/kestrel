@@ -64,6 +64,7 @@ pub fn resolve_assoc_type_substs(
     module: &kestrel_mir::MirModule,
     func: &FunctionDef,
     subst: &mut HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
 ) {
     use crate::monomorphize::witness;
 
@@ -87,8 +88,17 @@ pub fn resolve_assoc_type_substs(
             for assoc in &proto_def.associated_types {
                 let expected = format!("{}.{}", proto_def.name, assoc.name);
                 if name == expected {
-                    // Try resolving through each concrete type in the subst map
-                    for concrete in subst.values() {
+                    // Candidate concrete types to try, in priority order:
+                    // concrete types already in `subst` (method-level type
+                    // params like `I` in `init[I](from: I)` — the body's
+                    // `I.Item` must resolve via `I`, not via the enclosing
+                    // `Self`). Fall back to the caller-supplied `self_type`
+                    // for protocol extension methods whose body has no type
+                    // params of its own (e.g. `extend Iterator { collect }`),
+                    // where the only concrete witness to query is `Self`.
+                    let subst_candidates = subst.values();
+                    let self_candidate = self_type.into_iter();
+                    for concrete in subst_candidates.chain(self_candidate) {
                         if let Ok(resolved) = witness::resolve_associated_type(
                             module,
                             proto_def.entity,
@@ -391,33 +401,15 @@ pub fn compile_function(
 
     // Compile and define
     let mut cl_ctx = cranelift_codegen::Context::for_function(cl_func);
-    let ir_dump_filter = std::env::var("KESTREL_DUMP_IR").ok();
-    let should_dump = ir_dump_filter
-        .as_ref()
-        .map(|f| f == "1" || mangled_name.contains(f.as_str()))
-        .unwrap_or(false);
-    if should_dump {
-        eprintln!("=== IR for {mangled_name} ===\n{}", cl_ctx.func.display());
-    }
-    let pre_compile_ir = if !should_dump {
-        Some(format!("{}", cl_ctx.func.display()))
-    } else {
-        None
-    };
-    let compile_result = stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, || {
+    stacker::maybe_grow(256 * 1024, 8 * 1024 * 1024, || {
         cl_ctx.compile(ctx.isa.as_ref(), &mut Default::default())
-    });
-    compile_result.map_err(|e| {
-        if let Some(ir) = pre_compile_ir {
-            eprintln!("=== IR for failing {mangled_name} (err={e:?}) ===\n{ir}");
-        }
-        CodegenError::FunctionCompilation {
-            name: mangled_name.to_string(),
-            source: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("{e:?}"),
-            )),
-        }
+    })
+    .map_err(|e| CodegenError::FunctionCompilation {
+        name: mangled_name.to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("{e:?}"),
+        )),
     })?;
 
     ctx.cl_module
