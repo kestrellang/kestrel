@@ -459,10 +459,14 @@ fn substitute_type_inner(
             // A bare `Named` entity may alias an associated type entry in the
             // subst map (e.g. Iterator.Item entity → Int64). The codegen layer
             // installs these mappings when it knows the concrete self-type.
+            // Recurse on the substituted value: `resolve_assoc_type_substs`
+            // only does a single witness lookup, so for chained projections
+            // (FuseIterator[X].Item → X.Item) the cached value is itself an
+            // unresolved AssociatedProjection that needs further reduction.
             if type_args.is_empty()
                 && let Some(concrete) = subst.get(entity)
             {
-                return concrete.clone();
+                return rec(concrete);
             }
             MirTy::Named {
                 entity: *entity,
