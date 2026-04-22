@@ -18,6 +18,7 @@ pub mod move_tracking;
 // Wave 6: Pattern checks
 pub mod exhaustiveness;
 pub mod for_loop_pattern;
+pub mod match_pattern;
 pub mod refutable_pattern;
 
 // Literal/lexing checks (E700-E799)

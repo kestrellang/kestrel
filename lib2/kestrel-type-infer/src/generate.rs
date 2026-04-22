@@ -35,11 +35,16 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
         gen_stmt(ctx, hir, stmt_id);
     }
 
-    // Tail expression flows to return type
+    // Tail expression flows to return type. Skip the coerce when the tail
+    // is a control-flow construct that may fall through to unit — the
+    // exhaustive_return analyzer (E001) reports that more precisely, and
+    // the redundant E100 here would mask it at diagnostic-match time.
     if let Some(tail) = hir.tail_expr {
         let tail_tv = gen_expr(ctx, hir, tail);
-        let span = expr_span(hir, tail);
-        ctx.coerce(tail_tv, ctx.return_ty, tail, span);
+        if tail_is_exhaustive(hir, tail) {
+            let span = expr_span(hir, tail);
+            ctx.coerce(tail_tv, ctx.return_ty, tail, span);
+        }
     }
 
     // Report type parameters used as standalone values (not consumed by MethodCall/Call)
@@ -87,7 +92,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // If explicit type args are provided (e.g., Pointer[UInt8]),
             // use them instead of fresh inference variables.
             let (tv, type_arg_vars) =
-                instantiate_entity_with_args(ctx, *entity, explicit_type_args);
+                instantiate_entity_with_args(ctx, *entity, explicit_type_args, span);
             // Record type arg vars so MIR lowering can retrieve the resolved types
             if !type_arg_vars.is_empty() {
                 ctx.record_type_args(id, type_arg_vars, span.clone());
@@ -619,15 +624,15 @@ fn gen_pat(
                 });
             } else {
                 // Fixed arity: equate scrutinee against tuple of exactly these
-                // elements, unless the param_pattern analyzer will flag the
-                // arity (E111) — in that case, skip the equate to avoid a
-                // duplicate generic type-mismatch diagnostic.
+                // elements, unless the pattern analyzer will flag the arity
+                // (E111 for params, E314 for match arms) — in that case skip
+                // the equate to avoid a duplicate generic type-mismatch
+                // diagnostic on the same span.
                 let pat_arity = prefix.len();
-                let suppress = matches!(source, MatchSource::ParamDestructure)
-                    && matches!(
-                        ctx.slot(scrutinee_tv),
-                        TySlot::Resolved(TyKind::Tuple(elems)) if elems.len() != pat_arity
-                    );
+                let suppress = matches!(
+                    ctx.slot(scrutinee_tv),
+                    TySlot::Resolved(TyKind::Tuple(elems)) if elems.len() != pat_arity
+                );
                 if !suppress {
                     let tuple_tv = ctx.tuple(prefix_tvs.clone());
                     ctx.equal(scrutinee_tv, tuple_tv, span.clone());
@@ -865,6 +870,8 @@ fn gen_struct_init(
                 init_subs.push((e, tv));
             }
 
+            emit_where_clause_constraints_with_subs(ctx, init, &init_subs, span);
+
             // Constrain args against the matched init's param types
             if let Some(param_tys) = qctx.query(LowerCallableTypes { entity: init, root }) {
                 for (arg, param_ty) in args.iter().zip(param_tys.iter()) {
@@ -953,6 +960,43 @@ fn gen_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock) -> TyVar {
     }
 }
 
+/// Whether the tail expression of a function body is guaranteed to either
+/// produce a value of the return type or diverge. Returns `false` when it
+/// may structurally fall through to unit (e.g. an `if` without `else`, or
+/// a nested if-chain whose last arm is missing). Used to suppress the
+/// redundant tail-return type-mismatch so E001 (`missing_return`) labels
+/// the fault on its own.
+fn tail_is_exhaustive(hir: &HirBody, id: HirExprId) -> bool {
+    match &hir.exprs[id] {
+        HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. } => true,
+        HirExpr::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let Some(else_body) = else_body else {
+                return false;
+            };
+            block_is_exhaustive(hir, then_body) && block_is_exhaustive(hir, else_body)
+        },
+        HirExpr::Match { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|a| tail_is_exhaustive(hir, a.body))
+        },
+        HirExpr::Block { body, .. } => block_is_exhaustive(hir, body),
+        // Loops and other expressions either produce a value or are Never-typed;
+        // either way the coerce is well-defined.
+        _ => true,
+    }
+}
+
+fn block_is_exhaustive(hir: &HirBody, block: &HirBlock) -> bool {
+    if let Some(tail) = block.tail_expr {
+        tail_is_exhaustive(hir, tail)
+    } else {
+        block_diverges(hir, &block.stmts)
+    }
+}
+
 /// Check if a block's last statement is a diverging expression (return/break/continue).
 /// Used so `{ return .None }` has type Never instead of unit.
 fn block_diverges(hir: &HirBody, stmts: &[HirStmtId]) -> bool {
@@ -1017,14 +1061,16 @@ fn instantiate_entity_with_args(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     explicit_type_args: &[HirTy],
+    site_span: &Span,
 ) -> (TyVar, Vec<TyVar>) {
-    instantiate_entity_inner(ctx, entity, explicit_type_args)
+    instantiate_entity_inner(ctx, entity, explicit_type_args, site_span)
 }
 
 fn instantiate_entity_inner(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     explicit_type_args: &[HirTy],
+    site_span: &Span,
 ) -> (TyVar, Vec<TyVar>) {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
@@ -1145,50 +1191,7 @@ fn instantiate_entity_inner(
         }
     }
 
-    // Emit where clause constraints for the type params
-    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
-        entity,
-        root: ctx.root,
-    });
-    for clause in where_clauses {
-        match clause {
-            crate::resolve::WhereClause::Bound {
-                param, protocol, ..
-            } => {
-                if let Some(idx) = type_param_entities.iter().position(|&p| p == param) {
-                    let span = Span::synthetic(0);
-                    ctx.conforms(fresh_type_args[idx], protocol, span);
-                }
-            },
-            crate::resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                if let Some(idx) = type_param_entities.iter().position(|&p| p == param) {
-                    let span = Span::synthetic(0);
-                    let assoc_result = ctx.fresh();
-                    ctx.associated(
-                        fresh_type_args[idx],
-                        &assoc_name,
-                        assoc_result,
-                        span.clone(),
-                    );
-                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, &subs);
-                    ctx.equal(assoc_result, rhs_tv, span);
-                }
-            },
-            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                // Direct type param equality: V = Array[E]
-                // Redirect the param's TyVar to the concrete RHS type.
-                if let Some(idx) = type_param_entities.iter().position(|&p| p == param) {
-                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, &subs);
-                    ctx.types[fresh_type_args[idx].0 as usize] =
-                        crate::ty::TySlot::Redirect(rhs_tv);
-                }
-            },
-        }
-    }
+    emit_where_clause_constraints_with_subs(ctx, entity, &subs, site_span);
 
     // Determine entity kind and build appropriate type
     let type_arg_vars = fresh_type_args.clone();
@@ -1283,6 +1286,47 @@ fn instantiate_entity_inner(
         _ => ctx.named(entity, fresh_type_args),
     };
     (entity_tv, type_arg_vars)
+}
+
+fn emit_where_clause_constraints_with_subs(
+    ctx: &mut InferCtx<'_>,
+    entity: Entity,
+    subs: &[(Entity, TyVar)],
+    site_span: &Span,
+) {
+    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root: ctx.root,
+    });
+    for clause in where_clauses {
+        match clause {
+            crate::resolve::WhereClause::Bound {
+                param, protocol, ..
+            } => {
+                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                    ctx.conforms(tv, protocol, site_span.clone());
+                }
+            },
+            crate::resolve::WhereClause::TypeEquality {
+                param,
+                assoc_name,
+                rhs,
+            } => {
+                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                    let assoc_result = ctx.fresh();
+                    ctx.associated(tv, &assoc_name, assoc_result, site_span.clone());
+                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
+                    ctx.equal(assoc_result, rhs_tv, site_span.clone());
+                }
+            },
+            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
+                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
+                    ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+                }
+            },
+        }
+    }
 }
 
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.

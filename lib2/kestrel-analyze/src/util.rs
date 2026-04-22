@@ -4,10 +4,11 @@
 //! When writing a new analyzer, use these instead of creating local versions.
 //! If you need a new utility, add it here and update AGENTS.md.
 
-use kestrel_ast_builder::{DeclSpan, Name};
+use kestrel_ast_builder::{DeclSpan, Name, Valued};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_span2::Span;
+use kestrel_syntax_tree2::{SyntaxElement, SyntaxKind};
 
 // ===== Span extraction =====
 
@@ -83,4 +84,28 @@ pub fn entity_span(ctx: &QueryContext<'_>, entity: Entity) -> Span {
     ctx.get::<DeclSpan>(entity)
         .map(|s| s.0.clone())
         .unwrap_or_else(|| Span::synthetic(0))
+}
+
+/// Span of the closing `}` of an entity's block body (from the `Valued`
+/// component's CodeBlock CST node). Returns `None` for expression bodies
+/// or entities without a `Valued` component.
+pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<Span> {
+    let valued = ctx.get::<Valued>(entity)?;
+    let node = &valued.0;
+    if node.kind() != SyntaxKind::CodeBlock {
+        return None;
+    }
+    let file_id = ctx.get::<DeclSpan>(entity).map(|s| s.0.file_id).unwrap_or(0);
+    for elem in node.children_with_tokens() {
+        if let SyntaxElement::Token(tok) = elem {
+            if tok.kind() == SyntaxKind::RBrace {
+                let r = tok.text_range();
+                return Some(Span::new(
+                    file_id,
+                    usize::from(r.start())..usize::from(r.end()),
+                ));
+            }
+        }
+    }
+    None
 }

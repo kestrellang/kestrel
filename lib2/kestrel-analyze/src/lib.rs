@@ -56,6 +56,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Wave 6: Pattern checks
     r.add_body_check(body::refutable_pattern::RefutablePatternAnalyzer);
     r.add_body_check(body::for_loop_pattern::ForLoopPatternAnalyzer);
+    r.add_body_check(body::match_pattern::MatchPatternAnalyzer);
     r.add_body_check(body::exhaustiveness::ExhaustivenessAnalyzer);
 
     // Literal/lexing checks (E700-E799)
@@ -66,7 +67,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
-    r.add_decl_check(decl::disallowed_conformance::DisallowedConformanceAnalyzer);
+    r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
     r.add_decl_check(decl::duplicate_deinit::DuplicateDeinitAnalyzer);
     r.add_decl_check(decl::duplicate_case::DuplicateCaseAnalyzer);
     r.add_decl_check(decl::duplicate_label::DuplicateLabelAnalyzer);

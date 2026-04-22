@@ -1,9 +1,10 @@
 //! # Condition Type Analyzer
 //!
-//! Checks that if/while conditions are Bool (or conform to BooleanConditional).
-//! Like lib1, this runs as a post-inference analyzer rather than a solver
-//! constraint — primitive `lang.i1` doesn't implement protocols, so a
-//! Conforms constraint would fail for direct `i1` usage in conditions.
+//! Checks that if/while/guard conditions and `match` arm guards are Bool
+//! (or conform to BooleanConditional). Like lib1, this runs as a
+//! post-inference analyzer rather than a solver constraint — primitive
+//! `lang.i1` doesn't implement protocols, so a Conforms constraint would
+//! fail for direct `i1` usage in conditions.
 //!
 //! ## Diagnostics
 //!
@@ -67,6 +68,17 @@ impl BodyCheck for ConditionCheckAnalyzer {
         // Check while-loop conditions (tracked during desugaring)
         for &cond_id in &cx.hir.while_conditions {
             check_condition(cx, cond_id, "while", bool_cond_protocol, &mut diags);
+        }
+
+        // Check match arm guards.
+        for (_id, expr) in cx.hir.exprs.iter() {
+            if let HirExpr::Match { arms, .. } = expr {
+                for arm in arms {
+                    if let Some(guard) = arm.guard {
+                        check_condition(cx, guard, "guard", bool_cond_protocol, &mut diags);
+                    }
+                }
+            }
         }
 
         diags

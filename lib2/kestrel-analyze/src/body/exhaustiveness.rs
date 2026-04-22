@@ -172,10 +172,15 @@ fn check_user_match(
     }
 
     // Skip when any arm pattern contains an HirPat::Error (e.g. a malformed
-    // pattern that hir-lower already diagnosed). The flattener treats Error
-    // as a wildcard, which would falsely mark subsequent arms as unreachable
-    // and declare the match exhaustive.
-    if arms.iter().any(|a| pat_has_error(cx.hir, a.pattern)) {
+    // pattern that hir-lower already diagnosed), or when `match_pattern`
+    // will flag the pattern as structurally invalid (unknown case, bad
+    // arity, inconsistent or-binding, float-in-pattern). The flattener
+    // treats those as wildcards, which would falsely declare the match
+    // exhaustive or mark subsequent arms unreachable.
+    if arms.iter().any(|a| {
+        pat_has_error(cx.hir, a.pattern)
+            || crate::body::match_pattern::is_invalid(cx, a.pattern, Some(scrutinee_ty))
+    }) {
         return;
     }
 

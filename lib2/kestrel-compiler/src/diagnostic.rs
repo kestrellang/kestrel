@@ -86,14 +86,16 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::DoesNotConform { .. } => Diagnostic::error()
-                .with_message("type mismatch: does not conform to protocol")
+                .with_message(
+                    "type mismatch: does not conform to protocol; does not satisfy constraint",
+                )
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::NoMember { .. } => Diagnostic::error()
                 // `detail` already includes the lib1-style wording
                 // ("no method 'X' on type 'Y'" or "no member ..."), so we use it
                 // directly instead of prepending a redundant prefix.
-                .with_message(detail.clone())
+                .with_message(detail)
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
             InferError::AmbiguousMember { name, .. } => Diagnostic::error()

@@ -1,8 +1,12 @@
 //! # Exhaustive Return Analyzer
 //!
 //! Checks that all code paths in non-unit functions return a value.
-//! Skips unit-return functions, empty bodies (protocol decls), and
-//! bodies with a tail expression.
+//! Skips unit-return functions and empty bodies (protocol decls).
+//! Runs the CFG over both statement list and tail expression: a tail
+//! expression that does not itself guarantee a return (e.g. an `if`
+//! without `else`, a `while`, or a `loop` that can break) leaves the
+//! body `MayFallThrough` — which triggers E001 just like a trailing
+//! statement would.
 //!
 //! ## Diagnostics
 //!
@@ -11,8 +15,9 @@
 //! **Message:** "function '{name}' does not return a value on all code paths"
 //!
 //! **Labels:**
-//! - Primary: the last statement in the function body
-//!   - Span source: `util::stmt_span` on the last `HirStmtId`
+//! - Primary: the function body's closing `}`
+//!   - Span source: `util::body_close_brace_span` on the function entity,
+//!     falling back to `util::stmt_span` on the last `HirStmtId`
 //!   - Message: "missing return"
 //!
 //! **Notes:** (none)
@@ -21,6 +26,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
 use crate::util;
+use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::{ResolvedTy, TypedBody};
@@ -51,9 +57,13 @@ impl BodyCheck for ExhaustiveReturnAnalyzer {
             return vec![];
         }
 
-        // Skip if no return type annotation (unit-return functions)
-        if cx.query.get::<TypeAnnotation>(cx.entity).is_none() {
-            return vec![];
+        // Skip unit-return functions — these don't require an explicit
+        // return value on every path. Both a missing annotation and an
+        // explicit `-> ()` / `-> Tuple()` return type mean unit.
+        match cx.query.get::<TypeAnnotation>(cx.entity) {
+            None => return vec![],
+            Some(ann) if is_unit_ty(&ann.0) => return vec![],
+            _ => {},
         }
 
         // Skip empty bodies (protocol declarations, extern functions)
@@ -61,23 +71,29 @@ impl BodyCheck for ExhaustiveReturnAnalyzer {
             return vec![];
         }
 
-        // A tail expression means the body always produces a value
-        if cx.hir.tail_expr.is_some() {
+        // Skip when the body already has type-inference errors. A missing
+        // return is usually a secondary symptom in that case — the user
+        // needs to fix the root-cause error first, and E001 would spam.
+        if !cx.typed.errors.is_empty() {
             return vec![];
         }
 
-        // Check if the statement list definitely diverges
-        if block_diverges(cx.hir, cx.typed, &cx.hir.statements) {
+        // Run the CFG over the full body (statements + tail expression).
+        // If any path can fall through without returning, emit E001.
+        let state = block_state(cx.hir, cx.typed, &cx.hir.statements, cx.hir.tail_expr);
+        if state.definitely_returns() {
             return vec![];
         }
 
         let func_name = util::entity_name(cx.query, cx.entity);
 
-        let span = cx
-            .hir
-            .statements
-            .last()
-            .map(|&id| util::stmt_span(cx.hir, id))
+        let span = util::body_close_brace_span(cx.query, cx.entity)
+            .or_else(|| {
+                cx.hir
+                    .statements
+                    .last()
+                    .map(|&id| util::stmt_span(cx.hir, id))
+            })
             .unwrap_or_else(|| kestrel_span2::Span::synthetic(0));
 
         vec![AnalyzeDiagnostic {
@@ -95,6 +111,12 @@ impl BodyCheck for ExhaustiveReturnAnalyzer {
             notes: vec![],
         }]
     }
+}
+
+/// Whether an `AstType` names the unit type — either `AstType::Unit` or an
+/// empty tuple `()` spelled as `Tuple(vec![])`.
+fn is_unit_ty(ty: &AstType) -> bool {
+    matches!(ty, AstType::Unit(_)) || matches!(ty, AstType::Tuple(elems, _) if elems.is_empty())
 }
 
 // ===== Control flow divergence analysis =====
@@ -133,6 +155,16 @@ impl ReturnState {
 }
 
 /// Whether a block of statements definitely returns.
+///
+/// Tail-expression handling: if the tail itself definitely returns/diverges,
+/// propagate that. Otherwise, distinguish control-flow tails from
+/// value-producing tails:
+/// - Control-flow (`if`/`match`/`loop`/`block`) that does NOT definitely
+///   return is MayFallThrough — a missing `else`, a while-break, etc. can
+///   leave the block without a value on the relevant return type.
+/// - Everything else (literals, calls, arithmetic, field access, ...) is
+///   treated as producing the block's value → `Returns` for the purpose
+///   of exhaustive-return analysis.
 fn block_state(
     hir: &HirBody,
     typed: &TypedBody,
@@ -145,20 +177,20 @@ fn block_state(
             return state;
         }
     }
-    if let Some(tail) = tail {
-        let state = expr_state(hir, typed, tail);
-        if state.definitely_returns() {
-            return state;
-        }
-        // A tail expression means the block produces a value
-        return ReturnState::Returns;
+    let Some(tail) = tail else {
+        return ReturnState::MayFallThrough;
+    };
+    let state = expr_state(hir, typed, tail);
+    if state.definitely_returns() {
+        return state;
     }
-    ReturnState::MayFallThrough
-}
-
-/// Whether a block of statements definitely diverges (for the top-level check).
-fn block_diverges(hir: &HirBody, typed: &TypedBody, stmts: &[HirStmtId]) -> bool {
-    block_state(hir, typed, stmts, None).definitely_returns()
+    match &hir.exprs[tail] {
+        HirExpr::If { .. }
+        | HirExpr::Match { .. }
+        | HirExpr::Loop { .. }
+        | HirExpr::Block { .. } => state,
+        _ => ReturnState::Returns,
+    }
 }
 
 fn stmt_state(hir: &HirBody, typed: &TypedBody, id: HirStmtId) -> ReturnState {
@@ -170,9 +202,13 @@ fn stmt_state(hir: &HirBody, typed: &TypedBody, id: HirStmtId) -> ReturnState {
 }
 
 fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
-    let state = match &hir.exprs[id] {
-        HirExpr::Return { .. } => ReturnState::Returns,
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => ReturnState::Diverges,
+    // Control-flow expressions: use structural analysis and DON'T fall back
+    // to the Never-type heuristic. Type inference gives every `loop` type
+    // `Never` regardless of whether it contains a reachable `break`, so
+    // trusting that here would hide legitimate fall-through cases.
+    match &hir.exprs[id] {
+        HirExpr::Return { .. } => return ReturnState::Returns,
+        HirExpr::Break { .. } | HirExpr::Continue { .. } => return ReturnState::Diverges,
 
         HirExpr::If {
             then_body,
@@ -180,62 +216,81 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             ..
         } => {
             let then_s = block_part_state(hir, typed, then_body);
-            match else_body {
+            return match else_body {
                 Some(else_block) => then_s.merge(block_part_state(hir, typed, else_block)),
                 None => ReturnState::MayFallThrough,
-            }
+            };
         },
 
         HirExpr::Match { arms, .. } => {
+            // Each arm body sits in tail position of the match expression —
+            // a value-producing leaf (Local, Call, Literal) counts as
+            // Returns just like the tail of a block does.
             if arms.is_empty() {
-                ReturnState::MayFallThrough
-            } else {
-                // All arms must definitely return for the match to definitely return
-                let mut combined = expr_state(hir, typed, arms[0].body);
-                for arm in &arms[1..] {
-                    combined = combined.merge(expr_state(hir, typed, arm.body));
-                }
-                combined
+                return ReturnState::MayFallThrough;
             }
+            let mut combined = tail_expr_state(hir, typed, arms[0].body);
+            for arm in &arms[1..] {
+                combined = combined.merge(tail_expr_state(hir, typed, arm.body));
+            }
+            return combined;
         },
 
         HirExpr::Loop { body, .. } => {
-            // Check if the body always returns before any break could execute
-            let body_state = block_part_state(hir, typed, body);
-            if body_state == ReturnState::Returns {
-                ReturnState::Returns
-            } else if block_contains_break(hir, body) {
-                // If the loop body has a break, control can exit the loop
+            // If the body contains a break, the loop may fall through to
+            // its successor — even if the body also contains a return on
+            // some path, the break can exit before that return runs. This
+            // also correctly handles desugared `while`/`for` loops, whose
+            // conditional exit is modelled as a `break`.
+            return if block_contains_break(hir, body) {
                 ReturnState::MayFallThrough
             } else {
-                // Infinite loop with no break — diverges (never falls through)
-                ReturnState::Diverges
-            }
+                let body_state = block_part_state(hir, typed, body);
+                if body_state == ReturnState::Returns {
+                    ReturnState::Returns
+                } else {
+                    ReturnState::Diverges
+                }
+            };
         },
 
-        HirExpr::Block { body, .. } => block_part_state(hir, typed, body),
+        HirExpr::Block { body, .. } => return block_part_state(hir, typed, body),
 
         // Closures don't cause the enclosing function to return
-        HirExpr::Closure { .. } => ReturnState::MayFallThrough,
+        HirExpr::Closure { .. } => return ReturnState::MayFallThrough,
 
-        _ => ReturnState::MayFallThrough,
-    };
-
-    if state.definitely_returns() {
-        return state;
+        _ => {},
     }
 
-    // Fallback: if inference proved the expression has type `Never`
-    // (e.g. a call to `lang.panic_unwind`), treat it as diverging.
+    // Leaf-like expressions (calls, literals, field access, ...): if
+    // inference proved the expression has type `Never` (e.g. a call to
+    // `lang.panic_unwind`), treat it as diverging.
     if matches!(typed.expr_types.get(&id), Some(ResolvedTy::Never)) {
         return ReturnState::Diverges;
     }
 
-    state
+    ReturnState::MayFallThrough
 }
 
 fn block_part_state(hir: &HirBody, typed: &TypedBody, block: &HirBlock) -> ReturnState {
     block_state(hir, typed, &block.stmts, block.tail_expr)
+}
+
+/// Like `expr_state`, but applies the same "value-producing leaf counts
+/// as Returns" rule that `block_state` uses for its tail expression.
+/// Used for positions that act like tails (match arm bodies).
+fn tail_expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
+    let state = expr_state(hir, typed, id);
+    if state.definitely_returns() {
+        return state;
+    }
+    match &hir.exprs[id] {
+        HirExpr::If { .. }
+        | HirExpr::Match { .. }
+        | HirExpr::Loop { .. }
+        | HirExpr::Block { .. } => state,
+        _ => ReturnState::Returns,
+    }
 }
 
 // ===== Break detection for loop analysis =====

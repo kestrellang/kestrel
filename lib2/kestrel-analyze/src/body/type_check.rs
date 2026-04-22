@@ -83,7 +83,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             "incompatible types".into(),
         ),
         InferError::DoesNotConform { .. } => (
-            format!("protocol conformance error: {}", detail),
+            format!(
+                "protocol conformance error: does not satisfy constraint: {}",
+                detail
+            ),
             "type does not conform".into(),
         ),
         InferError::NoMember { name, .. } => (

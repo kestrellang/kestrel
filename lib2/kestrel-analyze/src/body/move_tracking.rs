@@ -40,14 +40,17 @@ use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
-    WhereConstraint,
+    Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind,
+    WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_semantics::{
+    CopyRequirement, ExplicitlyNegatesProtocol, TypeParamCopyRequirement,
+};
 use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::BodyContext;
@@ -148,26 +151,11 @@ impl State {
 
 struct MoveCtx<'a> {
     cx: &'a BodyContext<'a>,
-    /// Resolved Copyable protocol entity, when available. `None` means the
-    /// builtin isn't visible (minimal test inputs); we fall back to matching
-    /// the last path segment by name.
+    /// Resolved Copyable protocol entity. `None` in minimal test inputs
+    /// that don't import the builtin; in that case no type can explicitly
+    /// negate Copyable so everything reads as copyable — matching the
+    /// permissive lib1 behavior for stdlib-less fixtures.
     copyable: Option<Entity>,
-}
-
-impl<'a> MoveCtx<'a> {
-    fn ast_is_copyable_path(&self, ast_ty: &AstType) -> bool {
-        let AstType::Named { segments, .. } = ast_ty else {
-            return false;
-        };
-        // Prefer entity-match when we know the entity.
-        if let Some(copyable) = self.copyable {
-            if resolves_to(self.cx, ast_ty, self.cx.entity) == Some(copyable) {
-                return true;
-            }
-        }
-        // Fallback: last segment is literally named "Copyable".
-        segments.last().is_some_and(|s| s.name == "Copyable")
-    }
 }
 
 // ===== Walker (shape modelled on definite_assignment.rs) =====
@@ -589,20 +577,39 @@ fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
     }
 }
 
-/// True if the entity carries `: not Copyable` in its `Conformances`.
+/// True if the entity explicitly opts out of `Copyable`. Uses the
+/// semantics query when the builtin is visible; otherwise falls back to
+/// matching the last path segment by name so `stdlib: false` test inputs
+/// that only declare `: not Copyable` without registering the builtin
+/// still see the move semantics.
 fn entity_negates_copyable(mcx: &MoveCtx<'_>, entity: Entity) -> bool {
+    if let Some(copyable) = mcx.copyable {
+        return mcx.cx.query.query(ExplicitlyNegatesProtocol {
+            entity,
+            protocol: copyable,
+            root: mcx.cx.root,
+        });
+    }
     let Some(conf) = mcx.cx.query.get::<Conformances>(entity) else {
         return false;
     };
     conf.0.iter().any(|item| match item {
-        ConformanceItem::Negative(ast_ty, _) => mcx.ast_is_copyable_path(ast_ty),
+        ConformanceItem::Negative(ast_ty, _) => ast_last_segment_is_copyable(ast_ty),
         _ => false,
     })
 }
 
-/// True if a where-clause on the body owner (or any ancestor) declares
+/// True if a where-clause reachable from the body owner declares
 /// `param_entity: not Copyable`.
 fn param_negates_copyable(mcx: &MoveCtx<'_>, param_entity: Entity) -> bool {
+    if mcx.copyable.is_some() {
+        return mcx.cx.query.query(TypeParamCopyRequirement {
+            param: param_entity,
+            context: mcx.cx.entity,
+            root: mcx.cx.root,
+        }) == CopyRequirement::MayBeNonCopyable;
+    }
+
     let mut seen: HashSet<Entity> = HashSet::new();
     let mut current = Some(mcx.cx.entity);
     while let Some(ent) = current {
@@ -611,16 +618,17 @@ fn param_negates_copyable(mcx: &MoveCtx<'_>, param_entity: Entity) -> bool {
         }
         if let Some(wc) = mcx.cx.query.get::<AstWhereClause>(ent) {
             for c in &wc.0 {
-                if let WhereConstraint::NegativeBound {
+                let WhereConstraint::NegativeBound {
                     subject, protocol, ..
                 } = c
-                {
-                    if resolves_to(mcx.cx, subject, ent) != Some(param_entity) {
-                        continue;
-                    }
-                    if mcx.ast_is_copyable_path(protocol) {
-                        return true;
-                    }
+                else {
+                    continue;
+                };
+                if resolves_to_entity(mcx.cx, subject, ent) != Some(param_entity) {
+                    continue;
+                }
+                if ast_last_segment_is_copyable(protocol) {
+                    return true;
                 }
             }
         }
@@ -629,7 +637,14 @@ fn param_negates_copyable(mcx: &MoveCtx<'_>, param_entity: Entity) -> bool {
     false
 }
 
-fn resolves_to(cx: &BodyContext<'_>, ast_ty: &AstType, context: Entity) -> Option<Entity> {
+fn ast_last_segment_is_copyable(ast_ty: &AstType) -> bool {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return false;
+    };
+    segments.last().is_some_and(|s| s.name == "Copyable")
+}
+
+fn resolves_to_entity(cx: &BodyContext<'_>, ast_ty: &AstType, context: Entity) -> Option<Entity> {
     let AstType::Named { segments, .. } = ast_ty else {
         return None;
     };

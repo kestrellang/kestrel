@@ -15,6 +15,7 @@ kestrel-hir-lower = { path = "../kestrel-hir-lower" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
 kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-semantics = { path = "../kestrel-semantics" }
 kestrel-span2 = { path = "../kestrel-span" }
 kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
 

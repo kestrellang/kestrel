@@ -121,6 +121,9 @@ fn detect_cycle_for_owner(cx: &CompilationContext<'_>, owner: Entity) -> Option<
         for proto in protocols {
             collect_param_refs(cx, proto, owner, &param_set, &mut refs);
         }
+        // `where T: Proto[T]` is a legitimate self-referential bound, not a
+        // cycle — only edges between *distinct* params can form one.
+        refs.retain(|&r| r != subject_param);
         if !refs.is_empty() {
             adj.entry(subject_param).or_default().extend(refs);
         }

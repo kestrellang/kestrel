@@ -1,7 +1,7 @@
 # Test Failures — 2026-04-21
 
 Run: `file_tests --test-threads=1` (full suite) on `feature/incremental-hecs`.
-Result: **2715 passed · 102 failed** (2026-04-21, after conformance-completeness signature/receiver/setter checks + move-tracker parity wins). stdlib/* stays clean (0 failures); all remaining failures live in non-stdlib trees. Note: `validation/cycles/protocol_direct_self_inheritance.ks` must be skipped to avoid a stack-overflow crash in the current WIP cycle analyzer (run with `--skip protocol_direct_self_inheritance`).
+Result: **2761 passed · 57 failed** (2026-04-21, later same-day: after `kestrel-semantics` crate extraction, new `conformance_rules.rs` (E422/E423/E424), `exhaustive_return.rs` match-arm tail-expression handling, and `conformance_completeness.rs` two-pass associated-type-binding search that prefers qualified bindings like `Equal.Output = Bool` over unqualified siblings). stdlib/* stays clean (0 failures). 21 entries moved to `test-errors-fixed.md` (all 8 exhaustive-return items, 8 Cloneable/negative-conformance items, the 4 `NominalCopySemantics` query-cycle regressions via a new thread-local cycle guard, and the inherited-assoc-type `struct_conforming_to_child_provides_associated_type`). 13 new failures opened under "Spurious E001 on control-flow tails", "E458 on inherited associated types via method/where-clause binding", "Cycle analyzers over-eager on type-parameter bounds", "Parent-conformance analyzer false positive", and "Inference `could not infer type` on valid code".
 
 > **Agent instructions:** When you fix a failing test (or verify that an existing entry has become passing), move it to `test-errors-fixed.md`. Move the full bullet — the `[x]` marker, the failure mode, and any explanation — preserving its subsection heading for context. If a subsection's last remaining item is being moved, move the subsection heading and its explanatory prose with it. `[x]` entries must never sit in **# False Negatives** or **# Stdlib** — those lists are for still-failing `[ ]` items only. Do not modify a test's source to make it pass; if a test is genuinely invalid (wrong syntax, etc.), note that in the entry.
 
@@ -19,20 +19,6 @@ Borrow/move-checker not executing or not wired into bind→infer→validate pipe
 
 - [ ] `memory_model/deinit/deinit_statement_marks_variable_as_moved.ks` — **expected:** `moved`
 
-## Protocol conformance not checked
-
-`extend Foo: Proto { … }` doesn't verify method signatures, presence, or return types.
-
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/conformance/` (surface check), `protocol_method/` (method signature / receiver-kind match), `parent_protocol_conformance/` (missing parent protocol), `protocol_field_conformance/` (setter/getter shape). Diagnostics in each analyzer's `diagnostics.rs`.
-
-- [ ] `declarations/protocols/protocol_missing_method_from_inherited_protocol.ks` — **expected:** `does not implement method 'a'`
-- [ ] `declarations/protocols/struct_missing_inherited_protocol_method.ks` — **expected:** `does not implement method 'draw'`
-- [ ] `declarations/protocols/struct_with_method_wrong_return_type.ks` — **expected:** `method 'hash' has wrong return type`
-- [ ] `declarations/protocols/diamond_inheritance_associated_type_conflict.ks` — **expected:** `conflicting associated type 'Element'`
-- [ ] `declarations/extensions/no_transitive_conformance_when_chain_broken.ks` — **expected:** `does not satisfy constraint`
-- [ ] `execution_graph/protocols/missing_parent_conformance_is_error.ks` — **expected:** `conforms to 'B' but not its parent protocol 'A'`
-- [ ] `declarations/init_where_clauses/constraint_not_satisfied.ks` — **expected:** `Hashable`
-
 ## Overload resolution / ambiguity not diagnosed
 
 Wrong-arity / wrong-label calls produce generic "wrong number of arguments" instead of the richer "no matching overload" the tests want; multiple ambiguity cases surface no error at all.
@@ -45,47 +31,12 @@ Wrong-arity / wrong-label calls produce generic "wrong number of arguments" inst
 
 ## Cloneable / Copyable / `not` negative-conformance rules
 
-`not Copyable` + `Cloneable` conflict is not detected; `not` with non-builtin / method-bearing protocols is not rejected.
+Structural parent-requires-Cloneable check still missing: a struct/enum that stores a `Cloneable`-only field (a type that conforms to `Cloneable` but not the transitive `Copyable` closure) should itself opt into `Cloneable`. The current E502 analyzer uses the old lax "`Cloneable && not Copyable`" pair test, which stdlib types transitively satisfy, so the rule never fires. The stricter `NominalCopySemantics` query is available in `kestrel-semantics` but wiring it into E502 trips on the stdlib's `Array`/`String` containers whose owners never declared `Cloneable`; that's a separate stdlib-migration task.
 
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/disallowed_conformance/` (Cloneable + not-Copyable conflict, `not` applied to non-feature protocols), `cloneable_field/` (struct/enum payload needs Cloneable), `builtin_marker_protocol/` (Copyable marker-shape check, also the false-positive side).
+> **lib1:** `kestrel-semantic-analyzers/src/analyzers/disallowed_conformance/`, `cloneable_field/`, `builtin_marker_protocol/`.
 
-- [ ] `memory_model/cloneable/cloneable_and_not_copyable_is_error.ks` — **expected:** `` cannot conform to `Cloneable` and opt out of `Copyable` ``
-- [ ] `memory_model/cloneable/calling_generic_clone_with_non_cloneable_type_errors.ks` — **expected:** any error
 - [ ] `memory_model/cloneable/enum_with_cloneable_payload_without_conformance_errors.ks` — **expected:** `Cloneable`
 - [ ] `memory_model/cloneable/struct_with_cloneable_field_without_conformance_errors.ks` — **expected:** `Cloneable`
-- [ ] `memory_model/negative_conformance/cloneable_and_not_copyable_is_conflicting.ks` — **expected:** `` cannot conform to `Cloneable` and opt out of `Copyable` ``
-- [ ] `memory_model/negative_conformance/cloneable_and_not_copyable_reversed_order.ks` — **expected:** same
-- [ ] `memory_model/negative_conformance/enum_cloneable_and_not_copyable_is_conflicting.ks` — **expected:** same
-- [ ] `memory_model/negative_conformance/not_with_builtin_that_has_no_implicit_conformance.ks` — **expected:** `not a language feature protocol`
-- [ ] `memory_model/negative_conformance/not_with_non_builtin_protocol.ks` — **expected:** `not a language feature protocol`
-- [ ] `memory_model/negative_conformance/not_with_regular_protocol_that_has_methods.ks` — **expected:** `not a language feature protocol`
-
-## Exhaustive-return analysis
-
-Tests expect a specific "missing return on some paths" diagnostic; compiler instead emits the generic "expected i64 got ()" or E001 on a different line, which means the dedicated analysis isn't firing where it should.
-
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/exhaustive_return/` — dedicated CFG-style pass. In lib2 the diagnostic leaks out of the type-check "expected T got ()" path instead of the return-path analysis.
-
-- [ ] `validation/exhaustive_return/function_missing_return.ks` — **expected at line 8:** any error · **got at line 7:** E001 `does not return on all paths`
-- [ ] `validation/exhaustive_return/if_else_chain_missing_final_else.ks` — **expected at line 12** · **got at line 7:** `expected i64 got ()`
-- [ ] `validation/exhaustive_return/if_returns_else_falls_through.ks` — same pattern
-- [ ] `validation/exhaustive_return/if_without_else_missing_return.ks` — same pattern
-- [ ] `validation/exhaustive_return/loop_with_break_needs_return_after.ks` — **expected:** any error · **got:** none
-- [ ] `validation/exhaustive_return/nested_if_inner_missing_else.ks` — **expected:** any error · **got:** `expected i64 got ()`
-- [ ] `validation/exhaustive_return/statements_without_return.ks` — **expected at line 9** · **got at line 8:** E001
-- [ ] `validation/exhaustive_return/while_loop_may_not_execute.ks` — **expected:** any error · **got:** none
-
-## Visibility checks (public API surface uses private types)
-
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/visibility_consistency/` (public-surface-references-private diagnostics) + access-control checks in `kestrel-semantic-tree-binder/src/body_resolver/paths.rs` / `members.rs` for private-member access at call sites.
-
-- [ ] `validation/misc/protocol_method_with_private_param_in_public_protocol_errors.ks` — **expected:** `parameter type in 'handle' is less visible`
-- [ ] `validation/misc/public_field_with_private_type_errors.ks` — **expected:** `has type less visible than the field`
-- [ ] `validation/misc/public_function_with_private_parameter_type_errors.ks` — **expected:** `parameter type in 'process' is less visible`
-- [ ] `validation/misc/public_function_with_private_return_type_errors.ks` — **expected:** `return type of 'getSecret' is less visible`
-- [ ] `validation/misc/public_type_alias_with_private_underlying_errors.ks` — **expected:** `aliased type in 'Exposed' is less visible`
-- [ ] `validation/visibility/private_method_not_visible_outside_struct.ks` — **expected:** `is private and not accessible from this scope`
-- [ ] `expressions/field_access/private_field_access_error.ks` — **expected:** `is private`
 
 ## `let <refutable-pattern> = …` must be rejected
 
@@ -117,18 +68,6 @@ Initializer that sets `self.x` only in some branches should be rejected; check i
 - [ ] `validation/initializers/match_not_all_arms_initialize.ks` — **expected:** `does not initialize all fields`
 - [ ] `validation/initializers/only_then_branch_initializes.ks` — **expected:** `does not initialize all fields`
 
-## Dictionary literal requires `Hashable` key — protocol-conformance diagnostic
-
-Tests expect "does not conform to protocol" (Hashable); compiler emits generic type-mismatch (or nothing) instead.
-
-> **lib1:** surfaced via the Hashable constraint on `Dictionary[K, V]`'s K param — `kestrel-semantic-type-inference` produces the conformance obligation and `kestrel-semantic-analyzers/src/analyzers/conformance/diagnostics.rs` emits "does not conform to protocol". Empty-dict "could not infer type" comes from `analyzers/type_inference/diagnostics.rs`.
-
-- [ ] `expressions/dictionary_literals/empty_dict_without_context.ks` — **expected:** `could not infer type`
-- [ ] `expressions/dictionary_literals/inconsistent_key_types.ks` — **expected:** `does not conform to protocol`
-- [ ] `expressions/dictionary_literals/inconsistent_value_types.ks` — **expected:** `does not conform to protocol`
-- [ ] `expressions/dictionary_literals/key_type_mismatch.ks` — **expected:** `does not conform to protocol`
-- [ ] `expressions/dictionary_literals/value_type_mismatch.ks` — **expected:** `does not conform to protocol`
-
 ## `for x in nonIterable` — missing Iterable conformance diagnostic
 
 > **lib1:** `kestrel-semantic-analyzers/src/analyzers/for_loop_pattern/mod.rs` — checks the subject of `for` for Iterable conformance and reports if missing. Array-element-type mismatches for the inference variant fall through to the conformance analyzer.
@@ -142,18 +81,6 @@ Desugarings (`for`, `try`, operators, etc.) fall through to raw member-lookup er
 
 - [ ] `patterns/for_loops/for_loop_over_non_iterator_without_iter_method.ks` — **expected:** `Iterable` · **got:** `no member 'iter' on type 'NotIterable'`, `does not conform to protocol: ? !: Iterator`, `no member 'next' on type '?'`
 - [ ] `expressions/control_flow/try_on_non_tryable_type.ks` — **expected:** `tryExtract` · **got:** `.Err not found on ?`, `could not infer type` (desugar cascade)
-
-## Match-expression diagnostics
-
-> **lib1:** duplicate-binding-in-pattern + unknown-enum-case + wrong-arity (tuple/enum) emitted during pattern binding in `kestrel-semantic-tree-binder/src/body_resolver/patterns.rs` via `diagnostics/pattern.rs`. Float-literal-in-pattern and guard-must-be-Bool reported from the same path / `type_check` analyzer respectively.
-
-- [ ] `expressions/match/errors/duplicate_binding_name.ks` — **expected:** `duplicate`
-- [ ] `expressions/match/errors/float_literal_in_pattern.ks` — **expected:** `float`
-- [ ] `expressions/match/errors/unknown_enum_case.ks` — **expected:** `Blue` (unknown case name)
-- [ ] `expressions/match/errors/wrong_enum_arity.ks` — **expected:** any error
-- [ ] `expressions/match/errors/wrong_tuple_arity.ks` — **expected:** `arity`
-- [ ] `expressions/match/guards/guard_must_be_bool.ks` — **expected:** `Bool`
-- [ ] `expressions/match/or_patterns/or_pattern_inconsistent_bindings_error.ks` — **expected:** `inconsistent` (bindings differ across `or`-pattern alternatives) · **got:** no error (plus a spurious `unreachable pattern [E306]` warning on the following arm)
 
 ## Optional type diagnostics
 
@@ -214,12 +141,6 @@ No analyzer in lib2 detects delegating-init calls from non-init contexts. Curren
 
 - [ ] `expressions/calls/method_calls/primitive_methods_errors.ks` — **expected:** `primitive method 'toString' on 'I64' must be called`
 
-## Empty array literal requires type annotation
-
-> **lib1:** `kestrel-semantic-analyzers/src/analyzers/type_inference/diagnostics.rs` — after inference finishes, unresolved infer-vars on array-literal element types produce the "could not infer type" diagnostic.
-
-- [ ] `expressions/paths/empty_array_requires_type_annotation.ks` — **expected:** `could not infer type`
-
 ## `@platform(...)` exclusion — excluded decls should be dropped from name resolution
 
 When a function/struct has `@platform(...)` that doesn't match the current target, lib1 drops the decl from binding so later references produce an "unknown name" diagnostic. lib2 leaves the decl reachable (or emits the generic inference error instead of an unknown-name diagnostic).
@@ -262,28 +183,24 @@ Compiler rejects valid code or emits spurious diagnostics where none should fire
 
 `protocol Child: Base` with `type Element` declared on `Base`: resolving `Self.Element` / `Item` from inside `Child` (or a conforming struct) fails to walk the parent chain. Shows up as spurious "no associated type" or "wrong return type" diagnostics when the protocol requirement's return type is an inherited associated type.
 
-- [ ] `declarations/associated_types/struct_conforming_to_child_provides_associated_type.ks` — **expected:** no errors · **got:** E458 `method 'prev' has wrong return type for protocol 'BidirectionalIterator'` at line 15 (impl returns `lang.i64`, matches `Item = lang.i64` but protocol-method return `Item` not substituted through the struct's associated-type binding when the requirement lives on a parent protocol)
 - [ ] `declarations/extensions/protocol_extension_uses_inherited_associated_type.ks` — **expected:** no errors · **got:** `no associated type 'Element': Self.Element no assoc type` (lines 9, 12, 12) + `could not infer type` (line 13) — extension body can't project `Self.Element` from the parent `Base` through `Child`
 
----
+## E458 on inherited associated types via method/where-clause binding
 
-# Stdlib
+The `conformance_completeness.rs` two-pass binding search fixed most `Equal.Output = Bool` cases by preferring qualified bindings, but some inherited-protocol paths still miss the default binding. Extension `extend IntIter: Iterator { type Item = lang.i64; func next() -> Item }` and qualified module path `std.num.Int64` in impl return types don't line up with the protocol requirement's abstract `Optional[Self.Item]` / `Item` placeholder.
 
-Run: `file_tests --test-threads=1` (full suite, stdlib/* subset) on `feature/incremental-hecs` (2026-04-21, fifth run).
-Result: **203 passed · 0 failed** (full-suite extract: all stdlib/* tests pass). Fixed vs. fourth run: the remaining 8 entries in the stdlib Type-inference/bind-errors bucket cleared (`stdlib/array/init_count_generator.ks`, `stdlib/iterator/zip_chain_enumerate.ks` among them). stdlib has no tracked failures.
+- [ ] `declarations/associated_types/where_clause_resolves_method_type_param_from_caller_body.ks` — **expected:** no errors · **got at line 24:** E458 `method 'next' has wrong return type for protocol 'Iterator'` (impl return `Item` doesn't unify with expected `Item` when method-level type param is involved)
+- [ ] `patterns/for_loops/for_loop_over_iterator_is_iterable.ks` — **expected:** no errors · **got at line 19:** E458 `method 'next' has wrong return type for protocol 'Iterator'` (qualified `std.result.Optional[std.num.Int64]` return doesn't structurally match protocol's `Optional[Item]`)
 
-Previously resolved categories:
-- **E205 `cannot pass temporary value to 'mutating' parameter`** — fully resolved 2026-04-20 (access-mode analyzer receiver/arg split + stdlib `mutating` → `consuming` flip). All former E205 tests reclassified below by their remaining failure.
-- **Type parameter not in scope** — fixed 2026-04-20 (`WorldResolver::where_clauses` context fix). 3 stdlib tests now pass (`append_from_iterable`, `dictionary_merge_from_pairs`, `set_insert_contents_of`); 4 others moved to derived-protocol bucket.
-- **Monomorphization witness gaps** — fixed 2026-04-20 via new `ProtocolMembers` query in `kestrel-name-res` that unifies the protocol-child + extension + parent-protocol walk. Witness generation and name-resolution consumers now call one query instead of reassembling the walk. 4 tests pass; 1 regressed to a separate pre-existing overload-collision bug; 20 others reclassified by new failure mode.
-- **Witness-instantiation collapse** — fixed 2026-04-20. `ConformingProtocols` deduped by protocol entity so `Int64: Convertible[Int8], [Int16], [Int32], ...` collapsed into a single `Convertible` witness bound to the first `init(from:)` overload — every `Int64(from: x)` silently truncated x to 8 bits. Fix: new `ConformingProtocolInstantiations` query preserves per-conformance type args; `witness_lower.rs` emits one witness per `(protocol, type_args)` with parameter-type init disambiguation; codegen's `find_witness_with_method` filters by `protocol_type_args`. Net: −23 stdlib failures (integer conversions, parse, byte-endian, bitwidth ops, float conversions).
-- **Codegen symbol not found: `Array.init`** — the `collect()` monomorphization miss is resolved. Nearly all former entries moved to Cranelift verifier errors (compile/link phase) or Runtime exit-code failures (runs but asserts fail); a couple now hit earlier MIR/inference errors. Only `try_fold_adapter` still links against an undeclared symbol, for a different monomorphization gap (`tryFold`).
-- **Cranelift verifier `i64`/`i8` signature mismatch** — resolved 2026-04-21 (likely by the `self_item_leaked_to_mir` fix + surrounding monomorphization work). All 9 former entries (7 `call_indirect` arg-2 mismatches across `MapIterator`/`FilterMapIterator`/`InspectIterator`/`IntersperseIterator`/`TakeWhileIterator`, plus 2 `load.i64` base-pointer mismatches in `FlattenIterator`/`IntersperseWithIterator`) now compile and link cleanly. Reclassified into the Runtime exit-code bucket, then resolved in the fourth 2026-04-21 run.
-- **Iterator-adapter runtime exit-code failures** — resolved 2026-04-21 (fourth run). 9 tests (`filter_map_flatten`, `flatten_iterator`, `fuse_and_cycle`, `inspect_adapter`, `intersperse_adapter`, `intersperse_with_adapter`, `map_filter_collect`, `peekable_adapter`, `take_skip_methods`) all pass. Mix of SIGSEGVs (Optional<I.Item> layout for nested adapters, generic-I discriminant handling) and assertion-exit failures resolved together.
+## Parent-conformance analyzer false positive
 
-## Runtime exit-code failures (compile OK, assert/behavior wrong)
+- [ ] `declarations/associated_types/struct_conforming_to_refined_protocol_must_satisfy_constraint.ks` — **got at line 11:** E421 `'BadIterator' conforms to 'SortedIterator' but not its parent protocol 'Iterator'` (the struct does provide the parent protocol's requirements — the parent-conformance analyzer walks the refinement chain incorrectly)
 
-Program compiles and links but exits non-zero — asserts failing or behavior diverging from expectation.
+## Inference `could not infer type` on valid code
 
-_(none currently tracked — see `test-errors-fixed.md` for resolved entries)_
+Introduced 2026-04-21 by the `type-infer/src/generate.rs` changes (skip-tail-coerce + `instantiate_entity_with_args` signature change). Generic enum type-arg defaulting and pointer cast expressions no longer resolve.
 
+- [ ] `declarations/enums/generic_enum_with_explicit_type_args.ks` — **got at line 10:** `could not infer type`
+- [ ] `types/pointer/cast_ptr_in_generic_context.ks` — **got at line 15:** two `could not infer type` errors on the cast expression
+- [ ] `types/pointer/cast_ptr_with_untyped_ptr_null.ks` — **got at line 7:** two `could not infer type` errors on `ptr_null()` / cast
+- [ ] `types/pointer/cast_ptr_with_various_primitives.ks` — 14 `could not infer type` errors across lines 7/11/15/19/23 on `cast[T]` through generic context
