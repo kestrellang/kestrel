@@ -54,7 +54,7 @@ build_command = ["cargo", "test", "-p", "kestrel-test-suite2", "--release"]
 stall_threshold_seconds = 30
 
 # Parallelism default when neither -j nor TRIAGE_JOBS is set.
-jobs = 4
+jobs = 1
 ```
 
 A triage built outside the kestrel repo picks up whatever `config.toml` the target project supplies; the defaults above are chosen to match kestrel but the intent is portability.
@@ -174,12 +174,17 @@ A positional first argument is interpreted as a subcommand if it matches one of 
 
 **Global flags:**
 
-- `-j N` / `--jobs N` — parallelism; env `TRIAGE_JOBS`; default 4.
+- `-j N` / `--jobs N` — parallelism; env `TRIAGE_JOBS`; default 1.
 - `--db PATH` — SQLite path; env `TRIAGE_DB`; default `.triage/triage.db`.
 - `--binary PATH` — explicit path to a `file_tests-*` executable; otherwise triage finds the most recent one under `target/release/deps/`.
 - `--json` — emit machine-readable output instead of text. See below.
 - `--jq <expr>` — shell out to `jq` with the given expression against the JSON output. Implies `--json`. Errors if `jq` is not on `$PATH`.
 - `--async` / `-a` — on the run command, detach and return immediately instead of waiting. See Execution Modes.
+
+**Status detail flags:**
+
+- `--failures` — for `triage status`, include failed/problem test rows (`failed`, `timed_out`, `hung`, `crashed`, `panicked`, `canceled`) after the count summary.
+- `--messages` — include each row's `failure_message`; implies `--failures`.
 
 ### Execution modes
 
@@ -276,7 +281,7 @@ Per-invocation wall clock is the source of truth for `duration_ms` — libtest d
 
 triage runs N worker processes in parallel within a single invocation. Because the claim model is a row-level uniqueness check, workers do not coordinate with each other directly — they race for rows in SQLite and the loser moves on. This is also how parallelism composes across multiple agents: two `triage` invocations against the same database just add more workers to the pool, and the claim constraint keeps them from double-running.
 
-- **Default:** `4` — a conservative fixed value that leaves headroom for the OS, the IDE, and the scanning worker that detects stalls on any machine triage is likely to run on.
+- **Default:** `1` — serial by default. The Kestrel codegen tests currently share temp object names, so parallel test processes can collide in the linker.
 - **Override:** `--jobs N` / `-j N` on the CLI, or `TRIAGE_JOBS=N` in the environment. CLI wins over env.
 - **`-j 1`** runs serially — useful when debugging flakes that only reproduce in isolation, or when a test's resource usage would thrash under contention.
 - triage does not try to be clever about CPU pinning or performance/efficiency cores; the OS scheduler handles that.
@@ -304,7 +309,7 @@ Two people typing `triage` at the same time (or one person plus some number of a
 - **Build step.** Both invocations run `cargo test --no-run`. Cargo's own build lock serializes them. Both then `sha256` the resulting binary, get the same hash, and `INSERT OR IGNORE` the same `build` row. No race.
 - **Discovery.** If the build is new, both call `--list` and upsert `test` rows. `@unique(path)` + `INSERT OR IGNORE` absorbs the overlap; both end up with the same set.
 - **Scheduling.** Each invocation expands its pattern to a set of `test_id`s and tries to insert `test_run` rows with `status = running`. A row that already exists — because another invocation already scheduled it, already completed it, or is currently running it — causes the insert to fail, and the losing invocation simply moves on. Scheduling is idempotent: `triage` and `triage declarations.*` running side-by-side just partition the overlapping work between them.
-- **Execution.** Each invocation spawns its own worker pool (default 4). Workers from different invocations are indistinguishable to the claim mechanic; they all contend for the same `test_run` rows under the same uniqueness constraint. Total parallelism is the sum of the instances' `-j` values.
+- **Execution.** Each invocation spawns its own worker pool (default 1). Workers from different invocations are indistinguishable to the claim mechanic; they all contend for the same `test_run` rows under the same uniqueness constraint. Total parallelism is the sum of the instances' `-j` values.
 - **Reads are always safe.** `triage status`, `triage history`, `triage builds` are read-only queries against a WAL-mode SQLite — they run concurrently with active workers without contention.
 - **Ctrl-C on one invocation.** That invocation's workers die with claims still held. Heartbeats stop updating. The *other* invocation's stall scanner finds the rows, flips them to `hung`, and moves on. No stranded tests, no special signal handling, no coordination between processes.
 

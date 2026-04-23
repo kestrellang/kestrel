@@ -22,7 +22,8 @@ kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 codespan-reporting = { workspace = true }
 
 [dev-dependencies]
-datatest-stable = "0.2"
+libtest-mimic = "0.8"
+walkdir = "2"
 
 [[test]]
 name = "file_tests"

@@ -20,7 +20,9 @@ use context::CodegenContext;
 use error::CodegenError;
 use kestrel_codegen2::TargetConfig;
 use kestrel_mir::MirModule;
-use std::path::Path;
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Options for code generation.
@@ -107,6 +109,71 @@ fn compile_inner(
 /// Counter for unique temp file names.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+struct TempObjectFile {
+    path: PathBuf,
+}
+
+impl TempObjectFile {
+    fn create_near_output(output_path: &Path, object_bytes: &[u8]) -> Result<Self, CodegenError> {
+        let dir = output_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let output_name = output_path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| "output".into());
+        let output_name = sanitize_temp_component(&output_name);
+        let pid = std::process::id();
+
+        for _ in 0..100 {
+            let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let thread_id = sanitize_temp_component(&format!("{:?}", std::thread::current().id()));
+            let path = dir.join(format!(
+                ".{output_name}.kestrel-{pid}-{counter}-{thread_id}.o"
+            ));
+
+            let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => file,
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err.into()),
+            };
+            file.write_all(object_bytes)?;
+            return Ok(Self { path });
+        }
+
+        Err(CodegenError::IoError(std::io::Error::new(
+            ErrorKind::AlreadyExists,
+            "could not create a unique temporary object file",
+        )))
+    }
+}
+
+impl Drop for TempObjectFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn sanitize_temp_component(component: &str) -> String {
+    let sanitized: String = component
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        "output".to_string()
+    } else {
+        sanitized
+    }
+}
+
 /// Compile and link to an executable.
 pub fn compile_and_link(
     module: &MirModule,
@@ -115,28 +182,17 @@ pub fn compile_and_link(
     output_path: impl AsRef<Path>,
 ) -> Result<(), CodegenError> {
     let result = compile(module, target, options)?;
-
-    // Write temp object file with a unique name
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let thread_id = std::thread::current().id();
-    let temp_name = format!("kestrel_{counter}_{thread_id:?}.o");
-    let temp_path = std::env::temp_dir().join(&temp_name);
-
-    result.write_object_file(&temp_path)?;
+    let output_path = output_path.as_ref();
+    let temp_object = TempObjectFile::create_near_output(output_path, &result.object_bytes)?;
 
     // Link
-    let link_result = link::link_executable(
-        &temp_path,
-        output_path.as_ref(),
+    link::link_executable(
+        &temp_object.path,
+        output_path,
         &options.libraries,
         &options.library_paths,
         &options.frameworks,
-    );
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&temp_path);
-
-    link_result
+    )
 }
 
 #[cfg(test)]

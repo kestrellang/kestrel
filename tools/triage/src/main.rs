@@ -1,13 +1,13 @@
 use glob::glob;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitCode, Output, Stdio};
 use std::sync::mpsc;
@@ -31,6 +31,8 @@ const ASYNC_PATTERN_ENV: &str = "TRIAGE_ASYNC_PATTERN";
 const ASYNC_JOBS_ENV: &str = "TRIAGE_ASYNC_JOBS";
 const ASYNC_JSON_ENV: &str = "TRIAGE_ASYNC_JSON";
 const ASYNC_JQ_ENV: &str = "TRIAGE_ASYNC_JQ";
+const ASYNC_STRATEGY_ENV: &str = "TRIAGE_ASYNC_STRATEGY";
+const ASYNC_BATCH_SIZE_ENV: &str = "TRIAGE_ASYNC_BATCH_SIZE";
 
 const MIGRATIONS: &[(i64, &str)] = &[(
     1,
@@ -131,6 +133,49 @@ struct Cli {
     json: bool,
     jq: Option<String>,
     async_run: bool,
+    show_failures: bool,
+    show_messages: bool,
+    /// Execution strategy override. `None` → fall back to config default.
+    strategy: Option<Strategy>,
+    /// Per-worker batch size override (only meaningful for `Strategy::Batch`).
+    batch_size: Option<usize>,
+}
+
+/// How each worker runs tests.
+///
+/// * `Isolated` spawns one `file_tests` subprocess per test (the pre-Phase-B
+///   behavior). Maximally robust — every test starts from a clean address
+///   space — but pays the subprocess + stdlib-init cost for every test.
+/// * `Batch` claims a chunk of tests at a time and passes them to a single
+///   `file_tests --names-file` invocation. Amortizes stdlib init across the
+///   batch; a panic in one test no longer taints the others because the
+///   harness wraps each test in `catch_unwind`. A hard crash (abort/signal)
+///   still drops the whole batch — the in-flight test is attributed as
+///   `crashed`/`timed_out` and the remainder is requeued for other workers
+///   to pick up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Strategy {
+    Isolated,
+    Batch,
+}
+
+impl Default for Strategy {
+    fn default() -> Self {
+        Strategy::Batch
+    }
+}
+
+impl Strategy {
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "isolated" => Ok(Strategy::Isolated),
+            "batch" => Ok(Strategy::Batch),
+            other => Err(boxed(format!(
+                "unknown --strategy `{other}` (expected `isolated` or `batch`)"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -157,6 +202,10 @@ impl Cli {
         let mut json = false;
         let mut jq = None;
         let mut async_run = false;
+        let mut show_failures = false;
+        let mut show_messages = false;
+        let mut strategy = None;
+        let mut batch_size = None;
         let mut positional = Vec::new();
 
         let mut iter = args.into_iter();
@@ -175,6 +224,10 @@ impl Cli {
                         json,
                         jq,
                         async_run,
+                        show_failures,
+                        show_messages,
+                        strategy,
+                        batch_size,
                     });
                 },
                 "-V" | "--version" => {
@@ -186,10 +239,16 @@ impl Cli {
                         json,
                         jq,
                         async_run,
+                        show_failures,
+                        show_messages,
+                        strategy,
+                        batch_size,
                     });
                 },
                 "-a" | "--async" => async_run = true,
                 "--json" => json = true,
+                "--failures" => show_failures = true,
+                "--messages" => show_messages = true,
                 "-j" | "--jobs" => {
                     let value = next_arg(&mut iter, s)?;
                     jobs = Some(parse_usize(&value, s)?);
@@ -206,6 +265,20 @@ impl Cli {
                     let value = next_arg(&mut iter, s)?;
                     jq = Some(value);
                     json = true;
+                },
+                "--strategy" => {
+                    let value = next_arg(&mut iter, s)?;
+                    strategy = Some(Strategy::parse(&value)?);
+                },
+                "--batch-size" => {
+                    let value = next_arg(&mut iter, s)?;
+                    batch_size = Some(parse_usize(&value, s)?);
+                },
+                _ if s.starts_with("--strategy=") => {
+                    strategy = Some(Strategy::parse(&s["--strategy=".len()..])?);
+                },
+                _ if s.starts_with("--batch-size=") => {
+                    batch_size = Some(parse_usize(&s["--batch-size=".len()..], "--batch-size")?);
                 },
                 _ if s.starts_with("--jobs=") => {
                     jobs = Some(parse_usize(&s["--jobs=".len()..], "--jobs")?);
@@ -234,6 +307,18 @@ impl Cli {
         if async_run && !matches!(action, Action::Run { .. }) {
             return Err(boxed("--async only applies to the run command"));
         }
+        if show_messages {
+            show_failures = true;
+        }
+        if (show_failures || show_messages) && !matches!(action, Action::Status { .. }) {
+            return Err(boxed("--failures and --messages only apply to status"));
+        }
+
+        if (strategy.is_some() || batch_size.is_some()) && !matches!(action, Action::Run { .. }) {
+            return Err(boxed(
+                "--strategy and --batch-size only apply to the run command",
+            ));
+        }
 
         Ok(Self {
             action,
@@ -243,6 +328,10 @@ impl Cli {
             json,
             jq,
             async_run,
+            show_failures,
+            show_messages,
+            strategy,
+            batch_size,
         })
     }
 }
@@ -337,7 +426,7 @@ fn parse_action(positional: Vec<String>) -> Result<Action> {
 
 fn print_help() {
     println!(
-        "triage {}\n\nUSAGE:\n  triage [pattern] [flags]\n  triage [pattern] --async\n  triage status [build_id]\n  triage history <test>\n  triage builds\n  triage quarantine <test> <reason>\n  triage unquarantine <test>\n  triage cancel <build_id>\n\nFLAGS:\n  -j, --jobs N        Worker parallelism\n      --db PATH       SQLite database path (env: TRIAGE_DB)\n      --binary PATH   Explicit file_tests executable\n      --json          Emit JSON / NDJSON\n      --jq EXPR       Filter JSON output through jq\n  -a, --async         Run in a detached worker process\n  -h, --help          Print help\n  -V, --version       Print version",
+        "triage {}\n\nUSAGE:\n  triage [pattern] [flags]\n  triage [pattern] --async\n  triage status [build_id] [--failures] [--messages]\n  triage history <test>\n  triage builds\n  triage quarantine <test> <reason>\n  triage unquarantine <test>\n  triage cancel <build_id>\n\nFLAGS:\n  -j, --jobs N        Worker parallelism\n      --db PATH       SQLite database path (env: TRIAGE_DB)\n      --binary PATH   Explicit file_tests executable\n      --strategy S    Worker strategy: `batch` (default) or `isolated`\n      --batch-size N  Tests per subprocess when --strategy=batch (default 16)\n      --json          Emit JSON / NDJSON\n      --jq EXPR       Filter JSON output through jq\n      --failures      Include failed/problem test rows in status output\n      --messages      Include failure messages in status output; implies --failures\n  -a, --async         Run in a detached worker process\n  -h, --help          Print help\n  -V, --version       Print version",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -353,6 +442,14 @@ struct Config {
     build_command: Vec<String>,
     stall_threshold_seconds: u64,
     jobs: usize,
+    #[serde(default)]
+    strategy: Strategy,
+    #[serde(default = "default_batch_size")]
+    batch_size: usize,
+}
+
+fn default_batch_size() -> usize {
+    16
 }
 
 impl Default for Config {
@@ -371,7 +468,9 @@ impl Default for Config {
                 "--release".to_string(),
             ],
             stall_threshold_seconds: 30,
-            jobs: 4,
+            jobs: 1,
+            strategy: Strategy::Batch,
+            batch_size: default_batch_size(),
         }
     }
 }
@@ -506,21 +605,45 @@ fn absolutize(cwd: &Path, path: PathBuf) -> PathBuf {
 
 fn configure_connection(conn: &Connection) -> Result<()> {
     conn.busy_timeout(Duration::from_secs(30))?;
-    conn.pragma_update(None, "foreign_keys", "ON")?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    retry_sqlite(|| conn.pragma_update(None, "foreign_keys", "ON"))?;
+    retry_sqlite(|| conn.pragma_update(None, "journal_mode", "WAL"))?;
     Ok(())
 }
 
+fn retry_sqlite<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    let started = Instant::now();
+    let mut delay = Duration::from_millis(10);
+
+    loop {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(err) if sqlite_lock_error(&err) && started.elapsed() < Duration::from_secs(30) => {
+                thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(250));
+            },
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn sqlite_lock_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(sqlite_err, _)
+            if matches!(sqlite_err.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+    )
+}
+
 fn apply_migrations(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "BEGIN IMMEDIATE;
-         CREATE TABLE IF NOT EXISTS schema_migrations (
+    retry_sqlite(|| conn.execute_batch("BEGIN IMMEDIATE;"))?;
+
+    let migration_result = (|| -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
              version INTEGER PRIMARY KEY,
              applied_at TEXT NOT NULL
          );",
-    )?;
-
-    let migration_result = (|| -> Result<()> {
+        )?;
         for (version, sql) in MIGRATIONS {
             let exists: Option<i64> = conn
                 .query_row(
@@ -542,7 +665,7 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
 
     match migration_result {
         Ok(()) => {
-            conn.execute_batch("COMMIT;")?;
+            retry_sqlite(|| conn.execute_batch("COMMIT;"))?;
             Ok(())
         },
         Err(err) => {
@@ -563,6 +686,15 @@ fn run_command(ctx: &AppContext, cli: &Cli, pattern: &str) -> Result<ExitCode> {
             .unwrap_or_else(|| jobs_for(cli, &ctx.config));
         let json = env::var_os(ASYNC_JSON_ENV).is_some();
         let jq = env::var(ASYNC_JQ_ENV).ok();
+        let strategy = env::var(ASYNC_STRATEGY_ENV)
+            .ok()
+            .and_then(|v| Strategy::parse(&v).ok())
+            .unwrap_or_else(|| strategy_for(cli, &ctx.config));
+        let batch_size = env::var(ASYNC_BATCH_SIZE_ENV)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| batch_size_for(cli, &ctx.config));
         return execute_scheduled_run(
             ctx,
             &build_id,
@@ -570,6 +702,10 @@ fn run_command(ctx: &AppContext, cli: &Cli, pattern: &str) -> Result<ExitCode> {
             &pattern,
             jobs,
             OutputOptions { json, jq },
+            ExecOptions {
+                strategy,
+                batch_size,
+            },
         );
     }
 
@@ -592,7 +728,19 @@ fn run_command(ctx: &AppContext, cli: &Cli, pattern: &str) -> Result<ExitCode> {
         json: cli.json,
         jq: cli.jq.clone(),
     };
-    execute_scheduled_run(ctx, &build.id, &build.binary_path, pattern, jobs, output)
+    let exec = ExecOptions {
+        strategy: strategy_for(cli, &ctx.config),
+        batch_size: batch_size_for(cli, &ctx.config),
+    };
+    execute_scheduled_run(
+        ctx,
+        &build.id,
+        &build.binary_path,
+        pattern,
+        jobs,
+        output,
+        exec,
+    )
 }
 
 #[derive(Debug)]
@@ -735,7 +883,7 @@ fn discover_tests(ctx: &AppContext, binary_path: &Path) -> Result<Vec<String>> {
 
 fn sync_tests(conn: &Connection, build_id: &str, listed: &[String]) -> Result<()> {
     let now = now_string()?;
-    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    retry_sqlite(|| conn.execute_batch("BEGIN IMMEDIATE;"))?;
     let result = (|| -> Result<()> {
         let listed_set: HashSet<&str> = listed.iter().map(String::as_str).collect();
 
@@ -793,7 +941,7 @@ fn sync_tests(conn: &Connection, build_id: &str, listed: &[String]) -> Result<()
 
     match result {
         Ok(()) => {
-            conn.execute_batch("COMMIT;")?;
+            retry_sqlite(|| conn.execute_batch("COMMIT;"))?;
             Ok(())
         },
         Err(err) => {
@@ -850,7 +998,7 @@ fn schedule_tests(conn: &Connection, build_id: &str, pattern: &str) -> Result<Sc
 
     let mut inserted = 0;
     let now = now_string()?;
-    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    retry_sqlite(|| conn.execute_batch("BEGIN IMMEDIATE;"))?;
     let result = (|| -> Result<()> {
         for (test_id, quarantined) in &rows {
             let run_id = Uuid::new_v4().to_string();
@@ -869,7 +1017,7 @@ fn schedule_tests(conn: &Connection, build_id: &str, pattern: &str) -> Result<Sc
 
     match result {
         Ok(()) => {
-            conn.execute_batch("COMMIT;")?;
+            retry_sqlite(|| conn.execute_batch("COMMIT;"))?;
             Ok(ScheduleStats {
                 matched: rows.len(),
                 inserted,
@@ -914,7 +1062,18 @@ fn spawn_async(
         .env(ASYNC_BUILD_ENV, &build.id)
         .env(ASYNC_BINARY_ENV, &build.binary_path)
         .env(ASYNC_PATTERN_ENV, pattern)
-        .env(ASYNC_JOBS_ENV, jobs_for(cli, &ctx.config).to_string());
+        .env(ASYNC_JOBS_ENV, jobs_for(cli, &ctx.config).to_string())
+        .env(
+            ASYNC_STRATEGY_ENV,
+            match strategy_for(cli, &ctx.config) {
+                Strategy::Isolated => "isolated",
+                Strategy::Batch => "batch",
+            },
+        )
+        .env(
+            ASYNC_BATCH_SIZE_ENV,
+            batch_size_for(cli, &ctx.config).to_string(),
+        );
 
     command.env("TRIAGE_DB", &ctx.db_path);
     if cli.json {
@@ -962,6 +1121,33 @@ struct OutputOptions {
     jq: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ExecOptions {
+    strategy: Strategy,
+    batch_size: usize,
+}
+
+fn strategy_for(cli: &Cli, config: &Config) -> Strategy {
+    cli.strategy
+        .or_else(|| {
+            env::var("TRIAGE_STRATEGY")
+                .ok()
+                .and_then(|v| Strategy::parse(&v).ok())
+        })
+        .unwrap_or(config.strategy)
+}
+
+fn batch_size_for(cli: &Cli, config: &Config) -> usize {
+    cli.batch_size
+        .or_else(|| {
+            env::var("TRIAGE_BATCH_SIZE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+        })
+        .filter(|n| *n > 0)
+        .unwrap_or(config.batch_size.max(1))
+}
+
 fn execute_scheduled_run(
     ctx: &AppContext,
     build_id: &str,
@@ -969,11 +1155,27 @@ fn execute_scheduled_run(
     pattern: &str,
     jobs: usize,
     output: OutputOptions,
+    exec: ExecOptions,
 ) -> Result<ExitCode> {
     let scratch = ScratchBinary::new(ctx, binary_source)?;
     let started = Instant::now();
     let like = pattern_to_like(pattern);
     let total = count_matching_runs(ctx, build_id, &like)?;
+
+    // With a fixed `batch_size` a small run can starve workers: e.g. 11 tests,
+    // 4 jobs, batch_size=16 → one worker takes all 11 and the other three sit
+    // idle. Shrink the per-batch limit so every worker gets a few batches to
+    // chew through, while still amortizing stdlib init across several tests.
+    let effective_batch_size = if exec.strategy == Strategy::Batch && jobs > 0 && total > 0 {
+        let target = (total / (jobs * 4)).max(1);
+        exec.batch_size.min(target.max(1))
+    } else {
+        exec.batch_size
+    };
+    let exec = ExecOptions {
+        strategy: exec.strategy,
+        batch_size: effective_batch_size,
+    };
     let mut sink = JsonLineSink::new(output.json, output.jq.as_deref())?;
     let mut progress = Progress::new(
         !output.json && io::stderr().is_terminal(),
@@ -981,13 +1183,18 @@ fn execute_scheduled_run(
         total,
     );
 
+    // Seed in-memory counters once; update on each event instead of re-querying
+    // the DB after every test. Any drift (e.g. stale reclaims) gets reconciled
+    // by the final load_summary below.
+    let mut counts = load_summary(ctx, build_id)?.counts;
+
     sink.emit(json!({
         "kind": "build_started",
         "build_id": build_id,
         "pattern": pattern,
         "test_count": total,
     }))?;
-    progress.render(load_summary(ctx, build_id)?, started.elapsed())?;
+    progress.render(summary_from_counts(&counts), started.elapsed())?;
 
     let (tx, rx) = mpsc::channel::<WorkerEvent>();
     let mut handles = Vec::new();
@@ -995,6 +1202,7 @@ fn execute_scheduled_run(
         let worker = WorkerConfig {
             db_path: ctx.db_path.clone(),
             logs_dir: ctx.logs_dir(),
+            runs_dir: ctx.runs_dir(),
             binary_path: scratch.path.clone(),
             binary_cwd: ctx.binary_cwd(),
             build_id: build_id.to_string(),
@@ -1003,6 +1211,8 @@ fn execute_scheduled_run(
             test_extension: ctx.config.test_extension.clone(),
             stall_threshold: Duration::from_secs(ctx.config.stall_threshold_seconds),
             worker_id: worker_id(worker_index),
+            strategy: exec.strategy,
+            batch_size: exec.batch_size,
         };
         let tx = tx.clone();
         handles.push(thread::spawn(move || worker_loop(worker, tx)));
@@ -1028,6 +1238,7 @@ fn execute_scheduled_run(
                 test_path,
                 worker_id,
             } => {
+                shift_count(&mut counts, "pending", "running");
                 sink.emit(json!({
                     "kind": "test_started",
                     "test_run_id": test_run_id,
@@ -1043,6 +1254,7 @@ fn execute_scheduled_run(
                 duration_ms,
                 failure_message,
             } => {
+                shift_count(&mut counts, "running", status);
                 let mut value = json!({
                     "kind": "test_completed",
                     "test_run_id": test_run_id,
@@ -1055,7 +1267,25 @@ fn execute_scheduled_run(
                     value["failure_message"] = json!(message);
                 }
                 sink.emit(value)?;
-                progress.render(load_summary(ctx, build_id)?, started.elapsed())?;
+                progress.render(summary_from_counts(&counts), started.elapsed())?;
+            },
+            WorkerEvent::TestRequeued {
+                test_run_id,
+                test_path,
+                worker_id,
+            } => {
+                // The test had a TestStarted event emitted when the batch was
+                // claimed, so move it back out of `running` to keep counts
+                // honest. It will get a fresh TestStarted once another
+                // worker picks it up.
+                shift_count(&mut counts, "running", "pending");
+                sink.emit(json!({
+                    "kind": "test_requeued",
+                    "test_run_id": test_run_id,
+                    "test_path": test_path,
+                    "worker_id": worker_id,
+                }))?;
+                progress.render(summary_from_counts(&counts), started.elapsed())?;
             },
             WorkerEvent::Error { worker_id, error } => {
                 sink.emit(json!({
@@ -1097,6 +1327,7 @@ fn execute_scheduled_run(
 struct WorkerConfig {
     db_path: PathBuf,
     logs_dir: PathBuf,
+    runs_dir: PathBuf,
     binary_path: PathBuf,
     binary_cwd: PathBuf,
     build_id: String,
@@ -1105,6 +1336,8 @@ struct WorkerConfig {
     test_extension: String,
     stall_threshold: Duration,
     worker_id: String,
+    strategy: Strategy,
+    batch_size: usize,
 }
 
 #[derive(Debug)]
@@ -1128,6 +1361,16 @@ enum WorkerEvent {
         duration_ms: u64,
         failure_message: Option<String>,
     },
+    /// A test that was claimed (and so already had a `TestStarted` event
+    /// emitted) has been returned to the pending queue. Fired by the batch
+    /// strategy when a subprocess dies mid-batch: tests that had not yet
+    /// begun executing in the subprocess are reset so another worker can
+    /// pick them up cleanly.
+    TestRequeued {
+        test_run_id: String,
+        test_path: String,
+        worker_id: String,
+    },
     Error {
         worker_id: String,
         error: String,
@@ -1146,7 +1389,13 @@ fn worker_loop(config: WorkerConfig, tx: mpsc::Sender<WorkerEvent>) -> Result<()
 
     loop {
         reclaim_stale(&conn, &config)?;
-        let Some(claim) = claim_next(&conn, &config)? else {
+
+        let made_progress = match config.strategy {
+            Strategy::Isolated => step_isolated(&conn, &config, &tx)?,
+            Strategy::Batch => step_batch(&conn, &config, &tx)?,
+        };
+
+        if !made_progress {
             send_event(
                 &tx,
                 WorkerEvent::WorkerIdle {
@@ -1154,43 +1403,93 @@ fn worker_loop(config: WorkerConfig, tx: mpsc::Sender<WorkerEvent>) -> Result<()
                 },
             );
             return Ok(());
-        };
+        }
+    }
+}
 
+/// Claim and run one test in its own subprocess. Returns `true` if a test was
+/// claimed (and the loop should continue), `false` if the queue is empty.
+fn step_isolated(
+    conn: &Connection,
+    config: &WorkerConfig,
+    tx: &mpsc::Sender<WorkerEvent>,
+) -> Result<bool> {
+    let Some(claim) = claim_next(conn, config)? else {
+        return Ok(false);
+    };
+
+    send_event(
+        tx,
+        WorkerEvent::TestStarted {
+            test_run_id: claim.run_id.clone(),
+            test_path: claim.path.clone(),
+            worker_id: config.worker_id.clone(),
+        },
+    );
+
+    match run_one_test(conn, config, &claim) {
+        Ok(result) => {
+            send_event(
+                tx,
+                WorkerEvent::TestCompleted {
+                    test_run_id: claim.run_id,
+                    test_path: claim.path,
+                    status: result.status,
+                    exit_code: result.exit_code,
+                    duration_ms: result.duration_ms,
+                    failure_message: result.failure_message,
+                },
+            );
+            Ok(true)
+        },
+        Err(err) => {
+            send_event(
+                tx,
+                WorkerEvent::Error {
+                    worker_id: config.worker_id.clone(),
+                    error: err.to_string(),
+                },
+            );
+            Err(err)
+        },
+    }
+}
+
+/// Claim up to `batch_size` tests and run them in a single subprocess.
+fn step_batch(
+    conn: &Connection,
+    config: &WorkerConfig,
+    tx: &mpsc::Sender<WorkerEvent>,
+) -> Result<bool> {
+    let claims = claim_batch(conn, config)?;
+    if claims.is_empty() {
+        return Ok(false);
+    }
+
+    // Announce every test as started up front so the UI/progress counters
+    // reflect work in flight even though only one subprocess is running.
+    for claim in &claims {
         send_event(
-            &tx,
+            tx,
             WorkerEvent::TestStarted {
                 test_run_id: claim.run_id.clone(),
                 test_path: claim.path.clone(),
                 worker_id: config.worker_id.clone(),
             },
         );
-
-        match run_one_test(&conn, &config, &claim) {
-            Ok(result) => {
-                send_event(
-                    &tx,
-                    WorkerEvent::TestCompleted {
-                        test_run_id: claim.run_id,
-                        test_path: claim.path,
-                        status: result.status,
-                        exit_code: result.exit_code,
-                        duration_ms: result.duration_ms,
-                        failure_message: result.failure_message,
-                    },
-                );
-            },
-            Err(err) => {
-                send_event(
-                    &tx,
-                    WorkerEvent::Error {
-                        worker_id: config.worker_id.clone(),
-                        error: err.to_string(),
-                    },
-                );
-                return Err(err);
-            },
-        }
     }
+
+    if let Err(err) = run_batch(conn, config, &claims, tx) {
+        send_event(
+            tx,
+            WorkerEvent::Error {
+                worker_id: config.worker_id.clone(),
+                error: err.to_string(),
+            },
+        );
+        return Err(err);
+    }
+    Ok(true)
 }
 
 fn send_event(tx: &mpsc::Sender<WorkerEvent>, event: WorkerEvent) {
@@ -1204,7 +1503,7 @@ struct ClaimedTest {
 }
 
 fn claim_next(conn: &Connection, config: &WorkerConfig) -> Result<Option<ClaimedTest>> {
-    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    retry_sqlite(|| conn.execute_batch("BEGIN IMMEDIATE;"))?;
     let result = (|| -> Result<Option<ClaimedTest>> {
         let claim = conn
             .query_row(
@@ -1248,8 +1547,81 @@ fn claim_next(conn: &Connection, config: &WorkerConfig) -> Result<Option<Claimed
 
     match result {
         Ok(claim) => {
-            conn.execute_batch("COMMIT;")?;
+            retry_sqlite(|| conn.execute_batch("COMMIT;"))?;
             Ok(claim)
+        },
+        Err(err) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(err)
+        },
+    }
+}
+
+/// Atomically claim up to `config.batch_size` pending tests for this worker.
+///
+/// Mirrors the shape of `claim_next` but operates on N rows in one
+/// transaction so the full batch is handed to a single `file_tests`
+/// invocation (amortizing stdlib init cost across the batch).
+fn claim_batch(conn: &Connection, config: &WorkerConfig) -> Result<Vec<ClaimedTest>> {
+    if config.batch_size == 0 {
+        return Ok(Vec::new());
+    }
+
+    retry_sqlite(|| conn.execute_batch("BEGIN IMMEDIATE;"))?;
+    let result = (|| -> Result<Vec<ClaimedTest>> {
+        let mut stmt = conn.prepare(
+            "SELECT tr.id, t.path
+             FROM test_run tr
+             JOIN test t ON t.id = tr.test_id
+             WHERE tr.build_id = ?1
+               AND tr.status = 'pending'
+               AND t.removed_at IS NULL
+               AND t.path LIKE ?2 ESCAPE '\\'
+             ORDER BY t.path
+             LIMIT ?3",
+        )?;
+        let candidates: Vec<ClaimedTest> = stmt
+            .query_map(
+                params![
+                    config.build_id,
+                    config.pattern_like,
+                    config.batch_size as i64
+                ],
+                |row| {
+                    Ok(ClaimedTest {
+                        run_id: row.get(0)?,
+                        path: row.get(1)?,
+                    })
+                },
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let now = now_string()?;
+        let mut claimed = Vec::with_capacity(candidates.len());
+        // Individually CAS each row from 'pending' → 'running'. If another
+        // worker stole a row between our SELECT and UPDATE, that single row
+        // silently drops out — the rest of the batch is still valid.
+        for candidate in candidates {
+            let changed = conn.execute(
+                "UPDATE test_run
+                 SET status = 'running',
+                     started_at = ?1,
+                     worker_id = ?2,
+                     heartbeat_at = ?1
+                 WHERE id = ?3 AND status = 'pending'",
+                params![now, config.worker_id, candidate.run_id],
+            )?;
+            if changed == 1 {
+                claimed.push(candidate);
+            }
+        }
+        Ok(claimed)
+    })();
+
+    match result {
+        Ok(claims) => {
+            retry_sqlite(|| conn.execute_batch("COMMIT;"))?;
+            Ok(claims)
         },
         Err(err) => {
             let _ = conn.execute_batch("ROLLBACK;");
@@ -1302,6 +1674,11 @@ fn run_one_test(
     let heartbeat_interval = Duration::from_secs(2);
     let mut last_heartbeat = Instant::now();
     let mut timed_out = false;
+    // Adaptive backoff: most ks tests finish in a handful of ms, so start with a
+    // 1ms poll and grow up to 50ms. Fixed 100ms polls were costing us up to
+    // ~100ms of slack per test on the fast path.
+    let mut poll = Duration::from_millis(1);
+    let max_poll = Duration::from_millis(50);
 
     loop {
         if child.try_wait()?.is_some() {
@@ -1319,14 +1696,20 @@ fn run_one_test(
             last_heartbeat = Instant::now();
         }
 
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(poll);
+        poll = (poll * 2).min(max_poll);
     }
 
     let output = child.wait_with_output()?;
     let duration_ms = started.elapsed().as_millis() as u64;
-    write_logs(config, &claim.run_id, &output)?;
     let exit_code = exit_code_from_output(&output);
     let parsed = classify_output(timed_out, exit_code, &output, config.stall_threshold);
+    // Only write logs for non-pass outcomes. Passing tests are the common case
+    // and creating the log dir + two fs::write syscalls per test is measurable
+    // when tests are just a few ms each.
+    if parsed.status != "passed" {
+        write_logs(config, &claim.run_id, &output)?;
+    }
     let now = now_string()?;
 
     let changed = conn.execute(
@@ -1373,6 +1756,540 @@ fn heartbeat(conn: &Connection, test_run_id: &str) -> Result<()> {
         params![now_string()?, test_run_id],
     )?;
     Ok(())
+}
+
+/// Run a batch of claimed tests inside a single `file_tests` subprocess.
+///
+/// The harness receives test names via `--names-file` and emits JSON events.
+/// As per-test `started` / `ok` / `failed` events stream in we record status
+/// and failure output immediately, then write logs for non-passing outcomes,
+/// update the DB, and emit events.
+///
+/// Failure handling:
+/// * A test the harness reports as `failed` → `failed`, with its `stdout`
+///   stored as the log/message.
+/// * A test the harness reports as `ok` → `passed`.
+/// * If the subprocess exits with an error before completing the batch (e.g.
+///   a compiler abort or segfault), the test that was mid-run gets
+///   `crashed`, and all tests that had not started yet are requeued for
+///   another worker to pick up (`TestRequeued`).
+/// * Batch-level timeout works the same way: the active test becomes
+///   `timed_out`, the rest are requeued.
+fn run_batch(
+    conn: &Connection,
+    config: &WorkerConfig,
+    claims: &[ClaimedTest],
+    tx: &mpsc::Sender<WorkerEvent>,
+) -> Result<()> {
+    let names: Vec<String> = claims
+        .iter()
+        .map(|c| path_to_libtest(config, &c.path))
+        .collect();
+    // Reverse-map so we can go from a libtest name (as echoed by the harness)
+    // back to its ClaimedTest index.
+    let name_to_index: HashMap<&str, usize> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.as_str(), i))
+        .collect();
+
+    let names_path = write_names_file(config, &names)?;
+    let _names_guard = TempFileGuard(names_path.clone());
+
+    let started = Instant::now();
+    // Allow roughly per-test stall budget, scaled by the batch size, with a
+    // sensible floor so small batches don't starve on a slow first test.
+    let batch_timeout = config
+        .stall_threshold
+        .saturating_mul(claims.len().max(4) as u32);
+
+    let mut child = Command::new(&config.binary_path)
+        .arg("--test-threads=1")
+        .arg("--format")
+        .arg("json")
+        .arg("--names-file")
+        .arg(&names_path)
+        .current_dir(&config.binary_cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    // Drain stdout on a background thread as lines arrive. This is what gives
+    // us live heartbeats: we know which test is active by watching the JSON
+    // `started` event that precedes its result.
+    let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+    let (line_tx, line_rx) = mpsc::channel::<String>();
+    let stdout_thread = thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        let mut raw = Vec::new();
+        for line in reader.lines() {
+            match line {
+                Ok(l) => {
+                    raw.push(l.clone());
+                    if line_tx.send(l).is_err() {
+                        break;
+                    }
+                },
+                Err(_) => break,
+            }
+        }
+        raw
+    });
+    let stderr_thread = thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut buf = String::new();
+        let _ = std::io::Read::read_to_string(&mut reader, &mut buf);
+        buf
+    });
+
+    let mut parser = BatchParser::new(&names);
+    let heartbeat_interval = Duration::from_secs(2);
+    let mut last_heartbeat = Instant::now();
+    let mut poll = Duration::from_millis(1);
+    let max_poll = Duration::from_millis(50);
+    let mut timed_out = false;
+
+    loop {
+        // Drain any stdout lines currently available without blocking.
+        let mut drained_any = false;
+        loop {
+            match line_rx.try_recv() {
+                Ok(line) => {
+                    drained_any = true;
+                    parser.observe(&line);
+                },
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        if let Some(_status) = child.try_wait()? {
+            break;
+        }
+
+        if started.elapsed() >= batch_timeout {
+            timed_out = true;
+            let _ = child.kill();
+            break;
+        }
+
+        if last_heartbeat.elapsed() >= heartbeat_interval {
+            let now = now_string()?;
+            for (i, claim) in claims.iter().enumerate() {
+                if parser.status_of(i).is_none() {
+                    let _ = conn.execute(
+                        "UPDATE test_run
+                         SET heartbeat_at = ?1
+                         WHERE id = ?2 AND status = 'running'",
+                        params![now, claim.run_id],
+                    )?;
+                }
+            }
+            last_heartbeat = Instant::now();
+        }
+
+        if drained_any {
+            poll = Duration::from_millis(1);
+        } else {
+            thread::sleep(poll);
+            poll = (poll * 2).min(max_poll);
+        }
+    }
+
+    // Drain any remaining stdout lines, then reap the child and join readers.
+    while let Ok(line) = line_rx.recv() {
+        parser.observe(&line);
+    }
+    let exit_status = child.wait()?;
+    let raw_stdout = stdout_thread.join().unwrap_or_default();
+    let stderr_text = stderr_thread.join().unwrap_or_default();
+    let full_stdout = raw_stdout.join("\n");
+    parser.finalize(&full_stdout);
+
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let exit_code = exit_status.code();
+    let clean_exit = exit_status.success();
+
+    // Now materialize per-test outcomes. For any test the harness did report,
+    // we use that status verbatim. For tests with no report, we decide based
+    // on how the process ended.
+    for (i, claim) in claims.iter().enumerate() {
+        let libtest_name = &names[i];
+        let observed = parser.status_of(i);
+        let (status, failure_message, per_test_log) = match observed {
+            Some(BatchTestStatus::Passed) => ("passed", None, None),
+            Some(BatchTestStatus::Failed) => {
+                let message = parser.failure_message(libtest_name);
+                ("failed", Some(message.clone()), Some(message))
+            },
+            Some(BatchTestStatus::Ignored) => ("ignored", None, None),
+            None => {
+                // No result line for this test.
+                if timed_out && parser.active_index() == Some(i) {
+                    (
+                        "timed_out",
+                        Some(format!(
+                            "batch exceeded {} second timeout while this test was running",
+                            batch_timeout.as_secs()
+                        )),
+                        Some(full_stdout.clone()),
+                    )
+                } else if !clean_exit && parser.active_index() == Some(i) {
+                    let reason = match exit_code {
+                        Some(code) if code < 0 => {
+                            format!("batch subprocess exited with signal {}", -code)
+                        },
+                        Some(code) => format!("batch subprocess exited with code {code}"),
+                        None => "batch subprocess did not exit cleanly".to_string(),
+                    };
+                    ("crashed", Some(reason), Some(full_stdout.clone()))
+                } else if !clean_exit {
+                    // Subprocess died, and this test was queued behind the
+                    // active one. Requeue it so another worker picks it up;
+                    // attributing "crashed" would be misleading.
+                    let _ = conn.execute(
+                        "UPDATE test_run
+                         SET status = 'pending',
+                             started_at = NULL,
+                             heartbeat_at = NULL,
+                             worker_id = NULL
+                         WHERE id = ?1 AND status = 'running'",
+                        params![claim.run_id],
+                    )?;
+                    send_event(
+                        tx,
+                        WorkerEvent::TestRequeued {
+                            test_run_id: claim.run_id.clone(),
+                            test_path: claim.path.clone(),
+                            worker_id: config.worker_id.clone(),
+                        },
+                    );
+                    continue;
+                } else {
+                    // Clean exit but the harness never mentioned this test.
+                    // That would mean `--names-file` filtered it out, which
+                    // is a bug on our side. Treat as crashed so it surfaces.
+                    (
+                        "crashed",
+                        Some(format!(
+                            "subprocess exited cleanly but did not report a result for {libtest_name}"
+                        )),
+                        Some(full_stdout.clone()),
+                    )
+                }
+            },
+        };
+
+        // Write logs only for non-passing outcomes (match Phase A).
+        if status != "passed" {
+            write_batch_logs(config, &claim.run_id, per_test_log.as_deref(), &stderr_text)?;
+        }
+
+        let now = now_string()?;
+        let changed = conn.execute(
+            "UPDATE test_run
+             SET status = ?1,
+                 completed_at = ?2,
+                 exit_code = ?3,
+                 duration_ms = ?4,
+                 failure_message = ?5,
+                 heartbeat_at = ?2
+             WHERE id = ?6 AND status = 'running'",
+            params![
+                status,
+                now,
+                exit_code,
+                duration_ms as i64,
+                failure_message,
+                claim.run_id
+            ],
+        )?;
+
+        if changed == 0 {
+            // Another process flipped the row (e.g. `cancel`). Nothing more
+            // to do — just emit the event so listeners stay consistent.
+            send_event(
+                tx,
+                WorkerEvent::TestCompleted {
+                    test_run_id: claim.run_id.clone(),
+                    test_path: claim.path.clone(),
+                    status: "canceled".to_string(),
+                    exit_code: None,
+                    duration_ms,
+                    failure_message: None,
+                },
+            );
+            continue;
+        }
+
+        send_event(
+            tx,
+            WorkerEvent::TestCompleted {
+                test_run_id: claim.run_id.clone(),
+                test_path: claim.path.clone(),
+                status: status.to_string(),
+                exit_code,
+                duration_ms,
+                failure_message,
+            },
+        );
+    }
+
+    // Silence unused variable warning for name_to_index — it is held here so
+    // future enhancements (e.g. looking up a claim from a streamed failure
+    // block) have the mapping ready; the current observe-by-sequence path
+    // doesn't require it.
+    let _ = name_to_index;
+    Ok(())
+}
+
+fn write_names_file(config: &WorkerConfig, names: &[String]) -> Result<PathBuf> {
+    fs::create_dir_all(&config.runs_dir)?;
+    let unique = format!(
+        "{}-{}-{}.names",
+        config.worker_id,
+        std::process::id(),
+        now_nanos(),
+    );
+    let path = config.runs_dir.join(unique);
+    let mut buf = String::with_capacity(names.iter().map(|n| n.len() + 1).sum());
+    for name in names {
+        buf.push_str(name);
+        buf.push('\n');
+    }
+    fs::write(&path, buf)?;
+    Ok(path)
+}
+
+struct TempFileGuard(PathBuf);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
+fn write_batch_logs(
+    config: &WorkerConfig,
+    run_id: &str,
+    stdout: Option<&str>,
+    stderr: &str,
+) -> Result<()> {
+    let dir = config.logs_dir.join(run_id);
+    fs::create_dir_all(&dir)?;
+    if let Some(stdout) = stdout {
+        if !stdout.is_empty() {
+            fs::write(dir.join("stdout"), stdout)?;
+        }
+    }
+    if !stderr.is_empty() {
+        fs::write(dir.join("stderr"), stderr)?;
+    }
+    Ok(())
+}
+
+/// Streaming/finalizing parser for libtest-mimic output.
+///
+/// Batch mode asks the harness for JSON output and consumes events like:
+///   `{ "type": "test", "event": "started", "name": "run_ks_test::foo.ks" }`
+///   `{ "type": "test", "event": "ok", "name": "run_ks_test::foo.ks" }`
+///   `{ "type": "test", "event": "failed", "name": "...", "stdout": "..." }`
+///
+/// We also keep support for the older pretty output shape:
+///   test run_ks_test::foo.ks ... ok
+///   test run_ks_test::bar.ks ... FAILED
+///   test run_ks_test::baz.ks ... ignored
+///
+/// Capturing `started` as it streams in keeps `active_index` accurate for
+/// timeout/crash attribution.
+#[derive(Debug)]
+struct BatchParser {
+    name_to_index: HashMap<String, usize>,
+    results: Vec<Option<BatchTestStatus>>,
+    active: Option<usize>,
+    failure_blocks: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchTestStatus {
+    Passed,
+    Failed,
+    Ignored,
+}
+
+impl BatchParser {
+    fn new(names: &[String]) -> Self {
+        Self {
+            name_to_index: names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.clone(), i))
+                .collect(),
+            results: vec![None; names.len()],
+            active: None,
+            failure_blocks: HashMap::new(),
+        }
+    }
+
+    fn observe(&mut self, line: &str) {
+        if self.observe_json(line) {
+            return;
+        }
+
+        let Some(rest) = line.strip_prefix("test ") else {
+            return;
+        };
+        // Two shapes:
+        //   `test NAME ... STATUS`         — one-line result
+        //   `test NAME ...`                — start (harness has not yet
+        //                                    printed the result; happens when
+        //                                    output is line-buffered and the
+        //                                    test is mid-run)
+        let Some(sep) = rest.find(" ... ") else {
+            // Bare name (no " ... "). Treat as active-test announcement.
+            let name = rest.trim();
+            if let Some(&idx) = self.name_to_index.get(name) {
+                self.active = Some(idx);
+            }
+            return;
+        };
+        let name = rest[..sep].trim();
+        let after = rest[sep + " ... ".len()..].trim();
+        let Some(&idx) = self.name_to_index.get(name) else {
+            return;
+        };
+
+        if after.is_empty() {
+            // Harness printed the test start but result hasn't flushed yet.
+            self.active = Some(idx);
+            return;
+        }
+
+        let status = match after {
+            "ok" => BatchTestStatus::Passed,
+            "FAILED" => BatchTestStatus::Failed,
+            s if s.starts_with("ignored") => BatchTestStatus::Ignored,
+            _ => return,
+        };
+        self.results[idx] = Some(status);
+        if self.active == Some(idx) {
+            self.active = None;
+        }
+    }
+
+    fn observe_json(&mut self, line: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            return false;
+        };
+        if value.get("type").and_then(Value::as_str) != Some("test") {
+            return true;
+        }
+
+        let Some(name) = value.get("name").and_then(Value::as_str) else {
+            return true;
+        };
+        let Some(&idx) = self.name_to_index.get(name) else {
+            return true;
+        };
+        let Some(event) = value.get("event").and_then(Value::as_str) else {
+            return true;
+        };
+
+        match event {
+            "started" => {
+                self.active = Some(idx);
+            },
+            "ok" => {
+                self.results[idx] = Some(BatchTestStatus::Passed);
+                if self.active == Some(idx) {
+                    self.active = None;
+                }
+            },
+            "failed" => {
+                self.results[idx] = Some(BatchTestStatus::Failed);
+                if let Some(stdout) = value.get("stdout").and_then(Value::as_str) {
+                    self.failure_blocks
+                        .insert(name.to_string(), stdout.trim_end().to_string());
+                }
+                if self.active == Some(idx) {
+                    self.active = None;
+                }
+            },
+            "ignored" => {
+                self.results[idx] = Some(BatchTestStatus::Ignored);
+                if self.active == Some(idx) {
+                    self.active = None;
+                }
+            },
+            _ => {},
+        }
+
+        true
+    }
+
+    fn finalize(&mut self, full_stdout: &str) {
+        // Parse `---- NAME stdout ----` blocks from the failures section.
+        // Lines between that header and the next `----` header (or the
+        // `failures:` summary) are the per-test failure output.
+        let mut current: Option<(String, String)> = None;
+        for line in full_stdout.lines() {
+            if let Some(rest) = line.strip_prefix("---- ") {
+                if let Some(name) = rest.strip_suffix(" stdout ----") {
+                    if let Some((n, buf)) = current.take() {
+                        self.failure_blocks.insert(n, buf.trim_end().to_string());
+                    }
+                    if self.name_to_index.contains_key(name) {
+                        current = Some((name.to_string(), String::new()));
+                    } else {
+                        current = None;
+                    }
+                    continue;
+                }
+            }
+            if line.starts_with("failures:") && current.is_some() {
+                if let Some((n, buf)) = current.take() {
+                    self.failure_blocks.insert(n, buf.trim_end().to_string());
+                }
+                continue;
+            }
+            if line.starts_with("test result:") && current.is_some() {
+                if let Some((n, buf)) = current.take() {
+                    self.failure_blocks.insert(n, buf.trim_end().to_string());
+                }
+                continue;
+            }
+            if let Some((_, buf)) = current.as_mut() {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+        }
+        if let Some((n, buf)) = current.take() {
+            self.failure_blocks.insert(n, buf.trim_end().to_string());
+        }
+    }
+
+    fn status_of(&self, index: usize) -> Option<BatchTestStatus> {
+        self.results.get(index).copied().flatten()
+    }
+
+    fn active_index(&self) -> Option<usize> {
+        self.active
+    }
+
+    fn failure_message(&self, libtest_name: &str) -> String {
+        self.failure_blocks
+            .get(libtest_name)
+            .cloned()
+            .unwrap_or_else(|| "test failed (no failure output captured)".to_string())
+    }
 }
 
 fn write_logs(config: &WorkerConfig, run_id: &str, output: &Output) -> Result<()> {
@@ -1485,12 +2402,21 @@ fn status_command(ctx: &AppContext, cli: &Cli, build_id: Option<&str>) -> Result
     };
     let build = load_build(&conn, &build_id)?.ok_or_else(|| boxed("build not found"))?;
     let summary = load_summary(ctx, &build_id)?;
-    let value = json!({
+    let failures = if cli.show_failures {
+        load_failure_rows(&conn, &build_id, cli.show_messages)?
+    } else {
+        Vec::new()
+    };
+
+    let mut value = json!({
         "kind": "status",
         "build": build,
         "counts": summary.counts,
         "total": summary.total,
     });
+    if cli.show_failures {
+        value["failures"] = json!(&failures);
+    }
 
     emit_point(cli, value, || {
         println!("Build:   {}", build_id);
@@ -1501,9 +2427,81 @@ fn status_command(ctx: &AppContext, cli: &Cli, build_id: Option<&str>) -> Result
         println!("Dirty:   {}", build.dirty);
         println!("Created: {}", build.created_at);
         print_counts(&summary);
+        if cli.show_failures {
+            print_failure_rows(&failures, cli.show_messages);
+        }
         Ok(())
     })?;
     Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FailureRow {
+    test_run_id: String,
+    test_path: String,
+    status: String,
+    exit_code: Option<i64>,
+    duration_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_message: Option<String>,
+}
+
+fn load_failure_rows(
+    conn: &Connection,
+    build_id: &str,
+    include_messages: bool,
+) -> Result<Vec<FailureRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT tr.id, t.path, tr.status, tr.exit_code, tr.duration_ms, tr.failure_message
+         FROM test_run tr
+         JOIN test t ON t.id = tr.test_id
+         WHERE tr.build_id = ?1
+           AND tr.status IN ('failed', 'timed_out', 'hung', 'crashed', 'panicked', 'canceled')
+         ORDER BY t.path",
+    )?;
+    let rows = stmt.query_map(params![build_id], |row| {
+        let failure_message = if include_messages { row.get(5)? } else { None };
+        Ok(FailureRow {
+            test_run_id: row.get(0)?,
+            test_path: row.get(1)?,
+            status: row.get(2)?,
+            exit_code: row.get(3)?,
+            duration_ms: row.get(4)?,
+            failure_message,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
+fn print_failure_rows(failures: &[FailureRow], show_messages: bool) {
+    if failures.is_empty() {
+        println!("Failures: none");
+        return;
+    }
+
+    println!("Failures:");
+    for failure in failures {
+        match failure.duration_ms {
+            Some(duration_ms) => println!(
+                "  {}  {}  {}ms",
+                failure.status, failure.test_path, duration_ms
+            ),
+            None => println!("  {}  {}", failure.status, failure.test_path),
+        }
+
+        if show_messages {
+            if let Some(message) = &failure.failure_message {
+                print_indented_message(message);
+            }
+        }
+    }
+}
+
+fn print_indented_message(message: &str) {
+    for line in message.lines() {
+        println!("    {line}");
+    }
 }
 
 fn builds_command(ctx: &AppContext, cli: &Cli) -> Result<ExitCode> {
@@ -1747,6 +2745,20 @@ impl Summary {
     fn count(&self, status: &str) -> usize {
         self.counts.get(status).copied().unwrap_or(0)
     }
+}
+
+fn summary_from_counts(counts: &BTreeMap<String, usize>) -> Summary {
+    Summary {
+        counts: counts.clone(),
+        total: counts.values().sum(),
+    }
+}
+
+fn shift_count(counts: &mut BTreeMap<String, usize>, from: &str, to: &str) {
+    if let Some(value) = counts.get_mut(from) {
+        *value = value.saturating_sub(1);
+    }
+    *counts.entry(to.to_string()).or_insert(0) += 1;
 }
 
 fn load_summary(ctx: &AppContext, build_id: &str) -> Result<Summary> {
@@ -2137,7 +3149,13 @@ fn is_executable(path: &Path) -> Result<bool> {
 fn process_is_alive(pid: u32) -> bool {
     #[cfg(unix)]
     unsafe {
-        libc::kill(pid as libc::pid_t, 0) == 0
+        if libc::kill(pid as libc::pid_t, 0) == 0 {
+            return true;
+        }
+        let Some(errno) = io::Error::last_os_error().raw_os_error() else {
+            return true;
+        };
+        errno != libc::ESRCH
     }
     #[cfg(not(unix))]
     {
@@ -2178,6 +3196,7 @@ mod tests {
         let worker = WorkerConfig {
             db_path: PathBuf::new(),
             logs_dir: PathBuf::new(),
+            runs_dir: PathBuf::new(),
             binary_path: PathBuf::new(),
             binary_cwd: PathBuf::new(),
             build_id: String::new(),
@@ -2186,6 +3205,8 @@ mod tests {
             test_extension: config.test_extension,
             stall_threshold: Duration::from_secs(30),
             worker_id: String::new(),
+            strategy: Strategy::Batch,
+            batch_size: 16,
         };
         assert_eq!(
             path_to_libtest(&worker, &path),
@@ -2197,5 +3218,110 @@ mod tests {
     fn pattern_escapes_sql_like_wildcards() {
         assert_eq!(pattern_to_like("declarations.*"), "declarations.%");
         assert_eq!(pattern_to_like("a_b%"), "a\\_b\\%");
+    }
+
+    #[test]
+    fn batch_parser_attributes_pretty_output() {
+        let names = vec![
+            "run_ks_test::foo/ok.ks".to_string(),
+            "run_ks_test::foo/fail.ks".to_string(),
+            "run_ks_test::foo/skip.ks".to_string(),
+        ];
+        let mut parser = BatchParser::new(&names);
+
+        for line in [
+            "running 3 tests",
+            "test run_ks_test::foo/ok.ks ... ok",
+            "test run_ks_test::foo/fail.ks ... FAILED",
+            "test run_ks_test::foo/skip.ks ... ignored",
+            "",
+            "failures:",
+            "",
+            "---- run_ks_test::foo/fail.ks stdout ----",
+            "assertion failed: values differ",
+            "thread 'main' panicked at ...",
+            "",
+            "",
+            "failures:",
+            "    run_ks_test::foo/fail.ks",
+            "",
+            "test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out",
+        ] {
+            parser.observe(line);
+        }
+        parser.finalize(
+            &[
+                "",
+                "failures:",
+                "",
+                "---- run_ks_test::foo/fail.ks stdout ----",
+                "assertion failed: values differ",
+                "thread 'main' panicked at ...",
+                "",
+                "",
+                "failures:",
+                "    run_ks_test::foo/fail.ks",
+                "",
+                "test result: FAILED.",
+            ]
+            .join("\n"),
+        );
+
+        assert_eq!(parser.status_of(0), Some(BatchTestStatus::Passed));
+        assert_eq!(parser.status_of(1), Some(BatchTestStatus::Failed));
+        assert_eq!(parser.status_of(2), Some(BatchTestStatus::Ignored));
+        let msg = parser.failure_message("run_ks_test::foo/fail.ks");
+        assert!(
+            msg.contains("assertion failed: values differ"),
+            "failure block missing content: {msg:?}"
+        );
+        assert!(
+            msg.contains("panicked"),
+            "failure block missing panic line: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn batch_parser_attributes_json_output() {
+        let names = vec![
+            "run_ks_test::foo/ok.ks".to_string(),
+            "run_ks_test::foo/fail.ks".to_string(),
+        ];
+        let mut parser = BatchParser::new(&names);
+
+        for line in [
+            r#"{ "type": "suite", "event": "started", "test_count": 2 }"#,
+            r#"{ "type": "test", "event": "started", "name": "run_ks_test::foo/ok.ks" }"#,
+            r#"{ "type": "test", "name": "run_ks_test::foo/ok.ks", "event": "ok" }"#,
+            r#"{ "type": "test", "event": "started", "name": "run_ks_test::foo/fail.ks" }"#,
+            r#"{ "type": "test", "name": "run_ks_test::foo/fail.ks", "event": "failed", "stdout": "Error: Diagnostic matching failed\n" }"#,
+            r#"{ "type": "suite", "event": "failed", "passed": 1, "failed": 1 }"#,
+        ] {
+            parser.observe(line);
+        }
+
+        assert_eq!(parser.status_of(0), Some(BatchTestStatus::Passed));
+        assert_eq!(parser.status_of(1), Some(BatchTestStatus::Failed));
+        assert_eq!(parser.active_index(), None);
+        assert_eq!(
+            parser.failure_message("run_ks_test::foo/fail.ks"),
+            "Error: Diagnostic matching failed"
+        );
+    }
+
+    #[test]
+    fn batch_parser_tracks_active_when_output_is_mid_test() {
+        // Harness printed the line announcing the next test but hasn't yet
+        // printed its result (happens when the test crashes the subprocess).
+        let names = vec![
+            "run_ks_test::a.ks".to_string(),
+            "run_ks_test::b.ks".to_string(),
+        ];
+        let mut parser = BatchParser::new(&names);
+        parser.observe("test run_ks_test::a.ks ... ok");
+        parser.observe("test run_ks_test::b.ks ... ");
+        assert_eq!(parser.status_of(0), Some(BatchTestStatus::Passed));
+        assert_eq!(parser.status_of(1), None);
+        assert_eq!(parser.active_index(), Some(1));
     }
 }
