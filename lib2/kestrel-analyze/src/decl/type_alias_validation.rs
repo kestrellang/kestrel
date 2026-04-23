@@ -92,7 +92,9 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Conformances, Name, NodeKind, QualifiedTarget, TypeAnnotation};
+use kestrel_ast_builder::{
+    ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, TypeAnnotation,
+};
 use kestrel_name_res::{ConformingProtocols, ExtensionsFor, ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -244,12 +246,20 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
                         &span,
                         &mut diags,
                     );
-                } else if parent_kind == Some(NodeKind::Extension) {
-                    // Check 5: Unqualified binding ambiguity (extensions only).
-                    // On the type itself (struct/enum), an unqualified binding
-                    // satisfies all protocols that declare the associated type —
-                    // no ambiguity since the binding is on the canonical type.
-                    check_unqualified_ambiguity(cx, type_entity, &alias_name, &span, &mut diags);
+                } else {
+                    // Check 5: Unqualified binding is ambiguous when the type
+                    // conforms to multiple protocols that each declare an
+                    // associated type with the same name. Fires on struct/enum
+                    // bodies and extensions — the user must disambiguate with
+                    // a qualified binding (`type Proto.Item = ...`).
+                    check_unqualified_ambiguity(
+                        cx,
+                        parent_entity,
+                        type_entity,
+                        &alias_name,
+                        &span,
+                        &mut diags,
+                    );
                 }
             }
         }
@@ -358,17 +368,23 @@ fn check_qualified_binding(
 /// Check 5 (E445): Unqualified binding is ambiguous if multiple conformed protocols
 /// declare the same associated type name, unless the extra protocols are already
 /// covered by qualified bindings in extensions.
+///
+/// `binding_parent` is the entity that directly owns the binding — the struct
+/// / enum for `struct S: A, B { type X = ... }`, or the extension for
+/// `extend S: A { type X = ... }`. Only that entity's declared conformances
+/// (and their refinement chains) participate in ambiguity checking — we
+/// deliberately don't cross into conformances added by *other* extensions,
+/// which is why stdlib patterns like `struct Array[T]: _ExpressibleByArrayLiteral`
+/// + `extend Array[T]: ArrayMatchable { type Element = T }` stay unambiguous.
 fn check_unqualified_ambiguity(
     cx: &DeclContext<'_>,
+    binding_parent: kestrel_hecs::Entity,
     type_entity: kestrel_hecs::Entity,
     alias_name: &str,
     span: &kestrel_span2::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let conforming = cx.query.query(ConformingProtocols {
-        entity: type_entity,
-        root: cx.root,
-    });
+    let conforming = refinement_closure(cx, binding_parent);
 
     // Find all conformed protocols that declare an associated type with this name
     let mut matching_protocols: Vec<(kestrel_hecs::Entity, String)> = Vec::new();
@@ -427,6 +443,60 @@ fn check_unqualified_ambiguity(
             }],
             notes: vec![],
         });
+    }
+}
+
+/// Transitively walk refinement conformances starting from `entity`'s direct
+/// conformances. Crosses protocol-to-protocol refinement edges (e.g.
+/// `protocol B: A`) but NOT extension-added conformances (e.g. `extend S: A`).
+/// This is the scope the ambiguity check uses — see `check_unqualified_ambiguity`.
+fn refinement_closure(
+    cx: &DeclContext<'_>,
+    entity: kestrel_hecs::Entity,
+) -> Vec<kestrel_hecs::Entity> {
+    let mut out: Vec<kestrel_hecs::Entity> = Vec::new();
+    let mut seen: std::collections::HashSet<kestrel_hecs::Entity> =
+        std::collections::HashSet::new();
+    let mut stack: Vec<kestrel_hecs::Entity> = Vec::new();
+    seed_refinement_closure(cx, entity, &mut stack, &mut seen);
+    while let Some(proto) = stack.pop() {
+        out.push(proto);
+        seed_refinement_closure(cx, proto, &mut stack, &mut seen);
+    }
+    out
+}
+
+fn seed_refinement_closure(
+    cx: &DeclContext<'_>,
+    entity: kestrel_hecs::Entity,
+    stack: &mut Vec<kestrel_hecs::Entity>,
+    seen: &mut std::collections::HashSet<kestrel_hecs::Entity>,
+) {
+    let Some(conformances) = cx.query.get::<Conformances>(entity) else {
+        return;
+    };
+    for item in &conformances.0 {
+        let ConformanceItem::Positive(ast_ty, _) = item else {
+            continue;
+        };
+        let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
+            continue;
+        };
+        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        let result = cx.query.query(ResolveTypePath {
+            segments: seg_names,
+            context: entity,
+            root: cx.root,
+        });
+        let TypeResolution::Found(resolved) = result else {
+            continue;
+        };
+        if cx.query.get::<NodeKind>(resolved) != Some(&NodeKind::Protocol) {
+            continue;
+        }
+        if seen.insert(resolved) {
+            stack.push(resolved);
+        }
     }
 }
 

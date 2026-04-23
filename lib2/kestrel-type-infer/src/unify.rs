@@ -67,6 +67,13 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
                     return Err(UnifyError::Mismatch);
                 }
             }
+            // Propagate wildcard status: if either side is a wildcard, the root
+            // (b, since a redirects to b) must also be a wildcard so that
+            // report_unresolved_slots skips it.
+            if ctx.wildcard_tvars.contains(&a) || ctx.wildcard_tvars.contains(&b) {
+                ctx.wildcard_tvars.insert(a);
+                ctx.wildcard_tvars.insert(b);
+            }
             let merged = lit_a.or(*lit_b);
             ctx.types[a.0 as usize] = TySlot::Redirect(b);
             if merged.is_some() {
@@ -77,6 +84,8 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
 
         // Unresolved (non-literal) + Concrete: bind
         (TySlot::Unresolved { literal: None }, _) => {
+            // Wildcard unifying with a concrete type: wildcard resolves normally,
+            // no propagation needed (it becomes concrete, not Unresolved).
             occurs_check(ctx, a, b)?;
             ctx.types[a.0 as usize] = TySlot::Redirect(b);
             Ok(())

@@ -245,6 +245,12 @@ impl LowerCtx<'_> {
                 }
                 return current;
             }
+
+            // Specific diagnostic for `self` used where no receiver is in scope.
+            // Distinguish static methods (owner is inside a type) from free functions.
+            if first.name == "self" {
+                return self.emit_self_out_of_scope(&first.span, span);
+            }
         } else if self.lookup_local(&first.name).is_some() {
             // Local variable with type args (e.g., `x[Int]`) — variables don't accept type args
             self.ctx.accumulate(
@@ -423,6 +429,37 @@ impl LowerCtx<'_> {
         }
     }
 
+    /// Emit a diagnostic for `self` used where no receiver is in scope.
+    /// Distinguishes static methods (owner's parent is a type decl) from free functions.
+    fn emit_self_out_of_scope(&mut self, self_span: &Span, full_span: &Span) -> HirExprId {
+        use kestrel_ast_builder::NodeKind;
+
+        let parent_kind = self
+            .ctx
+            .parent_of(self.owner)
+            .and_then(|p| self.ctx.get::<NodeKind>(p).cloned());
+        let in_type = matches!(
+            parent_kind,
+            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
+        );
+        let message = if in_type {
+            "cannot use 'self' in static method"
+        } else {
+            "cannot use 'self' in free function"
+        };
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(message.to_string())
+                .with_labels(vec![
+                    Label::primary(self_span.file_id, self_span.range())
+                        .with_message("'self' is only available in instance methods"),
+                ]),
+        );
+        self.alloc_expr(HirExpr::Error {
+            span: full_span.clone(),
+        })
+    }
+
     /// Lower a call expression. Detect method calls vs direct calls.
     ///
     /// Method calls come from two AST shapes:
@@ -551,6 +588,26 @@ impl LowerCtx<'_> {
                             span: span.clone(),
                         });
                     }
+
+                    // No static method matched. If the prefix names a type and
+                    // there's an instance method by that name, it's a misuse
+                    // (`Counter.getValue()` on a non-static method). Emit an
+                    // error and return Error so downstream phases short-circuit.
+                    if self.is_instance_method_on_type(segments, &last.name) {
+                        self.ctx.accumulate(
+                            kestrel_reporting2::Diagnostic::error()
+                                .with_message(format!(
+                                    "instance method '{}' cannot be called on a type",
+                                    last.name
+                                ))
+                                .with_labels(vec![kestrel_reporting2::Label::primary(
+                                    span.file_id,
+                                    span.range(),
+                                )
+                                .with_message("call this on an instance, not the type")]),
+                        );
+                        return self.alloc_expr(HirExpr::Error { span: span.clone() });
+                    }
                 }
 
                 // Type parameter static call: T.method(args) or T.Item.method(args)
@@ -677,6 +734,64 @@ impl LowerCtx<'_> {
                 })
             },
         }
+    }
+
+    /// Whether the path `Type.member` (`segments[..-1]` resolving to a struct
+    /// or enum) names an *instance* method on that type — i.e. a Function
+    /// child with a receiver and no `Static` marker. Used to catch misuses
+    /// like `Counter.getValue()` where `getValue` requires a `self`.
+    fn is_instance_method_on_type(
+        &mut self,
+        segments: &[ExprPathSegment],
+        member: &str,
+    ) -> bool {
+        use kestrel_ast_builder::{Callable, Name, NodeKind, Static};
+
+        if segments.len() < 2 {
+            return false;
+        }
+        let type_segments: Vec<String> = segments[..segments.len() - 1]
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        let result = self.ctx.query(ResolveValuePath {
+            segments: type_segments,
+            context: self.owner,
+            root: self.root,
+        });
+        let Some(type_entity) = (match result {
+            ValueResolution::Def(e) => Some(e),
+            _ => None,
+        }) else {
+            return false;
+        };
+        if !matches!(
+            self.ctx.get::<NodeKind>(type_entity),
+            Some(&NodeKind::Struct) | Some(&NodeKind::Enum)
+        ) {
+            return false;
+        }
+        for &child in self.ctx.children_of(type_entity) {
+            if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
+                continue;
+            }
+            if self.ctx.has::<Static>(child) {
+                continue;
+            }
+            let Some(callable) = self.ctx.get::<Callable>(child) else {
+                continue;
+            };
+            if callable.receiver.is_none() {
+                continue;
+            }
+            let Some(name) = self.ctx.get::<Name>(child) else {
+                continue;
+            };
+            if name.0 == member {
+                return true;
+            }
+        }
+        false
     }
 
     /// Check if a multi-segment path ending in `member` is a static method call.
@@ -927,8 +1042,12 @@ impl LowerCtx<'_> {
         else_body: Option<&ElseBody>,
         span: &Span,
     ) -> HirExprId {
+        // Scope enclosing the condition + then-body so `if let` pattern bindings
+        // are visible in the then-body but not in else or after the expression.
+        self.push_scope();
         let condition = self.lower_if_conditions(body, conditions, MatchSource::IfLet, span);
         let then_block = self.lower_block(body, then_body);
+        self.pop_scope();
         let else_block = else_body.map(|eb| match eb {
             ElseBody::Block(block) => self.lower_block(body, block),
             ElseBody::ElseIf(expr_id) => {

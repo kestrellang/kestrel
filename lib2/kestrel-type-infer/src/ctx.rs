@@ -116,6 +116,14 @@ pub struct InferCtx<'a> {
     /// literal. Set by `HirStmt::Let` when the annotation is `Dictionary[K, V]`
     /// or the `[K: V]` type operator has already lowered to Dictionary.
     pub(crate) expected_dict_entry: Option<(TyVar, TyVar)>,
+
+    /// TyVars created from an explicit `_` (HirTy::Infer) in a type-argument
+    /// position. These intentionally stay unresolved when the caller doesn't
+    /// care about the value (e.g. `lang.cast_ptr[_, T](p)`). They must not
+    /// generate "could not infer type" diagnostics. Wildcard status propagates
+    /// through unification so that any TyVar unified with a wildcard is also
+    /// treated as one.
+    pub(crate) wildcard_tvars: HashSet<TyVar>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -163,6 +171,7 @@ impl<'a> InferCtx<'a> {
             never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
             expected_dict_entry: None,
+            wildcard_tvars: HashSet::new(),
         }
     }
 
@@ -399,6 +408,19 @@ impl<'a> InferCtx<'a> {
         self.types[root.0 as usize] = TySlot::Resolved(TyKind::Error);
     }
 
+    /// Mark `tv` as a wildcard (created from explicit `_` in a type-arg position).
+    /// Wildcard TyVars that stay Unresolved don't generate "could not infer type"
+    /// diagnostics. Call after creating the TyVar; propagation to unified vars
+    /// is handled in unify::unify.
+    pub fn mark_wildcard(&mut self, tv: TyVar) {
+        self.wildcard_tvars.insert(tv);
+    }
+
+    /// Returns true if `tv`'s resolved root is marked as a wildcard.
+    pub fn is_wildcard(&self, tv: TyVar) -> bool {
+        self.wildcard_tvars.contains(&self.resolve(tv))
+    }
+
     // ===== Constraint emission =====
 
     pub fn equal(&mut self, a: TyVar, b: TyVar, span: Span) {
@@ -478,7 +500,8 @@ impl<'a> InferCtx<'a> {
     }
 
     /// Like `member` but marks the constraint as a static context call
-    /// (e.g., `T.method()` where T is a type parameter).
+    /// (e.g., `Counter.method()` or `T.method()`). Optionally carries
+    /// explicit type args for cases like `Pointer[UInt8].nullPointer()`.
     pub fn member_static(
         &mut self,
         receiver: TyVar,
@@ -487,6 +510,7 @@ impl<'a> InferCtx<'a> {
         result: TyVar,
         expr: HirExprId,
         is_call: bool,
+        explicit_type_args: Vec<kestrel_hir::ty::HirTy>,
         span: Span,
     ) {
         self.constraints.push(Constraint::Member {
@@ -497,7 +521,7 @@ impl<'a> InferCtx<'a> {
             expr,
             is_call,
             is_static_context: true,
-            explicit_type_args: Vec::new(),
+            explicit_type_args,
             span,
         });
     }

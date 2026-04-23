@@ -103,6 +103,24 @@ pub enum InferError {
     /// No overload matches the call's labels/arity (e.g., enum case with wrong labels).
     NoMatchingOverload { name: String, span: Span },
 
+    /// Memberwise init call has wrong number of arguments for the struct's fields.
+    /// Emitted for `Point(x: 1)` when `Point` has two fields.
+    MemberwiseInitArity {
+        struct_name: String,
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
+
+    /// Memberwise init call has a wrong label for a field.
+    /// Emitted for `Point(a: 1, b: 2)` when `Point` has fields `x`, `y`.
+    MemberwiseInitLabel {
+        struct_name: String,
+        expected: String,
+        got: Option<String>,
+        span: Span,
+    },
+
     /// Implicit `it` parameter used in a context expecting != 1 parameter.
     ItWrongArity { expected: usize, span: Span },
 
@@ -142,6 +160,36 @@ pub enum InferError {
     /// Before this existed, the slot silently became `MirTy::Error` in
     /// downstream lowering and triggered a Cranelift type-mismatch panic.
     CannotInferType { span: Span },
+
+    /// Tuple-index access (`x.0`) on a receiver that isn't a tuple type.
+    TupleIndexOnNonTuple {
+        receiver: TyVar,
+        index: usize,
+        span: Span,
+    },
+
+    /// Tuple-index access where the index is beyond the tuple's arity.
+    TupleIndexOutOfBounds {
+        arity: usize,
+        index: usize,
+        span: Span,
+    },
+
+    /// Member access on a primitive/intrinsic type that isn't a known method.
+    MemberAccessOnPrimitive {
+        receiver: TyVar,
+        name: String,
+        span: Span,
+    },
+
+    /// Referencing a known primitive method without calling it.
+    /// `x.toString` (when the user meant `x.toString()`) — primitive methods
+    /// cannot be used as first-class values.
+    PrimitiveMethodNotCalled {
+        receiver: TyVar,
+        method: String,
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -163,10 +211,16 @@ impl InferError {
             | Self::TypeParamAsValue { span }
             | Self::TypeArgCountMismatch { span, .. }
             | Self::NoMatchingOverload { span, .. }
+            | Self::MemberwiseInitArity { span, .. }
+            | Self::MemberwiseInitLabel { span, .. }
             | Self::ItWrongArity { span, .. }
             | Self::LiteralNotAccepted { span, .. }
             | Self::UnresolvedTypeParam { span, .. }
-            | Self::CannotInferType { span, .. } => span,
+            | Self::CannotInferType { span, .. }
+            | Self::TupleIndexOnNonTuple { span, .. }
+            | Self::TupleIndexOutOfBounds { span, .. }
+            | Self::MemberAccessOnPrimitive { span, .. }
+            | Self::PrimitiveMethodNotCalled { span, .. } => span,
         }
     }
 }

@@ -226,11 +226,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
-            // Check if receiver is a type parameter reference (T.method() = static context)
+            // A MethodCall whose receiver is a type-level reference (struct,
+            // enum, protocol, type alias, type parameter) is a static call —
+            // e.g. `Counter.getValue()`, `T.staticFn()`, `Pointer[UInt8].nullPointer()`.
+            // solve_member uses this to reject instance methods called as static.
             let is_static_ctx = matches!(
                 &hir.exprs[*receiver],
-                HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
-                    == Some(&NodeKind::TypeParameter)
+                HirExpr::Def(entity, _, _) if matches!(
+                    ctx.query_ctx.get::<NodeKind>(*entity),
+                    Some(&NodeKind::Struct)
+                        | Some(&NodeKind::Enum)
+                        | Some(&NodeKind::Protocol)
+                        | Some(&NodeKind::TypeAlias)
+                        | Some(&NodeKind::TypeParameter)
+                )
             );
 
             let has_explicit = explicit_targs.as_ref().map_or(false, |a| !a.is_empty());
@@ -238,7 +247,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Consuming a Def(TypeParameter) as a MethodCall receiver is valid
             if is_static_ctx {
                 ctx.type_param_defs.remove(receiver);
-                ctx.member_static(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+                let ext_args = if has_explicit {
+                    explicit_targs.clone().unwrap()
+                } else {
+                    Vec::new()
+                };
+                ctx.member_static(recv_tv, method, arg_tvs, result_tv, id, true, ext_args, span.clone());
             } else if has_explicit {
                 ctx.member_with_type_args(
                     recv_tv,
@@ -304,19 +318,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             let base_tv = gen_expr(ctx, hir, *base);
             let result_tv = ctx.fresh();
-
-            // Emit an Equal constraint: base must be a tuple, and result = element at index.
-            // The solver will extract the element type when base resolves.
-            // For now we use a Member constraint with the index as name.
-            ctx.member(
-                base_tv,
-                &index.to_string(),
-                vec![],
-                result_tv,
-                id,
-                false,
-                span.clone(),
-            );
+            ctx.constraints.push(crate::constraint::Constraint::TupleIndex {
+                tuple: base_tv,
+                index: *index as usize,
+                result: result_tv,
+                span: span.clone(),
+            });
             result_tv
         },
 
@@ -379,6 +386,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             let result_tv = ctx.fresh();
+
+            // Empty match has no arms to pin the result type. An analyzer
+            // reports the `empty match` diagnostic — poison the result so a
+            // cascading "could not infer type" doesn't obscure the real error.
+            if arms.is_empty() {
+                ctx.poison(result_tv);
+            }
 
             for arm in arms {
                 // Pattern constrains scrutinee type
@@ -907,12 +921,52 @@ fn gen_struct_init(
             return result_tv;
         }
     } else {
-        // Memberwise init: match args against field types (in order)
+        // Memberwise init: match args against stored field types (in order).
+        // `NodeKind::Field` also covers computed properties, so filter them
+        // out via the `Computed` marker — memberwise init only takes storage.
         let fields: Vec<Entity> = children
             .iter()
-            .filter(|&&c| qctx.get::<NodeKind>(c) == Some(&NodeKind::Field))
+            .filter(|&&c| {
+                qctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                    && qctx.get::<kestrel_ast_builder::Computed>(c).is_none()
+            })
             .copied()
             .collect();
+
+        // Auto-generated memberwise inits require one labeled argument per
+        // field, in declaration order, with the label matching the field name.
+        // Mismatches here silently truncate via zip() below, so validate upfront.
+        if args.len() != fields.len() {
+            let struct_name = qctx
+                .get::<Name>(struct_entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| "<struct>".into());
+            ctx.report_error(InferError::MemberwiseInitArity {
+                struct_name,
+                expected: fields.len(),
+                got: args.len(),
+                span: span.clone(),
+            });
+        } else {
+            for (arg, &field) in args.iter().zip(fields.iter()) {
+                let expected_label = qctx
+                    .get::<Name>(field)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                if arg.label.as_deref() != Some(expected_label.as_str()) {
+                    let struct_name = qctx
+                        .get::<Name>(struct_entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| "<struct>".into());
+                    ctx.report_error(InferError::MemberwiseInitLabel {
+                        struct_name,
+                        expected: expected_label,
+                        got: arg.label.clone(),
+                        span: span.clone(),
+                    });
+                }
+            }
+        }
 
         for (arg, &field) in args.iter().zip(fields.iter()) {
             if let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
@@ -1223,16 +1277,24 @@ fn instantiate_entity_inner(
             let parent_enum = qctx.parent_of(entity);
 
             // For enum cases, type params come from the parent enum.
-            // Build subs from parent's type params.
+            // Reuse entries already pushed into the outer `subs` map (e.g. when
+            // the caller wrote `Option[Int].None` — the parent's T was mapped to
+            // i64 at line 1142-1146). Only allocate fresh TyVars for parent type
+            // params that aren't already bound.
             let parent_subs: Vec<(Entity, TyVar)> = if let Some(pe) = parent_enum {
                 let parent_tps: Vec<Entity> = qctx
                     .get::<TypeParams>(pe)
                     .map(|tp| tp.0.clone())
                     .unwrap_or_default();
-                let parent_args: Vec<TyVar> = parent_tps.iter().map(|_| ctx.fresh()).collect();
                 parent_tps
                     .into_iter()
-                    .zip(parent_args.into_iter())
+                    .map(|tp| {
+                        if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == tp) {
+                            (tp, tv)
+                        } else {
+                            (tp, ctx.fresh())
+                        }
+                    })
                     .collect()
             } else {
                 vec![]
@@ -1525,7 +1587,11 @@ pub(crate) fn lower_hir_ty_with_subs(
             ctx.self_type_ty(*entity)
         },
         HirTy::Never(_) => ctx.never(),
-        HirTy::Infer(_) => ctx.fresh(),
+        HirTy::Infer(_) => {
+            let tv = ctx.fresh();
+            ctx.mark_wildcard(tv);
+            tv
+        },
         HirTy::Error(span) => ctx.report_error(InferError::FromHir { span: span.clone() }),
     }
 }
@@ -1735,14 +1801,13 @@ fn gen_struct_pat(
     // For each field in the pattern, find the matching Field child and constrain
     let children: Vec<Entity> = qctx.children_of(entity).to_vec();
     for field in fields {
-        let field_tv = children
-            .iter()
-            .find(|&&child| {
-                qctx.get::<NodeKind>(child) == Some(&NodeKind::Field)
-                    && qctx
-                        .get::<Name>(child)
-                        .is_some_and(|n| n.0 == field.field_name)
-            })
+        let found = children.iter().find(|&&child| {
+            qctx.get::<NodeKind>(child) == Some(&NodeKind::Field)
+                && qctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == field.field_name)
+        });
+        let field_tv = found
             .and_then(|&child| {
                 qctx.query(LowerTypeAnnotation {
                     entity: child,
@@ -1750,7 +1815,15 @@ fn gen_struct_pat(
                 })
                 .map(|hir_ty| lower_hir_ty(ctx, &hir_ty))
             })
-            .unwrap_or_else(|| ctx.fresh());
+            .unwrap_or_else(|| {
+                let tv = ctx.fresh();
+                // Unknown field — an analyzer reports the error. Poison the
+                // binding TyVar to suppress a cascading "could not infer type".
+                if found.is_none() {
+                    ctx.poison(tv);
+                }
+                tv
+            });
 
         if let Some(pat) = field.pattern {
             gen_pat(ctx, hir, pat, field_tv, source);

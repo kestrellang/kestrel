@@ -226,8 +226,11 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             // Each arm body sits in tail position of the match expression —
             // a value-producing leaf (Local, Call, Literal) counts as
             // Returns just like the tail of a block does.
+            // An empty match is either on a Never type (unreachable) or an
+            // error already flagged by the exhaustiveness analyzer (E304);
+            // treat it as diverging so we don't emit a cascading E001.
             if arms.is_empty() {
-                return ReturnState::MayFallThrough;
+                return ReturnState::Diverges;
             }
             let mut combined = tail_expr_state(hir, typed, arms[0].body);
             for arm in &arms[1..] {

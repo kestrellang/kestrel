@@ -4,4 +4,4 @@
 module Test
 
 struct Foo {}
-protocol Foo {} // ERROR: duplicate
+protocol Foo {} // ERROR: already defined as a struct

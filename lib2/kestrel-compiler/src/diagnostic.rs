@@ -173,6 +173,40 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_message(format!("no matching overload for '{name}'"))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
+            InferError::MemberwiseInitArity {
+                struct_name,
+                expected,
+                got,
+                ..
+            } => Diagnostic::error()
+                .with_message(format!(
+                    "struct '{struct_name}' has {expected} field(s), but {got} argument(s) were provided"
+                ))
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("expected {expected} argument(s)")),
+                ]),
+
+            InferError::MemberwiseInitLabel {
+                struct_name,
+                expected,
+                got,
+                ..
+            } => {
+                let got_desc = got
+                    .as_deref()
+                    .map(|s| format!("'{}'", s))
+                    .unwrap_or_else(|| "unlabeled".into());
+                Diagnostic::error()
+                    .with_message(format!(
+                        "argument for struct '{struct_name}' has {got_desc} label, but expected '{expected}'"
+                    ))
+                    .with_labels(vec![
+                        Label::primary(file_id, range)
+                            .with_message(format!("expected label '{expected}'")),
+                    ])
+            },
+
             InferError::ItWrongArity { expected, .. } => Diagnostic::error()
                 .with_message("implicit 'it' parameter requires single-parameter context")
                 .with_labels(vec![
@@ -200,6 +234,39 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     Label::primary(file_id, range)
                         .with_message("add a type annotation to resolve this"),
                 ]),
+
+            InferError::TupleIndexOnNonTuple { index, .. } => Diagnostic::error()
+                .with_message(format!("cannot index into non-tuple type: {detail}"))
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("'.{index}' requires a tuple receiver")),
+                ]),
+
+            InferError::TupleIndexOutOfBounds { arity, index, .. } => Diagnostic::error()
+                .with_message(format!(
+                    "tuple index {index} out of bounds for {arity}-element tuple"
+                ))
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("valid indices are 0..{}", arity.saturating_sub(1))),
+                ]),
+
+            InferError::MemberAccessOnPrimitive { name, .. } => Diagnostic::error()
+                .with_message(format!("cannot access member on type: {detail}"))
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("'{name}' not available")),
+                ]),
+
+            InferError::PrimitiveMethodNotCalled { method, .. } => Diagnostic::error()
+                .with_message(detail.to_string())
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("add () to call this method")),
+                ])
+                .with_notes(vec![format!(
+                    "primitive methods cannot be used as first-class values; use '.{method}()' instead"
+                )]),
         }
     }
 }

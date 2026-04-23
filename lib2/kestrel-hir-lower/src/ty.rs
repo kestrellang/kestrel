@@ -177,19 +177,11 @@ fn build_hir_ty_for_entity(
 
     match kind {
         Some(NodeKind::TypeAlias) => {
-            // Trivial (non-generic, bound-free) aliases with a concrete
-            // TypeAnnotation are eagerly expanded — avoids constraint bloat
-            // for `type Fd = Int32` style declarations.
-            if is_trivial_alias(ctx, entity) && args.is_empty() {
-                if let Some(ann) = ctx.get::<TypeAnnotation>(entity) {
-                    return lower_ast_type(ctx, owner, root, &ann.0);
-                }
-            }
             // An associated type (TypeAlias whose parent is a Protocol) must
             // carry its base so the solver can project it through the concrete
-            // receiver. E.g. `T.Item` lowers to AssocProjection{ base: T,
-            // assoc: Item } — without the base, inference has no way to
-            // reach `type Item = X` on the concrete type's Iterable extension.
+            // receiver. This stays true even when the associated type has a
+            // default annotation: conforming types may override that default,
+            // so uses in protocol requirements must remain projections.
             let parent_is_protocol = ctx
                 .parent_of(entity)
                 .and_then(|p| ctx.get::<NodeKind>(p).cloned())
@@ -201,6 +193,14 @@ fn build_hir_ty_for_entity(
                     assoc: entity,
                     span: span.clone(),
                 };
+            }
+            // Trivial (non-generic, bound-free) aliases with a concrete
+            // TypeAnnotation are eagerly expanded — avoids constraint bloat
+            // for `type Fd = Int32` style declarations.
+            if is_trivial_alias(ctx, entity) && args.is_empty() {
+                if let Some(ann) = ctx.get::<TypeAnnotation>(entity) {
+                    return lower_ast_type(ctx, owner, root, &ann.0);
+                }
             }
             // Non-associated aliases (parameterized or constrained) flow as
             // AliasUse. The solver reduces concrete ones via Reduce.

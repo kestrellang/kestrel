@@ -12,7 +12,7 @@ use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
@@ -195,6 +195,65 @@ fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     }
 }
 
+/// Poison `tv` if its resolved root is still fully Unresolved
+/// (`Unresolved { literal: None }`). Used after a constraint error so
+/// cascading "could not infer type" diagnostics don't fire on the same slot.
+///
+/// Intentionally skips TyVars with a literal marker: those carry real type
+/// info (e.g. `Unresolved { literal: Some(Bool) }` from a `true` expression),
+/// and subsequent coerce/equal constraints can still produce meaningful
+/// errors against them. Poisoning would hide those legitimate errors.
+fn poison_if_unresolved(ctx: &mut InferCtx<'_>, tv: TyVar) {
+    if matches!(
+        ctx.slot(ctx.resolve(tv)),
+        TySlot::Unresolved { literal: None }
+    ) {
+        ctx.poison(tv);
+    }
+}
+
+/// Recursively poison any Unresolved type arguments nested inside `tv`'s
+/// resolved type. Leaves the outer type intact — we only silence inner
+/// slots so `contains_unresolved_type_args` doesn't cascade after a
+/// structural mismatch (e.g. `null` default → `Optional[?]` vs concrete
+/// `i64`).
+fn poison_unresolved_type_args(ctx: &mut InferCtx<'_>, tv: TyVar) {
+    let mut seen = std::collections::HashSet::new();
+    poison_inner(ctx, tv, &mut seen);
+
+    fn poison_inner(
+        ctx: &mut InferCtx<'_>,
+        tv: TyVar,
+        seen: &mut std::collections::HashSet<TyVar>,
+    ) {
+        let resolved = ctx.resolve(tv);
+        if !seen.insert(resolved) {
+            return;
+        }
+        let args: Vec<TyVar> = match ctx.slot(resolved).clone() {
+            TySlot::Resolved(TyKind::Struct { args, .. })
+            | TySlot::Resolved(TyKind::Enum { args, .. })
+            | TySlot::Resolved(TyKind::Protocol { args, .. })
+            | TySlot::Resolved(TyKind::TypeAlias { args, .. }) => args,
+            TySlot::Resolved(TyKind::Tuple(elements)) => elements,
+            TySlot::Resolved(TyKind::Function { params, ret }) => {
+                let mut v = params;
+                v.push(ret);
+                v
+            },
+            _ => return,
+        };
+        for arg in args {
+            let arg_root = ctx.resolve(arg);
+            if matches!(ctx.slot(arg_root), TySlot::Unresolved { .. }) {
+                ctx.poison(arg_root);
+            } else {
+                poison_inner(ctx, arg_root, seen);
+            }
+        }
+    }
+}
+
 fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
     fn walk(ctx: &InferCtx<'_>, tv: TyVar, seen: &mut std::collections::HashSet<TyVar>) -> bool {
         let resolved = ctx.resolve(tv);
@@ -202,6 +261,11 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
             return false;
         }
         match &ctx.types[resolved.0 as usize] {
+            // Wildcards (from explicit `_` type args) are intentionally unresolved —
+            // don't report them as inference failures.
+            TySlot::Unresolved { literal: None } if ctx.wildcard_tvars.contains(&resolved) => {
+                false
+            },
             TySlot::Unresolved { literal: None } => true,
             TySlot::Unresolved { literal: Some(_) } => false,
             TySlot::Redirect(target) => walk(ctx, *target, seen),
@@ -312,7 +376,17 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
         // diagnose the same slot with the generic "could not infer type".
         let (err, poison_tv) = match constraint {
             Constraint::Equal { a, b, span } => {
-                if ctx.is_error(ctx.resolve(a)) || ctx.is_error(ctx.resolve(b)) {
+                let a_err = ctx.is_error(ctx.resolve(a));
+                let b_err = ctx.is_error(ctx.resolve(b));
+                if a_err || b_err {
+                    // Propagate poison to the other side if it's still Unresolved,
+                    // so report_unresolved_slots doesn't cascade "could not infer type".
+                    if a_err && matches!(ctx.slot(ctx.resolve(b)), TySlot::Unresolved { .. }) {
+                        ctx.poison(b);
+                    }
+                    if b_err && matches!(ctx.slot(ctx.resolve(a)), TySlot::Unresolved { .. }) {
+                        ctx.poison(a);
+                    }
                     continue;
                 }
                 let err = mismatch_error(ctx, a, b, span);
@@ -325,7 +399,16 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 expr,
                 span,
             } => {
-                if ctx.is_error(ctx.resolve(from)) || ctx.is_error(ctx.resolve(to)) {
+                let from_err = ctx.is_error(ctx.resolve(from));
+                let to_err = ctx.is_error(ctx.resolve(to));
+                if from_err || to_err {
+                    // Propagate poison to unresolved sides to suppress cascading errors.
+                    if from_err && matches!(ctx.slot(ctx.resolve(to)), TySlot::Unresolved { .. }) {
+                        ctx.poison(to);
+                    }
+                    if to_err && matches!(ctx.slot(ctx.resolve(from)), TySlot::Unresolved { .. }) {
+                        ctx.poison(from);
+                    }
                     continue;
                 }
                 if ctx.errored_coerce_exprs.contains(&expr) {
@@ -350,6 +433,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             } => {
                 let resolved = ctx.resolve(container);
                 if ctx.is_error(resolved) {
+                    ctx.poison(result);
                     continue;
                 }
                 // Container stayed an unresolved literal TyVar — the only way
@@ -378,6 +462,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 ..
             } => {
                 if ctx.is_error(ctx.resolve(receiver)) {
+                    ctx.poison(result);
                     continue;
                 }
                 (
@@ -397,6 +482,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 ..
             } => {
                 if ctx.is_error(ctx.resolve(callee)) {
+                    ctx.poison(result);
                     continue;
                 }
                 (
@@ -451,13 +537,36 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     Some(expected),
                 )
             },
-            // Pattern matching handles unresolved patterns at a higher level
-            Constraint::ImplicitPat { .. } => continue,
-            Constraint::TupleRestPat { .. } => continue,
+            // Pattern matching handles unresolved patterns at a higher level —
+            // but poison any bound arg TyVars so cascading "could not infer type"
+            // doesn't fire on pattern bindings whose payload type was never
+            // resolved (e.g. `.Some(x)` on a scrutinee that stayed unresolved).
+            Constraint::ImplicitPat { arg_tys, .. } => {
+                for tv in &arg_tys {
+                    poison_if_unresolved(ctx, *tv);
+                }
+                continue;
+            },
+            Constraint::TupleRestPat {
+                prefix_tys,
+                suffix_tys,
+                ..
+            } => {
+                for tv in prefix_tys.iter().chain(suffix_tys.iter()) {
+                    poison_if_unresolved(ctx, *tv);
+                }
+                continue;
+            },
             // An unresolved Reduce means the alias never became concrete.
             // Absorb silently — any error will surface through the downstream
             // constraint that needed the reduction.
             Constraint::Reduce { .. } => continue,
+            // Unresolved TupleIndex: the base never became concrete. Poison
+            // the result so downstream `could not infer type` doesn't cascade.
+            Constraint::TupleIndex { result, .. } => {
+                ctx.poison(result);
+                continue;
+            },
         };
         ctx.report_error(err);
         if let Some(tv) = poison_tv {
@@ -479,13 +588,35 @@ enum SolveResult {
 /// Dispatch a constraint to the appropriate solver.
 fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     match c {
-        Constraint::Equal { a, b, span } => solve_equal(ctx, a, b, span),
+        Constraint::Equal { a, b, span } => {
+            let r = solve_equal(ctx, a, b, span);
+            if matches!(r, SolveResult::Error(_)) {
+                poison_if_unresolved(ctx, a);
+                poison_if_unresolved(ctx, b);
+                poison_unresolved_type_args(ctx, a);
+                poison_unresolved_type_args(ctx, b);
+            }
+            r
+        },
         Constraint::Coerce {
             from,
             to,
             expr,
             span,
-        } => solve_coerce(ctx, from, to, expr, span),
+        } => {
+            let r = solve_coerce(ctx, from, to, expr, span);
+            if matches!(r, SolveResult::Error(_)) {
+                // Cascade suppression: poison unresolved sides AND inner type
+                // args so expressions with a literal default (e.g. `null` →
+                // `Optional[?]`) don't report "could not infer type" for the
+                // unbound inner slot after an outer mismatch.
+                poison_if_unresolved(ctx, from);
+                poison_if_unresolved(ctx, to);
+                poison_unresolved_type_args(ctx, from);
+                poison_unresolved_type_args(ctx, to);
+            }
+            r
+        },
         Constraint::Conforms { ty, protocol, span } => solve_conforms(ctx, ty, protocol, span),
         Constraint::Associated {
             container,
@@ -499,7 +630,13 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             result,
             expr,
             span,
-        } => solve_call(ctx, callee, args, result, expr, span),
+        } => {
+            let r = solve_call(ctx, callee, args, result, expr, span);
+            if matches!(r, SolveResult::Error(_)) {
+                ctx.poison(result);
+            }
+            r
+        },
         Constraint::Member {
             receiver,
             name,
@@ -510,18 +647,24 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             is_static_context,
             explicit_type_args,
             span,
-        } => solve_member(
-            ctx,
-            receiver,
-            &name,
-            args,
-            result,
-            expr,
-            is_call,
-            is_static_context,
-            &explicit_type_args,
-            span,
-        ),
+        } => {
+            let r = solve_member(
+                ctx,
+                receiver,
+                &name,
+                args,
+                result,
+                expr,
+                is_call,
+                is_static_context,
+                &explicit_type_args,
+                span,
+            );
+            if matches!(r, SolveResult::Error(_)) {
+                ctx.poison(result);
+            }
+            r
+        },
         Constraint::OverloadedCall {
             candidates,
             type_args,
@@ -529,7 +672,13 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             result,
             expr,
             span,
-        } => solve_overloaded_call(ctx, candidates, type_args, args, result, expr, span),
+        } => {
+            let r = solve_overloaded_call(ctx, candidates, type_args, args, result, expr, span);
+            if matches!(r, SolveResult::Error(_)) {
+                ctx.poison(result);
+            }
+            r
+        },
         Constraint::Implicit {
             expected,
             name,
@@ -537,7 +686,13 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             result,
             expr,
             span,
-        } => solve_implicit(ctx, expected, &name, args, result, expr, span),
+        } => {
+            let r = solve_implicit(ctx, expected, &name, args, result, expr, span);
+            if matches!(r, SolveResult::Error(_)) {
+                ctx.poison(result);
+            }
+            r
+        },
         Constraint::ImplicitPat {
             scrutinee,
             name,
@@ -555,6 +710,183 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             result,
             span,
         } => solve_reduce(ctx, alias, result, span),
+        Constraint::TupleIndex {
+            tuple,
+            index,
+            result,
+            span,
+        } => {
+            let r = solve_tuple_index(ctx, tuple, index, result, span);
+            if matches!(r, SolveResult::Error(_)) {
+                ctx.poison(result);
+            }
+            r
+        },
+    }
+}
+
+/// Resolve a tuple index access (`t.N`). Defers until `tuple` is concrete,
+/// then either extracts the N-th element type or emits a specific error.
+fn solve_tuple_index(
+    ctx: &mut InferCtx<'_>,
+    tuple: TyVar,
+    index: usize,
+    result: TyVar,
+    span: Span,
+) -> SolveResult {
+    let slot = ctx.slot(tuple);
+    // Literal-unresolved receivers (e.g. integer literal) are definitionally
+    // not tuples — flag immediately instead of deferring indefinitely, which
+    // otherwise silently drops the error when no literal default is available
+    // (e.g. in a `stdlib: false` test).
+    if let TySlot::Unresolved { literal: Some(_) } = slot {
+        return SolveResult::Error(InferError::TupleIndexOnNonTuple {
+            receiver: tuple,
+            index,
+            span,
+        });
+    }
+    let TySlot::Resolved(kind) = slot else {
+        return SolveResult::Deferred(Constraint::TupleIndex {
+            tuple,
+            index,
+            result,
+            span,
+        });
+    };
+    // Silently absorb — upstream error will have been reported already.
+    if matches!(kind, TyKind::Error) {
+        return SolveResult::Solved;
+    }
+    if let TyKind::Tuple(elems) = kind {
+        if index < elems.len() {
+            let elem = elems[index];
+            ctx.equal(result, elem, span);
+            return SolveResult::Solved;
+        }
+        return SolveResult::Error(InferError::TupleIndexOutOfBounds {
+            arity: elems.len(),
+            index,
+            span,
+        });
+    }
+    SolveResult::Error(InferError::TupleIndexOnNonTuple {
+        receiver: tuple,
+        index,
+        span,
+    })
+}
+
+/// Classify a receiver TyKind as a primitive intrinsic by its simple name.
+/// Returns the primitive "family" suitable for looking up known method names.
+fn primitive_family(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<PrimitiveFamily> {
+    let TyKind::Struct { entity, .. } = kind else {
+        return None;
+    };
+    if ctx.query_ctx.get::<Intrinsic>(*entity).is_none() {
+        return None;
+    }
+    let name = ctx.query_ctx.get::<Name>(*entity)?;
+    match name.0.as_str() {
+        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" => Some(PrimitiveFamily::Int),
+        "f32" | "f64" => Some(PrimitiveFamily::Float),
+        "i1" => Some(PrimitiveFamily::Bool),
+        "str" => Some(PrimitiveFamily::String),
+        _ => None,
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum PrimitiveFamily {
+    Int,
+    Float,
+    Bool,
+    String,
+}
+
+/// Known primitive method names (mirrors lib1's `PrimitiveMethod` enum).
+/// Used only to distinguish "user referenced a primitive method without
+/// calling it" from "user accessed a nonexistent member on a primitive".
+fn is_known_primitive_method(family: PrimitiveFamily, name: &str) -> bool {
+    match family {
+        PrimitiveFamily::Int => matches!(
+            name,
+            "toString"
+                | "abs"
+                | "add"
+                | "subtract"
+                | "multiply"
+                | "divide"
+                | "modulo"
+                | "negate"
+                | "equals"
+                | "notEquals"
+                | "lessThan"
+                | "lessThanOrEqual"
+                | "greaterThan"
+                | "greaterThanOrEqual"
+                | "bitwiseAnd"
+                | "bitwiseOr"
+                | "bitwiseXor"
+                | "bitwiseNot"
+                | "shiftLeft"
+                | "shiftRight"
+        ),
+        PrimitiveFamily::Float => matches!(
+            name,
+            "add"
+                | "subtract"
+                | "multiply"
+                | "divide"
+                | "negate"
+                | "equals"
+                | "notEquals"
+                | "lessThan"
+                | "lessThanOrEqual"
+                | "greaterThan"
+                | "greaterThanOrEqual"
+        ),
+        PrimitiveFamily::Bool => {
+            matches!(name, "logicalAnd" | "logicalOr" | "logicalNot" | "equals" | "notEquals")
+        },
+        PrimitiveFamily::String => {
+            matches!(name, "length" | "isEmpty" | "equals" | "notEquals" | "unsafePtr")
+        },
+    }
+}
+
+/// Pick the appropriate "member not found" diagnostic for `recv_kind`.
+/// On primitive receivers, distinguish known-primitive-method (must-call) from
+/// generic nonexistent-member so the user gets a targeted suggestion.
+fn member_not_found_error(
+    ctx: &InferCtx<'_>,
+    receiver: TyVar,
+    recv_kind: &TyKind,
+    name: &str,
+    is_call: bool,
+    span: Span,
+) -> InferError {
+    if let Some(family) = primitive_family(ctx, recv_kind) {
+        if !is_call && is_known_primitive_method(family, name) {
+            return InferError::PrimitiveMethodNotCalled {
+                receiver,
+                method: name.to_string(),
+                span,
+            };
+        }
+        if !is_call {
+            return InferError::MemberAccessOnPrimitive {
+                receiver,
+                name: name.to_string(),
+                span,
+            };
+        }
+    }
+    InferError::NoMember {
+        receiver,
+        name: name.to_string(),
+        is_call,
+        span,
     }
 }
 
@@ -704,6 +1036,20 @@ fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveR
         }
     }
 
+    // If either side is Error, propagate poison to any Unresolved side.
+    // unify() silently absorbs Error without binding the other TyVar.
+    let ra = ctx.resolve(a);
+    let rb = ctx.resolve(b);
+    if ctx.is_error(ra) || ctx.is_error(rb) {
+        if ctx.is_error(ra) && matches!(ctx.slot(rb), TySlot::Unresolved { .. }) {
+            ctx.poison(b);
+        }
+        if ctx.is_error(rb) && matches!(ctx.slot(ra), TySlot::Unresolved { .. }) {
+            ctx.poison(a);
+        }
+        return SolveResult::Solved;
+    }
+
     match unify::unify(ctx, a, b) {
         Ok(()) => SolveResult::Solved,
         Err(UnifyError::Mismatch) => SolveResult::Error(mismatch_error(ctx, a, b, span)),
@@ -796,6 +1142,21 @@ fn solve_coerce(
     expr: kestrel_hir::body::HirExprId,
     span: Span,
 ) -> SolveResult {
+    // If either side is Error, propagate poison to any Unresolved side so
+    // downstream expressions don't cascade into "could not infer type".
+    // unify() silently absorbs Error but does NOT bind the other TyVar, so
+    // we must do this explicitly before falling into the unify path.
+    let fr = ctx.resolve(from);
+    let tr = ctx.resolve(to);
+    if ctx.is_error(fr) || ctx.is_error(tr) {
+        if ctx.is_error(fr) && matches!(ctx.slot(tr), TySlot::Unresolved { .. }) {
+            ctx.poison(to);
+        }
+        if ctx.is_error(tr) && matches!(ctx.slot(fr), TySlot::Unresolved { .. }) {
+            ctx.poison(from);
+        }
+        return SolveResult::Solved;
+    }
     // Try unification first (handles the common case)
     match unify::unify(ctx, from, to) {
         Ok(()) => return SolveResult::Solved,
@@ -936,6 +1297,7 @@ fn solve_associated(
     }
 
     if ctx.is_error(resolved) {
+        ctx.poison(result);
         return SolveResult::Solved;
     }
 
@@ -1088,6 +1450,8 @@ fn solve_call(
         });
     }
     if ctx.is_error(resolved) {
+        // Poison result so downstream "could not infer type" is suppressed.
+        ctx.poison(result);
         return SolveResult::Solved;
     }
 
@@ -1533,6 +1897,8 @@ fn solve_member(
     let resolved = ctx.resolve(receiver);
     let recv_kind = if ctx.is_concrete(resolved) {
         if ctx.is_error(resolved) {
+            // Poison result so downstream "could not infer type" is suppressed.
+            ctx.poison(result);
             return SolveResult::Solved;
         }
         match ctx.slot(resolved) {
@@ -1643,12 +2009,9 @@ fn solve_member(
             match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
                 Ok(res) => res,
                 Err(_) => {
-                    return SolveResult::Error(InferError::NoMember {
-                        receiver,
-                        name: name.to_string(),
-                        is_call,
-                        span,
-                    });
+                    return SolveResult::Error(member_not_found_error(
+                        ctx, receiver, &recv_kind, name, is_call, span,
+                    ));
                 },
             }
         },
@@ -2125,6 +2488,13 @@ fn solve_implicit_pat(
     }
 
     if ctx.is_error(resolved) {
+        // Poison any bound arg TyVars so pattern bindings don't cascade
+        // into "could not infer type".
+        for tv in &arg_tys {
+            if matches!(ctx.slot(ctx.resolve(*tv)), TySlot::Unresolved { .. }) {
+                ctx.poison(*tv);
+            }
+        }
         return SolveResult::Solved;
     }
 
@@ -2136,7 +2506,15 @@ fn solve_implicit_pat(
     // Find the enum entity and its type args from the scrutinee
     let (enum_entity, type_args) = match &kind {
         TyKind::Enum { entity, args } => (*entity, args.clone()),
-        _ => return SolveResult::Solved,
+        _ => {
+            // Scrutinee isn't an enum — poison arg TyVars to suppress cascades.
+            for tv in &arg_tys {
+                if matches!(ctx.slot(ctx.resolve(*tv)), TySlot::Unresolved { .. }) {
+                    ctx.poison(*tv);
+                }
+            }
+            return SolveResult::Solved;
+        },
     };
 
     // Search children for an enum case with the matching name
@@ -2150,7 +2528,12 @@ fn solve_implicit_pat(
     });
 
     let Some(case_entity) = case_entity else {
-        // No matching case found
+        // No matching case found — poison arg TyVars to suppress cascades.
+        for tv in &arg_tys {
+            if matches!(ctx.slot(ctx.resolve(*tv)), TySlot::Unresolved { .. }) {
+                ctx.poison(*tv);
+            }
+        }
         return SolveResult::Solved;
     };
 

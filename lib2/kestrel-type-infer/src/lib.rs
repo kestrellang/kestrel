@@ -9,6 +9,7 @@
 //! HIR Lowering (HirBody) → Type Inference (this crate) → TypedBody
 //! ```
 
+pub mod compare;
 pub mod constraint;
 pub mod ctx;
 pub mod error;

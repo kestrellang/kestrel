@@ -122,8 +122,15 @@ fn parent_requirements_satisfied(
     type_entity: Entity,
     parent_protocol: Entity,
 ) -> bool {
+    // Parity with lib1's `ProtocolRequiredMethods`: E421's purpose is to force
+    // the user to declare the parent protocol when the parent contributes a
+    // methods surface the refining protocol wouldn't otherwise expose. Parents
+    // that contribute only associated types (e.g. `protocol Iterator { type
+    // Item }`) flow transitively through refinement — no explicit listing
+    // needed. Associated-type / field-only parents are checked elsewhere
+    // (E457 for where-clause bounds on associated types).
     let provided = collect_provided_members(cx, type_entity);
-    let mut saw_requirement = false;
+    let mut saw_method_requirement = false;
 
     for member in cx.query.query(ProtocolMembers {
         protocol: parent_protocol,
@@ -135,47 +142,26 @@ fn parent_requirements_satisfied(
         let Some(name) = member_lookup_name(cx, member.entity) else {
             continue;
         };
-        match cx.query.get::<NodeKind>(member.entity) {
-            Some(NodeKind::Function | NodeKind::Subscript) => {
-                saw_requirement = true;
-                let proto_call = cx.query.get::<Callable>(member.entity);
-                let Some(candidates) = provided.methods.get(name.as_str()) else {
-                    return false;
-                };
-                if !candidates.iter().any(|&candidate| {
-                    signatures_match(proto_call, cx.query.get::<Callable>(candidate))
-                }) {
-                    return false;
-                }
-            },
-            Some(NodeKind::Field) => {
-                saw_requirement = true;
-                if !provided.fields.contains(name.as_str()) {
-                    return false;
-                }
-            },
-            _ => {},
-        }
-    }
-
-    for member in cx.query.query(ProtocolAssociatedTypes {
-        protocol: parent_protocol,
-        root: cx.root,
-    }) {
-        if member.extension.is_some() {
+        if !matches!(
+            cx.query.get::<NodeKind>(member.entity),
+            Some(NodeKind::Function | NodeKind::Subscript)
+        ) {
             continue;
         }
-        let Some(name) = member_lookup_name(cx, member.entity) else {
-            continue;
+        saw_method_requirement = true;
+        let proto_call = cx.query.get::<Callable>(member.entity);
+        let Some(candidates) = provided.methods.get(name.as_str()) else {
+            return false;
         };
-        saw_requirement = true;
-        let has_default = cx.query.get::<TypeAnnotation>(member.entity).is_some();
-        if !has_default && !provided.type_aliases.contains(name.as_str()) {
+        if !candidates
+            .iter()
+            .any(|&candidate| signatures_match(proto_call, cx.query.get::<Callable>(candidate)))
+        {
             return false;
         }
     }
 
-    saw_requirement
+    saw_method_requirement
 }
 
 fn collect_provided_members(cx: &DeclContext<'_>, type_entity: Entity) -> ProvidedMembers {

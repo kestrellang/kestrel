@@ -163,6 +163,34 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("no matching overload for '{name}'"),
             format!("no matching overload for '{name}'"),
         ),
+        InferError::MemberwiseInitArity {
+            struct_name,
+            expected,
+            got,
+            ..
+        } => (
+            format!(
+                "struct '{struct_name}' has {expected} field(s), but {got} argument(s) were provided"
+            ),
+            format!("expected {expected} argument(s)"),
+        ),
+        InferError::MemberwiseInitLabel {
+            struct_name,
+            expected,
+            got,
+            ..
+        } => {
+            let got_desc = got
+                .as_deref()
+                .map(|s| format!("'{}'", s))
+                .unwrap_or_else(|| "unlabeled".into());
+            (
+                format!(
+                    "argument for struct '{struct_name}' has {got_desc} label, but expected '{expected}'"
+                ),
+                format!("expected label '{expected}'"),
+            )
+        },
         InferError::ItWrongArity { expected, .. } => (
             format!("implicit 'it' parameter used in {expected}-parameter context"),
             "'it' requires exactly 1 parameter".into(),
@@ -177,6 +205,24 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         InferError::CannotInferType { .. } => (
             "could not infer type".into(),
             "add a type annotation".into(),
+        ),
+        InferError::TupleIndexOnNonTuple { index, .. } => (
+            format!("cannot index into non-tuple type: {}", detail),
+            format!("'.{}' requires a tuple receiver", index),
+        ),
+        InferError::TupleIndexOutOfBounds { arity, index, .. } => (
+            format!(
+                "tuple index {index} out of bounds for {arity}-element tuple"
+            ),
+            format!("valid indices are 0..{}", arity.saturating_sub(1)),
+        ),
+        InferError::MemberAccessOnPrimitive { name, .. } => (
+            format!("cannot access member on type: {}", detail),
+            format!("'{}' not available", name),
+        ),
+        InferError::PrimitiveMethodNotCalled { method, .. } => (
+            detail.to_string(),
+            format!("add () to call '{}'", method),
         ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }

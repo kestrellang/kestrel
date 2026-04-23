@@ -238,83 +238,84 @@ fn check_type_arg_arity(cx: &DeclContext<'_>, ty: &AstType, diags: &mut Vec<Anal
             let type_args: Vec<&AstType> =
                 segments.iter().flat_map(|s| s.type_args.iter()).collect();
 
-            if !type_args.is_empty() {
-                // Resolve the named type to check its type params
-                let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-                let result = cx.query.query(ResolveTypePath {
-                    segments: seg_names,
-                    context: cx.entity,
-                    root: cx.root,
-                });
-                if let TypeResolution::Found(entity) = result {
-                    let total = cx
-                        .query
-                        .get::<TypeParams>(entity)
-                        .map(|tp| tp.0.len())
-                        .unwrap_or(0);
-                    let required = cx
-                        .query
-                        .get::<TypeParams>(entity)
-                        .map(|tp| {
-                            tp.0.iter()
-                                .filter(|&&p| cx.query.get::<TypeAnnotation>(p).is_none())
-                                .count()
-                        })
-                        .unwrap_or(0);
-                    let type_name = segments
-                        .iter()
-                        .map(|s| s.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".");
+            // Resolve the named type to check its type params. A bare reference
+            // (no brackets) still needs checking: at declaration level there's no
+            // inference context to fill in type arguments, so `type T = Box;`
+            // where `Box[T]` has a required param is an error.
+            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            let result = cx.query.query(ResolveTypePath {
+                segments: seg_names,
+                context: cx.entity,
+                root: cx.root,
+            });
+            if let TypeResolution::Found(entity) = result {
+                let total = cx
+                    .query
+                    .get::<TypeParams>(entity)
+                    .map(|tp| tp.0.len())
+                    .unwrap_or(0);
+                let required = cx
+                    .query
+                    .get::<TypeParams>(entity)
+                    .map(|tp| {
+                        tp.0.iter()
+                            .filter(|&&p| cx.query.get::<TypeAnnotation>(p).is_none())
+                            .count()
+                    })
+                    .unwrap_or(0);
+                let type_name = segments
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
 
-                    if total == 0 {
-                        // Non-generic type doesn't accept type arguments
-                        diags.push(AnalyzeDiagnostic {
-                            descriptor_id: "E438",
-                            severity: Severity::Error,
-                            message: format!("'{}' does not accept type arguments", type_name),
-                            labels: vec![DiagLabel {
-                                span: span.clone(),
-                                message: "does not accept type arguments".into(),
-                                is_primary: true,
-                            }],
-                            notes: vec![],
-                        });
-                    } else if type_args.len() < required {
-                        diags.push(AnalyzeDiagnostic {
-                            descriptor_id: "E438",
-                            severity: Severity::Error,
-                            message: format!(
-                                "too few type arguments for '{}': expected at least {}, got {}",
-                                type_name,
-                                required,
-                                type_args.len()
-                            ),
-                            labels: vec![DiagLabel {
-                                span: span.clone(),
-                                message: format!("expected at least {} type argument(s)", required),
-                                is_primary: true,
-                            }],
-                            notes: vec![],
-                        });
-                    } else if type_args.len() > total {
-                        diags.push(AnalyzeDiagnostic {
-                            descriptor_id: "E438",
-                            severity: Severity::Error,
-                            message: format!(
-                                "too many type arguments for '{}': expected at most {}, got {}",
-                                type_name,
-                                total,
-                                type_args.len()
-                            ),
-                            labels: vec![DiagLabel {
-                                span: span.clone(),
-                                message: format!("expected at most {} type argument(s)", total),
-                                is_primary: true,
-                            }],
-                            notes: vec![],
-                        });
-                    }
+                if total == 0 && !type_args.is_empty() {
+                    // Non-generic type doesn't accept type arguments
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: "E438",
+                        severity: Severity::Error,
+                        message: format!("'{}' does not accept type arguments", type_name),
+                        labels: vec![DiagLabel {
+                            span: span.clone(),
+                            message: "does not accept type arguments".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                } else if type_args.len() < required {
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: "E438",
+                        severity: Severity::Error,
+                        message: format!(
+                            "too few type arguments for '{}': expected at least {}, got {}",
+                            type_name,
+                            required,
+                            type_args.len()
+                        ),
+                        labels: vec![DiagLabel {
+                            span: span.clone(),
+                            message: format!("expected at least {} type argument(s)", required),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                } else if type_args.len() > total {
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: "E438",
+                        severity: Severity::Error,
+                        message: format!(
+                            "too many type arguments for '{}': expected at most {}, got {}",
+                            type_name,
+                            total,
+                            type_args.len()
+                        ),
+                        labels: vec![DiagLabel {
+                            span: span.clone(),
+                            message: format!("expected at most {} type argument(s)", total),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
                 }
             }
 

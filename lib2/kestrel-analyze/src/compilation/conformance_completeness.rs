@@ -39,10 +39,13 @@ use kestrel_ast_builder::{
     TypeAnnotation, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
+use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::{
     ConformingProtocols, ExtensionTargetEntity, ExtensionsFor, ProtocolAssociatedTypes,
     ProtocolMembers, ResolveTypePath, TypeResolution,
 };
+use kestrel_type_infer::compare::{AssocBinding, TypeCompareEnv, compare_hir_types};
+use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -93,6 +96,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E463",
+        name: "ambiguous_method_satisfies_multiple_protocols",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct ConformanceCompletenessAnalyzer;
@@ -127,6 +136,7 @@ fn check_entity(cx: &CompilationContext<'_>, entity: Entity, diags: &mut Vec<Ana
     // Check struct/enum declarations with direct conformances
     if matches!(kind, Some(NodeKind::Struct | NodeKind::Enum)) {
         check_type_conformances(cx, entity, entity, diags);
+        check_ambiguous_method_satisfaction(cx, entity, diags);
     }
 
     // Check extensions that add conformances
@@ -751,44 +761,9 @@ fn resolve_qualified_target(cx: &CompilationContext<'_>, alias: Entity) -> Optio
     }
 }
 
-fn return_type_has_unbound_associated_type(
-    cx: &CompilationContext<'_>,
-    ast_ty: &AstType,
-    type_entity: Entity,
-    protocol: Entity,
-) -> bool {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return false;
-    };
-    if segments.len() != 1 || !segments[0].type_args.is_empty() {
-        return false;
-    }
-    let name = &segments[0].name;
-    let assoc_member = cx
-        .query
-        .query(ProtocolAssociatedTypes {
-            protocol,
-            root: cx.root,
-        })
-        .into_iter()
-        .find(|member| {
-            member.extension.is_none()
-                && member_lookup_name(cx, member.entity).is_some_and(|n| n == name.as_str())
-        });
-
-    let Some(member) = assoc_member else {
-        return false;
-    };
-    find_associated_type_binding(cx, type_entity, name, protocol).is_none()
-        && cx.query.get::<TypeAnnotation>(member.entity).is_none()
-        && find_protocol_extension_assoc_binding(cx, protocol, member.declaring_protocol, name)
-            .is_none()
-}
-
-/// Check that an impl method's return type matches the protocol method's,
-/// comparing by resolved entity so `Self`, associated-type projections, and
-/// fully-qualified paths (`std.num.Int64` vs `Int64`) compare equal when they
-/// denote the same type.
+/// Check that an impl method's return type matches the protocol method's.
+/// Return annotations are lowered to HIR and compared after substituting the
+/// conforming type for `Self` and resolving associated-type bindings.
 fn check_method_return_type(
     cx: &CompilationContext<'_>,
     proto_method: Entity,
@@ -799,32 +774,36 @@ fn check_method_return_type(
     proto_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let Some(proto_ann) = cx.query.get::<TypeAnnotation>(proto_method) else {
-        return;
-    };
-    let Some(impl_ann) = cx.query.get::<TypeAnnotation>(impl_method) else {
-        return;
-    };
+    let expected = cx.query.query(LowerCallableReturnType {
+        entity: proto_method,
+        root: cx.root,
+    });
+    let actual = cx.query.query(LowerCallableReturnType {
+        entity: impl_method,
+        root: cx.root,
+    });
+    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
 
-    if return_type_has_unbound_associated_type(cx, &proto_ann.0, type_entity, protocol) {
-        // Missing associated-type bindings are reported by E455. Avoid also
-        // comparing `Product` against a concrete impl return and emitting a
-        // misleading wrong-return diagnostic.
-        return;
+    // Align method-level type parameters. `func make[U] -> U` on the protocol
+    // and impl have distinct `U` entities, so the returns compare unequal
+    // without this mapping. Matched positionally; if arities differ the
+    // signature analyzer (E457) has already reported that.
+    let proto_params: Vec<Entity> = cx
+        .query
+        .get::<kestrel_ast_builder::TypeParams>(proto_method)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let impl_params: Vec<Entity> = cx
+        .query
+        .get::<kestrel_ast_builder::TypeParams>(impl_method)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for (&proto_param, &impl_param) in proto_params.iter().zip(impl_params.iter()) {
+        env.param_subs
+            .push((proto_param, ResolvedTy::Param { entity: impl_param }));
     }
 
-    let expected = resolve_expected_return_type(cx, &proto_ann.0, type_entity, protocol);
-    let actual = resolve_type_entity_with_self(cx, &impl_ann.0, impl_method, Some(type_entity));
-
-    let mismatch = match (expected, actual) {
-        (Some(expected), Some(actual)) => expected != actual,
-        // When stdlib is disabled, qualified intrinsic names like `lang.i64`
-        // may not resolve to entities. Still catch obvious signature
-        // mismatches by comparing the annotation paths directly.
-        _ => ast_type_key(&proto_ann.0) != ast_type_key(&impl_ann.0),
-    };
-
-    if mismatch {
+    if !compare_hir_types(cx.query, cx.root, &expected, &actual, &env).is_equal_or_unknown() {
         let impl_span = util::entity_span(cx.query, impl_method);
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[4].id,
@@ -843,58 +822,67 @@ fn check_method_return_type(
     }
 }
 
-/// Resolve a protocol method's return type to the entity the impl is expected
-/// to return. Single-segment associated type references are projected through
-/// the conforming type's binding. Other named paths are resolved normally,
-/// mapping `Self` to the conforming type.
-fn resolve_expected_return_type(
+fn type_compare_env_for_conformance(
     cx: &CompilationContext<'_>,
-    ast_ty: &AstType,
     type_entity: Entity,
     protocol: Entity,
-) -> Option<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return None;
-    };
-    if segments.len() != 1 || !segments[0].type_args.is_empty() {
-        return resolve_type_entity_with_self(cx, ast_ty, protocol, Some(type_entity));
-    }
-    let name = &segments[0].name;
-
-    // Find the protocol's associated type with this name, if any.
-    let assoc_member = cx
+) -> TypeCompareEnv {
+    let assoc_bindings = cx
         .query
         .query(ProtocolAssociatedTypes {
             protocol,
             root: cx.root,
         })
         .into_iter()
-        .find(|member| {
-            member.extension.is_none()
-                && member_lookup_name(cx, member.entity).is_some_and(|n| n == name.as_str())
+        .filter_map(|member| {
+            let name = member_lookup_name(cx, member.entity)?;
+            let ty = if let Some(binding) = find_associated_type_binding_entity(
+                cx,
+                type_entity,
+                &name,
+                member.declaring_protocol,
+            ) {
+                cx.query.query(LowerTypeAnnotation {
+                    entity: binding,
+                    root: cx.root,
+                })?
+            } else {
+                cx.query.query(LowerTypeAnnotation {
+                    entity: member.entity,
+                    root: cx.root,
+                })?
+            };
+            Some(AssocBinding {
+                assoc: member.entity,
+                name,
+                ty,
+            })
         })
-        .map(|member| (member.entity, member.declaring_protocol));
+        .collect();
 
-    if let Some((assoc, declaring_protocol)) = assoc_member {
-        // Associated type: find the impl's binding (direct or via extension).
-        if let Some(binding) = find_associated_type_binding(cx, type_entity, name, protocol) {
-            return resolve_type_entity_with_self(cx, &binding, type_entity, Some(type_entity));
-        }
-        // Fall back to the protocol's default binding on the associated type itself.
-        if let Some(default) = cx.query.get::<TypeAnnotation>(assoc) {
-            return resolve_type_entity_with_self(cx, &default.0, protocol, Some(type_entity));
-        }
-        if let Some(default) =
-            find_protocol_extension_assoc_binding(cx, protocol, declaring_protocol, name)
-        {
-            return resolve_type_entity_with_self(cx, &default, protocol, Some(type_entity));
-        }
-        // No binding and no default — E455 handles "missing associated type".
-        return None;
+    TypeCompareEnv {
+        self_ty: Some(self_type_for_compare(cx, type_entity)),
+        assoc_bindings,
+        param_subs: Vec::new(),
     }
+}
 
-    // Not an associated type — resolve the name as a regular path.
-    resolve_type_entity_with_self(cx, ast_ty, protocol, Some(type_entity))
+fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> ResolvedTy {
+    let args = cx
+        .query
+        .get::<kestrel_ast_builder::TypeParams>(type_entity)
+        .map(|params| {
+            params
+                .0
+                .iter()
+                .map(|&entity| ResolvedTy::Param { entity })
+                .collect()
+        })
+        .unwrap_or_default();
+    ResolvedTy::Named {
+        entity: type_entity,
+        args,
+    }
 }
 
 /// Find the impl's binding for `assoc_name` on `type_entity`, searching the
@@ -906,12 +894,12 @@ fn resolve_expected_return_type(
 /// Example: `Optional` conforms to `Equatable`, and
 /// `extend Equatable: Equal[Self] { type Equal.Output = Bool }` supplies
 /// the `Equal.Output = Bool` binding for every Equatable type.
-fn find_associated_type_binding(
+fn find_associated_type_binding_entity(
     cx: &CompilationContext<'_>,
     type_entity: Entity,
     assoc_name: &str,
     protocol: Entity,
-) -> Option<AstType> {
+) -> Option<Entity> {
     let mut search = vec![type_entity];
     let extensions = cx.query.query(ExtensionsFor {
         target: type_entity,
@@ -937,7 +925,7 @@ fn find_associated_type_binding(
     // First pass: prefer bindings qualified to this exact protocol —
     // `type Equal.Output = Bool` trumps a sibling `type Output = String`
     // that would otherwise apply to any conformed protocol.
-    let mut fallback: Option<AstType> = None;
+    let mut fallback: Option<Entity> = None;
     for &entity in &search {
         for &child in cx.query.children_of(entity) {
             if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
@@ -949,9 +937,9 @@ fn find_associated_type_binding(
             if name.0 != assoc_name {
                 continue;
             }
-            let Some(ann) = cx.query.get::<TypeAnnotation>(child) else {
+            if cx.query.get::<TypeAnnotation>(child).is_none() {
                 continue;
-            };
+            }
 
             match cx.query.get::<QualifiedTarget>(child) {
                 Some(target) => {
@@ -969,7 +957,7 @@ fn find_associated_type_binding(
                         TypeResolution::Found(e) if e == protocol,
                     );
                     if matches {
-                        return Some(ann.0.clone());
+                        return Some(child);
                     }
                 },
                 None => {
@@ -980,7 +968,7 @@ fn find_associated_type_binding(
                     // `Tryable.Output`, not `Equal.Output`. Save as a
                     // fallback; a later qualified match wins.
                     if fallback.is_none() && entity_conforms_to(cx, entity, protocol) {
-                        fallback = Some(ann.0.clone());
+                        fallback = Some(child);
                     }
                 },
             }
@@ -1103,25 +1091,6 @@ fn member_lookup_name(cx: &CompilationContext<'_>, entity: Entity) -> Option<Str
     }
 }
 
-fn ast_type_key(ast_ty: &AstType) -> Option<String> {
-    match ast_ty {
-        AstType::Named { segments, .. } => Some(
-            segments
-                .iter()
-                .map(|segment| segment.name.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-        ),
-        AstType::Array(_, _) => Some("Array".into()),
-        AstType::Dictionary(_, _, _) => Some("Dictionary".into()),
-        AstType::Optional(_, _) => Some("Optional".into()),
-        AstType::Result { .. } => Some("Result".into()),
-        AstType::Unit(_) => Some("()".into()),
-        AstType::Never(_) => Some("Never".into()),
-        _ => None,
-    }
-}
-
 /// Check if an entity has a TypeAlias child with the given name (regardless of binding).
 fn has_type_alias_by_name(cx: &CompilationContext<'_>, entity: Entity, name: &str) -> bool {
     cx.query.children_of(entity).iter().any(|&child| {
@@ -1222,5 +1191,179 @@ fn resolve_conformance(
     }) {
         TypeResolution::Found(entity) => Some(entity),
         _ => None,
+    }
+}
+
+/// Compare each param type of proto_method and impl_method under a conformance
+/// env that maps `Self` to the concrete type. Returns true iff all params
+/// match (or at least don't disagree). Used to distinguish sibling protocol
+/// methods that share a name + labels but differ in parameter types.
+fn param_types_match(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_method: Entity,
+    impl_method: Entity,
+) -> bool {
+    let proto_params = cx.query.query(LowerCallableTypes {
+        entity: proto_method,
+        root: cx.root,
+    });
+    let impl_params = cx.query.query(LowerCallableTypes {
+        entity: impl_method,
+        root: cx.root,
+    });
+    let (Some(proto_params), Some(impl_params)) = (proto_params, impl_params) else {
+        return true;
+    };
+    if proto_params.len() != impl_params.len() {
+        return false;
+    }
+    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
+    let proto_ty_params: Vec<Entity> = cx
+        .query
+        .get::<kestrel_ast_builder::TypeParams>(proto_method)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let impl_ty_params: Vec<Entity> = cx
+        .query
+        .get::<kestrel_ast_builder::TypeParams>(impl_method)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for (&p, &i) in proto_ty_params.iter().zip(impl_ty_params.iter()) {
+        env.param_subs.push((p, ResolvedTy::Param { entity: i }));
+    }
+    for (proto_ty, impl_ty) in proto_params.iter().zip(impl_params.iter()) {
+        let (Some(proto_ty), Some(impl_ty)) = (proto_ty, impl_ty) else {
+            continue;
+        };
+        if !compare_hir_types(cx.query, cx.root, proto_ty, impl_ty, &env).is_equal_or_unknown() {
+            return false;
+        }
+    }
+    true
+}
+
+/// True iff there exists a pair (a, b) in `protocols` where neither `a`
+/// transitively conforms to `b` nor vice versa. If all pairs are related via
+/// refinement/extension, a single impl method covers them all — no ambiguity.
+fn has_unrelated_pair(cx: &CompilationContext<'_>, protocols: &[Entity]) -> bool {
+    if protocols.len() < 2 {
+        return false;
+    }
+    let closures: Vec<Vec<Entity>> = protocols
+        .iter()
+        .map(|&p| {
+            cx.query.query(ConformingProtocols {
+                entity: p,
+                root: cx.root,
+            })
+        })
+        .collect();
+    for i in 0..protocols.len() {
+        for j in (i + 1)..protocols.len() {
+            let a = protocols[i];
+            let b = protocols[j];
+            let a_refines_b = closures[i].contains(&b);
+            let b_refines_a = closures[j].contains(&a);
+            if !a_refines_b && !b_refines_a {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check 9 (E463): An impl method that exactly satisfies the signature of
+/// method requirements from two or more DIFFERENT conformed protocols is
+/// ambiguous — the user must disambiguate (typically by extending each
+/// protocol with a qualified impl). Inherited declarations don't count as a
+/// second source, so we only walk each protocol's *direct* children.
+fn check_ambiguous_method_satisfaction(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let provided = collect_provided_members(cx, type_entity);
+    let conforming = cx.query.query(ConformingProtocols {
+        entity: type_entity,
+        root: cx.root,
+    });
+    if conforming.len() < 2 {
+        return;
+    }
+
+    for (method_name, impl_candidates) in &provided.methods {
+        for &impl_method in impl_candidates {
+            if cx.query.get::<NodeKind>(impl_method) != Some(&NodeKind::Function) {
+                continue;
+            }
+            let impl_call = cx.query.get::<Callable>(impl_method);
+
+            // Walk direct children of each conformed protocol — a method
+            // inherited from a parent protocol won't appear as a child of
+            // the refining protocol, so this naturally counts each distinct
+            // declaration exactly once.
+            let mut matching_protocols: Vec<Entity> = Vec::new();
+            for &proto in &conforming {
+                for &child in cx.query.children_of(proto) {
+                    if cx.query.get::<NodeKind>(child) != Some(&NodeKind::Function) {
+                        continue;
+                    }
+                    let Some(child_name) = member_lookup_name(cx, child) else {
+                        continue;
+                    };
+                    if &child_name != method_name {
+                        continue;
+                    }
+                    let proto_call = cx.query.get::<Callable>(child);
+                    if signatures_match(proto_call, impl_call)
+                        && receivers_match(proto_call, impl_call)
+                        && param_types_match(cx, type_entity, proto, child, impl_method)
+                    {
+                        matching_protocols.push(proto);
+                    }
+                }
+            }
+
+            matching_protocols.sort_unstable_by_key(|e| e.index());
+            matching_protocols.dedup();
+
+            // If every pair of matching protocols is related via refinement
+            // or extension (i.e. one conforms to the other), then the impl
+            // method satisfies them through a single chain — not ambiguous.
+            // Example: `extend Equatable: Equal[Self]` makes Equatable types
+            // auto-conform to Equal, so a struct's `equals` serves both.
+            if matching_protocols.len() >= 2
+                && !has_unrelated_pair(cx, &matching_protocols)
+            {
+                continue;
+            }
+
+            if matching_protocols.len() >= 2 {
+                let names: Vec<String> = matching_protocols
+                    .iter()
+                    .map(|&p| util::entity_name(cx.query, p))
+                    .collect();
+                let span = util::entity_span(cx.query, impl_method);
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: "E463",
+                    severity: Severity::Error,
+                    message: format!(
+                        "method '{}' is ambiguous: satisfies requirements of multiple protocols ({})",
+                        method_name,
+                        names.join(", ")
+                    ),
+                    labels: vec![DiagLabel {
+                        span,
+                        message: "ambiguous protocol method".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![
+                        "provide distinct implementations via `extend Type: Protocol { ... }` for each protocol".into(),
+                    ],
+                });
+            }
+        }
     }
 }

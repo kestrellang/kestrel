@@ -4,4 +4,4 @@
 module Test
 
 struct Box[T] { }
-type Alias = Box;
+type Alias = Box; // ERROR: too few type arguments

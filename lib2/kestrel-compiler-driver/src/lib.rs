@@ -245,10 +245,16 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
+        InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
+        InferError::MemberwiseInitLabel { .. } => "MemberwiseInitLabel",
         InferError::ItWrongArity { .. } => "ItWrongArity",
         InferError::LiteralNotAccepted { .. } => "LiteralNotAccepted",
         InferError::UnresolvedTypeParam { .. } => "UnresolvedTypeParam",
         InferError::CannotInferType { .. } => "CannotInferType",
+        InferError::TupleIndexOnNonTuple { .. } => "TupleIndexOnNonTuple",
+        InferError::TupleIndexOutOfBounds { .. } => "TupleIndexOutOfBounds",
+        InferError::MemberAccessOnPrimitive { .. } => "MemberAccessOnPrimitive",
+        InferError::PrimitiveMethodNotCalled { .. } => "PrimitiveMethodNotCalled",
     }
 }
 
@@ -328,6 +334,24 @@ fn format_error(err: &InferError) -> String {
                 name, span.file_id, span.start
             )
         },
+        InferError::MemberwiseInitArity {
+            struct_name,
+            expected,
+            got,
+            ..
+        } => format!(
+            "MemberwiseInitArity '{}' expected={} got={} at {}:{}",
+            struct_name, expected, got, span.file_id, span.start
+        ),
+        InferError::MemberwiseInitLabel {
+            struct_name,
+            expected,
+            got,
+            ..
+        } => format!(
+            "MemberwiseInitLabel '{}' expected={} got={:?} at {}:{}",
+            struct_name, expected, got, span.file_id, span.start
+        ),
         InferError::ItWrongArity { expected, .. } => {
             format!(
                 "ItWrongArity expected={} at {}:{}",
@@ -346,6 +370,22 @@ fn format_error(err: &InferError) -> String {
         InferError::CannotInferType { .. } => {
             format!("CannotInferType at {}:{}", span.file_id, span.start)
         },
+        InferError::TupleIndexOnNonTuple { index, .. } => format!(
+            "TupleIndexOnNonTuple index={} at {}:{}",
+            index, span.file_id, span.start
+        ),
+        InferError::TupleIndexOutOfBounds { arity, index, .. } => format!(
+            "TupleIndexOutOfBounds arity={} index={} at {}:{}",
+            arity, index, span.file_id, span.start
+        ),
+        InferError::MemberAccessOnPrimitive { name, .. } => format!(
+            "MemberAccessOnPrimitive '{}' at {}:{}",
+            name, span.file_id, span.start
+        ),
+        InferError::PrimitiveMethodNotCalled { method, .. } => format!(
+            "PrimitiveMethodNotCalled '{}' at {}:{}",
+            method, span.file_id, span.start
+        ),
     }
 }
 

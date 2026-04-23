@@ -1,15 +1,14 @@
 //! # Refutable Pattern Analyzer
 //!
-//! Checks that let/var bindings use irrefutable patterns. A refutable
-//! pattern (literal, variant, range) in a let binding is an error because
-//! it cannot match all possible values.
+//! Checks that `let <pat> = value` bindings use irrefutable patterns. HIR
+//! lowering desugars any non-trivial let pattern into a match with
+//! `MatchSource::LetDestructure` (see `hir-lower/src/stmt.rs`). This
+//! analyzer walks those matches and flags the arm pattern when it is not
+//! guaranteed to cover every value of the scrutinee's type.
 //!
-//! Irrefutable patterns: Wildcard, Binding, Tuple of irrefutables, At with
-//! irrefutable sub, Or with any irrefutable alternative, Error (to suppress
-//! cascading).
-//!
-//! Refutable patterns: Literal, Range, Variant, ImplicitVariant, Struct
-//! with refutable fields.
+//! Uses `kestrel_pattern_matching::is_irrefutable` for the type-aware
+//! check (so e.g. a single-variant enum destructure is irrefutable,
+//! but `Option.Some(x)` over `Option[T]` is not).
 //!
 //! ## Diagnostics
 //!
@@ -27,6 +26,7 @@
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
+use crate::util;
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
@@ -51,79 +51,51 @@ impl BodyCheck for RefutablePatternAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
-        // Walk all statements looking for let bindings
-        // Check both top-level statements and nested blocks
-        check_stmts(cx, &cx.hir.statements, &mut diags);
-        if let Some(tail) = cx.hir.tail_expr {
-            check_expr_for_lets(cx, tail, &mut diags);
+        for (_, expr) in cx.hir.exprs.iter() {
+            let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: MatchSource::LetDestructure,
+                ..
+            } = expr
+            else {
+                continue;
+            };
+            let Some(arm) = arms.first() else { continue };
+
+            // Skip if the scrutinee failed to type — the diagnostic is
+            // already reported and a refutability finding would be noise.
+            let Some(scrutinee_ty) = cx.typed.expr_types.get(scrutinee) else {
+                continue;
+            };
+            if matches!(scrutinee_ty, kestrel_type_infer::result::ResolvedTy::Error) {
+                continue;
+            }
+
+            if kestrel_pattern_matching::is_irrefutable(
+                cx.hir,
+                cx.query,
+                cx.root,
+                arm.pattern,
+                scrutinee_ty,
+            ) {
+                continue;
+            }
+
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[0].id,
+                severity: DESCRIPTORS[0].default_severity,
+                message: "refutable pattern in let binding".into(),
+                labels: vec![DiagLabel {
+                    span: util::pat_span(cx.hir, arm.pattern),
+                    message: "this pattern may not match all values".into(),
+                    is_primary: true,
+                }],
+                notes: vec!["help: use 'if let' or 'match' for refutable patterns".into()],
+            });
         }
 
         diags
-    }
-}
-
-fn check_stmts(cx: &BodyContext<'_>, stmts: &[HirStmtId], diags: &mut Vec<AnalyzeDiagnostic>) {
-    for &stmt_id in stmts {
-        check_stmt(cx, stmt_id, diags);
-    }
-}
-
-fn check_stmt(cx: &BodyContext<'_>, id: HirStmtId, diags: &mut Vec<AnalyzeDiagnostic>) {
-    match &cx.hir.stmts[id] {
-        HirStmt::Let { .. } => {
-            // In lib2 HIR, let bindings have a single local (not a pattern).
-            // Destructuring patterns are desugared before HIR, so we don't
-            // need to check patterns here — the desugaring handles it.
-            // This check is relevant for pattern-bearing let statements,
-            // which would need a pattern field on HirStmt::Let.
-            // Currently all let bindings are irrefutable by construction.
-        },
-        HirStmt::Expr { expr, .. } => {
-            check_expr_for_lets(cx, *expr, diags);
-        },
-        HirStmt::Deinit { .. } => {},
-    }
-}
-
-/// Recurse into expressions to find nested let bindings (in blocks, etc.)
-fn check_expr_for_lets(cx: &BodyContext<'_>, id: HirExprId, diags: &mut Vec<AnalyzeDiagnostic>) {
-    match &cx.hir.exprs[id] {
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            check_block_for_lets(cx, then_body, diags);
-            if let Some(else_block) = else_body {
-                check_block_for_lets(cx, else_block, diags);
-            }
-        },
-        HirExpr::Loop { body, .. } => {
-            check_block_for_lets(cx, body, diags);
-        },
-        HirExpr::Match { arms, .. } => {
-            for arm in arms {
-                check_expr_for_lets(cx, arm.body, diags);
-            }
-        },
-        HirExpr::Block { body, .. } => {
-            check_block_for_lets(cx, body, diags);
-        },
-        HirExpr::Closure { body, .. } => {
-            check_block_for_lets(cx, body, diags);
-        },
-        _ => {},
-    }
-}
-
-fn check_block_for_lets(
-    cx: &BodyContext<'_>,
-    block: &HirBlock,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
-    check_stmts(cx, &block.stmts, diags);
-    if let Some(tail) = block.tail_expr {
-        check_expr_for_lets(cx, tail, diags);
     }
 }
 

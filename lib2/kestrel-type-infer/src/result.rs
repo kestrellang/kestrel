@@ -383,6 +383,30 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::NoMatchingOverload { name, .. } => {
             format!("no matching overload for '{}'", name)
         },
+        InferError::MemberwiseInitArity {
+            struct_name,
+            expected,
+            got,
+            ..
+        } => format!(
+            "struct '{}' has {} field(s), but {} argument(s) were provided",
+            struct_name, expected, got
+        ),
+        InferError::MemberwiseInitLabel {
+            struct_name,
+            expected,
+            got,
+            ..
+        } => {
+            let got_desc = got
+                .as_deref()
+                .map(|s| format!("'{}'", s))
+                .unwrap_or_else(|| "unlabeled".into());
+            format!(
+                "argument for struct '{}' has {} label, but expected '{}'",
+                struct_name, got_desc, expected
+            )
+        },
         InferError::ItWrongArity { expected, .. } => {
             format!(
                 "implicit 'it' parameter used in {}-parameter context",
@@ -405,5 +429,28 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             format!("cannot infer type parameter '{}'", name)
         },
         InferError::CannotInferType { .. } => "could not infer type".into(),
+        InferError::TupleIndexOnNonTuple {
+            receiver, index, ..
+        } => format!(
+            "cannot index into non-tuple type '{}' with .{}",
+            describe_tyvar(ctx, *receiver),
+            index
+        ),
+        InferError::TupleIndexOutOfBounds { arity, index, .. } => format!(
+            "tuple index {} out of bounds for {}-element tuple",
+            index, arity
+        ),
+        InferError::MemberAccessOnPrimitive { receiver, name, .. } => format!(
+            "cannot access member '{}' on type '{}'",
+            name,
+            describe_tyvar(ctx, *receiver)
+        ),
+        InferError::PrimitiveMethodNotCalled {
+            receiver, method, ..
+        } => format!(
+            "primitive method '{}' on '{}' must be called",
+            method,
+            describe_tyvar(ctx, *receiver)
+        ),
     }
 }

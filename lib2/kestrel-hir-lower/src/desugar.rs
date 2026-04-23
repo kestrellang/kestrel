@@ -264,6 +264,9 @@ impl LowerCtx<'_> {
         while_body: &AstBlock,
         span: &Span,
     ) -> HirExprId {
+        // Scope enclosing the condition + loop body so `while let` pattern
+        // bindings are visible inside the body but not after the loop.
+        self.push_scope();
         // Lower conditions to a boolean expression
         let cond = self.lower_if_conditions(body, conditions, MatchSource::WhileLet, span);
 
@@ -305,6 +308,7 @@ impl LowerCtx<'_> {
         self.push_loop(label);
         let lowered_body = self.lower_block(body, while_body);
         self.pop_loop();
+        self.pop_scope();
 
         let mut loop_stmts = vec![if_break_stmt];
         loop_stmts.extend(lowered_body.stmts);

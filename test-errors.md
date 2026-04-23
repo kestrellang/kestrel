@@ -179,12 +179,6 @@ Field name in a struct pattern (`Point { x, z } => ...`) that isn't on the struc
 
 Compiler rejects valid code or emits spurious diagnostics where none should fire.
 
-## Inherited associated type not resolved through parent protocol
-
-`protocol Child: Base` with `type Element` declared on `Base`: resolving `Self.Element` / `Item` from inside `Child` (or a conforming struct) fails to walk the parent chain. Shows up as spurious "no associated type" or "wrong return type" diagnostics when the protocol requirement's return type is an inherited associated type.
-
-- [ ] `declarations/extensions/protocol_extension_uses_inherited_associated_type.ks` — **expected:** no errors · **got:** `no associated type 'Element': Self.Element no assoc type` (lines 9, 12, 12) + `could not infer type` (line 13) — extension body can't project `Self.Element` from the parent `Base` through `Child`
-
 ## E458 on inherited associated types via method/where-clause binding
 
 The `conformance_completeness.rs` two-pass binding search fixed most `Equal.Output = Bool` cases by preferring qualified bindings, but some inherited-protocol paths still miss the default binding. Extension `extend IntIter: Iterator { type Item = lang.i64; func next() -> Item }` and qualified module path `std.num.Int64` in impl return types don't line up with the protocol requirement's abstract `Optional[Self.Item]` / `Item` placeholder.

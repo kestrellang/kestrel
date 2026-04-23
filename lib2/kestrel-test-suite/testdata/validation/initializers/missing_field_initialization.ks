@@ -7,7 +7,7 @@ struct Point {
     var x: lang.i64
     var y: lang.i64
 
-    init() { // ERROR
+    init() {
         self.x = 0;
-    }
+    } // ERROR
 }

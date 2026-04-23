@@ -117,6 +117,21 @@ fn check_irrefutable(
         flat_pat::FlatPat::Wildcard => true,
 
         flat_pat::FlatPat::Ctor { ctor, children } => {
+            // A rest-only array pattern (`[..]` / `[..all]`) matches arrays
+            // of any length, so it's irrefutable for `Array[T]` types even
+            // though the Array type has "infinite" constructors (one per
+            // length). The sole rest slot matches anything.
+            if let constructor::Constructor::Array {
+                prefix_len: 0,
+                suffix_len: 0,
+                has_rest: true,
+            } = ctor
+            {
+                return children
+                    .iter()
+                    .all(|c| matches!(c, flat_pat::FlatPat::Wildcard));
+            }
+
             // Check if this constructor is the only one for the type
             let all = constructor::Constructor::all_for_type(query, root, ty);
             let is_sole_ctor = all

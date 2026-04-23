@@ -4,4 +4,4 @@
 module Test
 
 struct Map[K, V = lang.str] { }
-type Inferred = Map;
+type Inferred = Map; // ERROR: too few type arguments

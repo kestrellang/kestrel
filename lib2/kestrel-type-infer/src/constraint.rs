@@ -134,6 +134,17 @@ pub enum Constraint {
         suffix_tys: Vec<TyVar>,
         span: Span,
     },
+
+    /// `tuple.N` — tuple index access.
+    /// Deferred until tuple resolves. Distinct from `Member` so out-of-bounds
+    /// and non-tuple receivers get their own diagnostics instead of a generic
+    /// "no member 'N'".
+    TupleIndex {
+        tuple: TyVar,
+        index: usize,
+        result: TyVar,
+        span: Span,
+    },
 }
 
 /// Argument in a call: optional label + type variable.

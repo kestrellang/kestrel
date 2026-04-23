@@ -632,4 +632,8 @@ Fixed 2026-04-21 (later same-day) alongside the `conformance_completeness.rs` as
 
 - [x] `declarations/associated_types/struct_conforming_to_child_provides_associated_type.ks` — was E458 `method 'prev' has wrong return type for protocol 'BidirectionalIterator'` at line 15
 
-(The companion `declarations/extensions/protocol_extension_uses_inherited_associated_type.ks` still fails for a different reason: the extension body can't project `Self.Element` from the parent protocol chain — tracked separately in `test-errors.md`.)
+## Inherited associated type — protocol-extension Self projection resolved
+
+Fixed 2026-04-23 by routing protocol and `SelfType` associated-type lookup through the inherited protocol associated-type traversal instead of checking only direct children and extensions on the queried protocol. `Self.Element` inside `extend Child` now finds `Element` declared by parent protocol `Base`.
+
+- [x] `declarations/extensions/protocol_extension_uses_inherited_associated_type.ks` — was `no associated type 'Element': Self.Element no assoc type` plus `could not infer type`

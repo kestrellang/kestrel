@@ -16,8 +16,9 @@
 //! **Message:** "initializer does not initialize all fields: {field_list}"
 //!
 //! **Labels:**
-//! - Primary: the initializer declaration
-//!   - Span source: `util::entity_span` on the initializer entity
+//! - Primary: the closing `}` of the initializer body
+//!   - Span source: `util::body_close_brace_span` on the initializer entity
+//!     (falls back to `util::entity_span` for bodyless inits)
 //!   - Message: "in this initializer"
 //!
 //! **Notes:** (none)
@@ -188,6 +189,7 @@ impl BodyCheck for InitializerAnalyzer {
             all_fields: all_fields.clone(),
             let_fields,
             diags: Vec::new(),
+            loop_break_stack: Vec::new(),
         };
 
         let final_state = analyze_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut vctx);
@@ -204,12 +206,14 @@ impl BodyCheck for InitializerAnalyzer {
                     .map(|s| format!("'{}'", s))
                     .collect::<Vec<_>>()
                     .join(", ");
+                let span = util::body_close_brace_span(cx.query, cx.entity)
+                    .unwrap_or_else(|| util::entity_span(cx.query, cx.entity));
                 vctx.diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
                     message: format!("initializer does not initialize all fields: {}", field_list),
                     labels: vec![DiagLabel {
-                        span: util::entity_span(cx.query, cx.entity),
+                        span,
                         message: "in this initializer".into(),
                         is_primary: true,
                     }],
@@ -228,6 +232,10 @@ struct VerifyCtx {
     all_fields: HashSet<String>,
     let_fields: HashSet<String>,
     diags: Vec<AnalyzeDiagnostic>,
+    /// Stack of per-loop break-state collectors. When an unlabeled `break` is
+    /// reached inside a loop, its current state is pushed onto the top frame.
+    /// The merge of these frames becomes the outer state after the loop exits.
+    loop_break_stack: Vec<Vec<InitState>>,
 }
 
 #[derive(Clone, Debug)]
@@ -561,8 +569,17 @@ fn analyze_expr(
             }
         },
 
-        // Loop: analyze body but don't trust assignments (body may not fully execute)
+        // Loop: walk the body once; capture the state at every `break` that
+        // exits this loop. The post-loop state is the merge of those break
+        // states — a field is initialized after the loop only if it was
+        // initialized on every path that exits via `break`. A loop with no
+        // `break` is an infinite loop and therefore diverges.
+        //
+        // All loops have HIR type `Never`, so we must skip the unified Never
+        // check by returning early.
         HirExpr::Loop { body, .. } => {
+            vctx.loop_break_stack.push(Vec::new());
+
             let mut body_state = state.clone();
             for &stmt_id in &body.stmts {
                 if body_state.diverged {
@@ -575,11 +592,37 @@ fn analyze_expr(
                     let _ = analyze_expr(cx, tail, body_state, false, vctx);
                 }
             }
-            // Conservative: don't propagate loop body state
+
+            let break_states = vctx.loop_break_stack.pop().unwrap();
+            if break_states.is_empty() {
+                // No reachable break → infinite loop
+                state.diverged = true;
+            } else {
+                // Merge all break exit states into the post-loop state
+                let mut merged = break_states
+                    .into_iter()
+                    .reduce(|a, b| a.merge(b))
+                    .unwrap();
+                // A merged set of break exits is not itself diverged — the
+                // loop exits normally via the break. `merge` may have set
+                // diverged if all breaks came from diverging paths, but the
+                // breaks themselves define the exit, so clear it.
+                merged.diverged = false;
+                state = merged;
+            }
+            return state;
         },
 
-        // Break/Continue divergence is handled by the Never-type check below
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => {},
+        // Break: record current state for the enclosing loop's exit merge.
+        // Divergence flag is set by the Never-type check below.
+        HirExpr::Break { .. } => {
+            if let Some(top) = vctx.loop_break_stack.last_mut() {
+                top.push(state.clone());
+            }
+        },
+
+        // Continue: divergence set by Never-type check; no exit state to record
+        HirExpr::Continue { .. } => {},
 
         // Block expression
         HirExpr::Block { body, .. } => {
@@ -664,3 +707,4 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
         false
     }
 }
+

@@ -472,14 +472,10 @@ impl TypeResolver for WorldResolver<'_> {
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
         match container {
-            TyKind::Struct { entity, .. }
-            | TyKind::Enum { entity, .. }
-            | TyKind::Protocol { entity, .. }
-            | TyKind::SelfType { entity } => {
+            TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } => {
                 // Concrete type — search children for a TypeAlias with matching name,
                 // then extensions (e.g. Dictionary's `type Key = K` lives on an
                 // `extend Dictionary[K, V, H]: _ExpressibleByDictionaryLiteral` block).
-                // SelfType(P) resolves associated types via P's declaration + extensions.
                 if let Some(res) = self.find_associated_type_in_entity(*entity, name) {
                     return Some(res);
                 }
@@ -493,6 +489,9 @@ impl TypeResolver for WorldResolver<'_> {
                     }
                 }
                 None
+            },
+            TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => {
+                self.find_associated_type_in_protocol(*entity, name)
             },
             TyKind::TypeAlias { entity, .. } => {
                 // Protocol associated type (e.g. Iter: Iterator) —
@@ -878,6 +877,20 @@ impl WorldResolver<'_> {
             }
         }
         None
+    }
+
+    /// Search a protocol for an associated type, including inherited protocols
+    /// and protocol extensions.
+    ///
+    /// TODO: Move this into a shared name-resolution query that returns a
+    /// single associated-type member by name, so type inference does not need
+    /// to know how protocol associated-type traversal is assembled.
+    fn find_associated_type_in_protocol(
+        &self,
+        protocol: Entity,
+        name: &str,
+    ) -> Option<AssociatedTypeResolution> {
+        self.find_associated_type_in_protocols(&[protocol], name)
     }
 
     /// Search protocol bounds for an associated type with the given name.

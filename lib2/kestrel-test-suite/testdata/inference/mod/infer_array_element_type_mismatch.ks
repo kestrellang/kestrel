@@ -4,6 +4,6 @@
 module Main
 
 func test() {
-    let arr = [1, 2, 3];
-    let x: [lang.str] = arr; // ERROR: does not conform to protocol
+    let arr = [1, 2, 3]; // ERROR: type mismatch
+    let x: [lang.str] = arr;
 }
