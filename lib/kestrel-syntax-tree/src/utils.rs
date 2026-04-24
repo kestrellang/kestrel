@@ -27,11 +27,14 @@ pub fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
         .map(|tok| tok.text().to_string())
 }
 
-/// Check if a `SyntaxKind` is trivia (whitespace or comment).
+/// Check if a `SyntaxKind` is trivia (whitespace, newline, or comment).
 pub fn is_trivia(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
+        SyntaxKind::Whitespace
+            | SyntaxKind::Newline
+            | SyntaxKind::LineComment
+            | SyntaxKind::BlockComment
     )
 }
 

@@ -632,17 +632,55 @@ public struct B {}
     }
 
     #[test]
-    fn characterization_preserves_inter_declaration_trivia_text() {
+    fn trivia_kinds_are_distinct_between_declarations() {
         let source = "module Test\n// keep this comment\nimport Std.IO";
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(result.tree.text().to_string(), source);
 
-        let trivia = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
+        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        assert_eq!(line_comments, vec!["// keep this comment"]);
+
+        let newlines = token_texts(&result.tree, &[SyntaxKind::Newline]);
+        assert_eq!(newlines.len(), 2, "two \\n separators between the three tokens");
+
+        let whitespace = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
         assert!(
-            trivia.iter().any(|text| text.contains("// keep this comment")),
-            "current tree builder stores inter-declaration comment text as trivia"
+            whitespace.iter().all(|t| !t.contains('\n') && !t.contains("//")),
+            "Whitespace kind holds only spaces/tabs, not newlines or comments"
+        );
+    }
+
+    #[test]
+    fn trivia_round_trips_block_and_line_comments() {
+        let source = "module Test\n/* block */ struct Foo {}\n// trailing\n";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "tree text must round-trip the source verbatim"
+        );
+
+        let block_comments = token_texts(&result.tree, &[SyntaxKind::BlockComment]);
+        assert_eq!(block_comments, vec!["/* block */"]);
+
+        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        assert_eq!(line_comments, vec!["// trailing"]);
+    }
+
+    #[test]
+    fn trailing_trivia_is_preserved_in_tree() {
+        let source = "module Test\n// tail comment\n   \n";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "trailing trivia after the last syntax token must appear in the tree"
         );
     }
 

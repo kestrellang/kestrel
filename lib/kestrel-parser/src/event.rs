@@ -23,6 +23,18 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
+/// Distinct trivia kinds that can appear between syntax tokens. Kept local to
+/// the tree builder so callers don't need to know the enumeration.
+fn is_trivia_kind(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Whitespace
+            | SyntaxKind::Newline
+            | SyntaxKind::LineComment
+            | SyntaxKind::BlockComment
+    )
+}
+
 /// Events emitted during parsing
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -161,27 +173,69 @@ impl<'src> TreeBuilder<'src> {
         SyntaxNode::new_root(green)
     }
 
-    /// Emit trivia (whitespace and comments) from source_pos to the given position
+    /// Emit trivia (whitespace, newlines, line comments, block comments) from
+    /// `source_pos` up to `target_pos`, preserving each trivia token's distinct
+    /// `SyntaxKind`. The trivia range is re-lexed so the tree reflects the same
+    /// token kinds the lexer produced, rather than lumping everything into
+    /// `Whitespace`.
     fn emit_trivia_until(&mut self, target_pos: usize, builder: &mut GreenNodeBuilder) {
         if target_pos <= self.source_pos || target_pos > self.source.len() {
             return;
         }
 
-        let trivia = &self.source[self.source_pos..target_pos];
-        if !trivia.is_empty() {
-            // Emit as whitespace token (could be more granular)
-            builder.token(SyntaxKind::Whitespace.into(), trivia);
+        let start = self.source_pos;
+        let trivia = &self.source[start..target_pos];
+        if trivia.is_empty() {
+            self.source_pos = target_pos;
+            return;
         }
+
+        let mut cursor = 0usize;
+        for result in kestrel_lexer::lex(trivia, 0) {
+            let (kind, span) = match result {
+                Ok(spanned) => (SyntaxKind::from(spanned.value), spanned.span.range()),
+                Err(spanned) => (SyntaxKind::Error, spanned.span.range()),
+            };
+
+            // Safety net: if a non-trivia token slipped into a gap between
+            // emitted syntax tokens, emit remaining bytes as Error and stop so
+            // we never lose source bytes.
+            if !is_trivia_kind(kind) {
+                let remaining = &trivia[cursor..];
+                if !remaining.is_empty() {
+                    builder.token(SyntaxKind::Error.into(), remaining);
+                }
+                cursor = trivia.len();
+                break;
+            }
+
+            let text = &trivia[span.clone()];
+            builder.token(kind.into(), text);
+            cursor = span.end;
+        }
+
+        // If re-lexing consumed less than the gap (unexpected), emit the tail
+        // as Error rather than dropping bytes.
+        if cursor < trivia.len() {
+            builder.token(SyntaxKind::Error.into(), &trivia[cursor..]);
+        }
+
         self.source_pos = target_pos;
     }
 
     /// Process all events and build the tree
     fn process_events(&mut self, builder: &mut GreenNodeBuilder) {
+        // Track the span of the outermost node so trailing trivia lands
+        // inside it rather than as a sibling at the tree root.
+        let mut root_depth: usize = 0;
+        let mut pending_trailing_trivia = false;
+
         while self.pos < self.events.len() {
             // Use match on reference to avoid cloning events
             match &self.events[self.pos] {
                 Event::StartNode(kind) => {
                     builder.start_node((*kind).into());
+                    root_depth += 1;
                     self.pos += 1;
                 },
                 Event::AddToken(kind, span) => {
@@ -200,7 +254,14 @@ impl<'src> TreeBuilder<'src> {
                     self.pos += 1;
                 },
                 Event::FinishNode => {
+                    // Emit any trailing trivia before closing the outermost
+                    // node so the tree text round-trips with the source.
+                    if root_depth == 1 && !pending_trailing_trivia {
+                        self.emit_trivia_until(self.source.len(), builder);
+                        pending_trailing_trivia = true;
+                    }
                     builder.finish_node();
+                    root_depth = root_depth.saturating_sub(1);
                     self.pos += 1;
                 },
                 Event::Error { .. } => {
@@ -272,6 +333,60 @@ mod tests {
 
         assert_eq!(tree.kind(), SyntaxKind::ModulePath);
         assert_eq!(tree.children_with_tokens().count(), 3);
+    }
+
+    #[test]
+    fn tree_builder_classifies_inter_token_trivia_by_kind() {
+        // Source has whitespace, a newline, a block comment, and a line comment
+        // wedged between two syntax tokens. The builder should preserve each
+        // trivia kind distinctly rather than folding everything into Whitespace.
+        let source = "A /* b */ \n// c\nB";
+        let mut sink = EventSink::new(0);
+
+        sink.start_node(SyntaxKind::ModulePath);
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 16..17));
+        sink.finish_node();
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        assert_eq!(tree.text().to_string(), source);
+
+        let mut kinds: Vec<SyntaxKind> = tree
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .map(|t| t.kind())
+            .collect();
+        // Expected: Identifier, Whitespace, BlockComment, Whitespace,
+        //           Newline, LineComment, Newline, Identifier
+        kinds.retain(|k| is_trivia_kind(*k) || *k == SyntaxKind::Identifier);
+        assert_eq!(
+            kinds,
+            vec![
+                SyntaxKind::Identifier,
+                SyntaxKind::Whitespace,
+                SyntaxKind::BlockComment,
+                SyntaxKind::Whitespace,
+                SyntaxKind::Newline,
+                SyntaxKind::LineComment,
+                SyntaxKind::Newline,
+                SyntaxKind::Identifier,
+            ]
+        );
+    }
+
+    #[test]
+    fn tree_builder_emits_trailing_trivia_after_last_token() {
+        let source = "A\n// tail\n";
+        let mut sink = EventSink::new(0);
+
+        sink.start_node(SyntaxKind::ModulePath);
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
+        sink.finish_node();
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        assert_eq!(tree.text().to_string(), source);
     }
 
     #[test]

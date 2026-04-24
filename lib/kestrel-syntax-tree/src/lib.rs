@@ -318,6 +318,7 @@ pub enum SyntaxKind {
 
     // Trivia (whitespace and comments)
     Whitespace,
+    Newline,
     LineComment,
     BlockComment,
 
@@ -336,7 +337,7 @@ impl From<Token> for SyntaxKind {
         match token {
             // Trivia
             Token::Whitespace => SyntaxKind::Whitespace,
-            Token::Newline => SyntaxKind::Whitespace,
+            Token::Newline => SyntaxKind::Newline,
             Token::LineComment => SyntaxKind::LineComment,
             Token::BlockComment => SyntaxKind::BlockComment,
             // Literals
@@ -698,6 +699,7 @@ impl Language for KestrelLanguage {
         const GREATER: u16 = SyntaxKind::Greater as u16;
         const AT: u16 = SyntaxKind::At as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
+        const NEWLINE: u16 = SyntaxKind::Newline as u16;
         const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
         const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
         const DOT_DOT: u16 = SyntaxKind::DotDot as u16;
@@ -950,6 +952,7 @@ impl Language for KestrelLanguage {
             GREATER => SyntaxKind::Greater,
             AT => SyntaxKind::At,
             WHITESPACE => SyntaxKind::Whitespace,
+            NEWLINE => SyntaxKind::Newline,
             LINE_COMMENT => SyntaxKind::LineComment,
             BLOCK_COMMENT => SyntaxKind::BlockComment,
             ERROR => SyntaxKind::Error,

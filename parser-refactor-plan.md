@@ -161,16 +161,30 @@ Commit: `422a037a refactor: make common and type_decl modules crate-private`
 (`kestrel-compiler`) only use top-level parse entry points and `ParseResult`,
 so narrowing the internal modules matches their role as internal scaffolding.
 
-## Remaining Plan
-
 ### Step 6: Make Trivia Policy Explicit In Code
 
-Implement the documented target:
+Added `SyntaxKind::Newline` so newlines are distinct from horizontal whitespace.
+`Token::Newline` now maps to `SyntaxKind::Newline` instead of `Whitespace`.
 
-- preserve whitespace, newline, line comment, and block comment trivia as
-  distinct token kinds
-- preserve trailing trivia after the last emitted syntax token
-- add tests around source text round-tripping and trivia kinds
+Rewrote `TreeBuilder::emit_trivia_until` to re-lex each inter-token gap so
+whitespace, newlines, line comments, and block comments are preserved as their
+distinct kinds rather than lumped into `Whitespace`. Added trailing-trivia
+emission at the outermost `FinishNode` so `tree.text()` round-trips the source.
+
+Updated `is_trivia` in `kestrel-syntax-tree/utils.rs` to include `Newline`.
+
+New/updated tests in `parser.rs` and `event.rs`:
+
+- `trivia_kinds_are_distinct_between_declarations` (replaces the old
+  characterization test that documented the previous lumped behavior)
+- `trivia_round_trips_block_and_line_comments`
+- `trailing_trivia_is_preserved_in_tree`
+- `tree_builder_classifies_inter_token_trivia_by_kind`
+- `tree_builder_emits_trailing_trivia_after_last_token`
+
+Verification: `cargo test -p kestrel-parser`
+
+## Remaining Plan
 
 ### Step 7: Split `expr/mod.rs`
 
