@@ -3,7 +3,7 @@
 use crate::id::BlockId;
 use crate::place::Place;
 use crate::value::Value;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// A terminator ends a basic block. Every block must have exactly one.
 #[derive(Debug, Clone)]

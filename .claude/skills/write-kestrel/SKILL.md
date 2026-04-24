@@ -1,6 +1,6 @@
 ---
 name: write-kestrel
-description: Quick reference for writing Kestrel source code — syntax, semantics, idioms, and the label/access-mode rules that bite first-time writers. Use when writing or editing `.ks` files, when the user asks "how do I write X in Kestrel?", when drafting stdlib modules, or any time the task involves producing Kestrel code rather than modifying the compiler. Skip for compiler-internals work (Rust code in `lib2/`), which is covered by `kestrel-pipeline` / `debug-kestrel`.
+description: Quick reference for writing Kestrel source code — syntax, semantics, idioms, and the label/access-mode rules that bite first-time writers. Use when writing or editing `.ks` files, when the user asks "how do I write X in Kestrel?", when drafting stdlib modules, or any time the task involves producing Kestrel code rather than modifying the compiler. Skip for compiler-internals work (Rust code in `lib/`), which is covered by `kestrel-pipeline` / `debug-kestrel`.
 ---
 
 # Kestrel Language Quick Reference

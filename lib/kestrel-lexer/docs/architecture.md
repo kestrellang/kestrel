@@ -62,4 +62,4 @@ Built on the **logos** procedural macro framework. Simple tokens use regex patte
 |-------|-------|
 | `logos` | Procedural macro lexer framework |
 | `unicode-xid` | Unicode identifier validation |
-| `kestrel-span2` | `Span`, `Spanned<T>` for source locations |
+| `kestrel-span` | `Span`, `Spanned<T>` for source locations |

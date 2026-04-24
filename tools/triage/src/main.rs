@@ -455,16 +455,16 @@ fn default_batch_size() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            package: "kestrel-test-suite2".to_string(),
+            package: "kestrel-test-suite".to_string(),
             binary_glob: "file_tests-*".to_string(),
             harness_prefix: "run_ks_test::".to_string(),
             test_extension: ".ks".to_string(),
-            binary_cwd: "lib2/kestrel-test-suite".to_string(),
+            binary_cwd: "lib/kestrel-test-suite".to_string(),
             build_command: vec![
                 "cargo".to_string(),
                 "test".to_string(),
                 "-p".to_string(),
-                "kestrel-test-suite2".to_string(),
+                "kestrel-test-suite".to_string(),
                 "--release".to_string(),
             ],
             stall_threshold_seconds: 30,

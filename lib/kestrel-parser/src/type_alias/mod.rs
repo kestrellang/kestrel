@@ -28,9 +28,9 @@
 //! ```
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
@@ -291,7 +291,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     #[test]
     fn test_type_alias_declaration_basic() {

@@ -6,7 +6,7 @@
 
 use kestrel_ast::arena::Idx;
 use kestrel_hecs::Entity;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 // ===== Local variables =====
 

@@ -24,11 +24,11 @@ fn build_from_source(source: &str) -> (World, Entity) {
     world.set(root, Name("<root>".to_string()));
 
     let file_entity = world.spawn();
-    let tokens: Vec<_> = kestrel_lexer2::lex(source, file_entity.index())
+    let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
         .filter_map(|r| r.ok())
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
-    let result = kestrel_parser2::parse_source_file_from_source(source, token_iter);
+    let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
     build_declarations(&mut world, file_entity, &result.tree, root, None);
 
     (world, root)

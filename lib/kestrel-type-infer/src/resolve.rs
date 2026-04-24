@@ -18,7 +18,7 @@ use kestrel_name_res::{
     ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution,
     expand_protocol_closure_in_place,
 };
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::ty::TyKind;
 
@@ -871,7 +871,7 @@ impl WorldResolver<'_> {
                     resolved: kestrel_hir::ty::HirTy::AliasUse {
                         entity: child,
                         args: vec![],
-                        span: kestrel_span2::Span::synthetic(0),
+                        span: kestrel_span::Span::synthetic(0),
                     },
                 });
             }
@@ -926,7 +926,7 @@ impl WorldResolver<'_> {
                     resolved: kestrel_hir::ty::HirTy::AliasUse {
                         entity: m.entity,
                         args: vec![],
-                        span: kestrel_span2::Span::synthetic(0),
+                        span: kestrel_span::Span::synthetic(0),
                     },
                 });
             }

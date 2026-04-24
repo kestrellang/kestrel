@@ -18,7 +18,7 @@ use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::{
     ConformingProtocols, EntityBuiltin, ResolveBuiltin, ResolveTypePath, TypeResolution,
 };
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 // ===== Direct Conformance Facts =====
 

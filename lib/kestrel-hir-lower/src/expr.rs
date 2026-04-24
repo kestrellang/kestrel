@@ -7,8 +7,8 @@ use kestrel_ast::ast_body::*;
 use kestrel_ast_builder::{DeclSpan, Name};
 use kestrel_hir::body::*;
 use kestrel_name_res::{ResolveValuePath, ValueResolution};
-use kestrel_reporting2::{Diagnostic, Label};
-use kestrel_span2::Span;
+use kestrel_reporting::{Diagnostic, Label};
+use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 
@@ -254,13 +254,13 @@ impl LowerCtx<'_> {
         } else if self.lookup_local(&first.name).is_some() {
             // Local variable with type args (e.g., `x[Int]`) — variables don't accept type args
             self.ctx.accumulate(
-                kestrel_reporting2::Diagnostic::error()
+                kestrel_reporting::Diagnostic::error()
                     .with_message(format!(
                         "variable '{}' does not accept type arguments",
                         first.name
                     ))
                     .with_labels(vec![
-                        kestrel_reporting2::Label::primary(first.span.file_id, first.span.range())
+                        kestrel_reporting::Label::primary(first.span.file_id, first.span.range())
                             .with_message("type arguments not allowed on variables"),
                     ]),
             );
@@ -312,10 +312,10 @@ impl LowerCtx<'_> {
             if let Some(args) = &seg.type_args {
                 if args.is_empty() {
                     self.ctx.accumulate(
-                        kestrel_reporting2::Diagnostic::error()
+                        kestrel_reporting::Diagnostic::error()
                             .with_message("empty type argument list")
                             .with_labels(vec![
-                                kestrel_reporting2::Label::primary(
+                                kestrel_reporting::Label::primary(
                                     seg.span.file_id,
                                     seg.span.range(),
                                 )
@@ -631,12 +631,12 @@ impl LowerCtx<'_> {
                     // error and return Error so downstream phases short-circuit.
                     if self.is_instance_method_on_type(segments, &last.name) {
                         self.ctx.accumulate(
-                            kestrel_reporting2::Diagnostic::error()
+                            kestrel_reporting::Diagnostic::error()
                                 .with_message(format!(
                                     "instance method '{}' cannot be called on a type",
                                     last.name
                                 ))
-                                .with_labels(vec![kestrel_reporting2::Label::primary(
+                                .with_labels(vec![kestrel_reporting::Label::primary(
                                     span.file_id,
                                     span.range(),
                                 )
@@ -1314,10 +1314,10 @@ impl LowerCtx<'_> {
     fn validate_break_continue(&self, keyword: &str, label: &Option<String>, span: &Span) {
         if !self.in_loop() {
             self.ctx.accumulate(
-                kestrel_reporting2::Diagnostic::error()
+                kestrel_reporting::Diagnostic::error()
                     .with_message(format!("'{}' outside of loop", keyword))
                     .with_labels(vec![
-                        kestrel_reporting2::Label::primary(span.file_id, span.range())
+                        kestrel_reporting::Label::primary(span.file_id, span.range())
                             .with_message(format!("'{}' can only be used inside a loop", keyword)),
                     ]),
             );
@@ -1326,10 +1326,10 @@ impl LowerCtx<'_> {
         if let Some(lbl) = label {
             if !self.has_loop_label(lbl) {
                 self.ctx.accumulate(
-                    kestrel_reporting2::Diagnostic::error()
+                    kestrel_reporting::Diagnostic::error()
                         .with_message(format!("undeclared label '{}'", lbl))
                         .with_labels(vec![
-                            kestrel_reporting2::Label::primary(span.file_id, span.range())
+                            kestrel_reporting::Label::primary(span.file_id, span.range())
                                 .with_message(format!(
                                     "label '{}' not found in enclosing loops",
                                     lbl

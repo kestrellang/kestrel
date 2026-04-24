@@ -1,11 +1,11 @@
 ---
 name: type-inference
-description: Internals of the lib2 type-infer crate — the constraint solver, unification, member resolution, literal defaults, error recovery, and the pitfalls they hide. Use when debugging "could not infer type", "type mismatch", "ambiguous member", where-clause bugs, protocol-conformance wrong answers, associated-type resolution, literal-default surprises, or any solver-crate change. Also use when adding a new `Constraint` variant, `InferError` variant, or extending `TypeResolver`. For "where does this source construct live?" routing, use `kestrel-pipeline` instead.
+description: Internals of the lib type-infer crate — the constraint solver, unification, member resolution, literal defaults, error recovery, and the pitfalls they hide. Use when debugging "could not infer type", "type mismatch", "ambiguous member", where-clause bugs, protocol-conformance wrong answers, associated-type resolution, literal-default surprises, or any solver-crate change. Also use when adding a new `Constraint` variant, `InferError` variant, or extending `TypeResolver`. For "where does this source construct live?" routing, use `kestrel-pipeline` instead.
 ---
 
 # type-inference
 
-Operational reference for `lib2/kestrel-type-infer/`. Explains the three-phase
+Operational reference for `lib/kestrel-type-infer/`. Explains the three-phase
 architecture, the **12** constraint variants (design doc says 8 — it's stale),
 the solver's fixpoint loop, and every pitfall worth remembering.
 
@@ -16,7 +16,7 @@ the solver's fixpoint loop, and every pitfall worth remembering.
 | How is the solver laid out? What file does what? What's the generate→solve→resolve dance? | `solver.md` — architecture, fn anchors, dispatch map |
 | "Could not infer type" cascade, poisoning rules, wrong error count, Error vs Never, wildcard (`_`) infer vars | `pitfalls.md` — symptom-indexed |
 | How does `Equal`/`Coerce`/`Member`/`Associated`/`Conforms`/`Call`/`OverloadedCall`/`Implicit`/`ImplicitPat`/`Reduce`/`TupleRestPat`/`TupleIndex` work? | `solver.md` → "Constraint dispatch" |
-| Where do I add a new `InferError` variant? | `lib2/kestrel-type-infer/AGENTS.md` (5-file checklist lives there) |
+| Where do I add a new `InferError` variant? | `lib/kestrel-type-infer/AGENTS.md` (5-file checklist lives there) |
 
 When unsure: start with `solver.md` for "how it works", `pitfalls.md` for "why it broke."
 
@@ -83,7 +83,7 @@ All in `constraint.rs`:
 time of writing. Before telling the user "edit solver.rs:1955," re-grep:
 
 ```
-grep -n "^fn solve_member\|^fn try_solve" lib2/kestrel-type-infer/src/solver.rs
+grep -n "^fn solve_member\|^fn try_solve" lib/kestrel-type-infer/src/solver.rs
 ```
 
 Enum variants (`Constraint`, `TyKind`, `InferError`) are stable; dispatch fns
@@ -94,7 +94,7 @@ move. Update this skill's anchors when you notice drift.
 1. New `Constraint` variant: add to `constraint.rs`, add emission in
    `generate.rs`, add `solve_*` fn + `try_solve` arm, update the table above.
 2. New `InferError` variant: 5-file checklist in
-   `lib2/kestrel-type-infer/AGENTS.md`. Do not skip.
+   `lib/kestrel-type-infer/AGENTS.md`. Do not skip.
 3. New pitfall: add a symptom-indexed entry to `pitfalls.md` with a link to the
    memory file (if one exists) and the load-bearing fact.
 

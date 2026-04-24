@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-compiler2"
+name = "kestrel-compiler"
 version.workspace = true
 edition.workspace = true
 
@@ -8,10 +8,10 @@ workspace = true
 
 [dependencies]
 kestrel-hecs = { path = "../kestrel-hecs" }
-kestrel-lexer2 = { path = "../kestrel-lexer" }
-kestrel-parser2 = { path = "../kestrel-parser" }
-kestrel-span2 = { path = "../kestrel-span" }
-kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-hir = { path = "../kestrel-hir" }
 kestrel-hir-lower = { path = "../kestrel-hir-lower" }
@@ -19,9 +19,9 @@ kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-analyze = { path = "../kestrel-analyze" }
 kestrel-debug = { path = "../kestrel-debug" }
-kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-mir = { path = "../kestrel-mir" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
-kestrel-codegen2 = { path = "../kestrel-codegen" }
-kestrel-codegen2-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
 codespan-reporting = { workspace = true }

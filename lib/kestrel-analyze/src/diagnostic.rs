@@ -3,7 +3,7 @@
 //! `AnalyzeDiagnostic` is the rich diagnostic type accumulated via HECS.
 //! `DiagnosticDescriptor` is static metadata per diagnostic kind (Roslyn-style).
 
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// Severity of an analysis diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

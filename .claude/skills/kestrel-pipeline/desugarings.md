@@ -4,7 +4,7 @@ HIR variants and shapes that don't have a 1:1 AST counterpart: constructs synthe
 during HIR lowering to reduce the surface language to a smaller core. "How did we get
 this `HirExpr::X`?" is usually answered here.
 
-All citations refer to `lib2/kestrel-hir-lower/src/` unless otherwise noted.
+All citations refer to `lib/kestrel-hir-lower/src/` unless otherwise noted.
 
 ---
 
@@ -293,7 +293,7 @@ pub enum MatchSource {
 - Sites:
   - Closures: `expr.rs:1179-1188` (inside `lower_closure`). The synthetic param
     name is `_cparam_N`; the match is prepended to the closure body as a `HirStmt::Expr`.
-  - For function/method params: see `lib2/kestrel-hir-lower/src/lib.rs` (not included
+  - For function/method params: see `lib/kestrel-hir-lower/src/lib.rs` (not included
     here, but the pattern is the same — lowered via `lower_param_pattern` at
     `pat.rs:410`). Also see `param_pattern` analyzer (E111) which emits a tuple-arity
     error and is specifically gated to skip `ParamDestructure`.

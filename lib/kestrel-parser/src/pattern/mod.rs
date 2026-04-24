@@ -11,13 +11,13 @@
 //! - Enum patterns: `.Case` or `.Case(label)` or `.Case(label: pattern)`
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 
 /// Represents a pattern syntax node
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,36 +195,36 @@ pub fn pattern_parser<'tokens>()
     recursive(|pattern| {
         // Wildcard pattern: _
         let wildcard = skip_trivia()
-            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
             .map(PatternVariant::Wildcard);
 
         // Literal patterns
         let integer_literal = skip_trivia()
-            .ignore_then(select! { Token::Integer = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Integer = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::Integer(span)));
 
         let float_literal = skip_trivia()
-            .ignore_then(select! { Token::Float = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Float = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::Float(span)));
 
         let string_literal = skip_trivia()
-            .ignore_then(select! { Token::String = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::String = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::String(span)));
 
         let bool_literal = skip_trivia()
-            .ignore_then(select! { Token::Boolean = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Boolean = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::Bool(span)));
 
         let char_literal = skip_trivia()
-            .ignore_then(select! { Token::Char = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Char = e => to_kestrel_span(e.span()) })
             .map(|span| PatternVariant::Literal(LiteralPatternKind::Char(span)));
 
         // Range patterns: `0..=9`, `0..<10`, `..=9`, `..<10`, `0..`
         // Must parse before standalone literals
         let range_bound = skip_trivia()
-            .ignore_then(select! { Token::Integer = e => LiteralPatternKind::Integer(to_kestrel_span2(e.span())) })
+            .ignore_then(select! { Token::Integer = e => LiteralPatternKind::Integer(to_kestrel_span(e.span())) })
             .or(skip_trivia().ignore_then(select! { Token::Char = e => {
-                let span = to_kestrel_span2(e.span());
+                let span = to_kestrel_span(e.span());
                 LiteralPatternKind::Char(span)
             }}));
 
@@ -235,11 +235,11 @@ pub fn pattern_parser<'tokens>()
                 skip_trivia()
                     .ignore_then(
                         just(Token::DotDotEquals)
-                            .map_with(|_, e| (to_kestrel_span2(e.span()), true)),
+                            .map_with(|_, e| (to_kestrel_span(e.span()), true)),
                     )
                     .or(skip_trivia().ignore_then(
                         just(Token::DotDotLess)
-                            .map_with(|_, e| (to_kestrel_span2(e.span()), false)),
+                            .map_with(|_, e| (to_kestrel_span(e.span()), false)),
                     )),
             )
             .then(range_bound.clone())
@@ -257,7 +257,7 @@ pub fn pattern_parser<'tokens>()
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|(start, operator)| PatternVariant::Range {
                 start: Some(start),
@@ -270,9 +270,9 @@ pub fn pattern_parser<'tokens>()
         let range_to_pattern = skip_trivia()
             .ignore_then(
                 just(Token::DotDotEquals)
-                    .map_with(|_, e| (to_kestrel_span2(e.span()), true))
+                    .map_with(|_, e| (to_kestrel_span(e.span()), true))
                     .or(just(Token::DotDotLess)
-                        .map_with(|_, e| (to_kestrel_span2(e.span()), false))),
+                        .map_with(|_, e| (to_kestrel_span(e.span()), false))),
             )
             .then(range_bound.clone())
             .map(|((operator, inclusive), end)| PatternVariant::Range {
@@ -296,21 +296,21 @@ pub fn pattern_parser<'tokens>()
 
         // Rest pattern: `..` (used in tuples)
         let rest_pattern = skip_trivia()
-            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())))
             .map(PatternVariant::Rest);
 
         // Binding pattern: `var name` (mutable) or `name` (immutable)
         // Can optionally be followed by `@ subpattern` to make it an @-pattern
         // Need to be careful to distinguish from wildcards and literals
         let mutable_binding = skip_trivia()
-            .ignore_then(just(Token::Var).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Var).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 skip_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) }),
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) }),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::At).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::At).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(pattern.clone())
                     .or_not(),
             )
@@ -328,10 +328,10 @@ pub fn pattern_parser<'tokens>()
             });
 
         let immutable_binding = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::At).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::At).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(pattern.clone())
                     .or_not(),
             )
@@ -350,19 +350,19 @@ pub fn pattern_parser<'tokens>()
 
         // Tuple pattern: (p1, p2, ...)
         let tuple_pattern = skip_trivia()
-            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 pattern
                     .clone()
                     .separated_by(skip_trivia().ignore_then(
-                        just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|((lparen, elements), rparen)| PatternVariant::Tuple {
                 lparen,
@@ -374,10 +374,10 @@ pub fn pattern_parser<'tokens>()
         // Enum pattern argument: `label` or `label: pattern` or just `pattern`
         // Labeled form: identifier optionally followed by `: pattern`
         let labeled_arg = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(pattern.clone())
                     .or_not(),
             )
@@ -402,24 +402,24 @@ pub fn pattern_parser<'tokens>()
 
         // Enum pattern: `.Case` or `.Case(args)`
         let enum_pattern = skip_trivia()
-            .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 skip_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) }),
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) }),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
                         enum_arg
                             .separated_by(skip_trivia().ignore_then(
-                                just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                             ))
                             .allow_trailing()
                             .collect::<Vec<_>>(),
                     )
                     .then(skip_trivia().ignore_then(
-                        just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .map(|((lparen, args), rparen)| (lparen, args, rparen))
                     .or_not(),
@@ -432,10 +432,10 @@ pub fn pattern_parser<'tokens>()
 
         // Struct pattern field: `x` or `x: pattern` or `..`
         let struct_field = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(pattern.clone())
                     .or_not(),
             )
@@ -446,7 +446,7 @@ pub fn pattern_parser<'tokens>()
 
         // Rest pattern in struct: `..`
         let struct_rest = skip_trivia()
-            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span2(e.span())));
+            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())));
 
         // Either a field or rest pattern
         let struct_field_or_rest = struct_rest
@@ -456,22 +456,22 @@ pub fn pattern_parser<'tokens>()
 
         // Struct pattern: `TypeName { field1, field2: binding, .. }`
         let struct_pattern = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(
                 struct_field_or_rest
                     .separated_by(skip_trivia().ignore_then(
-                        just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|(((struct_name, lbrace), field_or_rests), rbrace)| {
                 let mut fields = Vec::new();
@@ -496,17 +496,17 @@ pub fn pattern_parser<'tokens>()
 
         // Array pattern element: either a rest pattern (..) or (..name) or a regular pattern
         let array_rest = skip_trivia()
-            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 skip_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
                     .or_not(),
             )
             .map(|(dotdot_span, name_span)| (dotdot_span, name_span));
 
         // Array pattern: [p1, p2, ..rest, p3]
         let array_pattern = skip_trivia()
-            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 // Parse elements: either rest patterns or regular patterns
                 array_rest
@@ -514,14 +514,14 @@ pub fn pattern_parser<'tokens>()
                     .map(|(dotdot, name)| (None, Some((dotdot, name))))
                     .or(pattern.clone().map(|p| (Some(p), None)))
                     .separated_by(skip_trivia().ignore_then(
-                        just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|((lbracket, elements), rbracket)| {
                 // Split elements into prefix, rest, suffix
@@ -578,7 +578,7 @@ pub fn pattern_parser<'tokens>()
         // Or-pattern: base_pattern (or base_pattern)*
         // The `or` keyword has lowest precedence in pattern context
         let or_continuation = skip_trivia()
-            .ignore_then(just(Token::Or).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Or).map_with(|_, e| to_kestrel_span(e.span())))
             .then(base_pattern.clone())
             .map(|(or_span, pat)| (or_span, pat));
 
@@ -1087,7 +1087,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     fn parse_pattern_from_source(source: &str) -> Pattern {
         let tokens: Vec<_> = lex(source, 0)

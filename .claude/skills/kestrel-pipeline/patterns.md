@@ -5,12 +5,12 @@ pipeline maps go stale.
 
 Top-level dispatch anchors:
 
-- AST constructor switch: `lib2/kestrel-ast-builder/src/lower.rs:1321` (`lower_pat`)
-- HIR lowering switch: `lib2/kestrel-hir-lower/src/pat.rs:34` (`lower_pat_inner`)
-- Inference gen switch: `lib2/kestrel-type-infer/src/generate.rs:607` (`gen_pat`, takes
+- AST constructor switch: `lib/kestrel-ast-builder/src/lower.rs:1321` (`lower_pat`)
+- HIR lowering switch: `lib/kestrel-hir-lower/src/pat.rs:34` (`lower_pat_inner`)
+- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:607` (`gen_pat`, takes
   a `scrutinee_tv: TyVar` and a `source: MatchSource`)
 - MIR lowering: patterns are consumed inside `lower_match` at
-  `lib2/kestrel-mir-lower/src/body_lower.rs:3319`; there is no stand-alone
+  `lib/kestrel-mir-lower/src/body_lower.rs:3319`; there is no stand-alone
   pattern-lowering dispatch.
 
 Patterns never appear in MIR directly — they're compiled into a decision tree by the
@@ -21,7 +21,7 @@ assignments.
 
 ## AstPat variants (12)
 
-Enum: `lib2/kestrel-ast/src/ast_body.rs:226`.
+Enum: `lib/kestrel-ast/src/ast_body.rs:226`.
 
 ### AstPat::Wildcard
 
@@ -225,7 +225,7 @@ Enum: `lib2/kestrel-ast/src/ast_body.rs:226`.
 
 ## HirPat variants (12)
 
-Enum: `lib2/kestrel-hir/src/body.rs:260`. Header comment says "10 variants" — stale,
+Enum: `lib/kestrel-hir/src/body.rs:260`. Header comment says "10 variants" — stale,
 actually 12.
 
 ### HirPat::Wildcard
@@ -326,12 +326,12 @@ actually 12.
 
 ### `HirLiteral` (used in `HirPat::Literal` and `HirPat::Range`)
 
-Enum: `lib2/kestrel-hir/src/body.rs:334`.
+Enum: `lib/kestrel-hir/src/body.rs:334`.
 
 Variants: `Integer(i64)`, `Float(f64)`, `String { value, escape_errors }`, `Char(u32)`,
 `Bool(bool)`, `Null`.
 
-Parse helpers in `lib2/kestrel-hir-lower/src/pat.rs`:
+Parse helpers in `lib/kestrel-hir-lower/src/pat.rs`:
 
 - `parse_int` (501) — handles `0x` / `0o` / `0b` radix; falls back to `u64` for values
   above `i64::MAX` so `UInt64.maxValue` round-trips. See MEMORY

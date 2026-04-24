@@ -7,7 +7,7 @@
 //! instead of the fragile `impl_func_name.contains(protocol_name)` heuristic.
 
 use super::error::MonomorphizeError;
-use kestrel_codegen2::substitute_type;
+use kestrel_codegen::substitute_type;
 use kestrel_hecs::Entity;
 use kestrel_mir::{MethodSource, MirModule, MirTy, WitnessDef, WitnessMethodKey};
 use std::collections::HashMap;

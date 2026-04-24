@@ -71,5 +71,5 @@ All nodes are stored in flat arenas and addressed by typed indices (`HirExprId`,
 | Crate | Usage |
 |-------|-------|
 | `kestrel-ast` | `Arena<T>`, `Idx<T>` (arena storage), `BinaryOp`, `UnaryOp`, `CompoundAssignOp` (operator enums) |
-| `kestrel-span2` | `Span` (source location tracking) |
+| `kestrel-span` | `Span` (source location tracking) |
 | `kestrel-hecs` | `Entity` (ECS handles for resolved definitions) |

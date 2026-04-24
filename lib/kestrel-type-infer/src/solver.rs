@@ -17,7 +17,7 @@ use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// Run the full solver: fixpoint loop, literal defaults, final fixpoint,
 /// then report any remaining unsolved constraints as errors.
@@ -2992,7 +2992,7 @@ pub fn kind_to_tyvar_sub(
             // TyKind has no span; this rematerialization path runs when
             // instantiating an already-resolved type back into a fresh TyVar
             // set, so a synthetic span is acceptable for the emitted constraint.
-            ctx.project_associated(base_tv, *assoc, kestrel_span2::Span::synthetic(0))
+            ctx.project_associated(base_tv, *assoc, kestrel_span::Span::synthetic(0))
         },
         TyKind::Tuple(elems) => {
             let elem_tvs: Vec<TyVar> = elems
@@ -3148,7 +3148,7 @@ fn lower_hir_ty_sub(
                 if is_concrete_non_self {
                     if let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity) {
                         let result = ctx.fresh();
-                        ctx.associated(recv_tv, &name.0, result, kestrel_span2::Span::synthetic(0));
+                        ctx.associated(recv_tv, &name.0, result, kestrel_span::Span::synthetic(0));
                         return result;
                     }
                 }

@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-codegen2-cranelift"
+name = "kestrel-codegen-cranelift"
 version.workspace = true
 edition.workspace = true
 
@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 kestrel-mir = { path = "../kestrel-mir" }
-kestrel-codegen2 = { path = "../kestrel-codegen" }
+kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-debug = { path = "../kestrel-debug" }
 cranelift-codegen = "0.129"
@@ -21,7 +21,7 @@ indexmap = { workspace = true }
 stacker = { workspace = true }
 
 [dev-dependencies]
-kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
-kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-reporting = { path = "../kestrel-reporting" }

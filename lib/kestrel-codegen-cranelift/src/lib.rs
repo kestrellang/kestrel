@@ -1,4 +1,4 @@
-//! Cranelift backend for Kestrel (lib2).
+//! Cranelift backend for Kestrel (lib).
 //!
 //! Compiles `MirModule` → native object code via Cranelift.
 //!
@@ -18,7 +18,7 @@ pub mod types;
 
 use context::CodegenContext;
 use error::CodegenError;
-use kestrel_codegen2::TargetConfig;
+use kestrel_codegen::TargetConfig;
 use kestrel_mir::MirModule;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
@@ -208,7 +208,7 @@ mod integration_tests {
     }
 
     fn compile_source(source: &str) -> Result<CompilationResult, error::CodegenError> {
-        let mut compiler = kestrel_compiler2::Compiler::new();
+        let mut compiler = kestrel_compiler::Compiler::new();
         let entity = compiler.set_source("test.ks", source.into());
         compiler.build(entity);
         kestrel_compiler_driver::CompilerDriver::new(&compiler).infer_all();
@@ -271,7 +271,7 @@ mod integration_tests {
 
     /// Compile and run a program with stdlib.
     fn compile_and_run_with_stdlib(source: &str) -> (i32, String, String) {
-        let mut compiler = kestrel_compiler2::Compiler::new();
+        let mut compiler = kestrel_compiler::Compiler::new();
         compiler.load_dir(&stdlib_path());
         let entity = compiler.set_source("test.ks", source.into());
         compiler.build(entity);
@@ -282,7 +282,7 @@ mod integration_tests {
         let _ = kestrel_compiler_driver::CompilerDriver::new(&compiler).emit_diagnostics();
         let error_count = diagnostics
             .iter()
-            .filter(|d| d.severity >= kestrel_reporting2::Severity::Error)
+            .filter(|d| d.severity >= kestrel_reporting::Severity::Error)
             .count();
         if error_count > 0 {
             panic!(
@@ -342,13 +342,13 @@ mod integration_tests {
 module Test
 
 func main() {
-    print("Hello from lib2!")
+    print("Hello from lib!")
 }
 "#,
         );
         eprintln!("exit={code} stdout={stdout:?} stderr={stderr:?}");
         assert_eq!(code, 0);
-        assert!(stdout.contains("Hello from lib2!"), "stdout: {stdout:?}");
+        assert!(stdout.contains("Hello from lib!"), "stdout: {stdout:?}");
     }
 
     #[test]
@@ -448,13 +448,13 @@ func greet(name: String) -> String {
 }
 
 func main() {
-    print(greet("lib2"))
+    print(greet("lib"))
 }
 "#,
         );
         eprintln!("exit={code} stdout={stdout:?}");
         assert_eq!(code, 0);
-        assert!(stdout.contains("Hello, lib2!"), "stdout: {stdout:?}");
+        assert!(stdout.contains("Hello, lib!"), "stdout: {stdout:?}");
     }
 
     #[test]
@@ -464,7 +464,7 @@ func main() {
 module Test
 
 func main() {
-    let s = "Hello from lib2!";
+    let s = "Hello from lib!";
     if s.count > 0 {
         print("has content")
     } else {
@@ -610,7 +610,7 @@ func main() {
     /// Smoke test: compile with stdlib to check for TypeParam panics.
     #[test]
     fn compile_with_stdlib_smoke() {
-        let mut compiler = kestrel_compiler2::Compiler::new();
+        let mut compiler = kestrel_compiler::Compiler::new();
         compiler.load_dir(&stdlib_path());
         let entity = compiler.set_source("test.ks", "module Test\nfunc main() { }".into());
         compiler.build(entity);

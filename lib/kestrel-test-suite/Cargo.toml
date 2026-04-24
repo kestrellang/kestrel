@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-test-suite2"
+name = "kestrel-test-suite"
 version.workspace = true
 edition.workspace = true
 
@@ -7,16 +7,16 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-mir = { path = "../kestrel-mir" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
-kestrel-codegen2 = { path = "../kestrel-codegen" }
-kestrel-codegen2-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
 kestrel-analyze = { path = "../kestrel-analyze" }
-kestrel-span2 = { path = "../kestrel-span" }
-kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 codespan-reporting = { workspace = true }

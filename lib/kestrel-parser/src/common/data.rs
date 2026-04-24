@@ -3,8 +3,8 @@
 //! This module contains data types that are used by multiple parsers
 //! to avoid duplication and ensure consistency.
 
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
 use crate::expr::ExprVariant;

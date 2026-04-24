@@ -1,4 +1,4 @@
-//! Backend-agnostic code generation infrastructure for Kestrel (lib2).
+//! Backend-agnostic code generation infrastructure for Kestrel (lib).
 //!
 //! Shared utilities used by all code generation backends:
 //! - **Target configuration** — host detection and target triple handling

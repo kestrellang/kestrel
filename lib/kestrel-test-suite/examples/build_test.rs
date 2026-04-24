@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use kestrel_test_suite2::TestCompiler;
+use kestrel_test_suite::TestCompiler;
 
 fn main() {
     let mut out_path: Option<String> = None;
@@ -55,7 +55,7 @@ fn main() {
         .filter(|d| {
             matches!(
                 d.severity,
-                kestrel_test_suite2::diagnostic_matcher::TestSeverity::Error
+                kestrel_test_suite::diagnostic_matcher::TestSeverity::Error
             )
         })
         .collect();
@@ -66,7 +66,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let options = kestrel_codegen2_cranelift::CodegenOptions {
+    let options = kestrel_codegen_cranelift::CodegenOptions {
         libraries,
         ..Default::default()
     };

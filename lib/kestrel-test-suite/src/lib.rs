@@ -1,4 +1,4 @@
-//! kestrel-test-suite2 — hybrid test framework for the lib2 compiler pipeline.
+//! kestrel-test-suite — hybrid test framework for the lib compiler pipeline.
 //!
 //! Supports file-based `.ks` tests (auto-discovered via datatest-stable) and
 //! a programmatic Rust API for complex/multi-file tests.
@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use kestrel_compiler_driver::CompilerDriver;
-use kestrel_compiler2::Compiler;
+use kestrel_compiler::Compiler;
 
 /// Cached stdlib compiler state. Built once, cloned per test.
 struct StdlibCache {
@@ -75,11 +75,11 @@ fn find_stdlib_path() -> PathBuf {
     if let Ok(path) = std::env::var("KESTREL_STD") {
         return PathBuf::from(path);
     }
-    // lib2/kestrel-test-suite/ -> lib2/ -> project root -> lang/std
+    // lib/kestrel-test-suite/ -> lib/ -> project root -> lang/std
     let manifest = env!("CARGO_MANIFEST_DIR");
     let project_root = std::path::Path::new(manifest)
         .parent()
-        .unwrap() // lib2/
+        .unwrap() // lib/
         .parent()
         .unwrap(); // project root
     project_root.join("lang/std")

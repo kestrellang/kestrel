@@ -296,7 +296,7 @@ fn check_qualified_binding(
     alias_entity: kestrel_hecs::Entity,
     type_entity: kestrel_hecs::Entity,
     alias_name: &str,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let Some(proto_segments) = extract_qualified_protocol_segments(cx, alias_entity) else {
@@ -381,7 +381,7 @@ fn check_unqualified_ambiguity(
     binding_parent: kestrel_hecs::Entity,
     type_entity: kestrel_hecs::Entity,
     alias_name: &str,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let conforming = refinement_closure(cx, binding_parent);

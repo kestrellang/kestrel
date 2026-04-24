@@ -8,5 +8,5 @@ workspace = true
 
 [dependencies]
 kestrel-ast = { path = "../kestrel-ast" }
-kestrel-span2 = { path = "../kestrel-span" }
+kestrel-span = { path = "../kestrel-span" }
 kestrel-hecs = { path = "../kestrel-hecs" }

@@ -14,8 +14,8 @@
 use kestrel_ast_builder::DeclSpan;
 use kestrel_hecs::Entity;
 use kestrel_mir::{Callee, MirModule, MirTy, Rvalue, StatementKind};
-use kestrel_reporting2::{Diagnostic, Label};
-use kestrel_span2::Span;
+use kestrel_reporting::{Diagnostic, Label};
+use kestrel_span::Span;
 
 use crate::context::LowerCtx;
 

@@ -159,7 +159,7 @@ impl BodyCheck for InitializerAnalyzer {
             // these have a CodeBlock/PropertyAccessors in the CST but no Callable
             // because the builder doesn't recognize the shorthand form yet.
             if let Some(cst) = cx.query.get::<CstNode>(child) {
-                use kestrel_syntax_tree2::SyntaxKind;
+                use kestrel_syntax_tree::SyntaxKind;
                 let has_body_node = cst.0.children().any(|c| {
                     matches!(
                         c.kind(),

@@ -65,5 +65,5 @@ See [design.md](design.md) for detailed rationale on:
 | `kestrel-ast` | `AstBody`, `AstExpr`, `AstType`, operator enums |
 | `kestrel-ast-builder` | Components (`Valued`, `Callable`, `TypeAnnotation`, etc.) |
 | `kestrel-name-res` | Resolution queries (`ResolveName`, `ResolveTypePath`, etc.) |
-| `kestrel-span2` | `Span` for source locations |
+| `kestrel-span` | `Span` for source locations |
 | `kestrel-debug` | `ktrace!` for debug tracing |

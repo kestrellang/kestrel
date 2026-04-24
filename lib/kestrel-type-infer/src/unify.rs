@@ -497,7 +497,7 @@ mod tests {
         let qctx = world.query_context();
         let mut ctx = make_ctx(&resolver, &qctx);
         let err = ctx.report_error(crate::error::InferError::InfiniteType {
-            span: kestrel_span2::Span::synthetic(0),
+            span: kestrel_span::Span::synthetic(0),
         });
         let b = ctx.fresh();
         assert!(unify(&mut ctx, err, b).is_ok());

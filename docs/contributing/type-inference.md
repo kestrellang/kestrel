@@ -1,6 +1,6 @@
-# Type Inference (lib2)
+# Type Inference (lib)
 
-Kestrel uses a **bidirectional, constraint-based** type system with a fixpoint solver. The implementation lives in `lib2/kestrel-type-infer/`. This document is the contributor-level overview — enough to find your way around and safely add a constraint or diagnostic. For deeper invariants see `lib2/kestrel-type-infer/AGENTS.md` and `lib2/kestrel-type-infer/docs/`.
+Kestrel uses a **bidirectional, constraint-based** type system with a fixpoint solver. The implementation lives in `lib/kestrel-type-infer/`. This document is the contributor-level overview — enough to find your way around and safely add a constraint or diagnostic. For deeper invariants see `lib/kestrel-type-infer/AGENTS.md` and `lib/kestrel-type-infer/docs/`.
 
 ## Where it runs
 
@@ -195,11 +195,11 @@ let result = ctx.report_error(InferError::TypeMismatch { … });
 3. Add a `try_solve_*` function in `solver.rs`. Return `Solved` / `Deferred` / `Errored`.
 4. Wire it into the fixpoint dispatch (the big match in `fixpoint`).
 5. If the constraint can fail, add the corresponding `InferError` variant (see below — **five** files).
-6. Write focused tests under `lib2/kestrel-test-suite/testdata/inference/`.
+6. Write focused tests under `lib/kestrel-test-suite/testdata/inference/`.
 
 ## Adding an `InferError` variant
 
-From `lib2/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **five** files:
+From `lib/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **five** files:
 
 1. `kestrel-type-infer/src/error.rs` — the variant plus its span arm in `InferError::span`.
 2. `kestrel-type-infer/src/result.rs` — `describe_error()` match arm (short detail string).
@@ -221,6 +221,6 @@ Emit from the solver via `ctx.report_error(InferError::YourVariant { … })`, no
 
 ## Further reading
 
-- `lib2/kestrel-type-infer/AGENTS.md` — invariants, five-file rule, memberwise-init validation.
-- `lib2/kestrel-type-infer/docs/architecture.md`, `design.md` — deeper design rationale.
+- `lib/kestrel-type-infer/AGENTS.md` — invariants, five-file rule, memberwise-init validation.
+- `lib/kestrel-type-infer/docs/architecture.md`, `design.md` — deeper design rationale.
 - `.claude/skills/type-inference/` — solver crate deep-dive skill.

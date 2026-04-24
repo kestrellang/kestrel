@@ -15,7 +15,7 @@ use cranelift_codegen::ir::{self, InstBuilder, MemFlags, StackSlotData, StackSlo
 use cranelift_codegen::verifier::verify_function;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::Module;
-use kestrel_codegen2::{LayoutCache, substitute_type_with_self};
+use kestrel_codegen::{LayoutCache, substitute_type_with_self};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
     BlockId, FunctionDef, FunctionKind, LocalId, MirBody, MirTy, PassingMode, Place, Rvalue,

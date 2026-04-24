@@ -10,7 +10,7 @@ use crate::terminator;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::substitute_type;
+use kestrel_codegen::substitute_type;
 use kestrel_mir::{BlockId, Place, Rvalue, StatementKind};
 
 /// Compile a single basic block: all statements, then the terminator.

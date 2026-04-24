@@ -1,5 +1,5 @@
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
-use kestrel_parser2::{ParseResult, parse_source_file_from_source};
+use kestrel_parser::{ParseResult, parse_source_file_from_source};
 
 use crate::components::SourceText;
 use crate::diagnostic::{self, ThrowDiagnostic};

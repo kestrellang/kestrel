@@ -5,14 +5,14 @@
 //!
 //! Key differences from lib1:
 //! - Types are by-value (`MirTy`), no interning needed
-//! - Uses `substitute_type` from kestrel-codegen2
+//! - Uses `substitute_type` from kestrel-codegen
 //! - Entity-based lookups via pre-built HashMap
 
 use super::error::MonomorphizeError;
 use super::instantiation::{FunctionInstantiation, MonomorphizationSet};
 use super::witness;
 use crate::common;
-use kestrel_codegen2::{substitute_type, substitute_type_with_self};
+use kestrel_codegen::{substitute_type, substitute_type_with_self};
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
 use kestrel_mir::{Callee, FunctionId, FunctionKind, MirModule, MirTy, Rvalue, StatementKind};

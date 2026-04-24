@@ -11,7 +11,7 @@ use cranelift_codegen::ir::{
     self, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue,
 };
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{NamedKind, substitute_type, substitute_type_with_self};
+use kestrel_codegen::{NamedKind, substitute_type, substitute_type_with_self};
 use kestrel_mir::{MirTy, Value};
 use std::collections::HashMap;
 
@@ -117,7 +117,7 @@ pub fn compile_tuple(
     common::zero_memory(builder, addr, layout.size, ptr_ty);
 
     // Store each element
-    let mut offset_layout = kestrel_codegen2::Layout::zero(1);
+    let mut offset_layout = kestrel_codegen::Layout::zero(1);
     for (i, value) in values.iter().enumerate() {
         let elem_layout = ctx.layouts.layout_of(&elem_types[i]);
         let (offset, new_layout) = offset_layout.append(elem_layout);

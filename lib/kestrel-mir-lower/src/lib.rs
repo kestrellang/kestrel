@@ -55,7 +55,7 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 mod tests {
     use super::*;
     use kestrel_compiler_driver::CompilerDriver;
-    use kestrel_compiler2::Compiler;
+    use kestrel_compiler::Compiler;
     use kestrel_mir::WitnessMethodKey;
     use std::path::PathBuf;
 

@@ -1,6 +1,6 @@
 //! # Type Check Analyzer
 //!
-//! Surfaces type inference errors as analyzer diagnostics. In lib2, the
+//! Surfaces type inference errors as analyzer diagnostics. In lib, the
 //! constraint solver catches most type errors (mismatches, missing members,
 //! non-conformance). This analyzer converts those into structured diagnostics.
 //!

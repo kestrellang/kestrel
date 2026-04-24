@@ -1,6 +1,6 @@
 # lib1 Execution Graph Review
 
-Code quality review of `lib/kestrel-execution-graph` that motivated the lib2 redesign.
+Code quality review of `lib/kestrel-execution-graph` that motivated the lib redesign.
 
 ## High Priority Issues
 
@@ -11,20 +11,20 @@ But the IR supports i8/i16/i32 types and f16/f32. A `BinOp` on two `i32` values 
 `i64.add.signed` — incorrect and misleading. Same issue with `UnOp::as_str()` and
 `CastKind::as_str()`.
 
-**Fix in lib2**: `Op` carries `IntBits`/`FloatBits` directly.
+**Fix in lib**: `Op` carries `IntBits`/`FloatBits` directly.
 
 ### I1* vs Bool* redundancy
 
 `Rvalue` has both `BinaryOp { op: BinOp::BoolAnd, .. }` and `I1And { lhs, rhs }`.
 Same operations, two representations. Forces consumers to handle both.
 
-**Fix in lib2**: Single `Op::BoolAnd`/`BoolOr`/`BoolNot`/`BoolEq`.
+**Fix in lib**: Single `Op::BoolAnd`/`BoolOr`/`BoolNot`/`BoolEq`.
 
 ### Rvalue::PtrNull duplicates ImmediateKind::NullPtr
 
 Two ways to express null pointers. Consumers must check both.
 
-**Fix in lib2**: `Immediate::NullPtr(ty)` only.
+**Fix in lib**: `Immediate::NullPtr(ty)` only.
 
 ## Medium Priority Issues
 
@@ -53,13 +53,13 @@ for (i, item) in items.iter().enumerate() {
 Mixes core IR concepts (Move, Copy, BinaryOp, Call) with domain-specific intrinsics
 (pointer ops, string ops, float ops, atomic ops). Every match must handle all variants.
 
-**Fix in lib2**: Core ops + arity-based `Op1`/`Op2`/`Op3` with a single `Op` enum.
+**Fix in lib**: Core ops + arity-based `Op1`/`Op2`/`Op3` with a single `Op` enum.
 
 ### StatementKind::Call duplicates Rvalue::Call
 
 Both carry `callee: Callee, args: Vec<CallArg>`. Display code is identical.
 
-**Fix in lib2**: Single `StatementKind::Call { dest: Option<Place>, ... }`.
+**Fix in lib**: Single `StatementKind::Call { dest: Option<Place>, ... }`.
 
 ### run_to_fixpoint fragile modified handling
 
@@ -134,14 +134,14 @@ Codegen has a 4-step chain to infer self-type:
 3. Infer from method's containing type name (string matching)
 4. Fail
 
-**Fix in lib2**: `Callee` carries explicit `self_type`.
+**Fix in lib**: `Callee` carries explicit `self_type`.
 
 ### Extension method detection via string matching
 
 Monomorphization detects extension methods by checking if the implementation function
 name contains the protocol name.
 
-**Fix in lib2**: `MethodBinding.source: MethodSource` enum.
+**Fix in lib**: `MethodBinding.source: MethodSource` enum.
 
 ### Witness lookup is linear scan
 
@@ -154,13 +154,13 @@ for witness in mir.witnesses:
 
 O(n) for every witness resolution.
 
-**Fix in lib2**: `witness_index: HashMap<(Entity, MirTy), WitnessId>` on MirModule.
+**Fix in lib**: `witness_index: HashMap<(Entity, MirTy), WitnessId>` on MirModule.
 
 ### Function lookup by name is linear scan
 
 Codegen finds functions by iterating all functions and matching names.
 
-**Fix in lib2**: Functions indexed by entity.
+**Fix in lib**: Functions indexed by entity.
 
 ### Bool representation ambiguity in codegen
 
@@ -179,14 +179,14 @@ it immutably. The boundary between mutable and immutable phases is implicit.
 Scope stacks, deinit flags, 15+ case branches for merge logic, 8+ save/restore
 operations per closure. Single biggest source of complexity.
 
-**Fix in lib2**: Deinit is a separate pass on the CFG.
+**Fix in lib**: Deinit is a separate pass on the CFG.
 
 ### Closure context save/restore
 
 Lowering a closure requires saving and restoring 8+ fields of the lowering context.
 Manual and error-prone.
 
-**Fix in lib2**: Closures lowered independently. No context save/restore.
+**Fix in lib**: Closures lowered independently. No context save/restore.
 
 ### Type parameter scope is flat
 
@@ -198,7 +198,7 @@ generic contexts.
 Suffix-matches the last segment of qualified names. Fragile with multiple "main"
 functions.
 
-**Fix in lib2**: Explicit `entry_point` and `module_init` on MirModule.
+**Fix in lib**: Explicit `entry_point` and `module_init` on MirModule.
 
 ### LoweringContext mixes state and builder
 

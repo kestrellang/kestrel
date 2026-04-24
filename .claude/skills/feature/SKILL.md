@@ -1,15 +1,15 @@
 ---
 name: feature
-description: End-to-end workflow for adding a new language feature to the lib2 Kestrel compiler. Use when the user says "add feature X", "implement X in the compiler", or otherwise asks for a non-trivial language change that spans multiple pipeline stages (lexer → parser → AST → name-res → HIR → type-infer → MIR/codegen) and wants it done with design/plan/test gates. For single-stage tweaks or bug fixes, use the `change` skill instead. For writing the `.ks` testdata, use `write-tests`; for writing Kestrel source examples, use `write-kestrel`. For tracing "where does X live in the pipeline?", use `kestrel-pipeline`.
+description: End-to-end workflow for adding a new language feature to the lib Kestrel compiler. Use when the user says "add feature X", "implement X in the compiler", or otherwise asks for a non-trivial language change that spans multiple pipeline stages (lexer → parser → AST → name-res → HIR → type-infer → MIR/codegen) and wants it done with design/plan/test gates. For single-stage tweaks or bug fixes, use the `change` skill instead. For writing the `.ks` testdata, use `write-tests`; for writing Kestrel source examples, use `write-kestrel`. For tracing "where does X live in the pipeline?", use `kestrel-pipeline`.
 ---
 
-# Adding a Feature to the lib2 Kestrel Compiler
+# Adding a Feature to the lib Kestrel Compiler
 
 A staged workflow with **confirmation gates** at each phase. The point of the
 gates is to avoid writing 800 lines of code against a design the user didn't want.
 Do not skip them.
 
-## lib2 pipeline (where your code will go)
+## lib pipeline (where your code will go)
 
 ```
 Source → Tokens → CST → AST (ECS) → Name Res → HIR → Type Infer → MIR → Codegen
@@ -23,8 +23,8 @@ Orthogonal phases:
 - **Pattern matching** (`kestrel-pattern-matching`) is called from HIR lowering
   and MIR lowering for `match`-family constructs.
 
-Before you start, skim the target crate's `docs/architecture.md` — lib2 requires
-one per crate (see `lib2/AGENTS.md`). `kestrel-pipeline` is faster for "which
+Before you start, skim the target crate's `docs/architecture.md` — lib requires
+one per crate (see `lib/AGENTS.md`). `kestrel-pipeline` is faster for "which
 file owns variant X?".
 
 ## Phase 1 — Brainstorm
@@ -39,7 +39,7 @@ agent should return:
 - **Error surfaces** — what new diagnostics does this introduce; what existing
   ones does it break?
 - **Test precedents** — how is a similar feature tested under
-  `lib2/kestrel-test-suite/testdata/`?
+  `lib/kestrel-test-suite/testdata/`?
 
 Then have a short Socratic back-and-forth with the user: surface ambiguities,
 edge cases, and any alternative framings the Explore run turned up. Don't pad
@@ -107,7 +107,7 @@ don't apply (most features don't touch every stage).
 ## Test strategy
 - Diagnostic tests (one per distinct error, full `// ERROR:` message)
 - Execution tests (happy-path behavior, edge cases)
-- Location: `lib2/kestrel-test-suite/testdata/<category>/<feature>/`
+- Location: `lib/kestrel-test-suite/testdata/<category>/<feature>/`
 - See `write-tests` skill for the `.ks` testdata format.
 
 ## Phases
@@ -119,15 +119,15 @@ don't apply (most features don't touch every stage).
 - [ ] Run via `/triage` with a targeted pattern; expect failures.
 
 ### Phase 1 — Lexer (only if adding tokens/keywords)
-Files: `lib2/kestrel-lexer/src/...`
+Files: `lib/kestrel-lexer/src/...`
 - [ ] Add token; update keyword table if it's a keyword.
 
 ### Phase 2 — CST / SyntaxKind (only if adding a new syntactic shape)
-Files: `lib2/kestrel-syntax-tree/src/...`
+Files: `lib/kestrel-syntax-tree/src/...`
 - [ ] Add `SyntaxKind` variant(s).
 
 ### Phase 3 — Parser
-Files: `lib2/kestrel-parser/src/...`
+Files: `lib/kestrel-parser/src/...`
 - [ ] Parse rule for the new shape.
 - [ ] Wire into the existing declaration / expression / statement dispatcher
       so the parser actually reaches it.
@@ -150,7 +150,7 @@ Files: `lib2/kestrel-parser/src/...`
       `for_expr` in `kestrel-parser/src/expr/mod.rs`.
 
 ### Phase 4 — AST (ECS) builder
-Files: `lib2/kestrel-ast-builder/src/builders/<feature>.rs` (+ `mod.rs`,
+Files: `lib/kestrel-ast-builder/src/builders/<feature>.rs` (+ `mod.rs`,
 `components.rs`, `lower.rs`)
 - [ ] AST component(s) if the feature carries new data on an entity.
 - [ ] `AstExpr` / `AstStmt` / `AstPat` variant if it's a body-level construct.
@@ -159,13 +159,13 @@ Files: `lib2/kestrel-ast-builder/src/builders/<feature>.rs` (+ `mod.rs`,
 - [ ] Decls: modules own the entity; files attach as a `FileId` component.
 
 ### Phase 5 — Name resolution
-Files: `lib2/kestrel-name-res/src/...`
+Files: `lib/kestrel-name-res/src/...`
 - [ ] Scope / visibility handling if the feature introduces a new binder or
       changes lookup rules.
 - [ ] Update auto-import / std-import rules only if explicitly part of the design.
 
 ### Phase 6 — HIR lowering
-Files: `lib2/kestrel-hir-lower/src/{expr,stmt,pat,ty,desugar}.rs`
+Files: `lib/kestrel-hir-lower/src/{expr,stmt,pat,ty,desugar}.rs`
 - [ ] `HirExpr` / `HirStmt` / `HirPat` variant — or desugar to existing ones
       (prefer desugar when the semantics overlap with an existing construct).
 - [ ] Lowering function; wire into the `lower_ast_*` dispatcher.
@@ -173,7 +173,7 @@ Files: `lib2/kestrel-hir-lower/src/{expr,stmt,pat,ty,desugar}.rs`
       See `feedback_no_hir_decls` memory.
 
 ### Phase 7 — Type inference
-Files: `lib2/kestrel-type-infer/src/...`
+Files: `lib/kestrel-type-infer/src/...`
 - [ ] New `Constraint` kind (if existing ones don't cover this) plus solver
       handling in `solver.rs` / `resolve.rs`.
 - [ ] Oracle method (`kestrel-semantics` side) if the feature needs a query
@@ -182,7 +182,7 @@ Files: `lib2/kestrel-type-infer/src/...`
       — see `cascading_infer_errors` and `solver_poison_overreach` memories.
 
 ### Phase 8 — Analyzers (validation)
-Files: `lib2/kestrel-analyze/src/decl/<feature>.rs` or `.../body/<feature>.rs`
+Files: `lib/kestrel-analyze/src/decl/<feature>.rs` or `.../body/<feature>.rs`
 - [ ] DeclCheck / BodyCheck analyzer per distinct error class.
 - [ ] Register in the analyzer list.
 - [ ] Allocate a new `E3xx` diagnostic ID if applicable — coordinate via the
@@ -196,7 +196,7 @@ Files: `lib2/kestrel-analyze/src/decl/<feature>.rs` or `.../body/<feature>.rs`
       on tree construction.
 
 ### Phase 9 — MIR lowering / codegen
-Files: `lib2/kestrel-mir-lower/src/...`, `lib2/kestrel-codegen-cranelift/src/...`
+Files: `lib/kestrel-mir-lower/src/...`, `lib/kestrel-codegen-cranelift/src/...`
 - [ ] MIR shape (`Rvalue` / `Terminator` / witness calls).
 - [ ] Cranelift lowering if the feature produces new MIR.
 - [ ] Watch for monomorphization edge cases — see
@@ -242,7 +242,7 @@ After tests are green:
 2. **Crate architecture docs.** Update `docs/architecture.md` in any crate
    whose pipeline position, core types, or module map changed. Topic docs
    (`docs/<topic>.md`) get a new entry if the feature warrants a deep dive.
-   See `lib2/AGENTS.md` for the required structure.
+   See `lib/AGENTS.md` for the required structure.
 3. **`write-kestrel` skill.** If the feature introduces new syntax or a new
    gotcha future writers should know, update
    `.claude/skills/write-kestrel/SKILL.md`.

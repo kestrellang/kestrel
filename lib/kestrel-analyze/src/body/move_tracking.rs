@@ -2,7 +2,7 @@
 //!
 //! Tracks non-copyable value moves through control flow and reports
 //! use-after-move / maybe-moved errors. Mirrors lib1's `move_tracker` design
-//! on top of lib2's HIR/TypedBody: per-local move state, CFG-join on
+//! on top of lib's HIR/TypedBody: per-local move state, CFG-join on
 //! if/else/match/loop, `consuming` parameter arguments and `consuming self`
 //! receivers as move triggers.
 //!
@@ -868,7 +868,7 @@ fn emit_move_diagnostic(
     diags: &mut Vec<AnalyzeDiagnostic>,
     info: MoveInfo,
     use_expr: HirExprId,
-    use_span: kestrel_span2::Span,
+    use_span: kestrel_span::Span,
     name: &str,
 ) {
     let secondary_span = util::expr_span(cx.hir, info.site);
@@ -923,7 +923,7 @@ fn emit_use_after_move(
     cx: &BodyContext<'_>,
     diags: &mut Vec<AnalyzeDiagnostic>,
     _local: LocalId,
-    use_span: kestrel_span2::Span,
+    use_span: kestrel_span::Span,
     info: MoveInfo,
     name: &str,
 ) {

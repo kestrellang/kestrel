@@ -4,7 +4,7 @@
 //! `TypeAnnotation` components and embedded in `AstBody` nodes.
 //! All types carry a `Span` for error reporting.
 
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// A single segment in a qualified type path.
 /// Each segment has a name and optional type arguments.

@@ -3,7 +3,7 @@
 //! These are unresolved — paths are just names, no symbol resolution, no types
 //! embedded. Position-independent for incremental caching.
 
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::arena::{Arena, Idx};
 use crate::ast_type::AstType;

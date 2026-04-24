@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-reporting2"
+name = "kestrel-reporting"
 version.workspace = true
 edition.workspace = true
 

@@ -11,10 +11,10 @@ Information on the project structure, workflows, quick references, and patterns 
 - Verbose debug tracing is available via `VERBOSE_DEBUG_OUTPUT=1`. This enables `debug_trace!` output in the binder and semantic tree crates (member resolution, method calls, where clause checks, type substitutions). Don't use eprintln!, println!, or any other flags for debugging. When debugging something add `debug_trace!` to the compiler source code.
 
 ## Testing
-- **Only run `kestrel-test-suite2` through the `/triage` skill** — full suite, targeted subsets, or single tests. Do not invoke `cargo test -p kestrel-test-suite2` or the `file_tests-*` binary directly; the triage skill records results in `.triage/triage.db`, supports background runs, and is safe alongside other agents.
+- **Only run `kestrel-test-suite` through the `/triage` skill** — full suite, targeted subsets, or single tests. Do not invoke `cargo test -p kestrel-test-suite` or the `file_tests-*` binary directly; the triage skill records results in `.triage/triage.db`, supports background runs, and is safe alongside other agents.
 - After a run completes, **read the triage results** — check pass/fail counts and failure messages before reporting results. A started run with ignored output is not a test run.
 - Only run the full suite before commits, not after every edit. For iteration, pass a targeted pattern to triage.
-- Do not run `kestrel-test-suite` (the lib1 suite) — lib2 is the active target.
+- Do not run `kestrel-test-suite` (the lib1 suite) — lib is the active target.
 
 ### Fluid Memory
 
@@ -33,7 +33,7 @@ When you fix a mistake, think about how you can avoid the same mistake being mad
 
 # Lib 2 rewrite
 
-We are rewriting it in lib2, focus on that
+We are rewriting it in lib, focus on that
 
 # Directory-scoped guidance (`AGENTS.md`)
 

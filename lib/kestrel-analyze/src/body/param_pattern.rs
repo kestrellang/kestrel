@@ -100,7 +100,7 @@ impl BodyCheck for ParamPatternAnalyzer {
 fn check_duplicate_bindings(
     pattern: &ParamPattern,
     seen: &mut HashMap<String, bool>,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     match pattern {
@@ -140,7 +140,7 @@ fn check_duplicate_bindings(
 fn check_pattern_type(
     pattern: &ParamPattern,
     ty: &AstType,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     if let ParamPattern::Tuple { elements } = pattern {
@@ -162,7 +162,7 @@ fn check_duplicate_bindings_hir(
     hir: &HirBody,
     pat_id: HirPatId,
     seen: &mut HashMap<String, bool>,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     match &hir.pats[pat_id] {
@@ -221,7 +221,7 @@ fn check_pattern_type_hir(
     hir: &HirBody,
     pat_id: HirPatId,
     ty: &HirTy,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     if let HirPat::Tuple {
@@ -248,7 +248,7 @@ fn check_pattern_type_hir(
 }
 
 /// Get the span from an HirPat.
-fn hir_pat_span(pat: &HirPat) -> &kestrel_span2::Span {
+fn hir_pat_span(pat: &HirPat) -> &kestrel_span::Span {
     match pat {
         HirPat::Wildcard { span }
         | HirPat::Binding { span, .. }
@@ -270,7 +270,7 @@ fn hir_pat_span(pat: &HirPat) -> &kestrel_span2::Span {
 fn emit_arity_mismatch(
     pat_count: usize,
     type_count: usize,
-    span: &kestrel_span2::Span,
+    span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     diags.push(AnalyzeDiagnostic {
@@ -289,7 +289,7 @@ fn emit_arity_mismatch(
     });
 }
 
-fn emit_tuple_on_non_tuple(span: &kestrel_span2::Span, diags: &mut Vec<AnalyzeDiagnostic>) {
+fn emit_tuple_on_non_tuple(span: &kestrel_span::Span, diags: &mut Vec<AnalyzeDiagnostic>) {
     diags.push(AnalyzeDiagnostic {
         descriptor_id: DESCRIPTORS[2].id,
         severity: DESCRIPTORS[2].default_severity,

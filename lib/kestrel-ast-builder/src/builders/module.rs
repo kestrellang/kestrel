@@ -5,7 +5,7 @@
 //! Creates if not found. Module entities have NO `FileId`.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::components::{Name, NodeKind};
 

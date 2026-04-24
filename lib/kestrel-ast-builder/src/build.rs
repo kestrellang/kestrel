@@ -5,7 +5,7 @@
 //! their body children onto the stack for processing.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::components::{Os, TargetConfig};
 
@@ -252,11 +252,11 @@ mod tests {
         let file_entity = world.spawn();
 
         // Lex and parse
-        let tokens: Vec<_> = kestrel_lexer2::lex(source, file_entity.index())
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
             .filter_map(|r| r.ok())
             .collect();
         let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
-        let result = kestrel_parser2::parse_source_file_from_source(source, token_iter);
+        let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
 
         build_declarations(&mut world, file_entity, &result.tree, root, None);
         (world, root, file_entity)
@@ -320,10 +320,10 @@ mod tests {
         // File 1
         let f1 = world.spawn();
         let src1 = "module Shared\nstruct A {}";
-        let tokens1: Vec<_> = kestrel_lexer2::lex(src1, f1.index())
+        let tokens1: Vec<_> = kestrel_lexer::lex(src1, f1.index())
             .filter_map(|r| r.ok())
             .collect();
-        let result1 = kestrel_parser2::parse_source_file_from_source(
+        let result1 = kestrel_parser::parse_source_file_from_source(
             src1,
             tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
@@ -332,10 +332,10 @@ mod tests {
         // File 2
         let f2 = world.spawn();
         let src2 = "module Shared\nstruct B {}";
-        let tokens2: Vec<_> = kestrel_lexer2::lex(src2, f2.index())
+        let tokens2: Vec<_> = kestrel_lexer::lex(src2, f2.index())
             .filter_map(|r| r.ok())
             .collect();
-        let result2 = kestrel_parser2::parse_source_file_from_source(
+        let result2 = kestrel_parser::parse_source_file_from_source(
             src2,
             tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
         );

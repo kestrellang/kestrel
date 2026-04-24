@@ -125,7 +125,7 @@ mod tests {
     use kestrel_ast_builder::ExtensionTarget;
     use kestrel_ast_builder::{Name, Typed, Vis};
     use kestrel_hecs::World;
-    use kestrel_span2::Span;
+    use kestrel_span::Span;
 
     fn test_span() -> Span {
         Span::synthetic(0)

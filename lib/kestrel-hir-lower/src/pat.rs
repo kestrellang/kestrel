@@ -6,7 +6,7 @@
 use kestrel_ast::ast_body::*;
 use kestrel_hir::body::*;
 use kestrel_name_res::{ResolveTypePath, ResolveValuePath, TypeResolution, ValueResolution};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 
@@ -51,12 +51,12 @@ impl LowerCtx<'_> {
             } => {
                 if *multiple_rests {
                     self.ctx.accumulate(
-                        kestrel_reporting2::Diagnostic::error()
+                        kestrel_reporting::Diagnostic::error()
                             .with_message(
                                 "only one rest pattern (`..`) is allowed per tuple pattern",
                             )
                             .with_labels(vec![
-                                kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                kestrel_reporting::Label::primary(span.file_id, span.range())
                                     .with_message("multiple rest patterns found"),
                             ]),
                     );
@@ -115,12 +115,12 @@ impl LowerCtx<'_> {
                     };
                     if invalid {
                         self.ctx.accumulate(
-                            kestrel_reporting2::Diagnostic::error()
+                            kestrel_reporting::Diagnostic::error()
                                 .with_message(
                                     "invalid range bounds: start must be less than or equal to end",
                                 )
                                 .with_labels(vec![
-                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                    kestrel_reporting::Label::primary(span.file_id, span.range())
                                         .with_message("range bounds are reversed"),
                                 ]),
                         );
@@ -188,10 +188,10 @@ impl LowerCtx<'_> {
                 // Check for nested @ patterns
                 if matches!(&body.pats[*subpattern], AstPat::At { .. }) {
                     self.ctx.accumulate(
-                        kestrel_reporting2::Diagnostic::error()
+                        kestrel_reporting::Diagnostic::error()
                             .with_message("nested @ patterns are not allowed")
                             .with_labels(vec![
-                                kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                kestrel_reporting::Label::primary(span.file_id, span.range())
                                     .with_message(
                                         "use a single @ pattern with the outermost binding",
                                     ),
@@ -351,13 +351,13 @@ impl LowerCtx<'_> {
                     if !struct_field_names.contains(&field.field_name) {
                         has_unknown = true;
                         self.ctx.accumulate(
-                            kestrel_reporting2::Diagnostic::error()
+                            kestrel_reporting::Diagnostic::error()
                                 .with_message(format!(
                                     "struct `{}` has no field `{}`",
                                     name, field.field_name
                                 ))
                                 .with_labels(vec![
-                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                    kestrel_reporting::Label::primary(span.file_id, span.range())
                                         .with_message(format!(
                                             "unknown field `{}`",
                                             field.field_name
@@ -380,14 +380,14 @@ impl LowerCtx<'_> {
                         .collect();
                     if !missing.is_empty() {
                         self.ctx.accumulate(
-                            kestrel_reporting2::Diagnostic::error()
+                            kestrel_reporting::Diagnostic::error()
                                 .with_message(format!(
                                     "pattern does not cover field{} `{}`",
                                     if missing.len() > 1 { "s" } else { "" },
                                     missing.join("`, `"),
                                 ))
                                 .with_labels(vec![
-                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                    kestrel_reporting::Label::primary(span.file_id, span.range())
                                         .with_message("use `..` to ignore remaining fields"),
                                 ]),
                         );
@@ -545,10 +545,10 @@ pub(crate) fn parse_char_validated(
     // Empty char literal
     if inner.is_empty() {
         ctx.accumulate(
-            kestrel_reporting2::Diagnostic::error()
+            kestrel_reporting::Diagnostic::error()
                 .with_message("empty character literal")
                 .with_labels(vec![
-                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                    kestrel_reporting::Label::primary(span.file_id, span.range())
                         .with_message("character literal must contain exactly one codepoint"),
                 ]),
         );
@@ -564,10 +564,10 @@ pub(crate) fn parse_char_validated(
 
     if codepoints.len() > 1 {
         ctx.accumulate(
-            kestrel_reporting2::Diagnostic::error()
+            kestrel_reporting::Diagnostic::error()
                 .with_message("character literal may only contain one codepoint")
                 .with_labels(vec![
-                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                    kestrel_reporting::Label::primary(span.file_id, span.range())
                         .with_message(format!("found {} codepoints", codepoints.len())),
                 ]),
         );
@@ -609,13 +609,13 @@ fn unescape_char_content(
                             if value > 0x7F {
                                 if let Some(ctx) = ctx {
                                     ctx.accumulate(
-                                        kestrel_reporting2::Diagnostic::error()
+                                        kestrel_reporting::Diagnostic::error()
                                             .with_message(format!(
                                                 "ASCII escape \\x{:02X} out of range",
                                                 value
                                             ))
                                             .with_labels(vec![
-                                                kestrel_reporting2::Label::primary(
+                                                kestrel_reporting::Label::primary(
                                                     span.file_id,
                                                     span.range(),
                                                 )
@@ -630,10 +630,10 @@ fn unescape_char_content(
                             // Incomplete hex escape
                             if let Some(ctx) = ctx {
                                 ctx.accumulate(
-                                    kestrel_reporting2::Diagnostic::error()
+                                    kestrel_reporting::Diagnostic::error()
                                         .with_message("invalid escape sequence")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(
+                                            kestrel_reporting::Label::primary(
                                                 span.file_id,
                                                 span.range(),
                                             )
@@ -650,10 +650,10 @@ fn unescape_char_content(
                     if chars.next() != Some('{') {
                         if let Some(ctx) = ctx {
                             ctx.accumulate(
-                                kestrel_reporting2::Diagnostic::error()
+                                kestrel_reporting::Diagnostic::error()
                                     .with_message("invalid Unicode escape")
                                     .with_labels(vec![
-                                        kestrel_reporting2::Label::primary(
+                                        kestrel_reporting::Label::primary(
                                             span.file_id,
                                             span.range(),
                                         )
@@ -675,10 +675,10 @@ fn unescape_char_content(
                         Ok(value) if value > 0x10FFFF => {
                             if let Some(ctx) = ctx {
                                 ctx.accumulate(
-                                    kestrel_reporting2::Diagnostic::error()
+                                    kestrel_reporting::Diagnostic::error()
                                         .with_message("invalid Unicode escape")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(
+                                            kestrel_reporting::Label::primary(
                                                 span.file_id,
                                                 span.range(),
                                             )
@@ -694,10 +694,10 @@ fn unescape_char_content(
                         Ok(value) if (0xD800..=0xDFFF).contains(&value) => {
                             if let Some(ctx) = ctx {
                                 ctx.accumulate(
-                                    kestrel_reporting2::Diagnostic::error()
+                                    kestrel_reporting::Diagnostic::error()
                                         .with_message("invalid Unicode escape")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(
+                                            kestrel_reporting::Label::primary(
                                                 span.file_id,
                                                 span.range(),
                                             )
@@ -714,10 +714,10 @@ fn unescape_char_content(
                         Err(_) => {
                             if let Some(ctx) = ctx {
                                 ctx.accumulate(
-                                    kestrel_reporting2::Diagnostic::error()
+                                    kestrel_reporting::Diagnostic::error()
                                         .with_message("invalid Unicode escape")
                                         .with_labels(vec![
-                                            kestrel_reporting2::Label::primary(
+                                            kestrel_reporting::Label::primary(
                                                 span.file_id,
                                                 span.range(),
                                             )
@@ -733,10 +733,10 @@ fn unescape_char_content(
                     // Unknown escape sequence
                     if let Some(ctx) = ctx {
                         ctx.accumulate(
-                            kestrel_reporting2::Diagnostic::error()
+                            kestrel_reporting::Diagnostic::error()
                                 .with_message(format!("invalid escape sequence '\\{}'", esc))
                                 .with_labels(vec![
-                                    kestrel_reporting2::Label::primary(span.file_id, span.range())
+                                    kestrel_reporting::Label::primary(span.file_id, span.range())
                                         .with_message("unknown escape"),
                                 ]),
                         );

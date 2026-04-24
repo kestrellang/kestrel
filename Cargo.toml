@@ -4,12 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-kestrel-compiler2 = { path = "lib2/kestrel-compiler" }
-kestrel-compiler-driver = { path = "lib2/kestrel-compiler-driver" }
-kestrel-ast-builder = { path = "lib2/kestrel-ast-builder" }
-kestrel-mir-lower = { path = "lib2/kestrel-mir-lower" }
-kestrel-codegen2 = { path = "lib2/kestrel-codegen" }
-kestrel-codegen2-cranelift = { path = "lib2/kestrel-codegen-cranelift" }
+kestrel-compiler = { path = "lib/kestrel-compiler" }
+kestrel-compiler-driver = { path = "lib/kestrel-compiler-driver" }
+kestrel-ast-builder = { path = "lib/kestrel-ast-builder" }
+kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
+kestrel-codegen = { path = "lib/kestrel-codegen" }
+kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
 clap = { workspace = true }
 
 [workspace.package]
@@ -35,29 +35,29 @@ unicode-xid = "0.2"
 
 [workspace]
 members = [
-    "lib2/kestrel-hecs",
-    "lib2/kestrel-span",
-    "lib2/kestrel-lexer",
-    "lib2/kestrel-syntax-tree",
-    "lib2/kestrel-parser",
-    "lib2/kestrel-compiler",
-    "lib2/kestrel-compiler-driver",
-    "lib2/kestrel-ast",
-    "lib2/kestrel-ast-builder",
-    "lib2/kestrel-hir",
-    "lib2/kestrel-name-res",
-    "lib2/kestrel-hir-lower",
-    "lib2/kestrel-type-infer",
-    "lib2/kestrel-pattern-matching",
-    "lib2/kestrel-semantics",
-    "lib2/kestrel-analyze",
-    "lib2/kestrel-debug",
-    "lib2/kestrel-reporting",
-    "lib2/kestrel-mir",
-    "lib2/kestrel-mir-lower",
-    "lib2/kestrel-codegen",
-    "lib2/kestrel-codegen-cranelift",
-    "lib2/kestrel-test-suite",
+    "lib/kestrel-hecs",
+    "lib/kestrel-span",
+    "lib/kestrel-lexer",
+    "lib/kestrel-syntax-tree",
+    "lib/kestrel-parser",
+    "lib/kestrel-compiler",
+    "lib/kestrel-compiler-driver",
+    "lib/kestrel-ast",
+    "lib/kestrel-ast-builder",
+    "lib/kestrel-hir",
+    "lib/kestrel-name-res",
+    "lib/kestrel-hir-lower",
+    "lib/kestrel-type-infer",
+    "lib/kestrel-pattern-matching",
+    "lib/kestrel-semantics",
+    "lib/kestrel-analyze",
+    "lib/kestrel-debug",
+    "lib/kestrel-reporting",
+    "lib/kestrel-mir",
+    "lib/kestrel-mir-lower",
+    "lib/kestrel-codegen",
+    "lib/kestrel-codegen-cranelift",
+    "lib/kestrel-test-suite",
     "tools/triage"
 ]
 exclude = ["registry"]
@@ -89,5 +89,5 @@ type_complexity = "allow"     # Parser combinators have complex types
 [profile.dev]
 opt-level = 1
 
-[profile.dev.package.kestrel-parser2]
+[profile.dev.package.kestrel-parser]
 opt-level = 2

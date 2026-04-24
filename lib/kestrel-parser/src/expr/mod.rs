@@ -5,14 +5,14 @@
 //! - Unit expression: ()
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::block::{BlockItem, CodeBlockData, ElseBlockItem, GuardLetData, emit_code_block};
 use crate::common::{skip_inline_trivia, skip_trivia};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::stmt::{StmtVariant, VariableDeclarationData};
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
@@ -156,7 +156,7 @@ impl Expression {
 fn full_type_args_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, TypeArgsData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             ty_parser()
                 .separated_by(skip_trivia().ignore_then(just(Token::Comma)))
@@ -164,7 +164,7 @@ fn full_type_args_parser<'tokens>()
                 .collect::<Vec<_>>(),
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|((lbracket, args), rbracket)| TypeArgsData {
             lbracket,
             args,
@@ -634,36 +634,36 @@ pub fn expr_parser<'tokens>()
     recursive(|expr| {
         // Literals - these are simple and don't need boxing
         let integer = skip_trivia()
-            .ignore_then(select! { Token::Integer = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Integer = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::Integer);
 
         let float = skip_trivia()
-            .ignore_then(select! { Token::Float = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Float = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::Float);
 
         let string = skip_trivia()
-            .ignore_then(select! { Token::String = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::String = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::String);
 
         let raw_string = skip_trivia()
-            .ignore_then(select! { Token::RawString = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::RawString = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::RawString);
 
         let char_literal = skip_trivia()
-            .ignore_then(select! { Token::Char = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Char = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::Char);
 
         let boolean = skip_trivia()
-            .ignore_then(select! { Token::Boolean = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Boolean = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::Bool);
 
         let null = skip_trivia()
-            .ignore_then(select! { Token::Null = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Null = e => to_kestrel_span(e.span()) })
             .map(ExprVariant::Null);
 
         // Path segment: identifier optionally followed by type args [T, U]
         let path_segment = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(full_type_args_parser().or_not())
             .map(|(name, type_args)| PathSegmentData { name, type_args });
 
@@ -672,7 +672,7 @@ pub fn expr_parser<'tokens>()
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(path_segment.clone())
                     .repeated()
                     .collect::<Vec<_>>(),
@@ -695,20 +695,20 @@ pub fn expr_parser<'tokens>()
         // - [expr, ...] = array
         // - [expr: expr, ...] = dictionary
         let array_or_dict = skip_trivia()
-            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 // Empty dictionary: [:]
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(skip_trivia().ignore_then(
-                        just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .map(|(_colon, rbracket)| BracketContent::EmptyDictionary(rbracket))
                     .or(
                         // Empty array: []
                         skip_trivia()
                             .ignore_then(
-                                just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())),
                             )
                             .map(BracketContent::EmptyArray),
                     )
@@ -720,7 +720,7 @@ pub fn expr_parser<'tokens>()
                                 skip_trivia()
                                     .ignore_then(
                                         just(Token::Colon)
-                                            .map_with(|_, e| to_kestrel_span2(e.span())),
+                                            .map_with(|_, e| to_kestrel_span(e.span())),
                                     )
                                     .then(expr.clone())
                                     .then(
@@ -728,13 +728,13 @@ pub fn expr_parser<'tokens>()
                                         skip_trivia()
                                             .ignore_then(
                                                 just(Token::Comma)
-                                                    .map_with(|_, e| to_kestrel_span2(e.span())),
+                                                    .map_with(|_, e| to_kestrel_span(e.span())),
                                             )
                                             .then(expr.clone())
                                             .then(
                                                 skip_trivia().ignore_then(
                                                     just(Token::Colon).map_with(|_, e| {
-                                                        to_kestrel_span2(e.span())
+                                                        to_kestrel_span(e.span())
                                                     }),
                                                 ),
                                             )
@@ -750,14 +750,14 @@ pub fn expr_parser<'tokens>()
                                         skip_trivia()
                                             .ignore_then(
                                                 just(Token::Comma)
-                                                    .map_with(|_, e| to_kestrel_span2(e.span())),
+                                                    .map_with(|_, e| to_kestrel_span(e.span())),
                                             )
                                             .or_not(),
                                     )
                                     .then(
                                         skip_trivia().ignore_then(
                                             just(Token::RBracket)
-                                                .map_with(|_, e| to_kestrel_span2(e.span())),
+                                                .map_with(|_, e| to_kestrel_span(e.span())),
                                         ),
                                     )
                                     .map(
@@ -778,13 +778,13 @@ pub fn expr_parser<'tokens>()
                                         skip_trivia()
                                             .ignore_then(
                                                 just(Token::Comma)
-                                                    .map_with(|_, e| to_kestrel_span2(e.span())),
+                                                    .map_with(|_, e| to_kestrel_span(e.span())),
                                             )
                                             .then(
                                                 expr.clone()
                                                     .separated_by(skip_trivia().ignore_then(
                                                         just(Token::Comma).map_with(|_, e| {
-                                                            to_kestrel_span2(e.span())
+                                                            to_kestrel_span(e.span())
                                                         }),
                                                     ))
                                                     .allow_trailing()
@@ -793,7 +793,7 @@ pub fn expr_parser<'tokens>()
                                             .then(
                                                 skip_trivia().ignore_then(
                                                     just(Token::RBracket).map_with(|_, e| {
-                                                        to_kestrel_span2(e.span())
+                                                        to_kestrel_span(e.span())
                                                     }),
                                                 ),
                                             )
@@ -810,13 +810,13 @@ pub fn expr_parser<'tokens>()
                                                     .ignore_then(
                                                         just(Token::Comma)
                                                             .map_with(|_, e| {
-                                                                to_kestrel_span2(e.span())
+                                                                to_kestrel_span(e.span())
                                                             })
                                                             .or_not(),
                                                     )
                                                     .then(skip_trivia().ignore_then(
                                                         just(Token::RBracket).map_with(|_, e| {
-                                                            to_kestrel_span2(e.span())
+                                                            to_kestrel_span(e.span())
                                                         }),
                                                     ))
                                                     .map(|(_trailing, rbracket)| {
@@ -883,11 +883,11 @@ pub fn expr_parser<'tokens>()
         // - (expr,) = single-element tuple
         // - (expr, expr, ...) = tuple
         let paren_expr = skip_trivia()
-            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 // Empty parens: ()
                 skip_trivia()
-                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .map(ParenContent::Unit)
                     .or(
                         // First element
@@ -897,7 +897,7 @@ pub fn expr_parser<'tokens>()
                                 skip_trivia()
                                     .ignore_then(
                                         just(Token::Comma)
-                                            .map_with(|_, e| to_kestrel_span2(e.span())),
+                                            .map_with(|_, e| to_kestrel_span(e.span())),
                                     )
                                     .then(
                                         // After comma: either more elements or just rparen
@@ -905,7 +905,7 @@ pub fn expr_parser<'tokens>()
                                             .separated_by(
                                                 skip_trivia().ignore_then(
                                                     just(Token::Comma).map_with(|_, e| {
-                                                        to_kestrel_span2(e.span())
+                                                        to_kestrel_span(e.span())
                                                     }),
                                                 ),
                                             )
@@ -919,7 +919,7 @@ pub fn expr_parser<'tokens>()
                                     .or(empty().to((false, Span::new(0, 0..0), vec![]))),
                             )
                             .then(skip_trivia().ignore_then(
-                                just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
                             ))
                             .map(|((first, (has_comma, _first_comma, more)), rparen)| {
                                 if !has_comma {
@@ -957,10 +957,10 @@ pub fn expr_parser<'tokens>()
         //
         // We use lookahead logic: first check if we have identifier:, only then commit.
         let labeled_argument = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(skip_trivia().ignore_then(expr.clone()))
             .map(|((label, colon), value)| CallArg {
@@ -982,19 +982,19 @@ pub fn expr_parser<'tokens>()
 
         // Argument list: (arg, arg, ...)
         let arg_list = skip_inline_trivia()
-            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 argument
                     .clone()
                     .separated_by(skip_trivia().ignore_then(
-                        just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|((lparen, arguments), rparen)| PostfixOp::Call {
                 lparen: Some(lparen),
@@ -1010,11 +1010,11 @@ pub fn expr_parser<'tokens>()
         // This prevents parsing ".foo" on a new line as a member access on the previous expression.
         // The dot must immediately follow the expression (same line) for postfix chaining.
         let member_access = just(Token::Dot)
-            .map_with(|_, e| to_kestrel_span2(e.span()))
+            .map_with(|_, e| to_kestrel_span(e.span()))
             .then(skip_trivia().ignore_then(select! {
-                Token::Identifier = e => (Token::Identifier, to_kestrel_span2(e.span())),
-                Token::Integer = e => (Token::Integer, to_kestrel_span2(e.span())),
-                Token::Init = e => (Token::Init, to_kestrel_span2(e.span())),
+                Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
+                Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
+                Token::Init = e => (Token::Init, to_kestrel_span(e.span())),
             }))
             .then(full_type_args_parser().or_not())
             .map(|((dot, (token, span)), type_args)| match token {
@@ -1028,7 +1028,7 @@ pub fn expr_parser<'tokens>()
 
         // Postfix unwrap operator: expr!
         let postfix_bang = skip_trivia()
-            .ignore_then(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span2(e.span()))))
+            .ignore_then(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
             .map(|(tok, span)| PostfixOp::PostfixOperator {
                 operator: tok,
                 operator_span: span,
@@ -1039,60 +1039,60 @@ pub fn expr_parser<'tokens>()
         // Prefix unary operators: -, +, ! (bitwise-not), not (logical-not)
         let unary_op = skip_trivia().ignore_then(
             just(Token::Minus)
-                .map_with(|tok, e| (tok, to_kestrel_span2(e.span())))
-                .or(just(Token::Plus).map_with(|tok, e| (tok, to_kestrel_span2(e.span()))))
-                .or(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span2(e.span()))))
-                .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span2(e.span())))),
+                .map_with(|tok, e| (tok, to_kestrel_span(e.span())))
+                .or(just(Token::Plus).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+                .or(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+                .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span(e.span())))),
         );
 
         // Binary operator parser
         let binary_op = skip_trivia().ignore_then(select! {
-            Token::Plus = e => (Token::Plus, to_kestrel_span2(e.span())),
-            Token::Minus = e => (Token::Minus, to_kestrel_span2(e.span())),
-            Token::Star = e => (Token::Star, to_kestrel_span2(e.span())),
-            Token::Slash = e => (Token::Slash, to_kestrel_span2(e.span())),
-            Token::Percent = e => (Token::Percent, to_kestrel_span2(e.span())),
-            Token::Ampersand = e => (Token::Ampersand, to_kestrel_span2(e.span())),
-            Token::Pipe = e => (Token::Pipe, to_kestrel_span2(e.span())),
-            Token::Caret = e => (Token::Caret, to_kestrel_span2(e.span())),
-            Token::LessLess = e => (Token::LessLess, to_kestrel_span2(e.span())),
-            Token::GreaterGreater = e => (Token::GreaterGreater, to_kestrel_span2(e.span())),
-            Token::Less = e => (Token::Less, to_kestrel_span2(e.span())),
-            Token::Greater = e => (Token::Greater, to_kestrel_span2(e.span())),
-            Token::LessEquals = e => (Token::LessEquals, to_kestrel_span2(e.span())),
-            Token::GreaterEquals = e => (Token::GreaterEquals, to_kestrel_span2(e.span())),
-            Token::EqualsEquals = e => (Token::EqualsEquals, to_kestrel_span2(e.span())),
-            Token::BangEquals = e => (Token::BangEquals, to_kestrel_span2(e.span())),
-            Token::And = e => (Token::And, to_kestrel_span2(e.span())),
-            Token::Or = e => (Token::Or, to_kestrel_span2(e.span())),
-            Token::QuestionQuestion = e => (Token::QuestionQuestion, to_kestrel_span2(e.span())),
-            Token::DotDotEquals = e => (Token::DotDotEquals, to_kestrel_span2(e.span())),
-            Token::DotDotLess = e => (Token::DotDotLess, to_kestrel_span2(e.span())),
+            Token::Plus = e => (Token::Plus, to_kestrel_span(e.span())),
+            Token::Minus = e => (Token::Minus, to_kestrel_span(e.span())),
+            Token::Star = e => (Token::Star, to_kestrel_span(e.span())),
+            Token::Slash = e => (Token::Slash, to_kestrel_span(e.span())),
+            Token::Percent = e => (Token::Percent, to_kestrel_span(e.span())),
+            Token::Ampersand = e => (Token::Ampersand, to_kestrel_span(e.span())),
+            Token::Pipe = e => (Token::Pipe, to_kestrel_span(e.span())),
+            Token::Caret = e => (Token::Caret, to_kestrel_span(e.span())),
+            Token::LessLess = e => (Token::LessLess, to_kestrel_span(e.span())),
+            Token::GreaterGreater = e => (Token::GreaterGreater, to_kestrel_span(e.span())),
+            Token::Less = e => (Token::Less, to_kestrel_span(e.span())),
+            Token::Greater = e => (Token::Greater, to_kestrel_span(e.span())),
+            Token::LessEquals = e => (Token::LessEquals, to_kestrel_span(e.span())),
+            Token::GreaterEquals = e => (Token::GreaterEquals, to_kestrel_span(e.span())),
+            Token::EqualsEquals = e => (Token::EqualsEquals, to_kestrel_span(e.span())),
+            Token::BangEquals = e => (Token::BangEquals, to_kestrel_span(e.span())),
+            Token::And = e => (Token::And, to_kestrel_span(e.span())),
+            Token::Or = e => (Token::Or, to_kestrel_span(e.span())),
+            Token::QuestionQuestion = e => (Token::QuestionQuestion, to_kestrel_span(e.span())),
+            Token::DotDotEquals = e => (Token::DotDotEquals, to_kestrel_span(e.span())),
+            Token::DotDotLess = e => (Token::DotDotLess, to_kestrel_span(e.span())),
         });
 
         // Inline variable declaration parser (uses expr for initializer)
         let inline_var_decl = skip_trivia()
             .ignore_then(
                 just(Token::Let)
-                    .map_with(|_, e| (to_kestrel_span2(e.span()), false))
-                    .or(just(Token::Var).map_with(|_, e| (to_kestrel_span2(e.span()), true))),
+                    .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                    .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
             )
             .then(crate::pattern::pattern_parser())
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(ty_parser())
                     .or_not(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(expr.clone())
                     .or_not(),
             )
             .then(
                 skip_trivia().ignore_then(
-                    just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span())),
+                    just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())),
                 ),
             )
             .map(
@@ -1131,7 +1131,7 @@ pub fn expr_parser<'tokens>()
                                 skip_trivia()
                                     .ignore_then(
                                         just(Token::Semicolon)
-                                            .map_with(|_, e| to_kestrel_span2(e.span())),
+                                            .map_with(|_, e| to_kestrel_span(e.span())),
                                     )
                                     .map(Some)
                                     .or(empty().to(None)),
@@ -1167,10 +1167,10 @@ pub fn expr_parser<'tokens>()
                 // Inline guard-let parser with chain support
                 // Single let condition: let pattern = expr
                 let inline_guard_let_condition = skip_trivia()
-                    .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(crate::pattern::pattern_parser())
                     .then(skip_trivia().ignore_then(
-                        just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .then(expr_for_guard.clone())
                     .map(
@@ -1204,17 +1204,17 @@ pub fn expr_parser<'tokens>()
 
                 let inline_guard_let =
                     skip_trivia()
-                        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span2(e.span())))
+                        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
                         .then(inline_guard_conditions)
                         .then(skip_trivia().ignore_then(
-                            just(Token::Else).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::Else).map_with(|_, e| to_kestrel_span(e.span())),
                         ))
                         .then(skip_trivia().ignore_then(
-                            just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())),
                         ))
                         .then(inline_else_items)
                         .then(skip_trivia().ignore_then(
-                            just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
                         ))
                         .map(
                             |(
@@ -1239,7 +1239,7 @@ pub fn expr_parser<'tokens>()
                             skip_trivia()
                                 .ignore_then(
                                     just(Token::Semicolon)
-                                        .map_with(|_, e| to_kestrel_span2(e.span())),
+                                        .map_with(|_, e| to_kestrel_span(e.span())),
                                 )
                                 .or_not(),
                         )
@@ -1257,7 +1257,7 @@ pub fn expr_parser<'tokens>()
                         }));
 
                 skip_trivia()
-                    .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
                         inline_block_item
                             .repeated()
@@ -1271,7 +1271,7 @@ pub fn expr_parser<'tokens>()
                             }),
                     )
                     .then(skip_trivia().ignore_then(
-                        just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .map(|((lbrace, items), rbrace)| CodeBlockData {
                         lbrace,
@@ -1286,18 +1286,18 @@ pub fn expr_parser<'tokens>()
         let implicit_member_access =
             {
                 let implicit_arg_list = skip_inline_trivia()
-                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
                         argument
                             .clone()
                             .separated_by(skip_trivia().ignore_then(
-                                just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                             ))
                             .allow_trailing()
                             .collect::<Vec<_>>(),
                     )
                     .then(skip_trivia().ignore_then(
-                        just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .map(|((lparen, arguments), rparen)| ArgumentListData {
                         lparen,
@@ -1307,9 +1307,9 @@ pub fn expr_parser<'tokens>()
                     });
 
                 skip_trivia()
-                    .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(skip_trivia().ignore_then(
-                        select! { Token::Identifier = e => to_kestrel_span2(e.span()) },
+                        select! { Token::Identifier = e => to_kestrel_span(e.span()) },
                     ))
                     .then(implicit_arg_list.or_not())
                     .map(
@@ -1350,10 +1350,10 @@ pub fn expr_parser<'tokens>()
                 _ => unreachable!(),
             })
             .or(skip_trivia()
-                .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(skip_trivia().ignore_then(select! {
-                    Token::Identifier = e => (Token::Identifier, to_kestrel_span2(e.span())),
-                    Token::Integer = e => (Token::Integer, to_kestrel_span2(e.span())),
+                    Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
+                    Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
                 }))
                 .then(full_type_args_parser().or_not())
                 .map(|((dot, (token, span)), type_args)| match token {
@@ -1431,11 +1431,11 @@ pub fn expr_parser<'tokens>()
 
         // If-let condition: let pattern = expr
         let if_let_condition = skip_trivia()
-            .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
             .then(crate::pattern::pattern_parser())
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(condition_binary.clone())
             .map(
@@ -1461,12 +1461,12 @@ pub fn expr_parser<'tokens>()
 
         // If expression (including if-let)
         let if_expr = skip_trivia()
-            .ignore_then(just(Token::If).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::If).map_with(|_, e| to_kestrel_span(e.span())))
             .then(condition_list)
             .then(inline_code_block.clone())
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
                         skip_trivia()
                             .ignore_then(just(Token::If))
@@ -1496,10 +1496,10 @@ pub fn expr_parser<'tokens>()
 
         // Label parser: name: (for loop labels like outer: while ...)
         let label_parser = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(|(name, colon)| LabelData { name, colon });
 
@@ -1527,7 +1527,7 @@ pub fn expr_parser<'tokens>()
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(while_let_conditions.clone())
             .then(inline_code_block.clone())
@@ -1541,7 +1541,7 @@ pub fn expr_parser<'tokens>()
             );
 
         let unlabeled_while_let = skip_trivia()
-            .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span())))
             .then(while_let_conditions.clone())
             .then(inline_code_block.clone())
             .map(|((while_span, conditions), body)| ExprVariant::WhileLet {
@@ -1555,7 +1555,7 @@ pub fn expr_parser<'tokens>()
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(condition_binary.clone())
             .then(inline_code_block.clone())
@@ -1569,7 +1569,7 @@ pub fn expr_parser<'tokens>()
             );
 
         let unlabeled_while = skip_trivia()
-            .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::While).map_with(|_, e| to_kestrel_span(e.span())))
             .then(condition_binary.clone())
             .then(inline_code_block.clone())
             .map(|((while_span, condition), body)| ExprVariant::While {
@@ -1591,7 +1591,7 @@ pub fn expr_parser<'tokens>()
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::Loop).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::Loop).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(inline_code_block.clone())
             .map(|((label, loop_span), body)| ExprVariant::Loop {
@@ -1601,7 +1601,7 @@ pub fn expr_parser<'tokens>()
             });
 
         let unlabeled_loop = skip_trivia()
-            .ignore_then(just(Token::Loop).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Loop).map_with(|_, e| to_kestrel_span(e.span())))
             .then(inline_code_block.clone())
             .map(|(loop_span, body)| ExprVariant::Loop {
                 label: None,
@@ -1616,12 +1616,12 @@ pub fn expr_parser<'tokens>()
             .clone()
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::For).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::For).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(crate::pattern::pattern_parser())
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::In).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::In).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(condition_binary.clone())
             .then(inline_code_block.clone())
@@ -1637,11 +1637,11 @@ pub fn expr_parser<'tokens>()
             );
 
         let unlabeled_for = skip_trivia()
-            .ignore_then(just(Token::For).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::For).map_with(|_, e| to_kestrel_span(e.span())))
             .then(crate::pattern::pattern_parser())
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::In).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::In).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .then(condition_binary.clone())
             .then(inline_code_block.clone())
@@ -1659,20 +1659,20 @@ pub fn expr_parser<'tokens>()
 
         // Break expression
         let break_expr = skip_trivia()
-            .ignore_then(just(Token::Break).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Break).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 skip_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
                     .or_not(),
             )
             .map(|(break_span, label)| ExprVariant::Break { break_span, label });
 
         // Continue expression
         let continue_expr = skip_trivia()
-            .ignore_then(just(Token::Continue).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Continue).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 skip_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
                     .or_not(),
             )
             .map(|(continue_span, label)| ExprVariant::Continue {
@@ -1682,19 +1682,19 @@ pub fn expr_parser<'tokens>()
 
         // Return expression
         let return_expr = skip_trivia()
-            .ignore_then(just(Token::Return).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Return).map_with(|_, e| to_kestrel_span(e.span())))
             .then(expr.clone().map(Box::new).or_not())
             .map(|(return_span, value)| ExprVariant::Return { return_span, value });
 
         // Throw expression: throw expr
         let throw_expr = skip_trivia()
-            .ignore_then(just(Token::Throw).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Throw).map_with(|_, e| to_kestrel_span(e.span())))
             .then(expr.clone().map(Box::new))
             .map(|(throw_span, value)| ExprVariant::Throw { throw_span, value });
 
         // Try expression - note: we'll connect it to postfix later for high precedence
         let try_keyword =
-            skip_trivia().ignore_then(just(Token::Try).map_with(|_, e| to_kestrel_span2(e.span())));
+            skip_trivia().ignore_then(just(Token::Try).map_with(|_, e| to_kestrel_span(e.span())));
 
         // Match expression: match scrutinee { pattern => expr, ... }
         let match_expr =
@@ -1706,7 +1706,7 @@ pub fn expr_parser<'tokens>()
                     .then(
                         skip_trivia()
                             .ignore_then(
-                                just(Token::If).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::If).map_with(|_, e| to_kestrel_span(e.span())),
                             )
                             .then(condition_binary.clone())
                             .map(|(if_span, condition)| MatchGuardData {
@@ -1716,7 +1716,7 @@ pub fn expr_parser<'tokens>()
                             .or_not(),
                     )
                     .then(skip_trivia().ignore_then(
-                        just(Token::FatArrow).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::FatArrow).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .then(expr.clone())
                     .map(|(((pattern, guard), fat_arrow), body)| MatchArmData {
@@ -1727,10 +1727,10 @@ pub fn expr_parser<'tokens>()
                     });
 
                 skip_trivia()
-                    .ignore_then(just(Token::Match).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Match).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(condition_binary.clone())
                     .then(skip_trivia().ignore_then(
-                        just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .then(
                         match_arm
@@ -1741,7 +1741,7 @@ pub fn expr_parser<'tokens>()
                             .collect::<Vec<_>>(),
                     )
                     .then(skip_trivia().ignore_then(
-                        just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .map(
                         |((((match_span, scrutinee), lbrace), arms), rbrace)| ExprVariant::Match {
@@ -1769,7 +1769,7 @@ pub fn expr_parser<'tokens>()
                     .then(
                         skip_trivia()
                             .ignore_then(
-                                just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
                             )
                             .then(ty_parser())
                             .or_not(),
@@ -1783,19 +1783,19 @@ pub fn expr_parser<'tokens>()
                     });
 
                 let closure_params = skip_trivia()
-                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
                         closure_param
                             .separated_by(skip_trivia().ignore_then(
-                                just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())),
+                                just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                             ))
                             .allow_trailing()
                             .collect::<Vec<_>>(),
                     )
                     .then_ignore(skip_trivia())
-                    .then(just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .then_ignore(skip_trivia())
-                    .then(just(Token::In).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .then(just(Token::In).map_with(|_, e| to_kestrel_span(e.span())))
                     .map(|(((lparen, params), rparen), in_span)| {
                         (
                             Some(ClosureParamsData {
@@ -1823,7 +1823,7 @@ pub fn expr_parser<'tokens>()
                                 skip_trivia()
                                     .ignore_then(
                                         just(Token::Semicolon)
-                                            .map_with(|_, e| to_kestrel_span2(e.span())),
+                                            .map_with(|_, e| to_kestrel_span(e.span())),
                                     )
                                     .map(Some)
                                     .or(empty().to(None)),
@@ -1859,10 +1859,10 @@ pub fn expr_parser<'tokens>()
                 // Inline guard-let parser for closures with chain support
                 // Single let condition: let pattern = expr
                 let closure_guard_let_condition = skip_trivia()
-                    .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(crate::pattern::pattern_parser())
                     .then(skip_trivia().ignore_then(
-                        just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .then(expr_for_closure_guard.clone())
                     .map(
@@ -1896,17 +1896,17 @@ pub fn expr_parser<'tokens>()
 
                 let closure_guard_let =
                     skip_trivia()
-                        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span2(e.span())))
+                        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
                         .then(closure_guard_conditions)
                         .then(skip_trivia().ignore_then(
-                            just(Token::Else).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::Else).map_with(|_, e| to_kestrel_span(e.span())),
                         ))
                         .then(skip_trivia().ignore_then(
-                            just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())),
                         ))
                         .then(closure_else_items)
                         .then(skip_trivia().ignore_then(
-                            just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
                         ))
                         .map(
                             |(
@@ -1932,7 +1932,7 @@ pub fn expr_parser<'tokens>()
                             skip_trivia()
                                 .ignore_then(
                                     just(Token::Semicolon)
-                                        .map_with(|_, e| to_kestrel_span2(e.span())),
+                                        .map_with(|_, e| to_kestrel_span(e.span())),
                                 )
                                 .map(Some)
                                 .or(empty().to(None)),
@@ -1969,7 +1969,7 @@ pub fn expr_parser<'tokens>()
                             }),
                     )
                     .then(skip_trivia().ignore_then(
-                        just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .map(
                         |(((lbrace, (params, in_span)), body), rbrace)| ExprVariant::Closure {
@@ -1985,13 +1985,13 @@ pub fn expr_parser<'tokens>()
 
         let closure_expr = build_closure_expr(
             skip_trivia()
-                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
                 .boxed(),
         );
 
         let closure_expr_inline = build_closure_expr(
             skip_inline_trivia()
-                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
                 .boxed(),
         );
 
@@ -2005,9 +2005,9 @@ pub fn expr_parser<'tokens>()
             // Labeled trailing closure: identifier: { closure }
             let labeled =
                 skip_inline_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span2(e.span()) })
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
                     .then(skip_inline_trivia().ignore_then(
-                        just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())),
+                        just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .then(closure_for_trailing.clone())
                     .map(|((label, colon), closure)| CallArg {
@@ -2148,16 +2148,16 @@ pub fn expr_parser<'tokens>()
 
         // Compound assignment operators
         let compound_assign_op = choice((
-            just(Token::PlusEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::MinusEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::StarEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::SlashEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::PercentEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::AmpersandEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::PipeEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::CaretEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::LessLessEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
-            just(Token::GreaterGreaterEquals).map_with(|t, e| (t, to_kestrel_span2(e.span()))),
+            just(Token::PlusEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::MinusEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::StarEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::SlashEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::PercentEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::AmpersandEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::PipeEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::CaretEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::LessLessEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
+            just(Token::GreaterGreaterEquals).map_with(|t, e| (t, to_kestrel_span(e.span()))),
         ));
 
         // Assignment or compound assignment expression
@@ -2168,7 +2168,7 @@ pub fn expr_parser<'tokens>()
                     .ignore_then(
                         // Regular assignment: =
                         just(Token::Equals)
-                            .map_with(|_, e| (None, to_kestrel_span2(e.span())))
+                            .map_with(|_, e| (None, to_kestrel_span(e.span())))
                             // Compound assignment: +=, -=, etc.
                             .or(compound_assign_op.map(|(tok, span)| (Some(tok), span))),
                     )

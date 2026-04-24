@@ -10,7 +10,7 @@ use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::constraint::{CallArg, Constraint, labels_match};
 use crate::ctx::InferCtx;

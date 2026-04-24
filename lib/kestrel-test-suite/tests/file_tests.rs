@@ -22,9 +22,9 @@ use std::process::ExitCode;
 use libtest_mimic::{Arguments, Trial};
 use walkdir::WalkDir;
 
-use kestrel_test_suite2::TestCompiler;
-use kestrel_test_suite2::annotation::{self, TestMode};
-use kestrel_test_suite2::mir_snapshot;
+use kestrel_test_suite::TestCompiler;
+use kestrel_test_suite::annotation::{self, TestMode};
+use kestrel_test_suite::mir_snapshot;
 
 // Matches datatest-stable's looser bound — we `format!` the error into a
 // `String` before returning it to the libtest thread, so Send/Sync on the

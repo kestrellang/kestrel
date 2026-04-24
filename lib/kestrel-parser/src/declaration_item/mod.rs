@@ -8,9 +8,9 @@
 //! - This module aggregates all declaration types and routes to them
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
     EnumDeclarationData,
@@ -353,8 +353,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
-    use kestrel_syntax_tree2::SyntaxKind;
+    use kestrel_lexer::lex;
+    use kestrel_syntax_tree::SyntaxKind;
 
     #[test]
     fn test_declaration_item_module() {
@@ -589,9 +589,9 @@ mod tests {
 
         // Find all FunctionDeclaration nodes
         fn find_nodes(
-            node: &kestrel_syntax_tree2::SyntaxNode,
+            node: &kestrel_syntax_tree::SyntaxNode,
             kind: SyntaxKind,
-        ) -> Vec<kestrel_syntax_tree2::SyntaxNode> {
+        ) -> Vec<kestrel_syntax_tree::SyntaxNode> {
             let mut result = Vec::new();
             if node.kind() == kind {
                 result.push(node.clone());
@@ -710,9 +710,9 @@ mod tests {
         let tree = TreeBuilder::new(source, sink.into_events()).build();
 
         fn find_nodes(
-            node: &kestrel_syntax_tree2::SyntaxNode,
+            node: &kestrel_syntax_tree::SyntaxNode,
             kind: SyntaxKind,
-        ) -> Vec<kestrel_syntax_tree2::SyntaxNode> {
+        ) -> Vec<kestrel_syntax_tree::SyntaxNode> {
             let mut result = Vec::new();
             if node.kind() == kind {
                 result.push(node.clone());

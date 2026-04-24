@@ -9,7 +9,7 @@ use kestrel_ast::arena::Arena;
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// Mutable context for lowering a single function/getter/setter body.
 pub(crate) struct LowerCtx<'a> {

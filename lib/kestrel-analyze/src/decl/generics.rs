@@ -75,7 +75,7 @@ use kestrel_ast_builder::{
     Name, NodeKind, TypeAnnotation, TypeParams, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {

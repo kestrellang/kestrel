@@ -33,7 +33,7 @@ use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind};
 use kestrel_name_res::ConformingProtocols;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E426",

@@ -65,4 +65,4 @@ Nodes reference each other by index, not pointers. This is cache-friendly and ma
 
 | Crate | Usage |
 |-------|-------|
-| `kestrel-span2` | `Span` on all AST nodes |
+| `kestrel-span` | `Span` on all AST nodes |

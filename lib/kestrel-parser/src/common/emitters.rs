@@ -4,9 +4,9 @@
 //! trees by emitting events through an EventSink. These functions are used
 //! by multiple parser modules to avoid code duplication.
 
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::SyntaxKind;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,

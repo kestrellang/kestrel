@@ -8,8 +8,8 @@ use kestrel_ast::ast_body::*;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_name_res::ResolveBuiltin;
-use kestrel_reporting2::{Diagnostic, Label};
-use kestrel_span2::Span;
+use kestrel_reporting::{Diagnostic, Label};
+use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 

@@ -5,7 +5,7 @@
 
 use kestrel_ast_builder::Vis;
 use kestrel_hecs::Entity;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::ty::{LiteralKind, TyVar};
 

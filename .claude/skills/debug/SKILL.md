@@ -1,9 +1,9 @@
 ---
 name: debug
-description: Structured protocol for debugging the lib2 Kestrel compiler — failing tests, diagnostic mismatches, inference cascades, MIR/codegen bugs, SIGSEGV or stack corruption, and intermittent flakes. Prevents speculative fix spirals by enforcing a reproduce → diagnose → one-hypothesis → fix → verify loop, with a hard stop after 3 failed attempts. Use when a triage run fails, when a `.ks` behaves unexpectedly, when the compiler crashes, or when you need to trace why a specific transformation produced the wrong output. Covers the `kestrel dump` CLI, `debug_trace!`, LLDB, and the project-wide "no `eprintln!`, no test-cajoling" rules.
+description: Structured protocol for debugging the lib Kestrel compiler — failing tests, diagnostic mismatches, inference cascades, MIR/codegen bugs, SIGSEGV or stack corruption, and intermittent flakes. Prevents speculative fix spirals by enforcing a reproduce → diagnose → one-hypothesis → fix → verify loop, with a hard stop after 3 failed attempts. Use when a triage run fails, when a `.ks` behaves unexpectedly, when the compiler crashes, or when you need to trace why a specific transformation produced the wrong output. Covers the `kestrel dump` CLI, `debug_trace!`, LLDB, and the project-wide "no `eprintln!`, no test-cajoling" rules.
 ---
 
-# Debugging the lib2 Kestrel Compiler
+# Debugging the lib Kestrel Compiler
 
 Structured debugging protocol. Read this top-to-bottom before touching code —
 the order matters. Skipping steps produces the speculative-fix spirals this
@@ -28,11 +28,11 @@ reproduction means no diagnosis, and any "fix" you write is speculation.
 ### For a failing testdata file
 
 Work directly with the failing `.ks` under
-`lib2/kestrel-test-suite/testdata/...`:
+`lib/kestrel-test-suite/testdata/...`:
 
 ```
 # via the /triage skill, with a tight pattern
-# never invoke `cargo test -p kestrel-test-suite2` or `file_tests-*` directly
+# never invoke `cargo test -p kestrel-test-suite` or `file_tests-*` directly
 ```
 
 If you need smaller scope, copy the failing file into `temp/repro.ks` and
@@ -76,7 +76,7 @@ tool to try next. Don't keep guessing.
 ## Step 2 — Diagnose with the right tool
 
 Once you have a reproduction, narrow down **where** the problem is before
-asking **what**. The lib2 pipeline is:
+asking **what**. The lib pipeline is:
 
 ```
 Source → Tokens → CST → AST (ECS) → Name Res → HIR → Type Infer → MIR → Codegen
@@ -84,7 +84,7 @@ Source → Tokens → CST → AST (ECS) → Name Res → HIR → Type Infer → 
 
 ### `kestrel dump` — show compiler-internal state at a stage
 
-The lib2 binary exposes dump subcommands (see `src/main.rs` for the
+The lib binary exposes dump subcommands (see `src/main.rs` for the
 authoritative list):
 
 ```
@@ -128,7 +128,7 @@ lldb target/debug/kestrel -- build repro.ks
 # or `-- dump mir repro.ks` if the crash is during a specific dump stage
 ```
 
-Useful starting breakpoints in lib2:
+Useful starting breakpoints in lib:
 
 | Issue | Breakpoint prefix |
 |-------|------------------|
@@ -137,7 +137,7 @@ Useful starting breakpoints in lib2:
 | Inference / solver | `kestrel_type_infer::solver` / `::resolve` |
 | Analyzer diagnostic | `kestrel_analyze::decl` / `::body` |
 | MIR lowering | `kestrel_mir_lower` |
-| Cranelift codegen | `kestrel_codegen2_cranelift` |
+| Cranelift codegen | `kestrel_codegen_cranelift` |
 
 (Run `image lookup -rn <pattern>` inside lldb if the exact symbol is unclear.)
 
@@ -223,7 +223,7 @@ delegate to the `write-tests` skill for format/placement.
 
 - Patching symptoms without a stated root cause.
 - Using `eprintln!` / `println!` as a debug channel. Use `debug_trace!`.
-- Running `cargo test -p kestrel-test-suite2` or `file_tests-*` directly.
+- Running `cargo test -p kestrel-test-suite` or `file_tests-*` directly.
   Always `/triage`.
 - Changing a test to match buggy behavior. See Step 4.
 - Ignoring the 3-attempt escalation rule. Thrashing costs more than asking.

@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-parser2"
+name = "kestrel-parser"
 version.workspace = true
 edition.workspace = true
 
@@ -9,6 +9,6 @@ workspace = true
 [dependencies]
 chumsky = { workspace = true }
 stacker = { workspace = true }
-kestrel-span2 = { path = "../kestrel-span" }
-kestrel-lexer2 = { path = "../kestrel-lexer" }
-kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

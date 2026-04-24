@@ -7,7 +7,7 @@ Every Kestrel function, method, initializer, deinit, static, and closure needs a
 3. Is LL(1) parseable, so it can be demangled without backtracking.
 4. Uses only characters legal in linker symbols (alphanumeric + `_`).
 
-The implementation lives in `lib2/kestrel-codegen/src/mangle.rs`. The public entry points are `mangle_name`, `mangle_function`, and `mangle_function_with_self`.
+The implementation lives in `lib/kestrel-codegen/src/mangle.rs`. The public entry points are `mangle_name`, `mangle_function`, and `mangle_function_with_self`.
 
 ## When mangling is bypassed
 
@@ -287,7 +287,7 @@ No two productions share a first character. There is no backtracking.
 
 ## Worked examples
 
-Drawn from `lib2/kestrel-codegen/src/mangle.rs` tests.
+Drawn from `lib/kestrel-codegen/src/mangle.rs` tests.
 
 ### Functions
 
@@ -380,7 +380,7 @@ read_type(): match on peek per the LL(1) table above
 If you add a new `MirTy` variant or a new function kind, do all of:
 
 1. Pick a first character that isn't already claimed in type position (see the LL(1) table).
-2. Add the encoding branch to `Mangler::mangle_type` in `lib2/kestrel-codegen/src/mangle.rs`.
+2. Add the encoding branch to `Mangler::mangle_type` in `lib/kestrel-codegen/src/mangle.rs`.
 3. Add a unit test showing the expected output.
 4. Update this document's LL(1) table and the "Type encoding" section.
 5. If the new variant can appear at symbol level (not just inside types), update the top-level grammar too.

@@ -8,7 +8,7 @@ use crate::place::Place;
 use crate::ty::MirTy;
 use crate::value::Value;
 use kestrel_hecs::Entity;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 use std::fmt;
 
 /// A statement in a basic block.

@@ -14,8 +14,8 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ExtensionTargetEntity, ResolveTypePath, TypeResolution};
-use kestrel_reporting2::{Diagnostic, Label};
-use kestrel_span2::Span;
+use kestrel_reporting::{Diagnostic, Label};
+use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 

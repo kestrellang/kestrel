@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-span2"
+name = "kestrel-span"
 version.workspace = true
 edition.workspace = true
 

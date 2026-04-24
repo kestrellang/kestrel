@@ -23,8 +23,8 @@
 
 use chumsky::input::MappedInput;
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span as KestrelSpan;
+use kestrel_lexer::Token;
+use kestrel_span::Span as KestrelSpan;
 
 /// The span type used by chumsky (byte range)
 pub type ChumskySpan = SimpleSpan<usize>;
@@ -54,13 +54,13 @@ pub fn to_chumsky_span(span: &KestrelSpan) -> ChumskySpan {
 /// Uses file_id 0 since chumsky doesn't track file IDs.
 /// Callers should set the correct file_id if needed.
 #[inline]
-pub fn to_kestrel_span2(span: ChumskySpan) -> KestrelSpan {
+pub fn to_kestrel_span(span: ChumskySpan) -> KestrelSpan {
     KestrelSpan::new(0, span.start..span.end)
 }
 
 /// Convert a chumsky SimpleSpan to a Kestrel Span with a specific file_id
 #[inline]
-pub fn to_kestrel_span2_with_file(span: ChumskySpan, file_id: usize) -> KestrelSpan {
+pub fn to_kestrel_span_with_file(span: ChumskySpan, file_id: usize) -> KestrelSpan {
     KestrelSpan::new(file_id, span.start..span.end)
 }
 
@@ -93,13 +93,13 @@ mod tests {
 
     #[test]
     fn test_span_conversion() {
-        let kestrel_span2 = KestrelSpan::new(42, 10..20);
-        let chumsky_span = to_chumsky_span(&kestrel_span2);
+        let kestrel_span = KestrelSpan::new(42, 10..20);
+        let chumsky_span = to_chumsky_span(&kestrel_span);
 
         assert_eq!(chumsky_span.start, 10);
         assert_eq!(chumsky_span.end, 20);
 
-        let back = to_kestrel_span2(chumsky_span);
+        let back = to_kestrel_span(chumsky_span);
         assert_eq!(back.start, 10);
         assert_eq!(back.end, 20);
         assert_eq!(back.file_id, 0); // Default file_id
@@ -108,11 +108,11 @@ mod tests {
     #[test]
     fn test_span_with_file_id() {
         let chumsky_span = SimpleSpan::new((), 5..15);
-        let kestrel_span2 = to_kestrel_span2_with_file(chumsky_span, 99);
+        let kestrel_span = to_kestrel_span_with_file(chumsky_span, 99);
 
-        assert_eq!(kestrel_span2.start, 5);
-        assert_eq!(kestrel_span2.end, 15);
-        assert_eq!(kestrel_span2.file_id, 99);
+        assert_eq!(kestrel_span.start, 5);
+        assert_eq!(kestrel_span.end, 15);
+        assert_eq!(kestrel_span.file_id, 99);
     }
 
     #[test]

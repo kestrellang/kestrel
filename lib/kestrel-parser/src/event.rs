@@ -19,9 +19,9 @@
 
 use crate::input::ChumskySpan;
 use crate::parser::ParseError;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
 /// Events emitted during parsing
 #[derive(Debug, Clone, PartialEq, Eq)]

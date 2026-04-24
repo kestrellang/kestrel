@@ -13,4 +13,4 @@ kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-hir = { path = "../kestrel-hir" }
 kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
-kestrel-span2 = { path = "../kestrel-span" }
+kestrel-span = { path = "../kestrel-span" }

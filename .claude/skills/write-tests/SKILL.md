@@ -1,15 +1,15 @@
 ---
 name: write-tests
-description: Write tests for a Kestrel compiler feature. Use when the user asks to add a test, write tests for a feature, cover a bug with a regression test, or when a diagnostic/behavior change needs testdata updates. Covers the lib2 `.ks` testdata format (`diagnostics` and `execution` kinds), the `// ERROR:` annotation style, where to place files under `lib2/kestrel-test-suite/testdata/`, and how to run the tests via the `triage` skill (never `cargo test` directly).
+description: Write tests for a Kestrel compiler feature. Use when the user asks to add a test, write tests for a feature, cover a bug with a regression test, or when a diagnostic/behavior change needs testdata updates. Covers the lib `.ks` testdata format (`diagnostics` and `execution` kinds), the `// ERROR:` annotation style, where to place files under `lib/kestrel-test-suite/testdata/`, and how to run the tests via the `triage` skill (never `cargo test` directly).
 ---
 
-# Writing Kestrel Tests (lib2)
+# Writing Kestrel Tests (lib)
 
-lib2 tests are **`.ks` files under `lib2/kestrel-test-suite/testdata/`** — not Rust code.
+lib tests are **`.ks` files under `lib/kestrel-test-suite/testdata/`** — not Rust code.
 There is no `Test::new(...)` builder anymore; each file is a full Kestrel program with
 a header that tells the harness what to check.
 
-> **lib2 only.** Do not write tests against `lib/kestrel-test-suite/` (lib1). lib1 is dead.
+> **lib only.** Do not write tests against `lib/kestrel-test-suite/` (lib1). lib1 is dead.
 
 ## File format
 
@@ -107,11 +107,11 @@ Avoid:
 let x = foo(a: 1); // ERROR: label
 ```
 
-See `lib2/kestrel-test-suite/AGENTS.md` for the authoritative rule.
+See `lib/kestrel-test-suite/AGENTS.md` for the authoritative rule.
 
 ## Where to put the file
 
-`lib2/kestrel-test-suite/testdata/` is organized by feature category. Pick the
+`lib/kestrel-test-suite/testdata/` is organized by feature category. Pick the
 directory that best describes **what the test exercises**, not where the bug was:
 
 ```
@@ -162,7 +162,7 @@ No `mod.rs` update is needed — the harness discovers files by walking
    If the bug has several facets, write several files — each with a name that
    describes exactly the case it covers.
 
-6. **Run via triage.** Never invoke `cargo test -p kestrel-test-suite2` or the
+6. **Run via triage.** Never invoke `cargo test -p kestrel-test-suite` or the
    `file_tests-*` binary directly — the `/triage` skill records runs in
    `.triage/triage.db`, handles background execution, and is safe alongside
    other agents. Pass a targeted pattern while iterating; save the full suite

@@ -1,6 +1,6 @@
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode, SyntaxToken};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::common::module_path_parser_internal;
 use crate::event::{EventSink, TreeBuilder};

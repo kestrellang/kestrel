@@ -1,13 +1,13 @@
-# lib2 Crate Documentation Guide
+# lib Crate Documentation Guide
 
-Every crate in `lib2/` has a `docs/` folder containing its documentation. This file describes the conventions for writing and maintaining these docs.
+Every crate in `lib/` has a `docs/` folder containing its documentation. This file describes the conventions for writing and maintaining these docs.
 
 ## Documentation Structure
 
 Every crate MUST have:
 
 ```
-lib2/kestrel-<name>/
+lib/kestrel-<name>/
 └── docs/
     ├── architecture.md    ← required: concise overview and entry point
     └── <topic>.md         ← optional: detailed docs for specific subsystems

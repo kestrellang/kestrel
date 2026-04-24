@@ -91,5 +91,5 @@ See [design.md](design.md) for comprehensive documentation of:
 | `kestrel-ast` | Arenas, operator enums |
 | `kestrel-ast-builder` | Components for entity inspection |
 | `kestrel-name-res` | Resolution queries (extensions, visibility) |
-| `kestrel-span2` | `Span` for error reporting |
+| `kestrel-span` | `Span` for error reporting |
 | `kestrel-debug` | `ktrace!` for debug tracing |

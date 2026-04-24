@@ -9,7 +9,7 @@ use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{
+use kestrel_codegen::{
     Layout, LayoutCache, TargetConfig, substitute_type, substitute_type_with_self,
 };
 use kestrel_hecs::Entity;
@@ -253,7 +253,7 @@ pub fn get_place_type(
                         .map(|a| substitute_type_with_self(a, subst, self_type, module))
                         .collect::<Vec<_>>();
                     match layouts.resolve_named(*entity) {
-                        kestrel_codegen2::NamedKind::Struct(struct_id) => {
+                        kestrel_codegen::NamedKind::Struct(struct_id) => {
                             let struct_def = &module.structs[struct_id.index()];
                             let field_id = struct_def.field_by_name(name).ok_or_else(|| {
                                 CodegenError::Unsupported(format!(
@@ -299,7 +299,7 @@ pub fn get_place_type(
                 },
                 // Index on a Named type is a struct field by index
                 MirTy::Named { entity, type_args } => match layouts.resolve_named(*entity) {
-                    kestrel_codegen2::NamedKind::Struct(struct_id) => {
+                    kestrel_codegen::NamedKind::Struct(struct_id) => {
                         let struct_def = &module.structs[struct_id.index()];
                         if *index < struct_def.fields.len() {
                             let field_ty = &struct_def.fields[*index].ty;
@@ -332,7 +332,7 @@ pub fn get_place_type(
             match &parent_ty {
                 MirTy::Named { entity, type_args } => {
                     match layouts.resolve_named(*entity) {
-                        kestrel_codegen2::NamedKind::Enum(enum_id) => {
+                        kestrel_codegen::NamedKind::Enum(enum_id) => {
                             let enum_def = &module.enums[enum_id.index()];
                             let case = enum_def.case_by_name(variant).ok_or_else(|| {
                                 CodegenError::Unsupported(format!(

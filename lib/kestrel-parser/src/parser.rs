@@ -9,9 +9,9 @@
 //! # Example
 //!
 //! ```no_run
-//! use kestrel_parser2::parser::Parser;
-//! use kestrel_parser2::parse_source_file;
-//! use kestrel_lexer2::lex;
+//! use kestrel_parser::parser::Parser;
+//! use kestrel_parser::parse_source_file;
+//! use kestrel_lexer::lex;
 //!
 //! let source = "module A.B.C\nimport X.Y.Z";
 //! let tokens: Vec<_> = lex(source, 0)
@@ -27,9 +27,9 @@
 //! }
 //! ```
 
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::SyntaxNode;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::SyntaxNode;
 use std::fmt;
 
 use crate::event::{Event, EventSink, TreeBuilder};
@@ -294,9 +294,9 @@ impl ParseError {
     pub fn from_rich_error<'a, T: fmt::Debug + fmt::Display>(
         error: &chumsky::error::Rich<'a, T>,
     ) -> Self {
-        use crate::input::to_kestrel_span2;
+        use crate::input::to_kestrel_span;
 
-        let span = Some(to_kestrel_span2(*error.span()));
+        let span = Some(to_kestrel_span(*error.span()));
 
         // Determine error kind based on what was found
         let kind = if error.found().is_none() {
@@ -323,10 +323,10 @@ impl ParseError {
     /// Create a parse error from a chumsky 0.12 Rich error with Token type
     /// This version provides better formatting for Kestrel tokens
     pub fn from_token_error<'a>(error: &chumsky::error::Rich<'a, Token>) -> Self {
-        use crate::input::to_kestrel_span2;
+        use crate::input::to_kestrel_span;
         use chumsky::error::RichPattern;
 
-        let span = Some(to_kestrel_span2(*error.span()));
+        let span = Some(to_kestrel_span(*error.span()));
 
         // Determine error kind based on what was found
         let kind = if error.found().is_none() {
@@ -413,9 +413,9 @@ impl Parser {
     /// # Example
     ///
     /// ```no_run
-    /// use kestrel_parser2::parser::Parser;
-    /// use kestrel_parser2::parse_source_file;
-    /// use kestrel_lexer2::lex;
+    /// use kestrel_parser::parser::Parser;
+    /// use kestrel_parser::parse_source_file;
+    /// use kestrel_lexer::lex;
     ///
     /// let source = "module Main";
     /// let file_id = 0;
@@ -466,7 +466,7 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::parse_source_file;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     #[test]
     fn test_parser_with_valid_source() {
@@ -481,7 +481,7 @@ mod tests {
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
             result.tree.kind(),
-            kestrel_syntax_tree2::SyntaxKind::SourceFile
+            kestrel_syntax_tree::SyntaxKind::SourceFile
         );
     }
 
@@ -498,7 +498,7 @@ mod tests {
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
             result.tree.kind(),
-            kestrel_syntax_tree2::SyntaxKind::SourceFile
+            kestrel_syntax_tree::SyntaxKind::SourceFile
         );
         assert_eq!(
             result.tree.children().count(),
@@ -543,7 +543,7 @@ public struct B {}
         // Parser creates a SourceFile node even when parsing fails
         assert_eq!(
             result.tree.kind(),
-            kestrel_syntax_tree2::SyntaxKind::SourceFile
+            kestrel_syntax_tree::SyntaxKind::SourceFile
         );
 
         println!(
@@ -579,7 +579,7 @@ public struct B {}
         // This test primarily documents that span tracking infrastructure is in place
         assert_eq!(
             result.tree.kind(),
-            kestrel_syntax_tree2::SyntaxKind::SourceFile
+            kestrel_syntax_tree::SyntaxKind::SourceFile
         );
     }
 

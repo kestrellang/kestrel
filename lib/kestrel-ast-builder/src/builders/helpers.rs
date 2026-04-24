@@ -4,11 +4,11 @@
 //! where clauses from CST nodes.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::utils::{
+use kestrel_span::Span;
+use kestrel_syntax_tree::utils::{
     extract_path_segments, extract_visibility, find_child, get_decl_span, is_trivia,
 };
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::ast_type::{AstType, PathSegment, ast_type_from_cst};
 use crate::components::*;
@@ -100,7 +100,7 @@ fn extract_attribute_arg(node: &SyntaxNode) -> Option<AstAttributeArg> {
 ///
 /// For `@builtin(.Copyable)`, the tokens are [Dot, Identifier("Copyable")].
 /// We combine them into ".Copyable" so consumers can recognize the pattern.
-fn extract_value_from_tokens(tokens: &[kestrel_syntax_tree2::SyntaxToken]) -> Option<String> {
+fn extract_value_from_tokens(tokens: &[kestrel_syntax_tree::SyntaxToken]) -> Option<String> {
     if tokens.len() >= 2
         && tokens[0].kind() == SyntaxKind::Dot
         && tokens[1].kind() == SyntaxKind::Identifier
@@ -344,7 +344,7 @@ fn bound_subject_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstT
 /// Convert a Name node to AstType::Named.
 fn name_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
     let name_node = find_child(parent, SyntaxKind::Name)?;
-    let ident = kestrel_syntax_tree2::utils::extract_identifier_from_name(&name_node)?;
+    let ident = kestrel_syntax_tree::utils::extract_identifier_from_name(&name_node)?;
     let range = name_node.text_range();
     let span = Span::new(file_id, (range.start().into())..(range.end().into()));
     Some(AstType::Named {
@@ -410,7 +410,7 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
 fn node_to_ast_type(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
     match node.kind() {
         SyntaxKind::Name => {
-            let ident = kestrel_syntax_tree2::utils::extract_identifier_from_name(node)?;
+            let ident = kestrel_syntax_tree::utils::extract_identifier_from_name(node)?;
             let range = node.text_range();
             let span = Span::new(file_id, (range.start().into())..(range.end().into()));
             Some(AstType::Named {

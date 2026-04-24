@@ -91,7 +91,7 @@ impl BodyCheck for GuardLetDivergenceAnalyzer {
 /// block's tail expression, or the last statement-expression. Used to put
 /// the E003 diagnostic under the offending value rather than the whole
 /// guard-let statement.
-fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span2::Span> {
+fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span::Span> {
     if let Some(tail) = block.tail_expr {
         return Some(util::expr_span(hir, tail));
     }

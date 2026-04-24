@@ -221,8 +221,8 @@ mod tests {
         NodeKind, TypeAnnotation, Typed, Vis,
     };
     use kestrel_hecs::World;
-    use kestrel_span2::Span;
-    use kestrel_syntax_tree2::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
+    use kestrel_span::Span;
+    use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
     fn span() -> Span {
         Span::synthetic(0)

@@ -1,9 +1,9 @@
 ---
 name: change
-description: Make a targeted behavioral change to an existing lib2 Kestrel compiler feature, keeping tests and docs in sync. Use when the user asks to change how an existing feature behaves — tweak a diagnostic, adjust inference for a case, modify lowering, fix a semantic bug — especially when the change spans one or two pipeline stages and doesn't need a full design doc. For brand-new features spanning many stages, use `feature` instead. For pure bug hunts with no known fix, use `debug-kestrel` / `debug-test`. For writing the test files, defer to `write-tests`.
+description: Make a targeted behavioral change to an existing lib Kestrel compiler feature, keeping tests and docs in sync. Use when the user asks to change how an existing feature behaves — tweak a diagnostic, adjust inference for a case, modify lowering, fix a semantic bug — especially when the change spans one or two pipeline stages and doesn't need a full design doc. For brand-new features spanning many stages, use `feature` instead. For pure bug hunts with no known fix, use `debug-kestrel` / `debug-test`. For writing the test files, defer to `write-tests`.
 ---
 
-# Making a Semantic Change in the lib2 Compiler
+# Making a Semantic Change in the lib Compiler
 
 Scope: one behavior of one existing feature, touching one or two pipeline stages.
 If the change needs a design doc, it belongs in the `feature` skill instead.
@@ -27,7 +27,7 @@ now is cheaper than a redone PR.
 Use Explore (or `kestrel-pipeline`, which is faster for pipeline-routing
 questions) to find:
 
-1. **Implementation site** — which lib2 crate(s) own this behavior?
+1. **Implementation site** — which lib crate(s) own this behavior?
    - `kestrel-lexer` / `kestrel-parser` / `kestrel-syntax-tree` for surface syntax
    - `kestrel-ast-builder` for AST construction
    - `kestrel-name-res` for scope / visibility / import
@@ -35,7 +35,7 @@ questions) to find:
    - `kestrel-type-infer` for constraints and the solver
    - `kestrel-analyze` for validation diagnostics
    - `kestrel-mir-lower` / `kestrel-codegen-cranelift` for MIR and code generation
-2. **Affected testdata** — grep `lib2/kestrel-test-suite/testdata/` for the
+2. **Affected testdata** — grep `lib/kestrel-test-suite/testdata/` for the
    feature's tests. Which will change expected output / `// ERROR:` text /
    `// expect-exit:` value? Which are still correct after the change?
 3. **Documentation** — per-crate `docs/architecture.md` (or topic doc) if
@@ -43,7 +43,7 @@ questions) to find:
    user-visible semantics. `.claude/skills/write-kestrel/SKILL.md` if a
    syntax/idiom/gotcha shifts.
 4. **Memory** — check `/Users/dino/.claude/projects/-Users-dino-Documents-Projects-kestrel/memory/`
-   for prior decisions about this feature. A lot of lib2 inference/MIR
+   for prior decisions about this feature. A lot of lib inference/MIR
    history is captured there.
 
 Present findings before proposing a plan.
@@ -86,7 +86,7 @@ While iterating, run triage with a **targeted pattern** (just the tests
 touching this feature). Save the full suite for pre-commit.
 
 ```
-# via the /triage skill — never `cargo test -p kestrel-test-suite2` directly
+# via the /triage skill — never `cargo test -p kestrel-test-suite` directly
 ```
 
 Debugging:
@@ -98,12 +98,12 @@ Debugging:
 
 ## Step 5 — Update testdata
 
-For each affected `.ks` under `lib2/kestrel-test-suite/testdata/`:
+For each affected `.ks` under `lib/kestrel-test-suite/testdata/`:
 
 - **Old expectation is now wrong.** Update the expected behavior to the new
   one. For `diagnostics` kind, rewrite `// ERROR:` to the full new message
   (substring match is permissive but full messages are the project
-  convention — see `lib2/kestrel-test-suite/AGENTS.md`). For `execution`
+  convention — see `lib/kestrel-test-suite/AGENTS.md`). For `execution`
   kind, update `// expect-exit:`.
 - **Test is obsolete.** Delete it; don't leave it ignored. Kestrel project
   rule is explicit: no `#[ignore]`.
@@ -126,8 +126,8 @@ yourself tempted to "fix" a test to silence a failure, stop and ask.
 
 Only what actually changed — don't rewrite unrelated sections.
 
-- **`lib2/kestrel-<crate>/docs/architecture.md`** — if pipeline position,
-  core types, or module map shifted. See `lib2/AGENTS.md` for the required
+- **`lib/kestrel-<crate>/docs/architecture.md`** — if pipeline position,
+  core types, or module map shifted. See `lib/AGENTS.md` for the required
   structure.
 - **`docs/language/<feature>.md`** — if surface syntax or user-visible
   semantics changed (new / changed error messages count).
@@ -168,7 +168,7 @@ Short report to the user:
   say so explicitly in the plan.
 - Bundling a diagnostic tweak with an unrelated refactor.
 - Claiming a run is green without reading triage output.
-- Running `cargo test -p kestrel-test-suite2` or `file_tests-*` directly —
+- Running `cargo test -p kestrel-test-suite` or `file_tests-*` directly —
   always go through `/triage` so history lands in `.triage/triage.db`.
 - Silently adding a new pattern to an `AGENTS.md` without asking. Capture
   patterns as they come up, but ask first.

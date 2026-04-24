@@ -1,4 +1,4 @@
-//! kestrel-analyze: Roslyn-inspired analyzer infrastructure for lib2.
+//! kestrel-analyze: Roslyn-inspired analyzer infrastructure for lib.
 //!
 //! Analyzers are stateless trait objects organized by granularity:
 //! - `BodyCheck` — per-function/init body analysis (control flow, types, mutability)

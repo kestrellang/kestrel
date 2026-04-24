@@ -5,8 +5,8 @@
 //! build (mutation) phase.
 
 use kestrel_hecs::Entity;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::SyntaxNode;
+use kestrel_span::Span;
+use kestrel_syntax_tree::SyntaxNode;
 
 use kestrel_ast::AstBody;
 use kestrel_ast::AstType;

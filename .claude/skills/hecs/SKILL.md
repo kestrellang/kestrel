@@ -1,11 +1,11 @@
 ---
 name: hecs
-description: Reference for the hECS (Hierarchical Entity Component System) architecture used by the lib2 Kestrel compiler — entities, components, queries, and the Salsa-style memoization model. Use when answering "why is it structured this way?", "what's a component vs a query?", "where should this new fact live?", "why are struct/enum unified as Nominal?", or when designing a new query/analyzer and you need to follow the existing conventions. Historical migration notes (now completed) also live here for rationale.
+description: Reference for the hECS (Hierarchical Entity Component System) architecture used by the lib Kestrel compiler — entities, components, queries, and the Salsa-style memoization model. Use when answering "why is it structured this way?", "what's a component vs a query?", "where should this new fact live?", "why are struct/enum unified as Nominal?", or when designing a new query/analyzer and you need to follow the existing conventions. Historical migration notes (now completed) also live here for rationale.
 ---
 
 # hECS
 
-The lib2 compiler is built on **hECS** — Hierarchical Entity Component System — combined with Salsa-style memoized queries. The migration from the lib1 symbol-tree architecture is complete; this skill is the **reference** for how the model works now and *why* it was built this way.
+The lib compiler is built on **hECS** — Hierarchical Entity Component System — combined with Salsa-style memoized queries. The migration from the lib1 symbol-tree architecture is complete; this skill is the **reference** for how the model works now and *why* it was built this way.
 
 ## The model in one paragraph
 
@@ -34,5 +34,5 @@ For stage-specific routing ("where does `HirExpr::Match` get built?"), use `kest
 ## Caveats
 
 - The detail docs were originally written as **migration plans**. The migration landed, so treat "Proposed:" / "Migration steps" sections as historical rationale, not TODOs. The *design decisions* they document are still load-bearing.
-- Line counts and file paths cited inside the detail docs (e.g., "`type_oracle.rs` line ~4201") reflect the lib1 codebase at the time of planning. The lib2 layout differs — grep for the symbol name, don't trust the line number.
-- Query counts ("48 queries in `kestrel-semantic-model/src/queries/`") are snapshots. If you need the current list, run `rg 'impl Query for' lib2/` rather than trusting the catalog.
+- Line counts and file paths cited inside the detail docs (e.g., "`type_oracle.rs` line ~4201") reflect the lib1 codebase at the time of planning. The lib layout differs — grep for the symbol name, don't trust the line number.
+- Query counts ("48 queries in `kestrel-semantic-model/src/queries/`") are snapshots. If you need the current list, run `rg 'impl Query for' lib/` rather than trusting the catalog.

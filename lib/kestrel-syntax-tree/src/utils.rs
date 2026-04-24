@@ -1,4 +1,4 @@
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::{SyntaxElement, SyntaxKind, SyntaxNode};
 

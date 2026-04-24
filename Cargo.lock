@@ -625,10 +625,10 @@ version = "0.15.0"
 dependencies = [
  "clap",
  "kestrel-ast-builder",
- "kestrel-codegen2",
- "kestrel-codegen2-cranelift",
+ "kestrel-codegen",
+ "kestrel-codegen-cranelift",
+ "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-compiler2",
  "kestrel-mir-lower",
 ]
 
@@ -641,13 +641,13 @@ dependencies = [
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
- "kestrel-lexer2",
+ "kestrel-lexer",
  "kestrel-name-res",
- "kestrel-parser2",
+ "kestrel-parser",
  "kestrel-pattern-matching",
  "kestrel-semantics",
- "kestrel-span2",
- "kestrel-syntax-tree2",
+ "kestrel-span",
+ "kestrel-syntax-tree",
  "kestrel-type-infer",
 ]
 
@@ -655,7 +655,7 @@ dependencies = [
 name = "kestrel-ast"
 version = "0.15.0"
 dependencies = [
- "kestrel-span2",
+ "kestrel-span",
 ]
 
 [[package]]
@@ -664,15 +664,15 @@ version = "0.15.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
- "kestrel-lexer2",
- "kestrel-parser2",
- "kestrel-span2",
- "kestrel-syntax-tree2",
+ "kestrel-lexer",
+ "kestrel-parser",
+ "kestrel-span",
+ "kestrel-syntax-tree",
  "rowan",
 ]
 
 [[package]]
-name = "kestrel-codegen2"
+name = "kestrel-codegen"
 version = "0.15.0"
 dependencies = [
  "indexmap",
@@ -683,7 +683,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-codegen2-cranelift"
+name = "kestrel-codegen-cranelift"
 version = "0.15.0"
 dependencies = [
  "cranelift-codegen",
@@ -692,16 +692,40 @@ dependencies = [
  "cranelift-native",
  "cranelift-object",
  "indexmap",
- "kestrel-codegen2",
+ "kestrel-codegen",
+ "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-compiler2",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-mir",
  "kestrel-mir-lower",
- "kestrel-reporting2",
+ "kestrel-reporting",
  "stacker",
  "target-lexicon 0.12.16",
+]
+
+[[package]]
+name = "kestrel-compiler"
+version = "0.15.0"
+dependencies = [
+ "codespan-reporting",
+ "kestrel-analyze",
+ "kestrel-ast-builder",
+ "kestrel-codegen",
+ "kestrel-codegen-cranelift",
+ "kestrel-debug",
+ "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-hir-lower",
+ "kestrel-lexer",
+ "kestrel-mir",
+ "kestrel-mir-lower",
+ "kestrel-name-res",
+ "kestrel-parser",
+ "kestrel-reporting",
+ "kestrel-span",
+ "kestrel-syntax-tree",
+ "kestrel-type-infer",
 ]
 
 [[package]]
@@ -711,33 +735,9 @@ dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
  "kestrel-ast-builder",
- "kestrel-compiler2",
+ "kestrel-compiler",
  "kestrel-hecs",
- "kestrel-reporting2",
- "kestrel-type-infer",
-]
-
-[[package]]
-name = "kestrel-compiler2"
-version = "0.15.0"
-dependencies = [
- "codespan-reporting",
- "kestrel-analyze",
- "kestrel-ast-builder",
- "kestrel-codegen2",
- "kestrel-codegen2-cranelift",
- "kestrel-debug",
- "kestrel-hecs",
- "kestrel-hir",
- "kestrel-hir-lower",
- "kestrel-lexer2",
- "kestrel-mir",
- "kestrel-mir-lower",
- "kestrel-name-res",
- "kestrel-parser2",
- "kestrel-reporting2",
- "kestrel-span2",
- "kestrel-syntax-tree2",
+ "kestrel-reporting",
  "kestrel-type-infer",
 ]
 
@@ -755,7 +755,7 @@ version = "0.15.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
- "kestrel-span2",
+ "kestrel-span",
 ]
 
 [[package]]
@@ -767,19 +767,19 @@ dependencies = [
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
- "kestrel-lexer2",
+ "kestrel-lexer",
  "kestrel-name-res",
- "kestrel-parser2",
- "kestrel-reporting2",
- "kestrel-span2",
- "kestrel-syntax-tree2",
+ "kestrel-parser",
+ "kestrel-reporting",
+ "kestrel-span",
+ "kestrel-syntax-tree",
 ]
 
 [[package]]
-name = "kestrel-lexer2"
+name = "kestrel-lexer"
 version = "0.15.0"
 dependencies = [
- "kestrel-span2",
+ "kestrel-span",
  "logos",
  "unicode-xid",
 ]
@@ -790,7 +790,7 @@ version = "0.15.0"
 dependencies = [
  "indexmap",
  "kestrel-hecs",
- "kestrel-span2",
+ "kestrel-span",
 ]
 
 [[package]]
@@ -799,16 +799,16 @@ version = "0.15.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-compiler2",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
  "kestrel-mir",
  "kestrel-name-res",
  "kestrel-pattern-matching",
- "kestrel-reporting2",
- "kestrel-span2",
+ "kestrel-reporting",
+ "kestrel-span",
  "kestrel-type-infer",
 ]
 
@@ -820,20 +820,20 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-hecs",
  "kestrel-hir",
- "kestrel-lexer2",
- "kestrel-parser2",
- "kestrel-span2",
- "kestrel-syntax-tree2",
+ "kestrel-lexer",
+ "kestrel-parser",
+ "kestrel-span",
+ "kestrel-syntax-tree",
 ]
 
 [[package]]
-name = "kestrel-parser2"
+name = "kestrel-parser"
 version = "0.15.0"
 dependencies = [
  "chumsky",
- "kestrel-lexer2",
- "kestrel-span2",
- "kestrel-syntax-tree2",
+ "kestrel-lexer",
+ "kestrel-span",
+ "kestrel-syntax-tree",
  "stacker",
 ]
 
@@ -846,12 +846,12 @@ dependencies = [
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-name-res",
- "kestrel-span2",
+ "kestrel-span",
  "kestrel-type-infer",
 ]
 
 [[package]]
-name = "kestrel-reporting2"
+name = "kestrel-reporting"
 version = "0.15.0"
 dependencies = [
  "codespan-reporting",
@@ -867,41 +867,41 @@ dependencies = [
  "kestrel-hir",
  "kestrel-hir-lower",
  "kestrel-name-res",
- "kestrel-span2",
+ "kestrel-span",
 ]
 
 [[package]]
-name = "kestrel-span2"
+name = "kestrel-span"
 version = "0.15.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
-name = "kestrel-syntax-tree2"
+name = "kestrel-syntax-tree"
 version = "0.15.0"
 dependencies = [
- "kestrel-lexer2",
- "kestrel-span2",
+ "kestrel-lexer",
+ "kestrel-span",
  "rowan",
 ]
 
 [[package]]
-name = "kestrel-test-suite2"
+name = "kestrel-test-suite"
 version = "0.15.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
  "kestrel-ast-builder",
- "kestrel-codegen2",
- "kestrel-codegen2-cranelift",
+ "kestrel-codegen",
+ "kestrel-codegen-cranelift",
+ "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-compiler2",
  "kestrel-hecs",
  "kestrel-mir",
  "kestrel-mir-lower",
- "kestrel-reporting2",
- "kestrel-span2",
+ "kestrel-reporting",
+ "kestrel-span",
  "kestrel-type-infer",
  "libtest-mimic",
  "walkdir",
@@ -917,10 +917,10 @@ dependencies = [
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
- "kestrel-lexer2",
+ "kestrel-lexer",
  "kestrel-name-res",
- "kestrel-parser2",
- "kestrel-span2",
+ "kestrel-parser",
+ "kestrel-span",
 ]
 
 [[package]]

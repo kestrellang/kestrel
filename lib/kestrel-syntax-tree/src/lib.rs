@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```
-//! use kestrel_syntax_tree2::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
+//! use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 //!
 //! let mut builder = GreenNodeBuilder::new();
 //! builder.start_node(SyntaxKind::ModulePath.into());
@@ -26,7 +26,7 @@
 //! assert_eq!(syntax.kind(), SyntaxKind::ModulePath);
 //! ```
 
-use kestrel_lexer2::Token;
+use kestrel_lexer::Token;
 use rowan::Language;
 
 // Re-export for use by parsers
@@ -977,15 +977,15 @@ mod tests {
     fn test_syntax_kind_conversion() {
         // Test that Token to SyntaxKind conversion works
         assert_eq!(
-            SyntaxKind::from(kestrel_lexer2::Token::Module),
+            SyntaxKind::from(kestrel_lexer::Token::Module),
             SyntaxKind::Module
         );
         assert_eq!(
-            SyntaxKind::from(kestrel_lexer2::Token::Identifier),
+            SyntaxKind::from(kestrel_lexer::Token::Identifier),
             SyntaxKind::Identifier
         );
         assert_eq!(
-            SyntaxKind::from(kestrel_lexer2::Token::Dot),
+            SyntaxKind::from(kestrel_lexer::Token::Dot),
             SyntaxKind::Dot
         );
     }

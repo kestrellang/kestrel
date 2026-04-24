@@ -8,13 +8,13 @@
 //! - Conformance lists: `: Proto1, Proto2` for structs and protocols
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::SyntaxKind;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::SyntaxKind;
 
 use crate::common::skip_trivia;
 use crate::event::EventSink;
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 /// Raw parsed data for a single type parameter
 /// Syntax: T or T = Default
@@ -97,7 +97,7 @@ fn path_parser<'tokens>()
     skip_trivia()
         .ignore_then(
             select! {
-                Token::Identifier = e => to_kestrel_span2(e.span()),
+                Token::Identifier = e => to_kestrel_span(e.span()),
             }
             .separated_by(just(Token::Dot))
             .at_least(1)
@@ -154,7 +154,7 @@ pub fn type_argument_list_with_spans_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<TypeArgumentData>, Span), ParserExtra<'tokens>>
 + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             type_argument_parser()
                 .separated_by(just(Token::Comma))
@@ -162,7 +162,7 @@ pub fn type_argument_list_with_spans_parser<'tokens>()
                 .collect(),
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|((lbracket, args), rbracket)| (lbracket, args, rbracket))
         .boxed()
 }
@@ -182,7 +182,7 @@ fn type_parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, TypeParameterData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(select! {
-            Token::Identifier = e => to_kestrel_span2(e.span()),
+            Token::Identifier = e => to_kestrel_span(e.span()),
         })
         .then(
             // Optional default: = Type
@@ -200,7 +200,7 @@ pub fn type_parameter_list_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<TypeParameterData>, Span), ParserExtra<'tokens>>
 + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             type_parameter_parser()
                 .separated_by(just(Token::Comma))
@@ -209,7 +209,7 @@ pub fn type_parameter_list_parser<'tokens>()
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
         .boxed()
@@ -247,7 +247,7 @@ fn negative_type_bound_parser<'tokens>()
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::Colon))
         .then_ignore(skip_trivia())
-        .then(just(Token::Not).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::Not).map_with(|_, e| to_kestrel_span(e.span())))
         .then_ignore(skip_trivia())
         .then(path_with_optional_args_parser())
         .map(|((path, not_span), bound)| NegativeTypeBoundData {
@@ -264,7 +264,7 @@ fn type_equality_parser<'tokens>()
     skip_trivia()
         .ignore_then(path_parser())
         .then_ignore(skip_trivia())
-        .then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
         .then_ignore(skip_trivia())
         .then(crate::ty::ty_parser())
         .map(|((left, equals_span), right)| TypeEqualityData {
@@ -293,7 +293,7 @@ fn where_constraint_parser<'tokens>()
 pub fn where_clause_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, WhereClauseData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Where).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Where).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             where_constraint_parser()
                 .separated_by(just(Token::Comma))
@@ -314,7 +314,7 @@ fn conformance_item_parser<'tokens>()
     skip_trivia()
         .ignore_then(
             just(Token::Not)
-                .map_with(|_, e| to_kestrel_span2(e.span()))
+                .map_with(|_, e| to_kestrel_span(e.span()))
                 .or_not(),
         )
         .then(crate::ty::ty_parser())
@@ -331,7 +331,7 @@ pub fn conformance_list_parser<'tokens>() -> impl Parser<
     ParserExtra<'tokens>,
 > + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             conformance_item_parser()
                 .separated_by(just(Token::Comma))
@@ -565,7 +565,7 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
 mod tests {
     use super::*;
     use crate::input::{create_input, prepare_tokens};
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     fn parse_type_params(source: &str) -> Option<(Span, Vec<TypeParameterData>, Span)> {
         let tokens: Vec<_> = lex(source, 0)

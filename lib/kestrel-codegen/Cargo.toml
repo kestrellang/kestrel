@@ -1,5 +1,5 @@
 [package]
-name = "kestrel-codegen2"
+name = "kestrel-codegen"
 version.workspace = true
 edition.workspace = true
 

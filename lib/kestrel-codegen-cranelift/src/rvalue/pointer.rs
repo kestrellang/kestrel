@@ -37,7 +37,7 @@ pub fn compile_pointer_op1(
 
         Op::PtrRead(ty) => {
             // Substitute type params with concrete types from the current instantiation
-            let concrete_ty = kestrel_codegen2::substitute_type_with_self(
+            let concrete_ty = kestrel_codegen::substitute_type_with_self(
                 ty,
                 &state.subst,
                 state.self_type.as_ref(),
@@ -88,7 +88,7 @@ pub fn compile_memory_op1(
 
     match op {
         Op::SizeOf(ty) => {
-            let concrete_ty = kestrel_codegen2::substitute_type_with_self(
+            let concrete_ty = kestrel_codegen::substitute_type_with_self(
                 ty,
                 &state.subst,
                 state.self_type.as_ref(),
@@ -105,7 +105,7 @@ pub fn compile_memory_op1(
         },
 
         Op::AlignOf(ty) => {
-            let concrete_ty = kestrel_codegen2::substitute_type_with_self(
+            let concrete_ty = kestrel_codegen::substitute_type_with_self(
                 ty,
                 &state.subst,
                 state.self_type.as_ref(),
@@ -143,7 +143,7 @@ pub fn compile_stack_alloc(
     element_ty: &MirTy,
     arg: &Value,
 ) -> Result<CrValue, CodegenError> {
-    let concrete_ty = kestrel_codegen2::substitute_type_with_self(
+    let concrete_ty = kestrel_codegen::substitute_type_with_self(
         element_ty,
         &state.subst,
         state.self_type.as_ref(),
@@ -202,7 +202,7 @@ pub fn compile_pointer_op2(
 
         Op::PtrWrite(ty) => {
             // Substitute type params to get the concrete pointee type
-            let concrete_ty = kestrel_codegen2::substitute_type_with_self(
+            let concrete_ty = kestrel_codegen::substitute_type_with_self(
                 ty,
                 &state.subst,
                 state.self_type.as_ref(),

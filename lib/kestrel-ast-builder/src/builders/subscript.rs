@@ -1,8 +1,8 @@
 //! Subscript declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::utils::{find_child, get_decl_span};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::utils::{find_child, get_decl_span};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::helpers::*;
 use super::params::extract_params;

@@ -4,17 +4,17 @@
 
 A new variant must be mirrored in **five** files — miss any and the build fails with non-exhaustive-match errors only after compiling a dependent crate, which is slow to discover.
 
-1. **`lib2/kestrel-type-infer/src/error.rs`**
+1. **`lib/kestrel-type-infer/src/error.rs`**
    - Add the variant to `pub enum InferError`.
    - Add the span arm in `impl InferError::span()`.
 
-2. **`lib2/kestrel-type-infer/src/result.rs`** — `describe_error()` match arm (short one-liner used as the `detail` string).
+2. **`lib/kestrel-type-infer/src/result.rs`** — `describe_error()` match arm (short one-liner used as the `detail` string).
 
-3. **`lib2/kestrel-compiler/src/diagnostic.rs`** — match arm on `InferError` that builds the user-facing `Diagnostic` (message + labels + notes).
+3. **`lib/kestrel-compiler/src/diagnostic.rs`** — match arm on `InferError` that builds the user-facing `Diagnostic` (message + labels + notes).
 
-4. **`lib2/kestrel-analyze/src/body/type_check.rs`** — `format_error()` match arm returning `(message, label_text)`.
+4. **`lib/kestrel-analyze/src/body/type_check.rs`** — `format_error()` match arm returning `(message, label_text)`.
 
-5. **`lib2/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
+5. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
 
 ## Reporting diagnostics from the solver
 

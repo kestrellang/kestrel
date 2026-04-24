@@ -32,4 +32,4 @@ When the exact wording is long or churns often, use a long distinctive prefix, n
 
 ## Running tests
 
-See the root `CLAUDE.md` and the `triage` skill — do not invoke `cargo test -p kestrel-test-suite2` directly.
+See the root `CLAUDE.md` and the `triage` skill — do not invoke `cargo test -p kestrel-test-suite` directly.

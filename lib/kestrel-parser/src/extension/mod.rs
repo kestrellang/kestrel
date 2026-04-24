@@ -6,9 +6,9 @@
 //! Syntax: `extend Type: Protocol { func method() { ... } }`
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
     ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
@@ -173,7 +173,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     /// Helper to parse source code and return an ExtensionDeclaration
     fn parse(source: &str) -> ExtensionDeclaration {

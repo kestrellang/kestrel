@@ -5,10 +5,10 @@ pipeline maps go stale.
 
 Top-level dispatch anchors:
 
-- AST constructor switch: `lib2/kestrel-ast-builder/src/lower.rs:160` (`lower_stmt`)
-- HIR lowering switch: `lib2/kestrel-hir-lower/src/stmt.rs:15` (`LowerCtx::lower_stmt`)
-- Inference gen switch: `lib2/kestrel-type-infer/src/generate.rs:551` (`gen_stmt`)
-- MIR lowering switch: `lib2/kestrel-mir-lower/src/body_lower.rs:419` (`lower_stmt`)
+- AST constructor switch: `lib/kestrel-ast-builder/src/lower.rs:160` (`lower_stmt`)
+- HIR lowering switch: `lib/kestrel-hir-lower/src/stmt.rs:15` (`LowerCtx::lower_stmt`)
+- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:551` (`gen_stmt`)
+- MIR lowering switch: `lib/kestrel-mir-lower/src/body_lower.rs:419` (`lower_stmt`)
 
 Top-of-body lowering: `AstBody::statements` → `HirBody::statements` through
 `kestrel-hir-lower/src/lib.rs` which calls `lower_stmt` for each. Tail expressions are
@@ -18,16 +18,16 @@ lowered via `lower_expr` only.
 
 ## AstStmt variants (4)
 
-Enum: `lib2/kestrel-ast/src/ast_body.rs:200`.
+Enum: `lib/kestrel-ast/src/ast_body.rs:200`.
 
 ### AstStmt::Let
 
 - Surface: `let x = v;`, `var x: Int = 0;`, `let (a, b) = pair;`,
   `let Point { x, y } = p;`.
 - CST: `VariableDeclaration` (`lower.rs:162`).
-- AST-builder: `lib2/kestrel-ast-builder/src/lower.rs:186` (`lower_variable_decl`,
+- AST-builder: `lib/kestrel-ast-builder/src/lower.rs:186` (`lower_variable_decl`,
   alloc at 232). Detects `var` for `is_mut`, pulls pattern / type / optional value.
-- HIR lowering: `lib2/kestrel-hir-lower/src/stmt.rs:18-24` dispatches to
+- HIR lowering: `lib/kestrel-hir-lower/src/stmt.rs:18-24` dispatches to
   `lower_let_stmt` (`stmt.rs:64`). Two paths:
   - **Simple binding pattern** (`stmt.rs:78-86`): allocates a `LocalId` via
     `define_local`, emits `HirStmt::Let { local, ty, value, span }` directly.
@@ -120,7 +120,7 @@ Enum: `lib2/kestrel-ast/src/ast_body.rs:200`.
   if the lookup failed (error already reported).
 - Type-infer: `generate.rs:593-595` — no constraints. Purely a cleanup registration.
 - MIR: `body_lower.rs:436-438` — **skipped**. Deinit resolution is handled by a later
-  pass (not yet fully wired in lib2).
+  pass (not yet fully wired in lib).
 - Gotchas:
   - No runtime code is currently emitted for deinit — if you're debugging a dropped
     value and expect a destructor call, check that the pass that consumes
@@ -131,7 +131,7 @@ Enum: `lib2/kestrel-ast/src/ast_body.rs:200`.
 
 ## HirStmt variants (3)
 
-Enum: `lib2/kestrel-hir/src/body.rs:234`.
+Enum: `lib/kestrel-hir/src/body.rs:234`.
 
 ### HirStmt::Let
 
@@ -177,5 +177,5 @@ Enum: `lib2/kestrel-hir/src/body.rs:234`.
 - `HirPat` produced by let-destructuring patterns — see `patterns.md`.
 - `MatchSource` tagging for synthetic matches — see `desugarings.md`.
 - `guard_let_stmts` / `while_conditions` fields on `HirBody` — see
-  `lib2/kestrel-hir/src/body.rs:42-45`. Analyzers use them to find specific
+  `lib/kestrel-hir/src/body.rs:42-45`. Analyzers use them to find specific
   source-original constructs after desugaring.

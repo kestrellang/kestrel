@@ -94,7 +94,7 @@ impl BodyCheck for ExhaustiveReturnAnalyzer {
                     .last()
                     .map(|&id| util::stmt_span(cx.hir, id))
             })
-            .unwrap_or_else(|| kestrel_span2::Span::synthetic(0));
+            .unwrap_or_else(|| kestrel_span::Span::synthetic(0));
 
         vec![AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[0].id,

@@ -5,11 +5,11 @@ maps go stale.
 
 Top-level dispatch anchors:
 
-- AST constructor switch: `lib2/kestrel-ast-builder/src/lower.rs:307` (`lower_expr`)
-- HIR lowering switch: `lib2/kestrel-hir-lower/src/expr.rs:19` (`LowerCtx::lower_expr`)
-- Inference gen switch: `lib2/kestrel-type-infer/src/generate.rs:60` (`gen_expr`)
-- Constraint dispatch: `lib2/kestrel-type-infer/src/solver.rs:583` (`try_solve`)
-- MIR lowering switch: `lib2/kestrel-mir-lower/src/body_lower.rs:445` (`lower_expr`)
+- AST constructor switch: `lib/kestrel-ast-builder/src/lower.rs:307` (`lower_expr`)
+- HIR lowering switch: `lib/kestrel-hir-lower/src/expr.rs:19` (`LowerCtx::lower_expr`)
+- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:60` (`gen_expr`)
+- Constraint dispatch: `lib/kestrel-type-infer/src/solver.rs:583` (`try_solve`)
+- MIR lowering switch: `lib/kestrel-mir-lower/src/body_lower.rs:445` (`lower_expr`)
 
 Solver functions (cite these when tracing a constraint):
 `solve_equal` 817, `solve_coerce` 955, `solve_conforms` 1076, `solve_associated` 1099,
@@ -21,16 +21,16 @@ Solver functions (cite these when tracing a constraint):
 
 ## AstExpr variants (30)
 
-Enum: `lib2/kestrel-ast/src/ast_body.rs:42`.
+Enum: `lib/kestrel-ast/src/ast_body.rs:42`.
 
 ### AstExpr::Literal
 
 - Surface: `42`, `3.14`, `"s"`, `'c'`, `true`, `null`, `()`.
 - CST: `ExprInteger`, `ExprFloat`, `ExprString`, `ExprRawString`, `ExprChar`, `ExprBool`,
   `ExprNull`, `ExprUnit` (dispatch: `lower.rs:309-338`).
-- AST-builder: `lib2/kestrel-ast-builder/src/lower.rs:410` (shared `lower_literal`);
+- AST-builder: `lib/kestrel-ast-builder/src/lower.rs:410` (shared `lower_literal`);
   `Bool` at 320, `Null` at 327, `Unit` at 334.
-- HIR lowering: `lib2/kestrel-hir-lower/src/expr.rs:20` →
+- HIR lowering: `lib/kestrel-hir-lower/src/expr.rs:20` →
   `AstExpr::Literal { kind, span } => self.lower_literal(&kind, &span)`
   (impl `expr.rs:191`). **Unit literal is special** — `AstLiteral::Unit` becomes
   `HirExpr::Tuple { elements: vec![] }` (`expr.rs:208-213`), NOT `HirExpr::Literal`.
@@ -489,7 +489,7 @@ Enum: `lib2/kestrel-ast/src/ast_body.rs:42`.
 
 - Surface: `{ stmt; stmt; tail }` as an expression (match-arm body, etc.).
 - CST: `CodeBlock` (when parser treats an arm body as a closure, see
-  `lib2/kestrel-ast-builder/AGENTS.md` and MEMORY entry for the 2026-03-07 fix).
+  `lib/kestrel-ast-builder/AGENTS.md` and MEMORY entry for the 2026-03-07 fix).
 - AST-builder: `lower.rs:1136` (inside `lower_match_arm` / the closure→block promotion).
   Allocated when an arm body is a parameterless closure with statements.
 - HIR lowering: `expr.rs:178-184` → `HirExpr::Block { body, span }` (1:1).
@@ -533,7 +533,7 @@ Enum: `lib2/kestrel-ast/src/ast_body.rs:42`.
 
 ## HirExpr variants (23)
 
-Enum: `lib2/kestrel-hir/src/body.rs:96` (header comment says "19 variants" — stale,
+Enum: `lib/kestrel-hir/src/body.rs:96` (header comment says "19 variants" — stale,
 actually 23).
 
 ### HirExpr::Literal

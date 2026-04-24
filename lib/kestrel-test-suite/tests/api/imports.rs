@@ -3,7 +3,7 @@
 //! These tests require multiple source files and can't be expressed
 //! as single .ks files. They use the programmatic TestCompiler API.
 
-use kestrel_test_suite2::TestCompiler;
+use kestrel_test_suite::TestCompiler;
 
 // =============================================================================
 // BASIC IMPORTS

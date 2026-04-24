@@ -1,4 +1,4 @@
-pub use kestrel_span2::{Span, Spanned};
+pub use kestrel_span::{Span, Spanned};
 use logos::Logos;
 use unicode_xid::UnicodeXID;
 

@@ -12,8 +12,8 @@
 //! - `Rich` errors instead of `Simple`
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
 
 use super::data::{
     ComputedBodyData, DeinitDeclarationData, FieldDeclarationData, FunctionBodyData,
@@ -23,7 +23,7 @@ use super::data::{
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
 use crate::expr::expr_parser;
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::pattern::{PatternVariant, StructPatternFieldData};
 use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
@@ -76,14 +76,14 @@ where
 pub fn token<'tokens>(
     t: Token,
 ) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
-    trivia(just(t).map_with(|_, e| to_kestrel_span2(e.span())))
+    trivia(just(t).map_with(|_, e| to_kestrel_span(e.span())))
 }
 
 /// Parse an identifier, skipping leading trivia
 pub fn identifier<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
     trivia(select! {
-        Token::Identifier = e => to_kestrel_span2(e.span()),
+        Token::Identifier = e => to_kestrel_span(e.span()),
     })
 }
 
@@ -115,10 +115,10 @@ pub fn module_path_parser_internal<'tokens>()
 pub fn visibility_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<(Token, Span)>, ParserExtra<'tokens>> + Clone {
     trivia(select! {
-        Token::Public = e => (Token::Public, to_kestrel_span2(e.span())),
-        Token::Private = e => (Token::Private, to_kestrel_span2(e.span())),
-        Token::Internal = e => (Token::Internal, to_kestrel_span2(e.span())),
-        Token::Fileprivate = e => (Token::Fileprivate, to_kestrel_span2(e.span())),
+        Token::Public = e => (Token::Public, to_kestrel_span(e.span())),
+        Token::Private = e => (Token::Private, to_kestrel_span(e.span())),
+        Token::Internal = e => (Token::Internal, to_kestrel_span(e.span())),
+        Token::Fileprivate = e => (Token::Fileprivate, to_kestrel_span(e.span())),
     })
     .or_not()
 }
@@ -237,7 +237,7 @@ pub fn import_declaration_parser_internal<'tokens>() -> impl Parser<
 pub fn static_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Static).map_with(|_, e| Some(to_kestrel_span2(e.span()))))
+        .ignore_then(just(Token::Static).map_with(|_, e| Some(to_kestrel_span(e.span()))))
         .or(empty().to(None))
 }
 
@@ -255,9 +255,9 @@ pub fn receiver_modifier_parser<'tokens>()
     skip_trivia()
         .ignore_then(
             just(Token::Mutating)
-                .map_with(|_, e| Some((ReceiverModifier::Mutating, to_kestrel_span2(e.span()))))
+                .map_with(|_, e| Some((ReceiverModifier::Mutating, to_kestrel_span(e.span()))))
                 .or(just(Token::Consuming).map_with(|_, e| {
-                    Some((ReceiverModifier::Consuming, to_kestrel_span2(e.span())))
+                    Some((ReceiverModifier::Consuming, to_kestrel_span(e.span())))
                 })),
         )
         .or(empty().to(None))
@@ -274,8 +274,8 @@ pub fn let_var_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, bool), ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         just(Token::Let)
-            .map_with(|_, e| (to_kestrel_span2(e.span()), false))
-            .or(just(Token::Var).map_with(|_, e| (to_kestrel_span2(e.span()), true))),
+            .map_with(|_, e| (to_kestrel_span(e.span()), false))
+            .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
     )
 }
 
@@ -297,9 +297,9 @@ fn parameter_access_mode_parser<'tokens>()
     skip_trivia()
         .ignore_then(
             just(Token::Mutating)
-                .map_with(|_, e| Some((ParameterAccessMode::Mutating, to_kestrel_span2(e.span()))))
+                .map_with(|_, e| Some((ParameterAccessMode::Mutating, to_kestrel_span(e.span()))))
                 .or(just(Token::Consuming).map_with(|_, e| {
-                    Some((ParameterAccessMode::Consuming, to_kestrel_span2(e.span())))
+                    Some((ParameterAccessMode::Consuming, to_kestrel_span(e.span())))
                 })),
         )
         .or(empty().to(None))
@@ -319,18 +319,18 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
     recursive(|param_pattern| {
         // Wildcard pattern: _
         let wildcard = skip_trivia()
-            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
             .map(PatternVariant::Wildcard);
 
         // Binding pattern: name or var name
         let binding = skip_trivia()
             .ignore_then(
                 just(Token::Var)
-                    .map_with(|_, e| Some(to_kestrel_span2(e.span())))
+                    .map_with(|_, e| Some(to_kestrel_span(e.span())))
                     .or(empty().to(None)),
             )
             .then(trivia(select! {
-                Token::Identifier = e => to_kestrel_span2(e.span()),
+                Token::Identifier = e => to_kestrel_span(e.span()),
             }))
             .map(|(var_span, name_span)| PatternVariant::Binding {
                 var_span,
@@ -339,7 +339,7 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
 
         // Tuple pattern: (p1, p2, ...)
         let tuple = skip_trivia()
-            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 param_pattern
                     .clone()
@@ -348,7 +348,7 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
                     .collect::<Vec<_>>(),
             )
             .then(trivia(
-                just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
             ))
             .map(|((lparen, elements), rparen)| PatternVariant::Tuple {
                 lparen,
@@ -358,10 +358,10 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
 
         // Struct pattern: StructName { field, field: pattern, .. }
         let struct_field = trivia(select! {
-            Token::Identifier = e => to_kestrel_span2(e.span()),
+            Token::Identifier = e => to_kestrel_span(e.span()),
         })
         .then(
-            trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+            trivia(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(param_pattern.clone())
                 .map(|(colon, pattern)| Some((colon, pattern)))
                 .or(empty().to(None)),
@@ -371,13 +371,13 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
             binding,
         });
 
-        let struct_rest = trivia(just(Token::DotDot).map_with(|_, e| to_kestrel_span2(e.span())));
+        let struct_rest = trivia(just(Token::DotDot).map_with(|_, e| to_kestrel_span(e.span())));
 
         let struct_pattern = trivia(select! {
-            Token::Identifier = e => to_kestrel_span2(e.span()),
+            Token::Identifier = e => to_kestrel_span(e.span()),
         })
         .then(trivia(
-            just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+            just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(
             struct_field
@@ -391,7 +391,7 @@ pub(crate) fn parameter_pattern_parser<'tokens>()
                 .ignore_then(struct_rest.or_not()),
         )
         .then(trivia(
-            just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())),
+            just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .map(
             |((((struct_name, lbrace), fields), rest), rbrace)| PatternVariant::Struct {
@@ -423,7 +423,7 @@ fn default_value_parser<'tokens>() -> impl Parser<
     // Parse optional default value: = expression
     // The trivia combinator handles whitespace before =
     // .or_not() makes the entire thing optional
-    trivia(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())))
+    trivia(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
         .then(expr_parser())
         .or_not()
         .boxed()
@@ -444,7 +444,7 @@ pub(crate) fn parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone {
     // Parse identifier (with trivia skipping)
     let ident = trivia(select! {
-        Token::Identifier = e => to_kestrel_span2(e.span()),
+        Token::Identifier = e => to_kestrel_span(e.span()),
     });
 
     let param_pattern = parameter_pattern_parser();
@@ -455,7 +455,7 @@ pub(crate) fn parameter_parser<'tokens>()
         .then(ident.clone())
         .then(param_pattern.clone())
         .then(trivia(
-            just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())),
+            just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(ty_parser())
         .then(default_value_parser())
@@ -474,7 +474,7 @@ pub(crate) fn parameter_parser<'tokens>()
     let unlabeled = parameter_access_mode_parser()
         .then(param_pattern)
         .then(trivia(
-            just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())),
+            just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
         ))
         .then(ty_parser())
         .then(default_value_parser())
@@ -499,7 +499,7 @@ pub(crate) fn parameter_list_parser<'tokens>()
     skip_trivia()
         .ignore_then(
             parameter_parser()
-                .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span2(e.span())))
+                .separated_by(just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())))
                 .allow_trailing()
                 .collect(),
         )
@@ -515,7 +515,7 @@ pub(crate) fn return_type_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<(Span, TyVariant)>, ParserExtra<'tokens>> + Clone
 {
     skip_trivia()
-        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
         .then(ty_parser())
         .map(|(arrow, ty)| (arrow, ty))
         .or_not()
@@ -659,17 +659,17 @@ fn computed_body_parser<'tokens>()
     // Protocol requirement: { get } or { get set }
     // These have no code block bodies, just keywords
     let protocol_requirement = skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then_ignore(skip_trivia())
-        .then(just(Token::Get).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
                 .map(Some)
                 .or(empty().to(None)),
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|(((lbrace_span, get_span), set_span_opt), rbrace_span)| {
             ComputedBodyData::Accessors {
                 lbrace: lbrace_span,
@@ -692,18 +692,18 @@ fn computed_body_parser<'tokens>()
     // Explicit accessors: { get { body } set { body }? }
     // getter is required, setter is optional
     let explicit_accessors = skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then_ignore(skip_trivia())
-        .then(just(Token::Get).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(code_block_parser())
                 .or_not(),
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .map(
             |((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
                 let (set_span, setter_body) = match setter_opt {
@@ -889,17 +889,17 @@ fn subscript_body_parser<'tokens>()
     // Protocol requirement: { get } or { get set }
     // These have no code block bodies, just keywords
     let protocol_requirement = skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then_ignore(skip_trivia())
-        .then(just(Token::Get).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
                 .map(Some)
                 .or(empty().to(None)),
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|(((lbrace_span, get_span), set_span_opt), rbrace_span)| {
             SubscriptBodyData::Accessors {
                 lbrace: lbrace_span,
@@ -922,18 +922,18 @@ fn subscript_body_parser<'tokens>()
     // Explicit accessors: { get { body } set { body }? }
     // getter is required, setter is optional
     let explicit_accessors = skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then_ignore(skip_trivia())
-        .then(just(Token::Get).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(code_block_parser())
                 .or_not(),
         )
         .then_ignore(skip_trivia())
-        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .map(
             |((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
                 let (set_span, setter_body) = match setter_opt {
@@ -971,7 +971,7 @@ fn subscript_body_parser<'tokens>()
 fn required_return_type_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Span, TyVariant), ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
         .then(ty_parser())
         .boxed()
 }

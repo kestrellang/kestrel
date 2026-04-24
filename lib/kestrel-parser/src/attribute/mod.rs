@@ -4,11 +4,11 @@
 //! Attributes use the `@name(args)` syntax and can be attached to declarations.
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
+use kestrel_lexer::Token;
 
 use crate::common::data::{AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData};
 use crate::common::parsers::{identifier, skip_trivia, token};
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 // =============================================================================
 // Attribute Argument Value Parsers
@@ -18,7 +18,7 @@ use crate::input::{ParserExtra, ParserInput, to_kestrel_span2};
 fn string_literal_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        just(Token::String).map_with(|_, e| AttributeArgValue::String(to_kestrel_span2(e.span()))),
+        just(Token::String).map_with(|_, e| AttributeArgValue::String(to_kestrel_span(e.span()))),
     )
 }
 
@@ -27,7 +27,7 @@ fn integer_literal_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         just(Token::Integer)
-            .map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span2(e.span()))),
+            .map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
     )
 }
 
@@ -35,7 +35,7 @@ fn integer_literal_parser<'tokens>()
 fn float_literal_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        just(Token::Float).map_with(|_, e| AttributeArgValue::Float(to_kestrel_span2(e.span()))),
+        just(Token::Float).map_with(|_, e| AttributeArgValue::Float(to_kestrel_span(e.span()))),
     )
 }
 
@@ -43,7 +43,7 @@ fn float_literal_parser<'tokens>()
 fn bool_literal_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        just(Token::Boolean).map_with(|_, e| AttributeArgValue::Bool(to_kestrel_span2(e.span()))),
+        just(Token::Boolean).map_with(|_, e| AttributeArgValue::Bool(to_kestrel_span(e.span()))),
     )
 }
 
@@ -160,7 +160,7 @@ pub fn attribute_list_parser<'tokens>()
 mod tests {
     use super::*;
     use crate::input::{create_input, prepare_tokens};
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     /// Helper to parse attributes from source
     fn parse_attributes(source: &str) -> Vec<AttributeData> {

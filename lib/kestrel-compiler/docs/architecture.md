@@ -80,9 +80,9 @@ Unchanged files are served from cache at every level.
 | Crate | Usage |
 |-------|-------|
 | `kestrel-hecs` | ECS world, queries, accumulators |
-| `kestrel-lexer2` | Token types, `lex()` function |
-| `kestrel-parser2` | `Parser`, `ParseResult` |
-| `kestrel-syntax-tree2` | `SyntaxKind`, `SyntaxNode` |
+| `kestrel-lexer` | Token types, `lex()` function |
+| `kestrel-parser` | `Parser`, `ParseResult` |
+| `kestrel-syntax-tree` | `SyntaxKind`, `SyntaxNode` |
 | `kestrel-ast-builder` | `build_declarations` |
 | `kestrel-type-infer` | `InferBody` query |
-| `kestrel-span2` | `Span` for diagnostics |
+| `kestrel-span` | `Span` for diagnostics |

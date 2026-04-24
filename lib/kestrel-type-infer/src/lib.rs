@@ -28,7 +28,7 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir_lower::{
     LowerBody, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
 };
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use ctx::InferCtx;
 use resolve::WorldResolver;

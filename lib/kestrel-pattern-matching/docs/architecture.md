@@ -142,5 +142,5 @@ kestrel-pattern-matching
 ├── kestrel-ast-builder   (NodeKind, Callable, Name, TypeParams, TypeAnnotation)
 ├── kestrel-hir           (HirBody, HirPat, HirMatchArm)
 ├── kestrel-type-infer    (ResolvedTy, TypedBody)
-└── kestrel-span2         (Span)
+└── kestrel-span         (Span)
 ```

@@ -6,13 +6,13 @@
 //! - Expression statements: expr;
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
@@ -113,14 +113,14 @@ fn variable_declaration_parser<'tokens>()
     skip_trivia()
         .ignore_then(
             just(Token::Let)
-                .map_with(|_, e| (to_kestrel_span2(e.span()), false))
-                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span2(e.span()), true))),
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
         .then(pattern_parser())
         .then(
             // Optional type annotation: : Type
             skip_trivia()
-                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(ty_parser())
                 .map(|(colon, ty)| (colon, ty))
                 .or_not(),
@@ -128,14 +128,14 @@ fn variable_declaration_parser<'tokens>()
         .then(
             // Optional initializer: = expr
             skip_trivia()
-                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(expr_parser())
                 .map(|(eq, expr)| (eq, expr))
                 .or_not(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(
@@ -163,7 +163,7 @@ fn expression_statement_parser<'tokens>()
     expr_parser()
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .boxed()
 }
@@ -174,14 +174,14 @@ fn expression_statement_parser<'tokens>()
 fn deinit_statement_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, DeinitStatementData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |((deinit_span, identifier_span), semicolon)| DeinitStatementData {
@@ -312,7 +312,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     fn parse_stmt_from_source(source: &str) -> Statement {
         let tokens: Vec<_> = lex(source, 0)

@@ -12,11 +12,11 @@ kestrel-ast = { path = "../kestrel-ast" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-hir = { path = "../kestrel-hir" }
 kestrel-name-res = { path = "../kestrel-name-res" }
-kestrel-span2 = { path = "../kestrel-span" }
+kestrel-span = { path = "../kestrel-span" }
 kestrel-debug = { path = "../kestrel-debug" }
-kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-reporting = { path = "../kestrel-reporting" }
 
 [dev-dependencies]
-kestrel-lexer2 = { path = "../kestrel-lexer" }
-kestrel-parser2 = { path = "../kestrel-parser" }
-kestrel-syntax-tree2 = { path = "../kestrel-syntax-tree" }
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

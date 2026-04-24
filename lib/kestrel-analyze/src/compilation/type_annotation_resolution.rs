@@ -21,7 +21,7 @@ use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E436",

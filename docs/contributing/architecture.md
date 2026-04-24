@@ -1,8 +1,8 @@
-# Kestrel Architecture (lib2)
+# Kestrel Architecture (lib)
 
-The Kestrel compiler lives under `lib2/`. It is built on a **hierarchical entity-component system** (hECS) with memoized queries — declarations are entities, facts about them are components, and every derived result (name resolution, HIR, types, diagnostics, MIR) is produced by a query that the runtime caches and invalidates automatically.
+The Kestrel compiler lives under `lib/`. It is built on a **hierarchical entity-component system** (hECS) with memoized queries — declarations are entities, facts about them are components, and every derived result (name resolution, HIR, types, diagnostics, MIR) is produced by a query that the runtime caches and invalidates automatically.
 
-This document describes the overall shape of the pipeline. For the motivation behind hECS see the `hecs` skill and `lib2/AGENTS.md`; per-crate deep-dives live in each crate's own `docs/` folder.
+This document describes the overall shape of the pipeline. For the motivation behind hECS see the `hecs` skill and `lib/AGENTS.md`; per-crate deep-dives live in each crate's own `docs/` folder.
 
 ## Compilation pipeline
 
@@ -102,7 +102,7 @@ Because components are orthogonal, capability checks are "does this entity have 
 | Subscript | `Callable`, `Subscript` marker, `Gettable`/`Settable` |
 | Type parameter | `TypeParameter` component with its constraints |
 
-The authoritative catalogue is `lib2/kestrel-ast-builder/src/components.rs`.
+The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 
 ## Crate map
 
@@ -130,7 +130,7 @@ The authoritative catalogue is `lib2/kestrel-ast-builder/src/components.rs`.
 | `kestrel-compiler-driver` | High-level orchestration used by the CLI and tests. |
 | `kestrel-debug` | Introspection utilities. |
 | `kestrel-reporting` | Diagnostic formatting (codespan-reporting wrapper). |
-| `kestrel-test-suite` | `.ks`-file test runner. Package name in `Cargo.toml` is `kestrel-test-suite2`. |
+| `kestrel-test-suite` | `.ks`-file test runner. Package name in `Cargo.toml` is `kestrel-test-suite`. |
 
 ## Data flow example — `5.toString()`
 
@@ -170,7 +170,7 @@ The authoritative catalogue is `lib2/kestrel-ast-builder/src/components.rs`.
 
 ## Where the phase boundaries are (and aren't)
 
-lib1 had explicit **BUILD → BIND → VALIDATE** phases that mutated a shared model in a specific order. lib2 does not.
+lib1 had explicit **BUILD → BIND → VALIDATE** phases that mutated a shared model in a specific order. lib does not.
 
 - There is no "BIND pass." Name resolution is a query (`ResolveName`) fired as needed.
 - There is no "VALIDATE pass." Each analyzer is a query that runs on demand and caches its result.
@@ -180,12 +180,12 @@ Practical consequence: to add a fact about a declaration, you either (a) add a c
 
 ## Further reading
 
-- `lib2/AGENTS.md` — documentation conventions for each lib2 crate; also lists which crates have `docs/` folders.
-- `lib2/kestrel-hecs/docs/architecture.md` — the ECS mechanics in detail.
-- `lib2/kestrel-ast-builder/docs/components.md` and `entity-mapping.md` — the component catalogue.
-- `lib2/kestrel-hir/docs/` — HIR shape and desugaring.
-- `lib2/kestrel-type-infer/docs/` and `lib2/kestrel-type-infer/AGENTS.md` — inference internals.
-- `lib2/kestrel-analyze/AGENTS.md` — analyzer patterns.
+- `lib/AGENTS.md` — documentation conventions for each lib crate; also lists which crates have `docs/` folders.
+- `lib/kestrel-hecs/docs/architecture.md` — the ECS mechanics in detail.
+- `lib/kestrel-ast-builder/docs/components.md` and `entity-mapping.md` — the component catalogue.
+- `lib/kestrel-hir/docs/` — HIR shape and desugaring.
+- `lib/kestrel-type-infer/docs/` and `lib/kestrel-type-infer/AGENTS.md` — inference internals.
+- `lib/kestrel-analyze/AGENTS.md` — analyzer patterns.
 - `docs/contributing/type-inference.md` — contributor overview of inference.
 - `docs/contributing/quick-reference.md` — file paths by task.
 - `docs/contributing/workflows.md` — step-by-step guides for common tasks.

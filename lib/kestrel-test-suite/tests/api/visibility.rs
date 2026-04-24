@@ -2,7 +2,7 @@
 //!
 //! Tests that require multiple modules to verify cross-module visibility rules.
 
-use kestrel_test_suite2::TestCompiler;
+use kestrel_test_suite::TestCompiler;
 
 #[test]
 fn internal_method_not_visible_outside_module() {

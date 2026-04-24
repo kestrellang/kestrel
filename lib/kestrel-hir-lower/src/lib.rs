@@ -20,7 +20,7 @@ pub mod ty;
 use kestrel_ast_builder::{Body, Callable};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 pub use ty::{
     LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,

@@ -1,6 +1,6 @@
 ---
 name: kestrel-pipeline
-description: Pipeline-routing reference for the lib2 Kestrel compiler. Use when someone asks "where is X handled?", "where does <AstExpr/HirExpr/HirStmt/HirPat variant> get built?", "how does Type.method() lower?", "what constraint does try emit?", "trace this through the compiler", "what's the MIR shape of X?", or any question that would otherwise require opening 4-5 files across kestrel-ast-builder / kestrel-hir-lower / kestrel-type-infer / kestrel-mir-lower to answer.
+description: Pipeline-routing reference for the lib Kestrel compiler. Use when someone asks "where is X handled?", "where does <AstExpr/HirExpr/HirStmt/HirPat variant> get built?", "how does Type.method() lower?", "what constraint does try emit?", "trace this through the compiler", "what's the MIR shape of X?", or any question that would otherwise require opening 4-5 files across kestrel-ast-builder / kestrel-hir-lower / kestrel-type-infer / kestrel-mir-lower to answer.
 ---
 
 # kestrel-pipeline
@@ -73,18 +73,18 @@ Plus many more codegen / runtime memory files relevant to the MIR side — see
 Top of each pipeline stage — useful when you need the full match statement, not a
 single variant:
 
-- AST-builder expr dispatch: `lib2/kestrel-ast-builder/src/lower.rs:307`
-- AST-builder stmt dispatch: `lib2/kestrel-ast-builder/src/lower.rs:160`
-- AST-builder pat dispatch: `lib2/kestrel-ast-builder/src/lower.rs:1321`
-- HIR lowering expr dispatch: `lib2/kestrel-hir-lower/src/expr.rs:19`
-- HIR lowering stmt dispatch: `lib2/kestrel-hir-lower/src/stmt.rs:15`
-- HIR lowering pat dispatch: `lib2/kestrel-hir-lower/src/pat.rs:34`
-- Inference gen_expr: `lib2/kestrel-type-infer/src/generate.rs:60`
-- Inference gen_stmt: `lib2/kestrel-type-infer/src/generate.rs:551`
-- Inference gen_pat: `lib2/kestrel-type-infer/src/generate.rs:607`
-- Constraint dispatch: `lib2/kestrel-type-infer/src/solver.rs:583` (`try_solve`)
-- MIR lower_expr: `lib2/kestrel-mir-lower/src/body_lower.rs:445`
-- MIR lower_stmt: `lib2/kestrel-mir-lower/src/body_lower.rs:419`
+- AST-builder expr dispatch: `lib/kestrel-ast-builder/src/lower.rs:307`
+- AST-builder stmt dispatch: `lib/kestrel-ast-builder/src/lower.rs:160`
+- AST-builder pat dispatch: `lib/kestrel-ast-builder/src/lower.rs:1321`
+- HIR lowering expr dispatch: `lib/kestrel-hir-lower/src/expr.rs:19`
+- HIR lowering stmt dispatch: `lib/kestrel-hir-lower/src/stmt.rs:15`
+- HIR lowering pat dispatch: `lib/kestrel-hir-lower/src/pat.rs:34`
+- Inference gen_expr: `lib/kestrel-type-infer/src/generate.rs:60`
+- Inference gen_stmt: `lib/kestrel-type-infer/src/generate.rs:551`
+- Inference gen_pat: `lib/kestrel-type-infer/src/generate.rs:607`
+- Constraint dispatch: `lib/kestrel-type-infer/src/solver.rs:583` (`try_solve`)
+- MIR lower_expr: `lib/kestrel-mir-lower/src/body_lower.rs:445`
+- MIR lower_stmt: `lib/kestrel-mir-lower/src/body_lower.rs:419`
 
 Solver per-constraint fns (all in `solver.rs`): `solve_equal` 817, `solve_coerce` 955,
 `solve_conforms` 1076, `solve_associated` 1099, `solve_call` 1251,

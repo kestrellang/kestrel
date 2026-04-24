@@ -20,11 +20,11 @@ fn build_from_source(source: &str) -> (World, Entity, Entity) {
 
     let file_entity = world.spawn();
 
-    let tokens: Vec<_> = kestrel_lexer2::lex(source, file_entity.index())
+    let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
         .filter_map(|r| r.ok())
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
-    let result = kestrel_parser2::parse_source_file_from_source(source, token_iter);
+    let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
 
     build_declarations(&mut world, file_entity, &result.tree, root, None);
     (world, root, file_entity)
@@ -41,20 +41,20 @@ fn build_two_files(source_a: &str, source_b: &str) -> (World, Entity) {
 
     // Build first file
     let file_a = world.spawn();
-    let tokens: Vec<_> = kestrel_lexer2::lex(source_a, file_a.index())
+    let tokens: Vec<_> = kestrel_lexer::lex(source_a, file_a.index())
         .filter_map(|r| r.ok())
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
-    let result = kestrel_parser2::parse_source_file_from_source(source_a, token_iter);
+    let result = kestrel_parser::parse_source_file_from_source(source_a, token_iter);
     build_declarations(&mut world, file_a, &result.tree, root, None);
 
     // Build second file
     let file_b = world.spawn();
-    let tokens: Vec<_> = kestrel_lexer2::lex(source_b, file_b.index())
+    let tokens: Vec<_> = kestrel_lexer::lex(source_b, file_b.index())
         .filter_map(|r| r.ok())
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
-    let result = kestrel_parser2::parse_source_file_from_source(source_b, token_iter);
+    let result = kestrel_parser::parse_source_file_from_source(source_b, token_iter);
     build_declarations(&mut world, file_b, &result.tree, root, None);
 
     (world, root)
@@ -767,10 +767,10 @@ fn auto_import_across_std_modules() {
     // std.core with Int64
     let f1 = world.spawn();
     let src1 = "module std.core\npublic struct Int64 {}";
-    let tokens1: Vec<_> = kestrel_lexer2::lex(src1, f1.index())
+    let tokens1: Vec<_> = kestrel_lexer::lex(src1, f1.index())
         .filter_map(|r| r.ok())
         .collect();
-    let result1 = kestrel_parser2::parse_source_file_from_source(
+    let result1 = kestrel_parser::parse_source_file_from_source(
         src1,
         tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
@@ -779,10 +779,10 @@ fn auto_import_across_std_modules() {
     // std.text with String
     let f2 = world.spawn();
     let src2 = "module std.text\npublic struct String {}";
-    let tokens2: Vec<_> = kestrel_lexer2::lex(src2, f2.index())
+    let tokens2: Vec<_> = kestrel_lexer::lex(src2, f2.index())
         .filter_map(|r| r.ok())
         .collect();
-    let result2 = kestrel_parser2::parse_source_file_from_source(
+    let result2 = kestrel_parser::parse_source_file_from_source(
         src2,
         tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
@@ -791,10 +791,10 @@ fn auto_import_across_std_modules() {
     // User module — no explicit imports
     let f3 = world.spawn();
     let src3 = "module MyApp";
-    let tokens3: Vec<_> = kestrel_lexer2::lex(src3, f3.index())
+    let tokens3: Vec<_> = kestrel_lexer::lex(src3, f3.index())
         .filter_map(|r| r.ok())
         .collect();
-    let result3 = kestrel_parser2::parse_source_file_from_source(
+    let result3 = kestrel_parser::parse_source_file_from_source(
         src3,
         tokens3.iter().map(|t| (t.value.clone(), t.span.clone())),
     );

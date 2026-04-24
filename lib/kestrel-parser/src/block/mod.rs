@@ -7,13 +7,13 @@
 //! If the last item has a semicolon, the block evaluates to unit ().
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
 use crate::pattern::pattern_parser;
 use crate::stmt::{StmtVariant, emit_stmt_variant};
 
@@ -132,11 +132,11 @@ pub struct CodeBlockData {
 pub fn code_block_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_items_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((lbrace, items), rbrace)| CodeBlockData {
             lbrace,
@@ -168,25 +168,25 @@ fn guard_let_else_items_parser<'tokens>()
     let var_decl = skip_trivia()
         .ignore_then(
             just(Token::Let)
-                .map_with(|_, e| (to_kestrel_span2(e.span()), false))
-                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span2(e.span()), true))),
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
         .then(pattern_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(crate::ty::ty_parser())
                 .or_not(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(expr_parser())
                 .or_not(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(
@@ -210,7 +210,7 @@ fn guard_let_else_items_parser<'tokens>()
     let expr_item = expr_parser()
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
                 .map(Some)
                 .or(empty().to(None)),
         )
@@ -269,11 +269,11 @@ fn code_block_items_parser<'tokens>()
 
     // Single let condition: let pattern = expr
     let guard_let_condition = skip_trivia()
-        .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
         .then(pattern_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(expr_parser())
         .map(
@@ -306,20 +306,20 @@ fn code_block_items_parser<'tokens>()
         });
 
     let guard_let = skip_trivia()
-        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
         .then(guard_conditions)
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(guard_let_else_items_parser())
         .then(
             skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
@@ -338,27 +338,27 @@ fn code_block_items_parser<'tokens>()
     let var_decl = skip_trivia()
         .ignore_then(
             just(Token::Let)
-                .map_with(|_, e| (to_kestrel_span2(e.span()), false))
-                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span2(e.span()), true))),
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
         )
         .then(pattern_parser())
         .then(
             // Optional type annotation: : Type
             skip_trivia()
-                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(crate::ty::ty_parser())
                 .or_not(),
         )
         .then(
             // Optional initializer: = expr
             skip_trivia()
-                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(expr_parser())
                 .or_not(),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(
@@ -380,14 +380,14 @@ fn code_block_items_parser<'tokens>()
 
     // Deinit statement: deinit identifier;
     let deinit_stmt = skip_trivia()
-        .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span2(e.span())))
+        .ignore_then(just(Token::Deinit).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Identifier).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span()))),
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(|((deinit_span, identifier_span), semicolon)| {
             BlockItem::Statement(StmtVariant::Deinit(crate::stmt::DeinitStatementData {
@@ -402,7 +402,7 @@ fn code_block_items_parser<'tokens>()
         .then(
             // Check if there's a semicolon (making it a regular statement)
             skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
                 .map(Some)
                 .or(empty().to(None)),
         )
@@ -534,7 +534,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     fn parse_block_from_source(source: &str) -> CodeBlock {
         let tokens: Vec<_> = lex(source, 0)

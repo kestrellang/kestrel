@@ -15,7 +15,7 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen2::{mangle_function_with_self, substitute_type};
+use kestrel_codegen::{mangle_function_with_self, substitute_type};
 use kestrel_hecs::Entity;
 use kestrel_mir::{FunctionKind, MirTy, Value};
 use std::collections::HashMap;

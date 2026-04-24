@@ -12,13 +12,13 @@ kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-hir = { path = "../kestrel-hir" }
 kestrel-ast = { path = "../kestrel-ast" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
-kestrel-span2 = { path = "../kestrel-span" }
+kestrel-span = { path = "../kestrel-span" }
 kestrel-hir-lower = { path = "../kestrel-hir-lower" }
 kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
-kestrel-reporting2 = { path = "../kestrel-reporting" }
+kestrel-reporting = { path = "../kestrel-reporting" }
 
 [dev-dependencies]
-kestrel-compiler2 = { path = "../kestrel-compiler" }
+kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }

@@ -7,8 +7,8 @@
 use kestrel_ast_builder::{DeclSpan, Name, Valued};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxElement, SyntaxKind};
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxElement, SyntaxKind};
 
 // ===== Span extraction =====
 

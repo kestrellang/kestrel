@@ -16,7 +16,7 @@ use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::FunctionBuilderContext;
 use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use kestrel_codegen2::{
+use kestrel_codegen::{
     LayoutCache, Mangler, TargetConfig, mangle_function_with_self, substitute_type_with_self,
 };
 use kestrel_debug::ktrace;

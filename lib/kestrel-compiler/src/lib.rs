@@ -1,4 +1,4 @@
-//! kestrel-compiler2: ECS-driven compiler pipeline built on kestrel-hecs.
+//! kestrel-compiler: ECS-driven compiler pipeline built on kestrel-hecs.
 //!
 //! Source files are entities, compilation phases are queries. Diagnostics
 //! are accumulated as side-effects during query execution.
@@ -6,7 +6,7 @@
 //! # Usage
 //!
 //! ```
-//! use kestrel_compiler2::Compiler;
+//! use kestrel_compiler::Compiler;
 //!
 //! let mut compiler = Compiler::new();
 //! let file = compiler.set_source("main.ks", "let x = 42".into());
@@ -22,7 +22,7 @@ pub mod queries;
 pub use components::{FilePath, SourceText};
 pub use diagnostic::ThrowDiagnostic;
 pub use kestrel_ast_builder;
-pub use kestrel_reporting2::{Diagnostic, Label, Severity};
+pub use kestrel_reporting::{Diagnostic, Label, Severity};
 pub use queries::{InferWithDiagnostics, LexFile, ParseFile};
 
 use std::collections::HashMap;
@@ -30,8 +30,8 @@ use std::path::Path;
 
 use kestrel_ast_builder::TargetConfig;
 use kestrel_hecs::{Entity, World};
-use kestrel_lexer2::SpannedToken;
-use kestrel_parser2::ParseResult;
+use kestrel_lexer::SpannedToken;
+use kestrel_parser::ParseResult;
 
 /// Compiler database backed by an ECS world.
 ///
@@ -195,11 +195,11 @@ impl Compiler {
     /// Call after inference has been run. Returns the raw object file bytes.
     pub fn compile_to_object(
         &self,
-    ) -> Result<Vec<u8>, kestrel_codegen2_cranelift::error::CodegenError> {
+    ) -> Result<Vec<u8>, kestrel_codegen_cranelift::error::CodegenError> {
         let mir = self.lower_to_mir();
-        let target = kestrel_codegen2::TargetConfig::host();
-        let options = kestrel_codegen2_cranelift::CodegenOptions::default();
-        let result = kestrel_codegen2_cranelift::compile(&mir, &target, &options)?;
+        let target = kestrel_codegen::TargetConfig::host();
+        let options = kestrel_codegen_cranelift::CodegenOptions::default();
+        let result = kestrel_codegen_cranelift::compile(&mir, &target, &options)?;
         Ok(result.object_bytes)
     }
 
@@ -209,11 +209,11 @@ impl Compiler {
     pub fn compile_and_link(
         &self,
         output_path: &Path,
-        options: &kestrel_codegen2_cranelift::CodegenOptions,
-    ) -> Result<(), kestrel_codegen2_cranelift::error::CodegenError> {
+        options: &kestrel_codegen_cranelift::CodegenOptions,
+    ) -> Result<(), kestrel_codegen_cranelift::error::CodegenError> {
         let mir = self.lower_to_mir();
-        let target = kestrel_codegen2::TargetConfig::host();
-        kestrel_codegen2_cranelift::compile_and_link(&mir, &target, options, output_path)
+        let target = kestrel_codegen::TargetConfig::host();
+        kestrel_codegen_cranelift::compile_and_link(&mir, &target, options, output_path)
     }
 
     /// Load all .ks files from a directory, parse and build declarations.
@@ -259,8 +259,8 @@ impl Default for Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::Token;
-    use kestrel_syntax_tree2::SyntaxKind;
+    use kestrel_lexer::Token;
+    use kestrel_syntax_tree::SyntaxKind;
 
     /// Helper: extract non-trivia token kinds from a token stream.
     fn structural_tokens(tokens: &[SpannedToken]) -> Vec<Token> {

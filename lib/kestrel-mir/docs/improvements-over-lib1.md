@@ -10,7 +10,7 @@ crate and the rationale behind each.
 **lib1**: All MIR data lives in a single `MirContext` with 16+ arenas. Statements,
 blocks, locals, types, and names all stored in separate arenas with `Id<T>` handles.
 
-**lib2**: `MirModule` contains items as plain `Vec`s. Function bodies (`MirBody`) store
+**lib**: `MirModule` contains items as plain `Vec`s. Function bodies (`MirBody`) store
 locals and blocks inline. Statements live inside their blocks. No shared arenas.
 
 **Why**: Function bodies are self-contained — a statement in function A never references
@@ -22,7 +22,7 @@ a local in function B. Shared arenas add indirection with no benefit. Plain vecs
 **lib1**: Types are interned in a `HashMap<MirTy, Id<Ty>>`. Every type reference is an
 `Id<Ty>` that requires a lookup in the context.
 
-**lib2**: `MirTy` is used by value wherever it appears. No interning, no `Id<Ty>`.
+**lib**: `MirTy` is used by value wherever it appears. No interning, no `Id<Ty>`.
 
 **Why**: Type interning is only valuable when types are frequently compared for equality
 or used as map keys. In the MIR, types are mostly just read during codegen. By-value
@@ -33,7 +33,7 @@ types eliminate the interning machinery and the `MirContext` dependency for type
 **lib1**: Items reference each other via `Id<QualifiedName>` — an interned qualified
 name string. Display works standalone but identity is string-based.
 
-**lib2**: Items reference each other via `Entity` from the ECS. An `entity_names` map
+**lib**: Items reference each other via `Entity` from the ECS. An `entity_names` map
 on `MirModule` stores resolved names for display.
 
 **Why**: Entity identity is already established by the ECS. Using it avoids building a
@@ -45,7 +45,7 @@ alongside the entity references.
 **lib1**: `BasicBlock.terminator` is `Option<Terminator>`. Blocks can exist without a
 terminator, which is a construction convenience but allows invalid MIR.
 
-**lib2**: `BasicBlock.terminator` is `Terminator` (non-optional). The builder enforces
+**lib**: `BasicBlock.terminator` is `Terminator` (non-optional). The builder enforces
 this — you can't finalize a block without a terminator.
 
 **Why**: Every basic block must have a terminator. Making this a type-level invariant
@@ -56,7 +56,7 @@ eliminates a class of "forgot to set terminator" bugs.
 **lib1**: Statements are stored in a separate `Arena<Statement, StatementData>`. Blocks
 hold `Vec<Id<Statement>>`.
 
-**lib2**: Blocks hold `Vec<Statement>` directly. No statement arena, no statement IDs.
+**lib**: Blocks hold `Vec<Statement>` directly. No statement arena, no statement IDs.
 
 **Why**: Statements are only ever accessed through their block. There's no cross-block
 statement reference. Inline storage avoids an indirection per statement.
@@ -68,7 +68,7 @@ statement reference. Inline storage avoids an indirection per statement.
 **lib1**: Three separate categories — `BinOp` (38 variants), `UnOp` (8 variants), and
 ~25 intrinsic-specific `Rvalue` variants for pointer ops, string ops, float ops, etc.
 
-**lib2**: Single `Op` enum with all operations. Arity enforced at the `Rvalue` level
+**lib**: Single `Op` enum with all operations. Arity enforced at the `Rvalue` level
 via `Op1`/`Op2`/`Op3` variants.
 
 **Why**: The categorical split was arbitrary. `i64.add(a, b)` is the same shape as
@@ -80,7 +80,7 @@ adding a new operation means adding one `Op` variant — not touching `Rvalue`.
 **lib1**: `BinOp::AddSigned` displays as `"i64.add.signed"` regardless of actual
 operand width. Width information is lost.
 
-**lib2**: `Op::Add(IntBits::I32, Signedness::Signed)` carries the actual width.
+**lib**: `Op::Add(IntBits::I32, Signedness::Signed)` carries the actual width.
 
 **Why**: The MIR should be self-describing. An add on two `i32` values should not print
 as `i64.add.signed`. Codegen shouldn't need to infer width from operand types.
@@ -91,7 +91,7 @@ as `i64.add.signed`. Codegen shouldn't need to infer width from operand types.
 `Rvalue::Call` (with return value). Both carry `callee` and `args`. Display code
 is duplicated.
 
-**lib2**: `StatementKind::Call { dest: Option<Place>, callee, args }`. One
+**lib**: `StatementKind::Call { dest: Option<Place>, callee, args }`. One
 representation, one display path.
 
 **Why**: Calls have side effects and don't compose like pure rvalues. Having them as
@@ -104,21 +104,21 @@ and clarifies semantics.
 **lib1**: Two ways to express null pointers — `Rvalue::PtrNull { ty }` and
 `Rvalue::Use(Immediate::null_ptr(ty))`. Consumers must check both.
 
-**lib2**: `Immediate::NullPtr(ty)` only. One representation.
+**lib**: `Immediate::NullPtr(ty)` only. One representation.
 
 ### No redundant boolean operations
 
 **lib1**: `BinOp::BoolAnd`/`BoolOr` and `UnOp::BoolNot` coexist with `Rvalue::I1And`/
 `I1Or`/`I1Not`/`I1Eq`. Same operations, two representations.
 
-**lib2**: `Op::BoolAnd`/`BoolOr`/`BoolNot`/`BoolEq`. One representation.
+**lib**: `Op::BoolAnd`/`BoolOr`/`BoolNot`/`BoolEq`. One representation.
 
 ### No Value::Unreachable
 
 **lib1**: `Value::Unreachable` represents a diverging expression. Can appear anywhere
 a value is expected, forcing every consumer to handle it.
 
-**lib2**: Divergence is represented only at the terminator level (`TerminatorKind::Unreachable`).
+**lib**: Divergence is represented only at the terminator level (`TerminatorKind::Unreachable`).
 Values are always either places or immediates.
 
 **Why**: Divergence is a control flow concept, not a value concept. A diverging expression
@@ -132,7 +132,7 @@ assignment.
 **lib1**: `Place` carries `Metadata` and `inline_name` on every node. Every projection
 (`.field()`, `.deref()`) creates a new `Place` with a fresh `Metadata`.
 
-**lib2**: `Place` is just the `PlaceKind` enum. No metadata, no names.
+**lib**: `Place` is just the `PlaceKind` enum. No metadata, no names.
 
 **Why**: Place metadata on intermediate projections is never useful. Spans belong on
 the statement that uses the place, not on the place itself.
@@ -141,7 +141,7 @@ the statement that uses the place, not on the place itself.
 
 **lib1**: `Immediate` carries `Metadata` and `inline_name`.
 
-**lib2**: `Immediate` is just `ImmediateKind`. A literal `42` doesn't need a span or
+**lib**: `Immediate` is just `ImmediateKind`. A literal `42` doesn't need a span or
 debug comments.
 
 ### Statements carry optional spans, nothing else
@@ -149,7 +149,7 @@ debug comments.
 **lib1**: `Statement` carries `Metadata` (span + origin + comments) and
 `Vec<Prior<Statement>>` (transformation history).
 
-**lib2**: `Statement` carries `kind` and `Option<Span>`.
+**lib**: `Statement` carries `kind` and `Option<Span>`.
 
 **Why**: The `Prior` system tracked transformation history across passes. In the new
 architecture, passes produce new data structures rather than mutating in place, so
@@ -162,7 +162,7 @@ transformation history is implicit in the pipeline.
 **lib1**: `FunctionDef` has `receiver_convention: Option<ReceiverConvention>` and
 `Origin` metadata to distinguish methods, closures, thunks, etc.
 
-**lib2**: `FunctionDef` has `kind: FunctionKind` — an enum that explicitly states what
+**lib**: `FunctionDef` has `kind: FunctionKind` — an enum that explicitly states what
 kind of function this is and carries the relevant metadata (parent entity, env struct,
 etc.).
 
@@ -174,7 +174,7 @@ the kind. The MIR is self-describing.
 **lib1**: Monomorphization detects extension methods via string matching on function
 names (checking if the name contains the protocol name).
 
-**lib2**: `MethodBinding` has a `source: MethodSource` field that explicitly records
+**lib**: `MethodBinding` has a `source: MethodSource` field that explicitly records
 whether this is a direct implementation or a protocol extension default.
 
 **Why**: String matching on function names is fragile and wrong in edge cases.
@@ -187,7 +187,7 @@ whether this is a direct implementation or a protocol extension default.
 3. Infer from method's containing type name
 4. Fail
 
-**lib2**: `Callee::Direct` and `Callee::Witness` carry explicit `self_type` fields.
+**lib**: `Callee::Direct` and `Callee::Witness` carry explicit `self_type` fields.
 
 **Why**: Lowering always knows the self-type. Codegen shouldn't have to guess.
 
@@ -196,7 +196,7 @@ whether this is a direct implementation or a protocol extension default.
 **lib1**: Closure relationships (env struct, call function, captures) are encoded in
 `Origin` metadata — debug info that's not part of the data model.
 
-**lib2**: `ClosureInfo` is a top-level item with explicit `env_struct`, `call_function`,
+**lib**: `ClosureInfo` is a top-level item with explicit `env_struct`, `call_function`,
 `captures` (with capture modes). Visible in the MIR dump.
 
 **Why**: Capture modes matter for the deinit pass. Env struct relationships matter for
@@ -207,7 +207,7 @@ monomorphization. These are semantic, not debug info.
 **lib1**: Deinit emission walks semantic types at lowering time to discover field drop
 order. MIR carries no drop information.
 
-**lib2**: `StructDef` has `drop_fields` (ordered list of fields that need dropping) and
+**lib**: `StructDef` has `drop_fields` (ordered list of fields that need dropping) and
 `needs_drop`. Computed by the layout pass.
 
 **Why**: Codegen and the deinit pass need this information. Computing it from semantic
@@ -218,7 +218,7 @@ types at lowering time couples the MIR to the semantic model and duplicates work
 **lib1**: Codegen maintains a separate `LayoutCache` that computes struct sizes and
 field offsets.
 
-**lib2**: `StructDef` has `layout: Option<StructLayout>` with size, alignment, and
+**lib**: `StructDef` has `layout: Option<StructLayout>` with size, alignment, and
 field offsets. Computed by a dedicated layout pass.
 
 **Why**: Layout is structurally determined by the MIR. Computing it earlier lets MIR
@@ -229,7 +229,7 @@ passes reason about sizes. The MIR dump shows actual memory layout — zero abst
 **lib1**: Static initialization finds `main` by suffix-matching the last segment of
 qualified names. Injects a call into main's entry block.
 
-**lib2**: `MirModule` has `entry_point: Option<FunctionId>` and
+**lib**: `MirModule` has `entry_point: Option<FunctionId>` and
 `module_init: Option<FunctionId>`. Relationships are explicit in the data structure.
 
 **Why**: String matching for main is fragile (multiple functions named main, different
@@ -240,7 +240,7 @@ qualified paths). Explicit fields are unambiguous.
 **lib1**: Statics are initialized in symbol tree traversal order — implementation
 detail, not specified.
 
-**lib2**: `StaticDef` has `init_order: u32` — topologically sorted based on
+**lib**: `StaticDef` has `init_order: u32` — topologically sorted based on
 dependencies between static initializers.
 
 **Why**: If static A's initializer references static B, B must be initialized first.
@@ -253,7 +253,7 @@ Implicit ordering from tree traversal is fragile and non-obvious.
 **lib1**: `HashMap` throughout. Witness type bindings, method bindings, field lookups
 all use `HashMap`. MIR dump output is non-deterministic.
 
-**lib2**: `IndexMap` for all maps that appear in output.
+**lib**: `IndexMap` for all maps that appear in output.
 
 **Why**: Deterministic output enables snapshot testing, diffing MIR dumps between
 compiler versions, and reproducible builds.
@@ -265,7 +265,7 @@ compiler versions, and reproducible builds.
 **lib1**: `PassManager` holds `Vec<Box<dyn MirPass>>`, runs them in sequence, supports
 fixed-point iteration. Passes mutate a shared `MirContext`.
 
-**lib2**: Each pass is a function that takes a `MirModule` and returns a `MirModule`
+**lib**: Each pass is a function that takes a `MirModule` and returns a `MirModule`
 (or modifies specific fields). The pipeline is explicit in code, not configured at
 runtime.
 
@@ -279,7 +279,7 @@ debug, and type-check. Each intermediate is a distinct, dumpable state.
 flag proliferation, 8+ save/restore operations per closure, branch merge logic with
 15+ case branches.
 
-**lib2**: Lowering emits naive MIR with no deinit logic. A separate deinit pass analyzes
+**lib**: Lowering emits naive MIR with no deinit logic. A separate deinit pass analyzes
 liveness and inserts deinit statements.
 
 **Why**: Lowering becomes a straightforward syntax-directed translation. The deinit pass
@@ -291,7 +291,7 @@ independently testable.
 **lib1**: Thunks generated on-demand during lowering with a per-function cache. Witness
 thunks not cached. Cross-function deduplication impossible.
 
-**lib2**: Thunk pass scans the complete MIR for `ApplyPartial` references, generates
+**lib**: Thunk pass scans the complete MIR for `ApplyPartial` references, generates
 all thunks, deduplicates globally.
 
 **Why**: Global deduplication reduces code size. No cache management during lowering.

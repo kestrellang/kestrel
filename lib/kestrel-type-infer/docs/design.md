@@ -44,7 +44,7 @@ CST → AST → build_declarations (mutation)
 ## Crate Structure
 
 ```
-lib2/kestrel-type-infer/
+lib/kestrel-type-infer/
   Cargo.toml
   src/
     lib.rs        — InferBody query, crate docs

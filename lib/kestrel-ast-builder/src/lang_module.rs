@@ -11,7 +11,7 @@
 
 use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::components::*;
 

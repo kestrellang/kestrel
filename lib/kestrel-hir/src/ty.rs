@@ -8,7 +8,7 @@
 //! have their own variant (`AssocProjection`) that carries the receiver explicitly.
 
 use kestrel_hecs::Entity;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// A resolved type in HIR. All syntactic sugar has been expanded:
 /// Optional, Array, Dictionary, Result are just `Struct` with the

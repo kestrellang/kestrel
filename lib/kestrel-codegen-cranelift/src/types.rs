@@ -6,7 +6,7 @@
 
 use crate::common;
 use cranelift_codegen::ir;
-use kestrel_codegen2::TargetConfig;
+use kestrel_codegen::TargetConfig;
 use kestrel_mir::MirTy;
 
 /// Translate a MirTy to its Cranelift type representation.
@@ -63,7 +63,7 @@ pub fn translate_type(ty: &MirTy, target: &TargetConfig) -> ir::Type {
 pub fn translate_type_with_layout(
     ty: &MirTy,
     target: &TargetConfig,
-    layouts: &mut kestrel_codegen2::LayoutCache,
+    layouts: &mut kestrel_codegen::LayoutCache,
 ) -> ir::Type {
     match ty {
         MirTy::Named { .. } => {

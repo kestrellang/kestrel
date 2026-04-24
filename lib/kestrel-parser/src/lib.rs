@@ -14,8 +14,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use kestrel_parser2::{parse_module_declaration_from_source, event::EventSink};
-//! use kestrel_lexer2::lex;
+//! use kestrel_parser::{parse_module_declaration_from_source, event::EventSink};
+//! use kestrel_lexer::lex;
 //!
 //! let source = "module A.B.C";
 //! let tokens: Vec<_> = lex(source, 0)
@@ -39,10 +39,10 @@
 //! For more control, you can use the event-driven API directly:
 //!
 //! ```no_run
-//! use kestrel_parser2::{module::parse_module_declaration, event::{EventSink, TreeBuilder}};
-//! use kestrel_parser2::module::ModuleDeclaration;
-//! use kestrel_lexer2::lex;
-//! use kestrel_span2::Span;
+//! use kestrel_parser::{module::parse_module_declaration, event::{EventSink, TreeBuilder}};
+//! use kestrel_parser::module::ModuleDeclaration;
+//! use kestrel_lexer::lex;
+//! use kestrel_span::Span;
 //!
 //! let source = "module A.B.C";
 //! let file_id = 0;
@@ -84,8 +84,8 @@ pub mod type_decl;
 pub mod type_param;
 
 use event::{EventSink, TreeBuilder};
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
 
 // Re-export commonly used types
 pub use block::CodeBlock;

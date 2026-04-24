@@ -1,4 +1,4 @@
-//! Diagnostic types for the lib2 compiler pipeline.
+//! Diagnostic types for the lib compiler pipeline.
 //!
 //! All phases (lex, parse, type inference) define error types that implement
 //! `ToDiagnostic`. Queries use `throw()` to convert and accumulate them
@@ -12,8 +12,8 @@ use std::ops::Range;
 
 use codespan_reporting::files::{self, SimpleFile};
 use kestrel_hecs::{Entity, QueryContext, World};
-use kestrel_reporting2::{Diagnostic, Label, ToDiagnostic};
-use kestrel_span2::Span;
+use kestrel_reporting::{Diagnostic, Label, ToDiagnostic};
+use kestrel_span::Span;
 use kestrel_type_infer::error::InferError;
 
 use crate::components::{FilePath, SourceText};

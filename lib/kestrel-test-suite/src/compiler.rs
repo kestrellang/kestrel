@@ -1,4 +1,4 @@
-//! TestCompiler: high-level wrapper for the lib2 compiler with test assertions.
+//! TestCompiler: high-level wrapper for the lib compiler with test assertions.
 //!
 //! Wraps `Compiler` and provides both a step-by-step API (add_source, infer,
 //! analyze, mir, run) and fluent assertion methods (expect_no_errors,
@@ -7,7 +7,7 @@
 use std::cell::OnceCell;
 
 use kestrel_compiler_driver::{AnalyzeSummary, CompilerDriver, InferSummary};
-use kestrel_compiler2::{Compiler, SourceText};
+use kestrel_compiler::{Compiler, SourceText};
 use kestrel_hecs::Entity;
 use kestrel_mir::MirModule;
 

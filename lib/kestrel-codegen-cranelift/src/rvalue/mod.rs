@@ -115,7 +115,7 @@ fn dispatch_op1(
             pointer::compile_memory_op1(ctx, state, builder, op, arg)
         },
 
-        // String ops (StrPtr, StrLen only — IntToString is not emitted by lib2)
+        // String ops (StrPtr, StrLen only — IntToString is not emitted by lib)
         Op::StrPtr | Op::StrLen => string::compile_string_op1(ctx, state, builder, op, arg),
 
         // Float intrinsics

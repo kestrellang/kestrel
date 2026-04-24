@@ -1,4 +1,4 @@
-# Solver architecture (lib2 `kestrel-type-infer`)
+# Solver architecture (lib `kestrel-type-infer`)
 
 Flat union-find over `TyVar`s with a fixpoint constraint loop. Deliberately
 lean — ~10k lines total across 12 files, most of the bulk in `solver.rs`
@@ -157,19 +157,19 @@ with NO diagnostic. Always pair them.
 **Do not** use `qctx.accumulate(Diagnostic::...)` from inside the solver. That
 path is for HIR-lower / decl-level analyzers. Solver errors flow through
 `InferError` → `diagnostic.rs` match arm → user-facing diagnostic. See
-`lib2/kestrel-type-infer/AGENTS.md`.
+`lib/kestrel-type-infer/AGENTS.md`.
 
 ## Adding an `InferError` variant (do not skip any file)
 
 5 files must be touched — non-exhaustive-match errors only surface on a
 dependent crate rebuild, which is slow to discover.
 
-1. `lib2/kestrel-type-infer/src/error.rs` — variant + `span()` arm.
-2. `lib2/kestrel-type-infer/src/result.rs` — `describe_error()` arm.
-3. `lib2/kestrel-compiler/src/diagnostic.rs` — user-facing `Diagnostic` arm.
-4. `lib2/kestrel-analyze/src/body/type_check.rs` — `format_error()` arm
+1. `lib/kestrel-type-infer/src/error.rs` — variant + `span()` arm.
+2. `lib/kestrel-type-infer/src/result.rs` — `describe_error()` arm.
+3. `lib/kestrel-compiler/src/diagnostic.rs` — user-facing `Diagnostic` arm.
+4. `lib/kestrel-analyze/src/body/type_check.rs` — `format_error()` arm
    (message + label text).
-5. `lib2/kestrel-compiler-driver/src/lib.rs` — both `describe()` and
+5. `lib/kestrel-compiler-driver/src/lib.rs` — both `describe()` and
    `format_error()`.
 
 ## Adding a `Constraint` variant
@@ -179,7 +179,7 @@ dependent crate rebuild, which is slow to discover.
    `ctx.foo(...)` helper method on `InferCtx` — add that in `ctx.rs`).
 3. `solver.rs` — new `solve_foo` fn, arm in `try_solve`.
 4. Update the constraint table in `SKILL.md`.
-5. Tests: `lib2/kestrel-test-suite/testdata/type_infer/…` — add a
+5. Tests: `lib/kestrel-test-suite/testdata/type_infer/…` — add a
    `diagnostics` or `execution` case covering the new constraint behavior.
    Run via the `triage` skill, not `cargo test`.
 

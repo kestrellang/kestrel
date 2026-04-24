@@ -44,7 +44,7 @@ use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{CstNode, Name, NodeKind};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -160,7 +160,7 @@ fn check_duplicates(
         };
         if *child_kind == NodeKind::TypeAlias {
             if let Some(cst) = cx.query.get::<CstNode>(child) {
-                use kestrel_syntax_tree2::SyntaxKind;
+                use kestrel_syntax_tree::SyntaxKind;
                 if cst
                     .0
                     .children()

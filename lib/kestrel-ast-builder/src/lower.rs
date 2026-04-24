@@ -9,9 +9,9 @@ use crate::builders::helpers::is_type_kind;
 use kestrel_ast::AstType;
 use kestrel_ast::arena::Arena;
 use kestrel_ast::ast_body::*;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::utils::{find_child, get_node_span, is_trivia};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_span::Span;
+use kestrel_syntax_tree::utils::{find_child, get_node_span, is_trivia};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 /// Lower a CodeBlock CST node into an AstBody.
 pub fn lower_body(code_block: &SyntaxNode, file_id: usize) -> AstBody {
@@ -2005,10 +2005,10 @@ mod tests {
         world.set(root, Name("<root>".to_string()));
         let file = world.spawn();
 
-        let tokens: Vec<_> = kestrel_lexer2::lex(source, file.index())
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
             .filter_map(|r| r.ok())
             .collect();
-        let result = kestrel_parser2::parse_source_file_from_source(
+        let result = kestrel_parser::parse_source_file_from_source(
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
@@ -2457,10 +2457,10 @@ mod tests {
         let file = world.spawn();
 
         let source = "module M\nstruct S { var x: Int64 = 42 }";
-        let tokens: Vec<_> = kestrel_lexer2::lex(source, file.index())
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
             .filter_map(|r| r.ok())
             .collect();
-        let result = kestrel_parser2::parse_source_file_from_source(
+        let result = kestrel_parser::parse_source_file_from_source(
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
@@ -2494,10 +2494,10 @@ mod tests {
         world.set(root, Name("<root>".to_string()));
         let file = world.spawn();
 
-        let tokens: Vec<_> = kestrel_lexer2::lex(source, file.index())
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
             .filter_map(|r| r.ok())
             .collect();
-        let result = kestrel_parser2::parse_source_file_from_source(
+        let result = kestrel_parser::parse_source_file_from_source(
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
@@ -2557,10 +2557,10 @@ mod tests {
         world.set(root, Name("<root>".to_string()));
         let file = world.spawn();
 
-        let tokens: Vec<_> = kestrel_lexer2::lex(source, file.index())
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
             .filter_map(|r| r.ok())
             .collect();
-        let result = kestrel_parser2::parse_source_file_from_source(
+        let result = kestrel_parser::parse_source_file_from_source(
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );

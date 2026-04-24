@@ -92,6 +92,6 @@ Each follows the pattern: data type + parser + emitter.
 |-------|-------|
 | `chumsky` | Parser combinator framework |
 | `stacker` | Stack growth for deeply nested types |
-| `kestrel-lexer2` | `Token` enum as parser input |
-| `kestrel-syntax-tree2` | `SyntaxKind`, `SyntaxNode`, `GreenNodeBuilder` |
-| `kestrel-span2` | `Span` for source locations |
+| `kestrel-lexer` | `Token` enum as parser input |
+| `kestrel-syntax-tree` | `SyntaxKind`, `SyntaxNode`, `GreenNodeBuilder` |
+| `kestrel-span` | `Span` for source locations |

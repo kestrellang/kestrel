@@ -25,7 +25,7 @@ use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::NodeKind;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E427",

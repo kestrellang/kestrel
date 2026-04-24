@@ -3,9 +3,9 @@
 //! Converts CST type nodes into `AstType` data types (defined in kestrel-ast).
 //! The data types themselves live in `kestrel_ast::ast_type`.
 
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::utils::{extract_path_segments, find_child};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_span::Span;
+use kestrel_syntax_tree::utils::{extract_path_segments, find_child};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 pub use kestrel_ast::{AstType, PathSegment};
 

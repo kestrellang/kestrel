@@ -1,8 +1,8 @@
 //! Enum and EnumCase declaration builders.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::utils::{extract_name, find_child, get_decl_span};
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::utils::{extract_name, find_child, get_decl_span};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::helpers::*;
 use super::type_param::build_type_parameters;

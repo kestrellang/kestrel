@@ -1,4 +1,4 @@
-//! Kestrel CLI driver (lib2).
+//! Kestrel CLI driver (lib).
 //!
 //! `kestrel build` compiles source files into an executable.
 //! `kestrel dump <kind>` prints compiler-internal representations for triage.
@@ -8,10 +8,10 @@
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
-use kestrel_codegen2::TargetConfig as CodegenTargetConfig;
-use kestrel_codegen2_cranelift::{self as cranelift_backend, CodegenOptions};
+use kestrel_codegen::TargetConfig as CodegenTargetConfig;
+use kestrel_codegen_cranelift::{self as cranelift_backend, CodegenOptions};
 use kestrel_compiler_driver::CompilerDriver;
-use kestrel_compiler2::{Compiler, Severity};
+use kestrel_compiler::{Compiler, Severity};
 use kestrel_mir_lower::lower_module;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -352,7 +352,7 @@ impl Globals {
 // Small helpers
 // ============================================================================
 
-/// Honor `KESTREL_STD` env var (matches kestrel-test-suite2 convention),
+/// Honor `KESTREL_STD` env var (matches kestrel-test-suite convention),
 /// else fall back to `lang/std` relative to CWD.
 fn default_std_path() -> PathBuf {
     std::env::var_os("KESTREL_STD")

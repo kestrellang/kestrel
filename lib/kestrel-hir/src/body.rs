@@ -9,7 +9,7 @@
 use kestrel_ast::arena::{Arena, Idx};
 use kestrel_ast::{BinaryOp, CompoundAssignOp, UnaryOp};
 use kestrel_hecs::Entity;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::builtin::Builtin;
 use crate::res::{Local, LocalId};

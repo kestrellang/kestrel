@@ -5,7 +5,7 @@ description: Low-token operational guide for the `triage` CLI. Use when the user
 
 # triage
 
-Use `triage` for broad Kestrel test runs. It wraps `kestrel-test-suite2`, stores results in `.triage/triage.db`, skips tests already recorded for the current build, and is safe alongside other agents.
+Use `triage` for broad Kestrel test runs. It wraps `kestrel-test-suite`, stores results in `.triage/triage.db`, skips tests already recorded for the current build, and is safe alongside other agents.
 
 ## Default Moves
 
@@ -45,7 +45,7 @@ Reserve the full suite for pre-commit validation. Every edit-verify cycle on `--
 `.triage/config.toml` specifies the build (usually `--release`). A debug `cargo build -p kestrel-analyze` **does not affect triage** — the release binary is what runs. When iterating on analyzer changes:
 
 ```bash
-cargo test --release -p kestrel-test-suite2 --no-run
+cargo test --release -p kestrel-test-suite --no-run
 ```
 
 After the release rebuild, a new triage run picks up the change (source edits invalidate the build hash → fresh rows).

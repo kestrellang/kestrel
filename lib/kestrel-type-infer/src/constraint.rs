@@ -7,7 +7,7 @@ use kestrel_ast_builder::AstParam;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::ty::HirTy;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::ty::TyVar;
 

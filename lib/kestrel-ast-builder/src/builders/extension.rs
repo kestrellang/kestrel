@@ -1,8 +1,8 @@
 //! Extension declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree2::utils::get_decl_span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::utils::get_decl_span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::helpers::*;
 use crate::ast_type::ast_type_from_cst;

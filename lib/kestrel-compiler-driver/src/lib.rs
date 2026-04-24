@@ -11,7 +11,7 @@ use std::fmt;
 use std::panic::AssertUnwindSafe;
 
 use kestrel_ast_builder::{Body, Name, NodeKind};
-use kestrel_compiler2::{Compiler, InferWithDiagnostics, diagnostic::WorldFiles};
+use kestrel_compiler::{Compiler, InferWithDiagnostics, diagnostic::WorldFiles};
 use kestrel_hecs::Entity;
 use kestrel_type_infer::error::InferError;
 
@@ -165,7 +165,7 @@ impl<'a> CompilerDriver<'a> {
             return Ok(());
         }
         let files = WorldFiles::from_world(self.compiler.world(), self.compiler.files());
-        kestrel_reporting2::emit_all(&files, &diagnostics)
+        kestrel_reporting::emit_all(&files, &diagnostics)
     }
 }
 

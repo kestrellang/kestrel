@@ -10,7 +10,7 @@
 //! (lib/kestrel-semantic-tree-binder/src/body_resolver/expressions.rs).
 
 use kestrel_hir::body::{EscapeError, EscapeErrorKind, UnicodeEscapeErrorReason};
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 /// Decode the unquoted contents of a string literal.
 ///

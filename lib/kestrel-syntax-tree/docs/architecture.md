@@ -59,5 +59,5 @@ This enables IDE features (formatting, refactoring) and accurate error recovery.
 | Crate | Usage |
 |-------|-------|
 | `rowan` | Green/red tree infrastructure for the lossless CST |
-| `kestrel-lexer2` | `Token` enum — conversion from lexer tokens to `SyntaxKind` |
-| `kestrel-span2` | `Span` for source location tracking |
+| `kestrel-lexer` | `Token` enum — conversion from lexer tokens to `SyntaxKind` |
+| `kestrel-span` | `Span` for source location tracking |

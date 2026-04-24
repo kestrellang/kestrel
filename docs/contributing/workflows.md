@@ -1,6 +1,6 @@
 # Common Workflows
 
-Step-by-step guides for the tasks that come up most often in lib2. For architectural background see [Architecture](architecture.md); for file paths by task see [Quick Reference](quick-reference.md).
+Step-by-step guides for the tasks that come up most often in lib. For architectural background see [Architecture](architecture.md); for file paths by task see [Quick Reference](quick-reference.md).
 
 ---
 
@@ -10,20 +10,20 @@ A "feature" here means new syntax or a new semantic construct that spans several
 
 | Stage | Where the work lives |
 |-------|---------------------|
-| 1. Tokenize | `lib2/kestrel-lexer/src/lib.rs` |
-| 2. Parse | `lib2/kestrel-parser/src/` |
-| 3. Syntax node | `lib2/kestrel-syntax-tree/src/` |
-| 4. AST type | `lib2/kestrel-ast/src/` (if the feature is body-local) |
-| 5. Component / `NodeKind` | `lib2/kestrel-ast-builder/src/components.rs` (if the feature is a declaration) |
-| 6. Build from CST | `lib2/kestrel-ast-builder/src/` |
-| 7. Name resolution | `lib2/kestrel-name-res/src/` |
-| 8. HIR shape | `lib2/kestrel-hir/src/body.rs` |
-| 9. HIR lowering | `lib2/kestrel-hir-lower/src/` |
-| 10. Inference | `lib2/kestrel-type-infer/src/constraint.rs`, `solver.rs`, `generate.rs` |
-| 11. Analyzers | `lib2/kestrel-analyze/src/body|decl|compilation/` |
-| 12. MIR lowering | `lib2/kestrel-mir-lower/src/` |
-| 13. Codegen | `lib2/kestrel-codegen-cranelift/src/` |
-| 14. Tests | `lib2/kestrel-test-suite/testdata/<category>/` |
+| 1. Tokenize | `lib/kestrel-lexer/src/lib.rs` |
+| 2. Parse | `lib/kestrel-parser/src/` |
+| 3. Syntax node | `lib/kestrel-syntax-tree/src/` |
+| 4. AST type | `lib/kestrel-ast/src/` (if the feature is body-local) |
+| 5. Component / `NodeKind` | `lib/kestrel-ast-builder/src/components.rs` (if the feature is a declaration) |
+| 6. Build from CST | `lib/kestrel-ast-builder/src/` |
+| 7. Name resolution | `lib/kestrel-name-res/src/` |
+| 8. HIR shape | `lib/kestrel-hir/src/body.rs` |
+| 9. HIR lowering | `lib/kestrel-hir-lower/src/` |
+| 10. Inference | `lib/kestrel-type-infer/src/constraint.rs`, `solver.rs`, `generate.rs` |
+| 11. Analyzers | `lib/kestrel-analyze/src/body|decl|compilation/` |
+| 12. MIR lowering | `lib/kestrel-mir-lower/src/` |
+| 13. Codegen | `lib/kestrel-codegen-cranelift/src/` |
+| 14. Tests | `lib/kestrel-test-suite/testdata/<category>/` |
 
 You won't touch every stage for every feature — a purely syntactic change (e.g. new keyword for an existing construct) may only need 1–3. A new declaration form touches 1–12.
 
@@ -56,7 +56,7 @@ All user-visible diagnostics are emitted by analyzers or by the inference solver
 
 ### From an analyzer
 
-1. Pick an unused diagnostic id (search `static DESCRIPTORS` across `lib2/kestrel-analyze/src/` to see what's taken).
+1. Pick an unused diagnostic id (search `static DESCRIPTORS` across `lib/kestrel-analyze/src/` to see what's taken).
 2. In the analyzer file, extend the `DESCRIPTORS` slice:
    ```rust
    DiagnosticDescriptor {
@@ -72,7 +72,7 @@ All user-visible diagnostics are emitted by analyzers or by the inference solver
 
 ### From the type-inference solver
 
-Inference diagnostics go through `InferError`. Adding a variant requires changes in **five** files — `lib2/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
+Inference diagnostics go through `InferError`. Adding a variant requires changes in **five** files — `lib/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
 
 | File | Change |
 |------|--------|
@@ -95,16 +95,16 @@ To report the error from the solver, call `ctx.report_error(InferError::YourVari
    - **`DeclCheck`** — per declaration entity. You filter by `NodeKind`.
    - **`CompilationCheck`** — once over the whole compilation. Use for cycle detection or cross-entity conflicts.
 2. Create the file under the matching subdirectory:
-   - `lib2/kestrel-analyze/src/body/<name>.rs`
-   - `lib2/kestrel-analyze/src/decl/<name>.rs`
-   - `lib2/kestrel-analyze/src/compilation/<name>.rs`
+   - `lib/kestrel-analyze/src/body/<name>.rs`
+   - `lib/kestrel-analyze/src/decl/<name>.rs`
+   - `lib/kestrel-analyze/src/compilation/<name>.rs`
 3. Follow the analyzer skeleton in [Patterns](patterns.md#analyzer-shape):
    - `static DESCRIPTORS` with the diagnostic ids.
    - ZST struct.
    - `Describe` impl (id + descriptors).
    - The relevant check trait impl.
 4. Export it from the parent `mod.rs`.
-5. Register it in `default_analyzers()` in `lib2/kestrel-analyze/src/lib.rs`, in the correct section. Analyzers run in registration order — place yours after any analyzer it depends on.
+5. Register it in `default_analyzers()` in `lib/kestrel-analyze/src/lib.rs`, in the correct section. Analyzers run in registration order — place yours after any analyzer it depends on.
 6. Suppress on upstream errors: if `cx.typed.errors.is_empty()` is false (for body checks), return `vec![]`.
 7. Add diagnostic tests under `testdata/validation/<your_rule>/`.
 
@@ -115,7 +115,7 @@ To report the error from the solver, call `ctx.report_error(InferError::YourVari
 The standard library is Kestrel source in `lang/std/`, one module per directory.
 
 1. **Implement the method** in the appropriate `.ks` file. Match the patterns in the surrounding code — visibility, mutating annotations, COW conventions.
-2. **Add an execution test** under `lib2/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks`:
+2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks`:
    ```kestrel
    // test: runs
    // stdlib: true
@@ -136,11 +136,11 @@ The standard library is Kestrel source in `lang/std/`, one module per directory.
 
 ## Adding a `Constraint` variant
 
-Type-inference constraints live in `lib2/kestrel-type-infer/src/constraint.rs`.
+Type-inference constraints live in `lib/kestrel-type-infer/src/constraint.rs`.
 
 1. Add the variant with the minimum data it needs, and a doc comment explaining the rule ("`a = b` — structural type equality", "`ty : Protocol` — protocol conformance", etc.).
 2. Decide whether the variant is **eager** (solves on first visit) or **deferred** (requires concrete input, re-checked each solver round). Document this in the variant's doc comment.
-3. Add a `try_solve_*` function in `lib2/kestrel-type-infer/src/solver.rs` and wire it into the solver loop.
+3. Add a `try_solve_*` function in `lib/kestrel-type-infer/src/solver.rs` and wire it into the solver loop.
 4. Generate the constraint where the language construct is lowered — typically in `generate.rs`.
 5. Add focused tests under `testdata/inference/`.
 

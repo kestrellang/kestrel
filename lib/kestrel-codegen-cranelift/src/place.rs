@@ -12,7 +12,7 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen2::{LayoutCache, NamedKind, substitute_type};
+use kestrel_codegen::{LayoutCache, NamedKind, substitute_type};
 use kestrel_hecs::Entity;
 use kestrel_mir::{MirTy, Place};
 use std::collections::HashMap;
@@ -150,7 +150,7 @@ fn read_global(
         .find(|s| s.entity == *entity)
         .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
 
-    let mut mangler = kestrel_codegen2::Mangler::new(ctx.module);
+    let mut mangler = kestrel_codegen::Mangler::new(ctx.module);
     mangler.push_prefix();
     mangler.mangle_name_path(&static_def.name);
     let mangled = mangler.finish();
@@ -226,7 +226,7 @@ fn read_index(
     match &parent_ty {
         MirTy::Tuple(elems) => {
             let mut offset = 0u64;
-            let mut layout = kestrel_codegen2::Layout::zero(1);
+            let mut layout = kestrel_codegen::Layout::zero(1);
             for (i, elem) in elems.iter().enumerate() {
                 let elem_layout = ctx.layouts.layout_of(elem);
                 let (field_offset, new_layout) = layout.append(elem_layout);
@@ -521,7 +521,7 @@ pub fn compile_place_addr(
             match &parent_ty {
                 MirTy::Tuple(elems) => {
                     let mut offset = 0u64;
-                    let mut layout = kestrel_codegen2::Layout::zero(1);
+                    let mut layout = kestrel_codegen::Layout::zero(1);
                     for (i, elem) in elems.iter().enumerate() {
                         let elem_layout = ctx.layouts.layout_of(elem);
                         let (field_offset, new_layout) = layout.append(elem_layout);
@@ -609,7 +609,7 @@ pub fn compile_place_addr(
                 .iter()
                 .find(|s| s.entity == *entity)
                 .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
-            let mut mangler = kestrel_codegen2::Mangler::new(ctx.module);
+            let mut mangler = kestrel_codegen::Mangler::new(ctx.module);
             mangler.push_prefix();
             mangler.mangle_name_path(&static_def.name);
             let mangled = mangler.finish();

@@ -11,7 +11,7 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen2::mangle_function_with_self;
+use kestrel_codegen::mangle_function_with_self;
 use kestrel_mir::{FloatBits, FunctionKind, Immediate, ImmediateKind, IntBits, MirTy};
 
 /// Compile an immediate value to a Cranelift value.

@@ -13,7 +13,7 @@ use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen2::{NamedKind, substitute_type_with_self};
+use kestrel_codegen::{NamedKind, substitute_type_with_self};
 use kestrel_mir::{MirTy, SwitchCase, Terminator, TerminatorKind, Value};
 
 /// Compile a block terminator.

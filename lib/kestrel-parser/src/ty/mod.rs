@@ -1,10 +1,10 @@
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 /// Represents a type expression
 ///
@@ -138,7 +138,7 @@ fn skip_trivia<'tokens>()
 /// Skips leading whitespace
 fn never_type_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
-    skip_trivia().ignore_then(just(Token::Bang).map_with(|_, e| to_kestrel_span2(e.span())))
+    skip_trivia().ignore_then(just(Token::Bang).map_with(|_, e| to_kestrel_span(e.span())))
 }
 
 /// Internal parser for path segments: Ident or Ident.Ident.Ident
@@ -147,7 +147,7 @@ fn path_segments_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
         select! {
-            Token::Identifier = e => to_kestrel_span2(e.span()),
+            Token::Identifier = e => to_kestrel_span(e.span()),
         }
         .separated_by(just(Token::Dot))
         .at_least(1)
@@ -165,7 +165,7 @@ pub(crate) fn ty_parser<'tokens>()
 
         // Inferred type: _
         let inferred = skip_trivia()
-            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
             .map(TyVariant::Inferred);
 
         // Unit type, grouping (T), tuple (T, U) or (T,), or function type
@@ -177,12 +177,12 @@ pub(crate) fn ty_parser<'tokens>()
         // - (...) -> T -> Function
         let paren_types = {
             skip_trivia()
-                .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span2(e.span())))
+                .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(
                     // Empty parens case
                     skip_trivia()
                         .ignore_then(
-                            just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                            just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
                         )
                         .map(|rparen| (Vec::new(), false, rparen))
                         .or(
@@ -193,7 +193,7 @@ pub(crate) fn ty_parser<'tokens>()
                                     skip_trivia()
                                         .ignore_then(
                                             just(Token::Comma)
-                                                .map_with(|_, e| to_kestrel_span2(e.span())),
+                                                .map_with(|_, e| to_kestrel_span(e.span())),
                                         )
                                         .then(
                                             // After comma: more types separated by comma
@@ -208,7 +208,7 @@ pub(crate) fn ty_parser<'tokens>()
                                         .or(empty().to((false, Vec::new()))),
                                 )
                                 .then(skip_trivia().ignore_then(
-                                    just(Token::RParen).map_with(|_, e| to_kestrel_span2(e.span())),
+                                    just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
                                 ))
                                 .map(|((first, (has_comma, more)), rparen)| {
                                     let mut types = vec![first];
@@ -221,7 +221,7 @@ pub(crate) fn ty_parser<'tokens>()
                     // Optional arrow and return type for function types
                     skip_trivia()
                         .ignore_then(just(Token::Arrow))
-                        .map_with(|_, e| to_kestrel_span2(e.span()))
+                        .map_with(|_, e| to_kestrel_span(e.span()))
                         .then(ty.clone())
                         .or_not(),
                 )
@@ -262,18 +262,18 @@ pub(crate) fn ty_parser<'tokens>()
 
         // Array type [T] or Dictionary type [K: V]
         let array_or_dict = skip_trivia()
-            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span2(e.span())))
+            .ignore_then(just(Token::LBracket).map_with(|_, e| to_kestrel_span(e.span())))
             .then(ty.clone())
             .then(
                 // Check for colon - if present, this is a dictionary [K: V]
                 skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span2(e.span())))
+                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(ty.clone())
                     .or_not(),
             )
             .then(
                 skip_trivia()
-                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span2(e.span()))),
+                    .ignore_then(just(Token::RBracket).map_with(|_, e| to_kestrel_span(e.span()))),
             )
             .map(
                 |(((lbracket, first_ty), maybe_colon_and_value), rbracket)| {
@@ -320,9 +320,9 @@ pub(crate) fn ty_parser<'tokens>()
         let type_operator = skip_trivia()
             .ignore_then(
                 just(Token::Question)
-                    .map_with(|_, e| TypeOperator::Optional(to_kestrel_span2(e.span())))
+                    .map_with(|_, e| TypeOperator::Optional(to_kestrel_span(e.span())))
                     .or(just(Token::Throws)
-                        .map_with(|_, e| to_kestrel_span2(e.span()))
+                        .map_with(|_, e| to_kestrel_span(e.span()))
                         .then(ty.clone())
                         .map(|(throws_span, error_ty)| {
                             TypeOperator::Throws(throws_span, error_ty)
@@ -658,7 +658,7 @@ pub(crate) fn emit_result_type(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     fn parse_ty_from_source(source: &str) -> TyExpression {
         let tokens: Vec<_> = lex(source, 0)

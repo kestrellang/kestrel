@@ -10,7 +10,7 @@ Source Text → Lex → Parse → AST Build → Name Res → HIR Lower → Type 
    spans originate here and propagate through every phase
 ```
 
-This is a foundational crate — all other lib2 crates depend on it.
+This is a foundational crate — all other lib crates depend on it.
 
 ## Core Types
 

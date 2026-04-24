@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::res::LocalId;
-use kestrel_span2::Span;
+use kestrel_span::Span;
 
 use crate::constraint::{CallArg, Constraint};
 use crate::error::InferError;

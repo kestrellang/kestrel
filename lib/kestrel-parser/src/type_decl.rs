@@ -11,8 +11,8 @@
 //! reducing stack usage for deeply nested type declarations.
 
 use chumsky::prelude::*;
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
@@ -23,7 +23,7 @@ use crate::common::{
     module_declaration_parser_internal, subscript_declaration_parser_internal, token,
     visibility_parser_internal,
 };
-use crate::input::{ParserExtra, ParserInput, to_kestrel_span2};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::ty::ty_parser;
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
@@ -112,7 +112,7 @@ fn skip_trivia<'tokens>()
 fn indirect_modifier_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
-        .ignore_then(just(Token::Indirect).map_with(|_, e| Some(to_kestrel_span2(e.span()))))
+        .ignore_then(just(Token::Indirect).map_with(|_, e| Some(to_kestrel_span(e.span()))))
         .or(empty().to(None))
 }
 

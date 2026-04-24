@@ -3,9 +3,9 @@
 //! This module is the single source of truth for function declaration parsing.
 //! Functions support generics with type parameters and where clauses.
 
-use kestrel_lexer2::Token;
-use kestrel_span2::Span;
-use kestrel_syntax_tree2::{SyntaxKind, SyntaxNode};
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_function_declaration, function_declaration_parser_internal};
 use crate::event::{EventSink, TreeBuilder};
@@ -135,7 +135,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_lexer2::lex;
+    use kestrel_lexer::lex;
 
     #[test]
     fn test_function_declaration_basic() {

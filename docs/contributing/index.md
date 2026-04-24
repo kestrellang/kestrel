@@ -1,8 +1,8 @@
 # Contributing to Kestrel
 
-Welcome. This guide orients new contributors to the Kestrel compiler — the active codebase lives in `lib2/` and is organized as a hierarchical entity-component system (hECS) with memoized queries.
+Welcome. This guide orients new contributors to the Kestrel compiler — the active codebase lives in `lib/` and is organized as a hierarchical entity-component system (hECS) with memoized queries.
 
-> The older `lib/` tree is legacy. All new work targets `lib2/`.
+> The older `lib/` tree is legacy. All new work targets `lib/`.
 
 ## Where to start
 
@@ -20,7 +20,7 @@ Welcome. This guide orients new contributors to the Kestrel compiler — the act
 
 ```
 kestrel/
-├── lib2/                               # Active compiler — work here
+├── lib/                               # Active compiler — work here
 │   ├── kestrel-lexer/                  # Tokenization (logos)
 │   ├── kestrel-parser/                 # Event-driven parser
 │   ├── kestrel-syntax-tree/            # Lossless CST (rowan)
@@ -57,7 +57,7 @@ kestrel/
     └── …                               #   — inference, pipeline routing, etc.
 ```
 
-Each lib2 crate has its own `docs/` folder with an `architecture.md` entry point; some have `AGENTS.md` files with invariants and "watch-out-for" notes. When you need details deeper than this guide offers, those are the next stop.
+Each lib crate has its own `docs/` folder with an `architecture.md` entry point; some have `AGENTS.md` files with invariants and "watch-out-for" notes. When you need details deeper than this guide offers, those are the next stop.
 
 ## Getting started
 
@@ -82,7 +82,7 @@ triage <pattern>
 triage --failures
 ```
 
-`cargo test -p <crate>` is fine for individual crates' unit tests (e.g. the mangler's tests), but not for `kestrel-test-suite`. See `lib2/kestrel-test-suite/AGENTS.md` for details on the test file format and annotations.
+`cargo test -p <crate>` is fine for individual crates' unit tests (e.g. the mangler's tests), but not for `kestrel-test-suite`. See `lib/kestrel-test-suite/AGENTS.md` for details on the test file format and annotations.
 
 ## Debugging
 
@@ -97,5 +97,5 @@ This enables `debug_trace!` output from the compiler (member resolution, method 
 ## Asking for help
 
 - `.claude/skills/` holds deeper skill documents for specialized topics (hECS internals, the inference pipeline, debugging playbook, etc.).
-- Each lib2 crate's `AGENTS.md` and `docs/` folder is the first stop for that crate's nuances.
+- Each lib crate's `AGENTS.md` and `docs/` folder is the first stop for that crate's nuances.
 - File an issue before starting non-trivial work (see [Git](git.md)).

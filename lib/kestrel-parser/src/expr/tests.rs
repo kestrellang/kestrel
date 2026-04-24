@@ -1,7 +1,7 @@
 use super::*;
 use crate::event::{EventSink, TreeBuilder};
-use kestrel_lexer2::lex;
-use kestrel_span2::Span;
+use kestrel_lexer::lex;
+use kestrel_span::Span;
 
 fn parse_expr_from_source(source: &str) -> Expression {
     let tokens: Vec<_> = lex(source, 0)
@@ -577,12 +577,12 @@ fn test_while_let_basic() {
     let expr_while = expr
         .syntax
         .children()
-        .find(|c| c.kind() == kestrel_syntax_tree2::SyntaxKind::ExprWhile);
+        .find(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::ExprWhile);
     let has_while_let_condition = expr_while
         .as_ref()
         .map(|w| {
             w.children()
-                .any(|c| c.kind() == kestrel_syntax_tree2::SyntaxKind::WhileLetCondition)
+                .any(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::WhileLetCondition)
         })
         .unwrap_or(false);
     assert!(
@@ -600,12 +600,12 @@ fn test_while_let_enum_pattern() {
     let expr_while = expr
         .syntax
         .children()
-        .find(|c| c.kind() == kestrel_syntax_tree2::SyntaxKind::ExprWhile);
+        .find(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::ExprWhile);
     let has_while_let_condition = expr_while
         .as_ref()
         .map(|w| {
             w.children()
-                .any(|c| c.kind() == kestrel_syntax_tree2::SyntaxKind::WhileLetCondition)
+                .any(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::WhileLetCondition)
         })
         .unwrap_or(false);
     assert!(
@@ -624,12 +624,12 @@ fn test_while_let_with_label() {
     let expr_while = expr
         .syntax
         .children()
-        .find(|c| c.kind() == kestrel_syntax_tree2::SyntaxKind::ExprWhile);
+        .find(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::ExprWhile);
     let has_while_let_condition = expr_while
         .as_ref()
         .map(|w| {
             w.children()
-                .any(|c| c.kind() == kestrel_syntax_tree2::SyntaxKind::WhileLetCondition)
+                .any(|c| c.kind() == kestrel_syntax_tree::SyntaxKind::WhileLetCondition)
         })
         .unwrap_or(false);
     assert!(
