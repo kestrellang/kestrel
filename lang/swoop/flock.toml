@@ -7,9 +7,9 @@ license = "MIT"
 repository = "https://github.com/jkpdino/kestrel"
 
 [dependencies]
-"kestrel/http" = "0.1.0"
-"kestrel/quill" = "0.1.0"
-"kestrel/quill-json" = "0.1.0"
+http = { path = "../http" }
+quill = { path = "../quill" }
+quill-json = { path = "../quill-json" }
 
 [build]
 link = ["ssl", "crypto"]

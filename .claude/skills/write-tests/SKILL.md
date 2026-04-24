@@ -9,8 +9,6 @@ lib tests are **`.ks` files under `lib/kestrel-test-suite/testdata/`** — not R
 There is no `Test::new(...)` builder anymore; each file is a full Kestrel program with
 a header that tells the harness what to check.
 
-> **lib only.** Do not write tests against `lib/kestrel-test-suite/` (lib1). lib1 is dead.
-
 ## File format
 
 Every test file begins with:

@@ -1463,29 +1463,120 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Resolve the type of a field on a struct type.
     /// Resolve the type of a field on a struct type, substituting type params.
-    fn resolve_field_type(&self, struct_ty: &MirTy, field_name: &str) -> MirTy {
-        if let MirTy::Named { entity, type_args } = struct_ty {
-            for s in &self.ctx.module.structs {
-                if s.entity == *entity {
-                    for field in &s.fields {
-                        if field.name == field_name {
-                            if s.type_params.is_empty() || type_args.is_empty() {
-                                return field.ty.clone();
-                            }
-                            // Build subst and apply manually
-                            let subst: std::collections::HashMap<Entity, MirTy> = s
-                                .type_params
-                                .iter()
-                                .zip(type_args.iter())
-                                .map(|(tp, arg)| (tp.entity, arg.clone()))
-                                .collect();
-                            return self.substitute_mir_type(&field.ty, &subst);
-                        }
-                    }
-                }
+    fn resolve_field_type(&mut self, struct_ty: &MirTy, field_name: &str) -> MirTy {
+        let MirTy::Named { entity, type_args } = struct_ty else {
+            return MirTy::unit();
+        };
+
+        // Look up field via an already-lowered StructDef first.
+        for s in &self.ctx.module.structs {
+            if s.entity != *entity {
+                continue;
             }
+            for field in &s.fields {
+                if field.name != field_name {
+                    continue;
+                }
+                if s.type_params.is_empty() || type_args.is_empty() {
+                    return field.ty.clone();
+                }
+                let subst: std::collections::HashMap<Entity, MirTy> = s
+                    .type_params
+                    .iter()
+                    .zip(type_args.iter())
+                    .map(|(tp, arg)| (tp.entity, arg.clone()))
+                    .collect();
+                return self.substitute_mir_type(&field.ty, &subst);
+            }
+            // Struct is known but field isn't — shouldn't happen for
+            // well-typed programs; fall through to unit as a safe default.
+            return MirTy::unit();
+        }
+
+        // Struct hasn't been lowered yet (cross-module body references an
+        // item later in the walk order). Resolve the field's type annotation
+        // directly from the ECS so cross-module field access doesn't
+        // silently degrade to unit.
+        self.resolve_field_type_via_ecs(*entity, type_args, field_name)
+    }
+
+    fn resolve_field_type_via_ecs(
+        &mut self,
+        struct_entity: Entity,
+        type_args: &[MirTy],
+        field_name: &str,
+    ) -> MirTy {
+        use kestrel_ast_builder::{Callable, Name, NodeKind, Static, TypeParams};
+
+        let children: Vec<Entity> = self.ctx.world.children_of(struct_entity).to_vec();
+        for child in children {
+            if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Field) {
+                continue;
+            }
+            // Skip computed properties and statics — matches struct_lower.
+            if self.ctx.world.get::<Callable>(child).is_some()
+                || self.ctx.world.get::<Static>(child).is_some()
+            {
+                continue;
+            }
+            let name_matches = self
+                .ctx
+                .world
+                .get::<Name>(child)
+                .map_or(false, |n| n.0 == field_name);
+            if !name_matches {
+                continue;
+            }
+            let field_ty = crate::ty::resolve_type_annotation(self.ctx, child);
+            if type_args.is_empty() {
+                return field_ty;
+            }
+            // Apply the receiver's concrete type arguments to the field type.
+            let Some(type_params) = self.ctx.world.get::<TypeParams>(struct_entity) else {
+                return field_ty;
+            };
+            let subst: std::collections::HashMap<Entity, MirTy> = type_params
+                .0
+                .iter()
+                .zip(type_args.iter())
+                .map(|(&tp_entity, arg)| (tp_entity, arg.clone()))
+                .collect();
+            return self.substitute_mir_type(&field_ty, &subst);
         }
         MirTy::unit()
+    }
+
+    /// Ordered stored-field names of a struct entity.
+    ///
+    /// Uses the already-lowered `StructDef` when available; otherwise walks ECS
+    /// children directly. Matches the "skip computed/static" rule from
+    /// `struct_lower` so the index line up with the memberwise-init arg order.
+    fn ordered_field_names(&self, struct_entity: Entity) -> Vec<String> {
+        if let Some(s) = self
+            .ctx
+            .module
+            .structs
+            .iter()
+            .find(|s| s.entity == struct_entity)
+        {
+            return s.fields.iter().map(|f| f.name.clone()).collect();
+        }
+        use kestrel_ast_builder::{Callable, Name, NodeKind, Static};
+        let mut names = Vec::new();
+        for &child in self.ctx.world.children_of(struct_entity) {
+            if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Field) {
+                continue;
+            }
+            if self.ctx.world.get::<Callable>(child).is_some()
+                || self.ctx.world.get::<Static>(child).is_some()
+            {
+                continue;
+            }
+            if let Some(n) = self.ctx.world.get::<Name>(child) {
+                names.push(n.0.clone());
+            }
+        }
+        names
     }
 
     /// Simple recursive type substitution (replaces TypeParam entities in the subst map).
@@ -1652,31 +1743,49 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         expr_id: HirExprId,
         callee_expr: HirExprId,
     ) -> Vec<MirTy> {
-        // Find the MIR function def
-        let func_def = self
+        // Resolve the callee's parent entity. Prefer the already-lowered
+        // FunctionDef; fall back to ECS when the callee's module hasn't been
+        // MIR-lowered yet (sibling ordering). Without the fallback, static
+        // methods on generic sibling-module types silently drop the struct's
+        // type args and monomorphize with empty args.
+        let parent = if let Some(func_def) = self
             .ctx
             .module
             .functions
             .iter()
-            .find(|f| f.entity == func_entity);
-        let Some(func_def) = func_def else {
-            return Vec::new();
-        };
-
-        // Must have inherited type params (from parent struct)
-        if func_def.type_params.is_empty() {
-            return Vec::new();
-        }
-
-        // Get the parent entity from the function kind
-        let parent_entity = match &func_def.kind {
-            FunctionKind::StaticMethod { parent }
-            | FunctionKind::Method { parent, .. }
-            | FunctionKind::Initializer { parent } => Some(*parent),
-            _ => None,
-        };
-        let Some(parent) = parent_entity else {
-            return Vec::new();
+            .find(|f| f.entity == func_entity)
+        {
+            if func_def.type_params.is_empty() {
+                return Vec::new();
+            }
+            match &func_def.kind {
+                FunctionKind::StaticMethod { parent }
+                | FunctionKind::Method { parent, .. }
+                | FunctionKind::Initializer { parent } => *parent,
+                _ => return Vec::new(),
+            }
+        } else {
+            // ECS fallback: for NodeKind::Function/Initializer whose parent is
+            // a Struct/Enum/Extension, return that parent (resolving extensions
+            // to their target).
+            let Some(parent) = self.ctx.world.parent_of(func_entity) else {
+                return Vec::new();
+            };
+            use kestrel_ast_builder::NodeKind;
+            match self.ctx.world.get::<NodeKind>(parent) {
+                Some(NodeKind::Struct | NodeKind::Enum) => parent,
+                Some(NodeKind::Extension) => {
+                    use kestrel_name_res::extensions::ExtensionTargetEntity;
+                    let Some(target) = self.ctx.query.query(ExtensionTargetEntity {
+                        extension: parent,
+                        root: self.ctx.root,
+                    }) else {
+                        return Vec::new();
+                    };
+                    target
+                },
+                _ => return Vec::new(),
+            }
         };
 
         // Check if parent is a generic struct/enum
@@ -1841,24 +1950,47 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         call_args: &mut [CallArg],
         callee_entity: kestrel_hecs::Entity,
     ) {
-        let Some(callee) = self
+        // Prefer the already-lowered FunctionDef; fall back to the AST
+        // `Callable` when the callee's module hasn't been MIR-lowered yet
+        // (sibling-module ordering). Without the fallback, `mut`/`consuming`
+        // params on cross-module callees would silently pass by value.
+        if let Some(callee) = self
             .ctx
             .module
             .functions
             .iter()
             .find(|f| f.entity == callee_entity)
-        else {
+        {
+            for (arg, param) in call_args.iter_mut().zip(callee.params.iter()) {
+                match param.mode {
+                    kestrel_mir::ParamMode::InOut => arg.mode = kestrel_mir::PassingMode::MutRef,
+                    kestrel_mir::ParamMode::Consuming => arg.mode = kestrel_mir::PassingMode::Move,
+                    kestrel_mir::ParamMode::In => {},
+                }
+            }
+            return;
+        }
+        // ECS fallback: the callee hasn't been MIR-lowered yet (forward
+        // reference within the same module OR sibling module not yet walked).
+        // AST `Callable.params` does NOT include self; MIR pushes self at
+        // `params[0]` only when `callable.receiver.is_some()`. Call sites that
+        // prepend a receiver into `call_args[0]` do so whenever the callee is
+        // method-shaped, so the skip count lines up with `callable.receiver`.
+        // Inits go through `emit_call_maybe_init` and bypass this path.
+        use kestrel_ast_builder::Callable;
+        let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return;
         };
-        for (arg, param) in call_args.iter_mut().zip(callee.params.iter()) {
-            match param.mode {
-                kestrel_mir::ParamMode::InOut => {
-                    arg.mode = kestrel_mir::PassingMode::MutRef;
-                },
-                kestrel_mir::ParamMode::Consuming => {
-                    arg.mode = kestrel_mir::PassingMode::Move;
-                },
-                kestrel_mir::ParamMode::In => {},
+        let skip = if callable.receiver.is_some() { 1 } else { 0 };
+        for (arg, param) in call_args
+            .iter_mut()
+            .skip(skip)
+            .zip(callable.params.iter())
+        {
+            if param.is_consuming {
+                arg.mode = kestrel_mir::PassingMode::Move;
+            } else if param.is_mut {
+                arg.mode = kestrel_mir::PassingMode::MutRef;
             }
         }
     }
@@ -2384,15 +2516,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         } else if let Callee::Direct { func, .. } = &callee {
             // Check if the callee is a struct entity (memberwise init with no explicit init)
             if self.is_struct_entity(*func) {
-                // Memberwise construct: use actual field names from the struct
-                let struct_def = self.ctx.module.structs.iter().find(|s| s.entity == *func);
+                // Memberwise construct: use actual field names from the struct.
+                // Prefer the already-lowered StructDef; fall back to ECS when the
+                // struct lives in a module that hasn't been MIR-lowered yet
+                // (sibling-module ordering; same class of issue as
+                // `resolve_field_type_via_ecs`). Without the fallback, field
+                // names collapse to `_0, _1, …` and codegen rejects them.
+                let field_names = self.ordered_field_names(*func);
                 let fields: Vec<(String, Value)> = call_args
                     .into_iter()
                     .enumerate()
                     .map(|(i, arg)| {
-                        let name = struct_def
-                            .and_then(|s| s.fields.get(i))
-                            .map(|f| f.name.clone())
+                        let name = field_names
+                            .get(i)
+                            .cloned()
                             .unwrap_or_else(|| format!("_{i}"));
                         (name, arg.value)
                     })

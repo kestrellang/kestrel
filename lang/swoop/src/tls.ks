@@ -82,7 +82,7 @@ public struct TlsStream: Read, Write {
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_read(
             self.ssl,
-            lang.cast_ptr[lang.i8](buf.pointer.raw),
+            lang.cast_ptr[_, lang.i8](buf.pointer.raw),
             count32.raw
         ));
         if n < 0 {
@@ -95,7 +95,7 @@ public struct TlsStream: Read, Write {
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(
             self.ssl,
-            lang.cast_ptr[lang.i8](buf.pointer.raw),
+            lang.cast_ptr[_, lang.i8](buf.pointer.raw),
             count32.raw
         ));
         if n < 0 {
@@ -171,7 +171,7 @@ extend TlsStream {
             ssl,
             SSL_CTRL_SET_TLSEXT_HOSTNAME().raw,
             0,
-            lang.cast_ptr[lang.i8](hostBuf.asPointer().raw)
+            lang.cast_ptr[_, lang.i8](hostBuf.asPointer().raw)
         );
 
         // TLS handshake

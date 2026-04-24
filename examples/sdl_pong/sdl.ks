@@ -188,7 +188,7 @@ public struct SDLApp : not Copyable {
     }
 
     public mutating func pollEvent() -> Event? {
-        let eventPtr = lang.cast_ptr[lang.i8](self.eventBuffer.asPointer().asRaw().raw);
+        let eventPtr = lang.cast_ptr[_, lang.i8](self.eventBuffer.asPointer().asRaw().raw);
 
         if sdlPollEvent(eventPtr) == 0 {
             return null;

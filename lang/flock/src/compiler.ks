@@ -1,6 +1,8 @@
 // Compiler invocation
 //
-// Builds a kestrel command and spawns it via system().
+// The kestrel binary only exposes `build` and `dump` subcommands, so flock
+// synthesizes `run` (build to a temp file + exec) and `check` (dump
+// diagnostics) on top of those.
 
 module flock.compiler
 
@@ -14,7 +16,7 @@ import flock.error.(FlockError)
 ///
 /// mode: "build", "run", or "check"
 /// sources: all .ks files to compile (in dependency order)
-/// output: output binary name (only used with "build")
+/// output: output binary name (only used with "build"; ignored for run/check)
 /// linkLibs: libraries and object files to link (-l flags)
 /// linkPaths: library search paths (-L flags)
 /// frameworks: macOS frameworks (--framework flags)
@@ -26,57 +28,49 @@ public func invokeCompiler(
     linkPaths linkPaths: Array[String],
     frameworks frameworks: Array[String]
 ) -> Result[(), FlockError] {
-    // Use KESTREL env var if set, otherwise fall back to "kestrel" in PATH
-    var compiler = "kestrel";
-    match getenv("KESTREL") {
-        .Some(path) => compiler = path,
-        .None => {}
+    if mode.equals("run") {
+        return invokeRun(sources: sources, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks)
     }
+    if mode.equals("check") {
+        return invokeCheck(sources: sources)
+    }
+    invokeBuild(sources: sources, output: output, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks)
+}
 
+// ----------------------------------------------------------------------------
+// build: `kestrel build ... -o <out>`
+// ----------------------------------------------------------------------------
+
+func invokeBuild(
+    sources sources: Array[String],
+    output output: Optional[String],
+    linkLibs linkLibs: Array[String],
+    linkPaths linkPaths: Array[String],
+    frameworks frameworks: Array[String]
+) -> Result[(), FlockError] {
     var cmd = String();
-    cmd.append(compiler);
-    cmd.append(" ");
-    cmd.append(mode);
+    cmd.append(compilerPath());
+    cmd.append(" build");
+    cmd.append(stdFlag());
 
-    // Pass --std if KESTREL_STD is set
-    match getenv("KESTREL_STD") {
-        .Some(stdPath) => {
-            cmd.append(" --std ");
-            cmd.append(quoteArg(stdPath))
-        },
-        .None => {}
-    }
-
-    // Add all source files
     for source in sources {
         cmd.append(" ");
         cmd.append(quoteArg(source))
     }
 
-    // Add output flag for build mode
     match output {
-        .Some(out) => {
-            if mode.equals("build") {
-                cmd.append(" -o ");
-                cmd.append(quoteArg(out))
-            }
-        },
+        .Some(out) => { cmd.append(" -o "); cmd.append(quoteArg(out)) },
         .None => {}
     }
 
-    // Add link libraries (-l flags)
     for lib in linkLibs {
         cmd.append(" -l ");
         cmd.append(quoteArg(lib))
     }
-
-    // Add library search paths (-L flags)
     for path in linkPaths {
         cmd.append(" -L ");
         cmd.append(quoteArg(path))
     }
-
-    // Add frameworks (--framework flags)
     for framework in frameworks {
         cmd.append(" --framework ");
         cmd.append(quoteArg(framework))
@@ -86,8 +80,92 @@ public func invokeCompiler(
     if exitCode != 0 {
         return .Err(FlockError.CompilerFailed(exitCode))
     }
-
     .Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// run: build to a temp path, exec it, clean up
+// ----------------------------------------------------------------------------
+
+func invokeRun(
+    sources sources: Array[String],
+    linkLibs linkLibs: Array[String],
+    linkPaths linkPaths: Array[String],
+    frameworks frameworks: Array[String]
+) -> Result[(), FlockError] {
+    // `mktemp -t flock-run` works on both macOS and Linux.
+    let tempPath = captureOutput("mktemp -t flock-run");
+    if tempPath.byteCount == 0 {
+        return .Err(FlockError.IoError("failed to create temp file for run"))
+    }
+
+    match invokeBuild(sources: sources, output: .Some(tempPath), linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks) {
+        .Err(e) => {
+            cleanupTemp(path: tempPath);
+            return .Err(e)
+        },
+        .Ok(_) => {}
+    }
+
+    let exitCode = spawn(quoteArg(tempPath));
+    cleanupTemp(path: tempPath);
+
+    if exitCode != 0 {
+        return .Err(FlockError.CompilerFailed(exitCode))
+    }
+    .Ok(())
+}
+
+func cleanupTemp(path path: String) {
+    var rm = String();
+    rm.append("rm -f ");
+    rm.append(quoteArg(path));
+    let _ = spawn(rm);
+}
+
+// ----------------------------------------------------------------------------
+// check: `kestrel dump diagnostics ...` (exits non-zero if any errors)
+// ----------------------------------------------------------------------------
+
+func invokeCheck(sources sources: Array[String]) -> Result[(), FlockError] {
+    var cmd = String();
+    cmd.append(compilerPath());
+    cmd.append(" dump diagnostics");
+    cmd.append(stdFlag());
+
+    for source in sources {
+        cmd.append(" ");
+        cmd.append(quoteArg(source))
+    }
+
+    let exitCode = spawn(cmd);
+    if exitCode != 0 {
+        return .Err(FlockError.CompilerFailed(exitCode))
+    }
+    .Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+func compilerPath() -> String {
+    match getenv("KESTREL") {
+        .Some(path) => path,
+        .None => "kestrel"
+    }
+}
+
+func stdFlag() -> String {
+    match getenv("KESTREL_STD") {
+        .Some(stdPath) => {
+            var s = String();
+            s.append(" --std ");
+            s.append(quoteArg(stdPath));
+            s
+        },
+        .None => String()
+    }
 }
 
 /// Quotes a shell argument if it contains spaces.

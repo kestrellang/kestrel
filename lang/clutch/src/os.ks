@@ -42,7 +42,7 @@ public func getArgv() -> Array[String] {
     while i < argcInt {
         let byteOffset = i * 8; // ptr size
         let argPtr: lang.ptr[lang.i8] = lang.ptr_read(lang.ptr_offset(argvPtr, byteOffset.raw));
-        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[UInt8](argPtr)));
+        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](argPtr)));
         let s = String(from: cstr);
         result.append(s);
         i = i + 1

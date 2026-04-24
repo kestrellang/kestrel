@@ -107,14 +107,11 @@ public struct App[T] {
         var req = request;
 
         // 1. Run global middleware
-        var mi: Int64 = 0;
-        while mi < self.router.globalMiddleware.count {
-            let mw = self.router.globalMiddleware(unchecked: mi);
+        for mw in self.router.globalMiddleware {
             match mw(req, self.context) {
                 .Continue(enriched) => { req = enriched },
                 .Respond(response) => { return response }
             }
-            mi = mi + 1
         }
 
         // 2. Find matching route
@@ -124,25 +121,19 @@ public struct App[T] {
                 req = req.withPathParams(matchResult.params);
 
                 // Run group middleware
-                var gi: Int64 = 0;
-                while gi < matchResult.groupMiddleware.count {
-                    let mw = matchResult.groupMiddleware(unchecked: gi);
+                for mw in matchResult.groupMiddleware {
                     match mw(req, self.context) {
                         .Continue(enriched) => { req = enriched },
                         .Respond(response) => { return response }
                     }
-                    gi = gi + 1
                 }
 
                 // Run route middleware
-                var ri: Int64 = 0;
-                while ri < matchResult.routeMiddleware.count {
-                    let mw = matchResult.routeMiddleware(unchecked: ri);
+                for mw in matchResult.routeMiddleware {
                     match mw(req, self.context) {
                         .Continue(enriched) => { req = enriched },
                         .Respond(response) => { return response }
                     }
-                    ri = ri + 1
                 }
 
                 // Run handler

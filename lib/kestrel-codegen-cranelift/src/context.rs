@@ -165,13 +165,17 @@ impl<'a> CodegenContext<'a> {
                 ))
             })?;
 
-            // Define the raw data blob
+            // Define the raw data blob. Align to the element type's natural
+            // alignment so ld doesn't warn about unaligned pointer loads into
+            // the table (e.g. Int32 reads from LiteralSlice[Int32]).
+            let elem_align = self.layouts.layout_of(&file_const.element_ty).align.max(1);
             let data_id = self
                 .cl_module
                 .declare_data(&data_name, Linkage::Local, false, false)
                 .map_err(|e| CodegenError::DataSection(format!("declare data: {e}")))?;
             let mut desc = DataDescription::new();
             desc.define(bytes.clone().into_boxed_slice());
+            desc.set_align(elem_align);
             self.cl_module
                 .define_data(data_id, &desc)
                 .map_err(|e| CodegenError::DataSection(format!("define data: {e}")))?;
@@ -191,6 +195,7 @@ impl<'a> CodegenContext<'a> {
                 .map_err(|e| CodegenError::DataSection(format!("declare slice: {e}")))?;
             let mut slice_desc = DataDescription::new();
             slice_desc.define(slice_data.into_boxed_slice());
+            slice_desc.set_align(ptr_size as u64);
             // Relocation: ptr at offset 0 → data_id
             let data_gv = self
                 .cl_module
@@ -208,6 +213,7 @@ impl<'a> CodegenContext<'a> {
                 .map_err(|e| CodegenError::DataSection(format!("declare static: {e}")))?;
             let mut desc = DataDescription::new();
             desc.define_zeroinit(layout.size as usize);
+            desc.set_align(layout.align.max(1));
             self.cl_module
                 .define_data(data_id, &desc)
                 .map_err(|e| CodegenError::DataSection(format!("define static: {e}")))?;
