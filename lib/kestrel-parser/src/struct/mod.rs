@@ -11,17 +11,25 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::{
-    AttributeData, ConformanceListData, TypeDeclarationBodyItem, emit_attribute_list, emit_name,
-    emit_type_declaration_body_item, emit_visibility,
+    AttributeData, ConformanceListData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
+    emit_attribute_list, emit_name, emit_type_declaration_body_item, emit_visibility, identifier,
+    initializer_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
+use crate::field::field_declaration_parser_internal;
+use crate::function::function_declaration_parser_internal;
+use crate::import::import_declaration_parser_internal;
 use crate::input::{ParserExtra, ParserInput};
+use crate::module::module_declaration_parser_internal;
 use crate::parse_and_emit;
-use crate::type_decl::struct_declaration_parser_unified;
+use crate::subscript::subscript_declaration_parser_internal;
+use crate::type_alias::type_alias_declaration_parser_internal;
+use crate::type_decl::{TypeDeclarationData, struct_declaration_parser_unified};
 use crate::type_param::{
-    TypeParameterData, WhereClauseData, emit_conformance_list, emit_type_parameter_list,
-    emit_where_clause,
+    TypeParameterData, WhereClauseData, conformance_list_parser, emit_conformance_list,
+    emit_type_parameter_list, emit_where_clause, type_parameter_list_parser, where_clause_parser,
 };
 
 /// Represents a struct declaration: (visibility)? struct Name[T]? (where ...)? { ... }
@@ -123,6 +131,120 @@ pub struct StructDeclarationData {
 pub fn struct_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone {
     struct_declaration_parser_unified()
+}
+
+/// Parser for a single struct-body item. Takes the shared `type_parser` handle
+/// so nested type declarations (struct or enum) can be parsed inside the body
+/// without creating a separate recursive context.
+pub(crate) fn struct_body_item_parser<'tokens, P>(
+    type_parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
+        + Clone
+        + 'tokens,
+{
+    let module_parser = module_declaration_parser_internal()
+        .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
+
+    let import_parser =
+        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
+            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
+        });
+
+    let nested_type_parser = type_parser.map(|data| match data {
+        TypeDeclarationData::Struct(s) => TypeDeclarationBodyItem::Struct(Box::new(s)),
+        TypeDeclarationData::Enum(e) => TypeDeclarationBodyItem::Enum(Box::new(e)),
+    });
+
+    let initializer_parser =
+        initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
+    let deinit_parser = deinit_declaration_parser_internal().map(TypeDeclarationBodyItem::Deinit);
+    let function_parser =
+        function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(TypeDeclarationBodyItem::Subscript);
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
+    let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
+
+    module_parser
+        .or(import_parser)
+        .or(nested_type_parser)
+        .or(initializer_parser)
+        .or(deinit_parser)
+        .or(type_alias_parser)
+        .or(function_parser)
+        .or(subscript_parser)
+        .or(field_parser)
+        .boxed()
+}
+
+/// Parser for a full struct declaration, taking the shared `type_parser`
+/// handle so nested type declarations are parsed through the same recursive
+/// context.
+///
+/// Returns `StructDeclarationData`. The unified `type_declaration_parser_internal`
+/// wraps this in `TypeDeclarationData::Struct`.
+pub(crate) fn struct_parser_with_recursion<'tokens, P>(
+    type_parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
+        + Clone
+        + 'tokens,
+{
+    let struct_body_parser = struct_body_item_parser(type_parser)
+        .repeated()
+        .collect::<Vec<_>>()
+        .boxed();
+
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(token(Token::Struct))
+        .then(identifier())
+        .then(type_parameter_list_parser().or_not())
+        .then(conformance_list_parser().or_not())
+        .then(where_clause_parser().or_not())
+        .then(token(Token::LBrace))
+        .then(struct_body_parser)
+        .then(token(Token::RBrace))
+        .map(
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (((attributes, visibility), struct_span), name_span),
+                                    type_params,
+                                ),
+                                conformances,
+                            ),
+                            where_clause,
+                        ),
+                        lbrace_span,
+                    ),
+                    body,
+                ),
+                rbrace_span,
+            )| StructDeclarationData {
+                attributes,
+                visibility,
+                struct_span,
+                name_span,
+                type_params,
+                conformances: conformances.map(|(colon_span, items)| ConformanceListData {
+                    colon_span,
+                    conformances: items,
+                }),
+                where_clause,
+                lbrace_span,
+                body,
+                rbrace_span,
+            },
+        )
+        .boxed()
 }
 
 /// Emit events for a struct declaration.

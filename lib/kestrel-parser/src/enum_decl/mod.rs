@@ -12,18 +12,26 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::attribute::attribute_list_parser;
 use crate::common::{
     AttributeData, ConformanceListData, TypeDeclarationBodyItem, emit_attribute_list, emit_name,
-    emit_type_declaration_body_item, emit_visibility,
+    emit_type_declaration_body_item, emit_visibility, identifier,
+    initializer_declaration_parser_internal, skip_trivia, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput};
+use crate::field::field_declaration_parser_internal;
+use crate::function::function_declaration_parser_internal;
+use crate::import::import_declaration_parser_internal;
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::module::module_declaration_parser_internal;
 use crate::parse_and_emit;
-use crate::ty::{TyVariant, emit_ty_variant};
-use crate::type_decl::enum_declaration_parser_unified;
+use crate::subscript::subscript_declaration_parser_internal;
+use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
+use crate::type_alias::type_alias_declaration_parser_internal;
+use crate::type_decl::{TypeDeclarationData, enum_declaration_parser_unified};
 use crate::type_param::{
-    TypeParameterData, WhereClauseData, emit_conformance_list, emit_type_parameter_list,
-    emit_where_clause,
+    TypeParameterData, WhereClauseData, conformance_list_parser, emit_conformance_list,
+    emit_type_parameter_list, emit_where_clause, type_parameter_list_parser, where_clause_parser,
 };
 
 /// Represents an enum declaration: (visibility)? (indirect)? enum Name[T]? (: Conformances)? (where ...)? { ... }
@@ -166,6 +174,187 @@ pub struct EnumDeclarationData {
 pub fn enum_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
     enum_declaration_parser_unified()
+}
+
+/// Parser for enum case parameter: `label: Type` or just `Type`.
+///
+/// Named form (`label: Type`) is tried first so it wins over the unnamed
+/// `Type`-only fallback when both would match.
+pub(crate) fn enum_case_parameter_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone {
+    let named = identifier()
+        .then(token(Token::Colon))
+        .then(ty_parser())
+        .map(|((label, colon), ty)| EnumCaseParameterData {
+            label: Some(label),
+            colon: Some(colon),
+            ty,
+        });
+
+    let unnamed = ty_parser().map(|ty| EnumCaseParameterData {
+        label: None,
+        colon: None,
+        ty,
+    });
+
+    named.or(unnamed).boxed()
+}
+
+/// Parser for enum case declaration:
+/// `(@attr)* case Name` or `(@attr)* case Name(label: Type, ...)`.
+pub(crate) fn enum_case_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    attribute_list_parser()
+        .then(token(Token::Case))
+        .then(identifier())
+        .then(
+            token(Token::LParen)
+                .then(
+                    enum_case_parameter_parser()
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>(),
+                )
+                .then(token(Token::RParen))
+                .map(|((lparen, params), rparen)| Some((lparen, params, rparen)))
+                .or(empty().map(|_| None)),
+        )
+        .map(
+            |(((attributes, case_span), name_span), parameters)| EnumCaseDeclarationData {
+                attributes,
+                case_span,
+                name_span,
+                parameters,
+            },
+        )
+        .boxed()
+}
+
+/// Parser for the optional `indirect` modifier that precedes `enum`.
+pub(crate) fn indirect_modifier_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Indirect).map_with(|_, e| Some(to_kestrel_span(e.span()))))
+        .or(empty().to(None))
+}
+
+/// Parser for a single enum-body item. Takes the shared `type_parser` handle
+/// so nested type declarations (struct or enum) can be parsed inside the body
+/// without creating a separate recursive context.
+pub(crate) fn enum_body_item_parser<'tokens, P>(
+    type_parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
+        + Clone
+        + 'tokens,
+{
+    let module_parser = module_declaration_parser_internal()
+        .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
+
+    let import_parser =
+        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
+            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
+        });
+
+    let nested_type_parser = type_parser.map(|data| match data {
+        TypeDeclarationData::Struct(s) => TypeDeclarationBodyItem::Struct(Box::new(s)),
+        TypeDeclarationData::Enum(e) => TypeDeclarationBodyItem::Enum(Box::new(e)),
+    });
+
+    let initializer_parser =
+        initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
+    let function_parser =
+        function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(TypeDeclarationBodyItem::Subscript);
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
+    let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
+    let case_parser = enum_case_parser().map(TypeDeclarationBodyItem::EnumCase);
+
+    module_parser
+        .or(import_parser)
+        .or(case_parser)
+        .or(nested_type_parser)
+        .or(initializer_parser)
+        .or(type_alias_parser)
+        .or(function_parser)
+        .or(subscript_parser)
+        .or(field_parser)
+        .boxed()
+}
+
+/// Parser for a full enum declaration, taking the shared `type_parser` handle
+/// so nested type declarations are parsed through the same recursive context.
+///
+/// Returns `EnumDeclarationData`. The unified `type_declaration_parser_internal`
+/// wraps this in `TypeDeclarationData::Enum`.
+pub(crate) fn enum_parser_with_recursion<'tokens, P>(
+    type_parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
+        + Clone
+        + 'tokens,
+{
+    let enum_body_parser = enum_body_item_parser(type_parser)
+        .repeated()
+        .collect::<Vec<_>>()
+        .boxed();
+
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(indirect_modifier_parser())
+        .then(token(Token::Enum))
+        .then(identifier())
+        .then(type_parameter_list_parser().or_not())
+        .then(conformance_list_parser().or_not())
+        .then(where_clause_parser().or_not())
+        .then(token(Token::LBrace))
+        .then(enum_body_parser)
+        .then(token(Token::RBrace))
+        .map(
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (
+                                        (((attributes, visibility), indirect), enum_span),
+                                        name_span,
+                                    ),
+                                    type_params,
+                                ),
+                                conformances,
+                            ),
+                            where_clause,
+                        ),
+                        lbrace_span,
+                    ),
+                    body,
+                ),
+                rbrace_span,
+            )| EnumDeclarationData {
+                attributes,
+                visibility,
+                indirect,
+                enum_span,
+                name_span,
+                type_params,
+                conformances: conformances.map(|(colon_span, items)| ConformanceListData {
+                    colon_span,
+                    conformances: items,
+                }),
+                where_clause,
+                lbrace_span,
+                body,
+                rbrace_span,
+            },
+        )
+        .boxed()
 }
 
 /// Emit events for an indirect modifier

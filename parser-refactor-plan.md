@@ -312,6 +312,30 @@ Verification: `cargo test -p kestrel-parser`
 
 ## Remaining Plan
 
+### Step 9: Tame Struct/Enum Mutual Recursion
+
+`type_decl.rs` is now a thin coordinator (64 lines) rather than the owner of
+all type-body syntax. The per-type modules own their own grammars and accept
+the shared `type_parser` handle as a generic argument:
+
+- `struct::struct_parser_with_recursion<P>(type_parser)` — struct header and
+  body grammar, plus `struct_body_item_parser<P>` for body items. Lives in
+  `struct/mod.rs` (514 → 636 lines).
+- `enum_decl::enum_parser_with_recursion<P>(type_parser)` — enum header and
+  body grammar, with `enum_body_item_parser<P>` for body items,
+  `enum_case_parser` / `enum_case_parameter_parser` for cases, and
+  `indirect_modifier_parser` for the `indirect` keyword. Lives in
+  `enum_decl/mod.rs` (560 → 749 lines).
+- `type_decl.rs` now owns only `TypeDeclarationData`, the single
+  `recursive()` glue, and the two variant-filtering wrappers
+  (`struct_declaration_parser_unified` / `enum_declaration_parser_unified`).
+  Shrank from 341 → 64 lines.
+
+The unified `recursive()` context is preserved, so mutually nested type
+declarations still share one recursion frame.
+
+Verification: `cargo test -p kestrel-parser`
+
 ### Step 7c: Postfix And Closure Extraction
 
 Extracted the final two large sections of `expr_parser` into their own
@@ -354,17 +378,6 @@ Target ownership:
 - `block` owns block grammar
 - `stmt` owns statement grammar
 - `expr` calls into those through narrow recursive hooks
-
-### Step 9: Tame Struct/Enum Mutual Recursion
-
-Keep a unified recursive parser if needed, but make `type_decl.rs` a coordinator
-rather than the owner of all type-body syntax.
-
-Target ownership:
-
-- enum cases live in `enum_decl`
-- struct-specific body rules live in `struct`
-- shared recursion glue stays in `type_decl`
 
 ## Acceptance Criteria
 
