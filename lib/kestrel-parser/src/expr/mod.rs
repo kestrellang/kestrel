@@ -17,10 +17,14 @@ use crate::stmt::{StmtVariant, VariableDeclarationData};
 use crate::ty::ty_parser;
 
 mod atom;
+mod closure;
 mod control;
 mod data;
 mod emit;
 mod operators;
+mod postfix;
+
+use postfix::PostfixOp;
 
 pub use data::{
     ArgumentListData, CallArg, ClosureParamData, ClosureParamsData, ElseClause, ExprVariant,
@@ -217,30 +221,7 @@ enum ElseClauseVariant {
     ElseIf(ExprVariant),
 }
 
-/// Helper enum for postfix operations (calls, member access, and postfix operators)
-#[derive(Debug, Clone)]
-enum PostfixOp {
-    /// Function call: (args) - always has parens since this is parsed from `(args)` syntax
-    Call {
-        lparen: Option<Span>,
-        arguments: Vec<CallArg>,
-        commas: Vec<Span>,
-        rparen: Option<Span>,
-    },
-    /// Member access: .identifier or .identifier[T]
-    MemberAccess {
-        dot: Span,
-        member: Span,
-        type_args: Option<TypeArgsData>,
-    },
-    /// Tuple index: .0, .1
-    TupleIndex { dot: Span, index: Span },
-    /// Postfix operator: expr!
-    PostfixOperator {
-        operator: Token,
-        operator_span: Span,
-    },
-}
+// `PostfixOp` lives in `postfix.rs` and is imported above.
 
 /// Helper enum for postfix operations in condition expressions
 /// (calls and member access only - no postfix operators like !)
@@ -266,7 +247,7 @@ enum ConditionPostfixOp {
 /// Check if an expression variant is "statement-like" (doesn't require semicolon).
 /// This is used in inline code blocks within the expression parser to allow
 /// if/while/loop/match expressions to be followed by more statements without semicolons.
-fn is_inline_statement_like(expr: &ExprVariant) -> bool {
+pub(super) fn is_inline_statement_like(expr: &ExprVariant) -> bool {
     matches!(
         expr,
         ExprVariant::If { .. }
@@ -598,93 +579,11 @@ pub fn expr_parser<'tokens>()
             })
             .boxed();
 
-        // Argument parser for call expressions
-        // We need to carefully handle labeled vs unlabeled arguments
-        // to avoid partial consumption issues with identifier followed by non-colon.
-        //
-        // The key insight is that a labeled argument is: identifier COLON expr
-        // If we see identifier NOT followed by colon, it's the start of an expression.
-        //
-        // We use lookahead logic: first check if we have identifier:, only then commit.
-        let labeled_argument = skip_trivia()
-            .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))),
-            )
-            .then(skip_trivia().ignore_then(expr.clone()))
-            .map(|((label, colon), value)| CallArg {
-                label: Some(label),
-                colon: Some(colon),
-                value,
-            });
-
-        let unlabeled_argument = skip_trivia()
-            .ignore_then(expr.clone())
-            .map(|value| CallArg {
-                label: None,
-                colon: None,
-                value,
-            });
-
-        // Try labeled first (more specific), then unlabeled
-        let argument = labeled_argument.or(unlabeled_argument);
-
-        // Argument list: (arg, arg, ...)
-        let arg_list = skip_inline_trivia()
-            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
-            .then(
-                argument
-                    .clone()
-                    .separated_by(skip_trivia().ignore_then(
-                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                    ))
-                    .allow_trailing()
-                    .collect::<Vec<_>>(),
-            )
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span()))),
-            )
-            .map(|((lparen, arguments), rparen)| PostfixOp::Call {
-                lparen: Some(lparen),
-                arguments,
-                commas: vec![],
-                rparen: Some(rparen),
-            })
-            .boxed();
-
-        // Member access: .identifier or .identifier[T] or tuple index: .0, .1
-        // Also allows .init for delegating initializers (self.init(...))
-        // NOTE: For postfix member access, we do NOT skip trivia before the dot.
-        // This prevents parsing ".foo" on a new line as a member access on the previous expression.
-        // The dot must immediately follow the expression (same line) for postfix chaining.
-        let member_access = just(Token::Dot)
-            .map_with(|_, e| to_kestrel_span(e.span()))
-            .then(skip_trivia().ignore_then(select! {
-                Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
-                Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
-                Token::Init = e => (Token::Init, to_kestrel_span(e.span())),
-            }))
-            .then(full_type_args_parser().or_not())
-            .map(|((dot, (token, span)), type_args)| match token {
-                Token::Integer => PostfixOp::TupleIndex { dot, index: span },
-                _ => PostfixOp::MemberAccess {
-                    dot,
-                    member: span,
-                    type_args,
-                },
-            });
-
-        // Postfix unwrap operator: expr!
-        let postfix_bang = skip_trivia()
-            .ignore_then(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-            .map(|(tok, span)| PostfixOp::PostfixOperator {
-                operator: tok,
-                operator_span: span,
-            });
-
-        let postfix_op = arg_list.clone().or(member_access).or(postfix_bang);
+        // Postfix pieces live in `postfix.rs`. `arg_list` is still named
+        // locally because the condition-postfix logic below reuses it to
+        // pick out `PostfixOp::Call` forms (conditions forbid postfix-bang).
+        let arg_list = postfix::arg_list_parser(expr.clone());
+        let postfix_op = postfix::postfix_op_parser(expr.clone());
 
         // Operator token parsers live in `operators.rs`.
         let unary_op = operators::unary_op_parser();
@@ -908,8 +807,7 @@ pub fn expr_parser<'tokens>()
                 let implicit_arg_list = skip_inline_trivia()
                     .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                     .then(
-                        argument
-                            .clone()
+                        postfix::argument_parser(expr.clone())
                             .separated_by(skip_trivia().ignore_then(
                                 just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
                             ))
@@ -1333,276 +1231,28 @@ pub fn expr_parser<'tokens>()
                     .boxed()
             };
 
-        // Closure expression
-        let build_closure_expr =
-            |lbrace_parser: Boxed<
-                'tokens,
-                'tokens,
-                ParserInput<'tokens>,
-                Span,
-                ParserExtra<'tokens>,
-            >| {
-                let closure_param = skip_trivia()
-                    .ignore_then(crate::common::parsers::parameter_pattern_parser())
-                    .then(
-                        skip_trivia()
-                            .ignore_then(
-                                just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
-                            )
-                            .then(ty_parser())
-                            .or_not(),
-                    )
-                    .map(|(pattern, ty_opt)| {
-                        let (colon, ty) = match ty_opt {
-                            Some((c, t)) => (Some(c), Some(t)),
-                            None => (None, None),
-                        };
-                        ClosureParamData { pattern, colon, ty }
-                    });
-
-                let closure_params = skip_trivia()
-                    .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
-                    .then(
-                        closure_param
-                            .separated_by(skip_trivia().ignore_then(
-                                just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                            ))
-                            .allow_trailing()
-                            .collect::<Vec<_>>(),
-                    )
-                    .then_ignore(skip_trivia())
-                    .then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
-                    .then_ignore(skip_trivia())
-                    .then(just(Token::In).map_with(|_, e| to_kestrel_span(e.span())))
-                    .map(|(((lparen, params), rparen), in_span)| {
-                        (
-                            Some(ClosureParamsData {
-                                lparen,
-                                params,
-                                commas: vec![],
-                                rparen,
-                            }),
-                            Some(in_span),
-                        )
-                    });
-
-                let expr_for_closure = expr.clone();
-                let expr_for_closure_guard = expr.clone();
-                let expr_for_closure_else = expr.clone();
-
-                // Inline else block items parser for guard-let in closures
-                let closure_else_item =
-                    inline_var_decl
-                        .clone()
-                        .map(ElseBlockItem::Statement)
-                        .or(expr_for_closure_else
-                            .clone()
-                            .then(
-                                skip_trivia()
-                                    .ignore_then(
-                                        just(Token::Semicolon)
-                                            .map_with(|_, e| to_kestrel_span(e.span())),
-                                    )
-                                    .map(Some)
-                                    .or(empty().to(None)),
-                            )
-                            .try_map(|(e, maybe_semi), _extra| {
-                                if let Some(semi) = maybe_semi {
-                                    Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
-                                } else if is_inline_statement_like(&e) {
-                                    Ok(ElseBlockItem::StatementExpr(e))
-                                } else {
-                                    Err(Rich::custom(
-                                        chumsky::span::Span::new((), 0..0),
-                                        "expected semicolon",
-                                    ))
-                                }
-                            }));
-
-                let closure_else_items = closure_else_item
-                    .repeated()
-                    .collect::<Vec<_>>()
-                    .then(
-                        expr_for_closure_else
-                            .map(ElseBlockItem::TrailingExpression)
-                            .or_not(),
-                    )
-                    .map(|(mut items, trailing)| {
-                        if let Some(e) = trailing {
-                            items.push(e);
-                        }
-                        items
-                    });
-
-                // Inline guard-let parser for closures with chain support
-                // Single let condition: let pattern = expr
-                let closure_guard_let_condition = skip_trivia()
-                    .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
-                    .then(crate::pattern::pattern_parser())
-                    .then(skip_trivia().ignore_then(
-                        just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())),
-                    ))
-                    .then(expr_for_closure_guard.clone())
-                    .map(
-                        |(((let_span, pattern), equals_span), value)| IfCondition::Let {
-                            let_span,
-                            pattern,
-                            equals_span,
-                            value,
-                        },
-                    );
-
-                // Single condition: either let-binding or boolean expression
-                let closure_guard_single_condition = closure_guard_let_condition
-                    .clone()
-                    .or(expr_for_closure_guard.clone().map(IfCondition::Expr));
-
-                // Condition list: first must be let, followed by comma-separated conditions
-                let closure_guard_conditions = closure_guard_let_condition
-                    .then(
-                        skip_trivia()
-                            .ignore_then(just(Token::Comma))
-                            .ignore_then(closure_guard_single_condition)
-                            .repeated()
-                            .collect::<Vec<_>>(),
-                    )
-                    .map(|(first, rest)| {
-                        let mut conditions = vec![first];
-                        conditions.extend(rest);
-                        conditions
-                    });
-
-                let closure_guard_let =
-                    skip_trivia()
-                        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
-                        .then(closure_guard_conditions)
-                        .then(skip_trivia().ignore_then(
-                            just(Token::Else).map_with(|_, e| to_kestrel_span(e.span())),
-                        ))
-                        .then(skip_trivia().ignore_then(
-                            just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())),
-                        ))
-                        .then(closure_else_items)
-                        .then(skip_trivia().ignore_then(
-                            just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
-                        ))
-                        .map(
-                            |(
-                                ((((guard_span, conditions), else_span), else_lbrace), else_items),
-                                else_rbrace,
-                            )| {
-                                BlockItem::GuardLet(GuardLetData {
-                                    guard_span,
-                                    conditions,
-                                    else_span,
-                                    else_lbrace,
-                                    else_items,
-                                    else_rbrace,
-                                })
-                            },
-                        );
-
-                let closure_block_item = closure_guard_let
-                    .or(inline_var_decl.clone().map(BlockItem::Statement))
-                    .or(expr_for_closure
-                        .clone()
-                        .then(
-                            skip_trivia()
-                                .ignore_then(
-                                    just(Token::Semicolon)
-                                        .map_with(|_, e| to_kestrel_span(e.span())),
-                                )
-                                .map(Some)
-                                .or(empty().to(None)),
-                        )
-                        .try_map(|(e, maybe_semi), _extra| {
-                            if let Some(semi) = maybe_semi {
-                                Ok(BlockItem::Statement(StmtVariant::Expression(e, semi)))
-                            } else if is_inline_statement_like(&e) {
-                                Ok(BlockItem::StatementExpr(e))
-                            } else {
-                                Err(Rich::custom(
-                                    chumsky::span::Span::new((), 0..0),
-                                    "expected semicolon",
-                                ))
-                            }
-                        }));
-
-                lbrace_parser
-                    .then(
-                        closure_params
-                            .or_not()
-                            .map(|opt| opt.unwrap_or((None, None))),
-                    )
-                    .then(
-                        closure_block_item
-                            .repeated()
-                            .collect::<Vec<_>>()
-                            .then(expr_for_closure.map(BlockItem::TrailingExpression).or_not())
-                            .map(|(mut statements, trailing)| {
-                                if let Some(expr) = trailing {
-                                    statements.push(expr);
-                                }
-                                statements
-                            }),
-                    )
-                    .then(skip_trivia().ignore_then(
-                        just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())),
-                    ))
-                    .map(
-                        |(((lbrace, (params, in_span)), body), rbrace)| ExprVariant::Closure {
-                            lbrace,
-                            params,
-                            in_span,
-                            body,
-                            rbrace,
-                        },
-                    )
-                    .boxed()
-            };
-
-        let closure_expr = build_closure_expr(
+        // Closure parsing lives in `closure.rs`. We build two variants of the
+        // closure parser — one that skips all trivia before the `{` and one
+        // that only skips inline trivia (no newlines). The inline variant
+        // feeds the trailing-closure slot so a `{ ... }` on the next line is
+        // NOT silently absorbed as a trailing closure.
+        let closure_expr = closure::closure_parser(
             skip_trivia()
                 .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
                 .boxed(),
+            expr.clone(),
+            inline_var_decl.clone(),
         );
 
-        let closure_expr_inline = build_closure_expr(
+        let closure_expr_inline = closure::closure_parser(
             skip_inline_trivia()
                 .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
                 .boxed(),
+            expr.clone(),
+            inline_var_decl.clone(),
         );
 
-        // Trailing closure argument
-        // Can be either:
-        // - Just a closure: { ... }
-        // - Labeled closure: label: { ... }
-        let trailing_closure_arg = {
-            let closure_for_trailing = closure_expr_inline.clone();
-
-            // Labeled trailing closure: identifier: { closure }
-            let labeled =
-                skip_inline_trivia()
-                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
-                    .then(skip_inline_trivia().ignore_then(
-                        just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
-                    ))
-                    .then(closure_for_trailing.clone())
-                    .map(|((label, colon), closure)| CallArg {
-                        label: Some(label),
-                        colon: Some(colon),
-                        value: closure,
-                    });
-
-            // Unlabeled trailing closure: { closure }
-            let unlabeled = closure_for_trailing.map(|closure| CallArg {
-                label: None,
-                colon: None,
-                value: closure,
-            });
-
-            labeled.or(unlabeled)
-        };
+        let trailing_closure_arg = closure::trailing_closure_arg_parser(closure_expr_inline);
 
         // Primary expressions
         let primary = literal
@@ -1622,48 +1272,15 @@ pub fn expr_parser<'tokens>()
             .or(path)
             .boxed();
 
-        // Postfix expression with trailing closures
+        // Postfix expression with trailing closures. The fold into an
+        // ExprVariant tree is in `postfix::fold_postfix_ops`; trailing
+        // closures still thread through `attach_trailing_closures` here
+        // since that helper lives at module scope.
         let postfix = primary
             .then(postfix_op.repeated().collect::<Vec<_>>())
             .then(trailing_closure_arg.repeated().collect::<Vec<_>>())
             .map(|((base, ops), trailing_closures)| {
-                let result = ops.into_iter().fold(base, |acc, op| match op {
-                    PostfixOp::Call {
-                        lparen,
-                        arguments,
-                        commas,
-                        rparen,
-                    } => ExprVariant::Call {
-                        callee: Box::new(acc),
-                        lparen,
-                        arguments,
-                        commas,
-                        rparen,
-                    },
-                    PostfixOp::MemberAccess {
-                        dot,
-                        member,
-                        type_args,
-                    } => ExprVariant::MemberAccess {
-                        base: Box::new(acc),
-                        dot,
-                        member,
-                        type_args,
-                    },
-                    PostfixOp::TupleIndex { dot, index } => ExprVariant::TupleIndex {
-                        base: Box::new(acc),
-                        dot,
-                        index,
-                    },
-                    PostfixOp::PostfixOperator {
-                        operator,
-                        operator_span,
-                    } => ExprVariant::Postfix {
-                        operand: Box::new(acc),
-                        operator,
-                        operator_span,
-                    },
-                });
+                let result = postfix::fold_postfix_ops(base, ops);
                 if trailing_closures.is_empty() {
                     result
                 } else {

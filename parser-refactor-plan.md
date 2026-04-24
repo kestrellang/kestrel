@@ -312,14 +312,38 @@ Verification: `cargo test -p kestrel-parser`
 
 ## Remaining Plan
 
-### Step 7c: Postfix and Closure Extraction (deferred)
+### Step 7c: Postfix And Closure Extraction
 
-`postfix.rs` and `closure.rs` are still to do. Both sections capture many
-shared sub-parsers defined inside the `recursive(|expr| ...)` closure
-(`inline_code_block`, `inline_var_decl`, `condition_binary`, pattern and
-statement parsers). Extracting them requires threading those through as
-parameters or introducing a shared context struct, which is a larger
-structural rewrite than the slices done so far.
+Extracted the final two large sections of `expr_parser` into their own
+modules, threading the recursive `expr` handle (and, for closures, the inline
+`let`/`var` parser) through as explicit generic parameters:
+
+- `expr/postfix.rs` (215 lines) — owns `PostfixOp`, the argument/arg-list/
+  member-access/postfix-bang parsers, the combined `postfix_op_parser`, and
+  the pure `fold_postfix_ops` helper. Also exposes `argument_parser` so
+  `implicit_member_access` can share the labeled-vs-unlabeled logic.
+- `expr/closure.rs` (293 lines) — owns `closure_parser` (the full
+  `{ params in body }` parser with guard-let/inline-stmt handling) and
+  `trailing_closure_arg_parser`. The factory takes `expr` and
+  `inline_var_decl` (an `impl Parser ... StmtVariant`) as generics.
+
+`is_inline_statement_like` is now `pub(super)` so both modules can import it.
+
+`expr/mod.rs` final size: 1405 lines (3199 → 1405 across Steps 7a, 7b, 7c —
+a 56% reduction). All 7 submodules suggested by the original plan now exist:
+
+| File | Lines | Role |
+| --- | --- | --- |
+| `expr/data.rs` | 310 | Public data types |
+| `expr/emit.rs` | 990 | All emit functions |
+| `expr/atom.rs` | 107 | Literals, paths, type args |
+| `expr/postfix.rs` | 215 | Calls, member access, postfix ops |
+| `expr/operators.rs` | 78 | Unary/binary/compound-assign tokens |
+| `expr/control.rs` | 101 | break/continue/return/throw/try/label |
+| `expr/closure.rs` | 293 | Closures + trailing closures |
+| `expr/mod.rs` | 1405 | Facade + recursion glue |
+
+Verification: `cargo test -p kestrel-parser`
 
 ### Step 8: Clarify Block/Stmt/Expr Boundaries
 
