@@ -16,9 +16,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    DeinitDeclarationData, FunctionBodyData, FunctionDeclarationData, InitializerDeclarationData,
-    ParameterAccessMode, ParameterData, ReceiverModifier, SubscriptBodyData,
-    SubscriptDeclarationData,
+    DeinitDeclarationData, FunctionBodyData, InitializerDeclarationData, ParameterAccessMode,
+    ParameterData, SubscriptBodyData, SubscriptDeclarationData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -138,28 +137,6 @@ pub fn static_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Option<Span>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::Static).map_with(|_, e| Some(to_kestrel_span(e.span()))))
-        .or(empty().to(None))
-}
-
-/// Parser for optional receiver modifier (mutating/consuming)
-///
-/// Parses an optional `mutating` or `consuming` keyword and returns the modifier with its span.
-///
-/// # Examples
-/// - `mutating func foo()` → `Some((ReceiverModifier::Mutating, span))`
-/// - `consuming func foo()` → `Some((ReceiverModifier::Consuming, span))`
-/// - `func foo()` → `None`
-pub fn receiver_modifier_parser<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, Option<(ReceiverModifier, Span)>, ParserExtra<'tokens>>
-+ Clone {
-    skip_trivia()
-        .ignore_then(
-            just(Token::Mutating)
-                .map_with(|_, e| Some((ReceiverModifier::Mutating, to_kestrel_span(e.span()))))
-                .or(just(Token::Consuming).map_with(|_, e| {
-                    Some((ReceiverModifier::Consuming, to_kestrel_span(e.span())))
-                })),
-        )
         .or(empty().to(None))
 }
 
@@ -467,79 +444,6 @@ pub fn block_body_parser<'tokens>()
 // =============================================================================
 // Declaration Parsers - Single Source of Truth
 // =============================================================================
-
-/// Parser for a function declaration
-///
-/// Syntax: `(@attr)* (visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ } | = expr)?`
-///
-/// This is the single source of truth for function declaration parsing.
-pub fn function_declaration_parser_internal<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, FunctionDeclarationData, ParserExtra<'tokens>> + Clone
-{
-    attribute_list_parser()
-        .then(visibility_parser_internal())
-        .then(static_parser())
-        .then(receiver_modifier_parser())
-        .then(token(Token::Func))
-        .then(identifier())
-        .then(type_parameter_list_parser().or_not())
-        .then(token(Token::LParen))
-        .then(parameter_list_parser())
-        .then(token(Token::RParen))
-        .then(return_type_parser())
-        .then(where_clause_parser().or_not())
-        .then(function_body_parser())
-        .map(
-            |(
-                (
-                    (
-                        (
-                            (
-                                (
-                                    (
-                                        (
-                                            (
-                                                (
-                                                    ((attributes, visibility), is_static),
-                                                    receiver_modifier,
-                                                ),
-                                                fn_span,
-                                            ),
-                                            name_span,
-                                        ),
-                                        type_params,
-                                    ),
-                                    lparen,
-                                ),
-                                parameters,
-                            ),
-                            rparen,
-                        ),
-                        return_type,
-                    ),
-                    where_clause,
-                ),
-                body,
-            )| {
-                FunctionDeclarationData {
-                    attributes,
-                    visibility,
-                    is_static,
-                    receiver_modifier,
-                    fn_span,
-                    name_span,
-                    type_params,
-                    lparen,
-                    parameters,
-                    rparen,
-                    return_type,
-                    where_clause,
-                    body,
-                }
-            },
-        )
-        .boxed()
-}
 
 /// Parser for an initializer declaration
 ///

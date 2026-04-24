@@ -11,14 +11,15 @@ use kestrel_syntax_tree::SyntaxKind;
 use super::data::{
     AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
     EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
-    FunctionBodyData, FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode,
-    ParameterData, ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier,
-    StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData, TypeDeclarationBodyItem,
+    FunctionBodyData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    ProtocolBodyItem, ProtocolDeclarationData, StructDeclarationData, SubscriptBodyData,
+    SubscriptDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
 use crate::field::emit_field_declaration;
+use crate::function::emit_function_declaration;
 use crate::import::emit_import_declaration;
 use crate::module::emit_module_declaration;
 use crate::pattern::emit_pattern_variant;
@@ -265,49 +266,6 @@ pub fn emit_function_body(sink: &mut EventSink, body: &FunctionBodyData) {
 // =============================================================================
 // Declaration Emitters - Single Source of Truth
 // =============================================================================
-
-/// Emit events for a function declaration
-///
-/// This is the single source of truth for function declaration emission.
-pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclarationData) {
-    sink.start_node(SyntaxKind::FunctionDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
-
-    // Emit receiver modifier (mutating/consuming) if present
-    if let Some((modifier, span)) = data.receiver_modifier {
-        let kind = match modifier {
-            ReceiverModifier::Mutating => SyntaxKind::Mutating,
-            ReceiverModifier::Consuming => SyntaxKind::Consuming,
-        };
-        sink.add_token(kind, span);
-    }
-
-    sink.add_token(SyntaxKind::Func, data.fn_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
-
-    if let Some((arrow_span, return_ty)) = data.return_type {
-        emit_return_type(sink, arrow_span, return_ty);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    if let Some(ref body) = data.body {
-        emit_function_body(sink, body);
-    }
-
-    sink.finish_node();
-}
 
 /// Emit events for an initializer declaration
 ///

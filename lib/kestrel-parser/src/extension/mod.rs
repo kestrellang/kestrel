@@ -12,10 +12,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
     ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
-    function_declaration_parser_internal, initializer_declaration_parser_internal,
-    subscript_declaration_parser_internal, token,
+    initializer_declaration_parser_internal, subscript_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
+use crate::function::function_declaration_parser_internal;
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::ty::ty_parser;
 use crate::type_alias::type_alias_declaration_parser_internal;

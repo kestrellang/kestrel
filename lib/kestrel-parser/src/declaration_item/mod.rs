@@ -15,19 +15,16 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::common::{
     EnumDeclarationData,
     ExtensionDeclarationData,
-    FunctionDeclarationData,
     ProtocolDeclarationData,
     // Shared data types
     StructDeclarationData,
     SubscriptDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
-    emit_function_declaration,
     // Shared emitters
     emit_protocol_declaration,
     emit_struct_declaration,
     emit_subscript_declaration,
-    function_declaration_parser_internal,
     subscript_declaration_parser_internal,
 };
 use crate::enum_decl::EnumDeclaration;
@@ -37,7 +34,10 @@ use crate::field::{
     FieldDeclaration, FieldDeclarationData, emit_field_declaration,
     field_declaration_parser_internal,
 };
-use crate::function::FunctionDeclaration;
+use crate::function::{
+    FunctionDeclaration, FunctionDeclarationData, emit_function_declaration,
+    function_declaration_parser_internal,
+};
 use crate::import::{ImportDeclaration, emit_import_declaration, import_declaration_parser_internal};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::module::{

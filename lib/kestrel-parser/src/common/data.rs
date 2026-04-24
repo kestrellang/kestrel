@@ -9,6 +9,7 @@ use kestrel_span::Span;
 use crate::block::CodeBlockData;
 use crate::expr::ExprVariant;
 use crate::field::FieldDeclarationData;
+use crate::function::FunctionDeclarationData;
 use crate::pattern::PatternVariant;
 use crate::ty::TyVariant;
 use crate::type_alias::TypeAliasDeclarationData;
@@ -117,15 +118,6 @@ pub struct ParameterData {
     pub default: Option<(Span, ExprVariant)>,
 }
 
-/// Receiver modifier for instance methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceiverModifier {
-    /// `mutating func` - method can mutate self
-    Mutating,
-    /// `consuming func` - method takes ownership of self
-    Consuming,
-}
-
 /// Body data for functions - either a block `{ ... }` or expression `= expr`
 #[derive(Debug, Clone)]
 pub enum FunctionBodyData {
@@ -134,27 +126,6 @@ pub enum FunctionBodyData {
     /// Expression body: `= expr`
     /// Contains the equals span and the expression
     Expression(Span, ExprVariant),
-}
-
-/// Raw parsed data for function declaration internals
-///
-/// Used by both function declarations and protocol method declarations.
-#[derive(Debug, Clone)]
-pub struct FunctionDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub is_static: Option<Span>,
-    /// Receiver modifier (mutating/consuming) with its span
-    pub receiver_modifier: Option<(ReceiverModifier, Span)>,
-    pub fn_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub lparen: Span,
-    pub parameters: Vec<ParameterData>,
-    pub rparen: Span,
-    pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
-    pub where_clause: Option<WhereClauseData>,
-    pub body: Option<FunctionBodyData>, // Optional body - None for protocol methods
 }
 
 /// Raw parsed data for initializer declaration internals

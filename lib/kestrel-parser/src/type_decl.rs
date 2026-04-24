@@ -17,11 +17,12 @@ use kestrel_span::Span;
 use crate::attribute::attribute_list_parser;
 use crate::common::{
     ConformanceListData, EnumCaseDeclarationData, EnumCaseParameterData, EnumDeclarationData,
-    StructDeclarationData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
-    function_declaration_parser_internal, identifier, initializer_declaration_parser_internal,
-    subscript_declaration_parser_internal, token, visibility_parser_internal,
+    StructDeclarationData, TypeDeclarationBodyItem, deinit_declaration_parser_internal, identifier,
+    initializer_declaration_parser_internal, subscript_declaration_parser_internal, token,
+    visibility_parser_internal,
 };
 use crate::field::field_declaration_parser_internal;
+use crate::function::function_declaration_parser_internal;
 use crate::import::import_declaration_parser_internal;
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::module::module_declaration_parser_internal;
