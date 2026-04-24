@@ -21,7 +21,6 @@ use crate::common::{
     // Shared data types
     StructDeclarationData,
     SubscriptDeclarationData,
-    TypeAliasDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
     emit_field_declaration,
@@ -30,7 +29,6 @@ use crate::common::{
     emit_protocol_declaration,
     emit_struct_declaration,
     emit_subscript_declaration,
-    emit_type_alias_declaration,
     field_declaration_parser_internal,
     function_declaration_parser_internal,
     subscript_declaration_parser_internal,
@@ -49,7 +47,8 @@ use crate::protocol::{ProtocolDeclaration, protocol_declaration_parser_internal}
 use crate::r#struct::StructDeclaration;
 use crate::subscript::SubscriptDeclaration;
 use crate::type_alias::{
-    TypeAliasDeclaration, type_alias_declaration_parser_internal,
+    TypeAliasDeclaration, TypeAliasDeclarationData, emit_type_alias_declaration,
+    type_alias_declaration_parser_internal,
 };
 use crate::type_decl::{TypeDeclarationData, type_declaration_parser_internal};
 

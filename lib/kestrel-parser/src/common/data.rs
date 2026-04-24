@@ -10,6 +10,7 @@ use crate::block::CodeBlockData;
 use crate::expr::ExprVariant;
 use crate::pattern::PatternVariant;
 use crate::ty::TyVariant;
+use crate::type_alias::TypeAliasDeclarationData;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
 // =============================================================================
@@ -333,49 +334,6 @@ pub struct ProtocolDeclarationData {
     pub lbrace_span: Span,
     pub body: Vec<ProtocolBodyItem>, // Protocol body: functions and associated types
     pub rbrace_span: Span,
-}
-
-/// Raw parsed data for type alias declaration internals
-#[derive(Debug, Clone)]
-pub struct TypeAliasDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub type_span: Span,
-    /// The target of the type alias - simple name or qualified path
-    pub target: AssociatedTypeTargetData,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    /// Optional bounds for associated types (: Equatable, Hashable)
-    pub bounds: Option<AssociatedTypeBoundsData>,
-    /// Optional where clause for associated types (where Iter.Item = Item)
-    pub where_clause: Option<WhereClauseData>,
-    /// Optional equals span and aliased type (= Type)
-    /// For associated types in protocols, this may be None (abstract associated type)
-    pub aliased: Option<(Span, TyVariant)>,
-    pub semicolon_span: Option<Span>,
-}
-
-/// Target for type alias - either simple name or qualified path
-#[derive(Debug, Clone)]
-pub enum AssociatedTypeTargetData {
-    /// Simple name: `type Item`
-    Simple(Span),
-    /// Qualified path: `type Iterator.Item` or `type Add[Int].Output`
-    Qualified {
-        /// The protocol path (may include type arguments)
-        protocol_path: TyVariant,
-        /// The dot before the name
-        dot_span: Span,
-        /// The associated type name
-        name_span: Span,
-    },
-}
-
-/// Bounds for associated types (: Equatable, Hashable)
-#[derive(Debug, Clone)]
-pub struct AssociatedTypeBoundsData {
-    pub colon_span: Span,
-    /// The bound types (protocols)
-    pub bounds: Vec<TyVariant>,
 }
 
 /// Items that can appear in a protocol body
