@@ -12,7 +12,7 @@ use super::data::{
     AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
     EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
     FunctionBodyData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
-    ProtocolBodyItem, ProtocolDeclarationData, StructDeclarationData, TypeDeclarationBodyItem,
+    StructDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -359,54 +359,6 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
             emit_import_declaration(sink, import_span, &path_segments, alias, items);
         },
     }
-}
-
-/// Emit events for a protocol declaration
-///
-/// This is the single source of truth for protocol declaration emission.
-pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclarationData) {
-    sink.start_node(SyntaxKind::ProtocolDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Protocol, data.protocol_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    if let Some(inherited) = data.inherited {
-        emit_conformance_list(sink, inherited.colon_span, &inherited.conformances);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::ProtocolBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        match item {
-            ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
-            ProtocolBodyItem::Subscript(subscript_data) => {
-                emit_subscript_declaration(sink, subscript_data)
-            },
-            ProtocolBodyItem::AssociatedType(type_data) => {
-                emit_type_alias_declaration(sink, type_data)
-            },
-            ProtocolBodyItem::Initializer(init_data) => {
-                emit_initializer_declaration(sink, init_data)
-            },
-            ProtocolBodyItem::Field(field_data) => emit_field_declaration(sink, field_data),
-        }
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // ProtocolBody
-
-    sink.finish_node(); // ProtocolDeclaration
 }
 
 /// Emit events for an extension declaration

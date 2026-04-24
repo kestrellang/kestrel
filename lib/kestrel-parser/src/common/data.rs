@@ -255,31 +255,6 @@ pub struct EnumDeclarationData {
     pub rbrace_span: Span,
 }
 
-/// Raw parsed data for protocol declaration internals
-#[derive(Debug, Clone)]
-pub struct ProtocolDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub protocol_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub inherited: Option<ConformanceListData>, // Inherited protocols (protocol A: B { })
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<ProtocolBodyItem>, // Protocol body: functions and associated types
-    pub rbrace_span: Span,
-}
-
-/// Items that can appear in a protocol body
-#[derive(Debug, Clone)]
-pub enum ProtocolBodyItem {
-    Function(FunctionDeclarationData),
-    Subscript(SubscriptDeclarationData),
-    AssociatedType(TypeAliasDeclarationData),
-    Initializer(InitializerDeclarationData),
-    Field(FieldDeclarationData),
-}
-
 /// Raw parsed data for extension declaration internals
 ///
 /// Extension syntax: `extend Type: Protocol { ... }`

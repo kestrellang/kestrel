@@ -15,13 +15,11 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::common::{
     EnumDeclarationData,
     ExtensionDeclarationData,
-    ProtocolDeclarationData,
     // Shared data types
     StructDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
     // Shared emitters
-    emit_protocol_declaration,
     emit_struct_declaration,
 };
 use crate::enum_decl::EnumDeclaration;
@@ -40,7 +38,10 @@ use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::module::{
     ModuleDeclaration, emit_module_declaration, module_declaration_parser_internal,
 };
-use crate::protocol::{ProtocolDeclaration, protocol_declaration_parser_internal};
+use crate::protocol::{
+    ProtocolDeclaration, ProtocolDeclarationData, emit_protocol_declaration,
+    protocol_declaration_parser_internal,
+};
 use crate::r#struct::StructDeclaration;
 use crate::subscript::{
     SubscriptDeclaration, SubscriptDeclarationData, emit_subscript_declaration,
