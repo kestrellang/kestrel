@@ -1603,12 +1603,34 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 MirTy::Pointer(Box::new(self.substitute_mir_type(inner, subst)))
             },
             MirTy::Ref(inner) => MirTy::Ref(Box::new(self.substitute_mir_type(inner, subst))),
+            MirTy::RefMut(inner) => {
+                MirTy::RefMut(Box::new(self.substitute_mir_type(inner, subst)))
+            },
             MirTy::Tuple(elems) => MirTy::Tuple(
                 elems
                     .iter()
                     .map(|e| self.substitute_mir_type(e, subst))
                     .collect(),
             ),
+            MirTy::FuncThin { params, ret } => MirTy::FuncThin {
+                params: params
+                    .iter()
+                    .map(|p| self.substitute_mir_type(p, subst))
+                    .collect(),
+                ret: Box::new(self.substitute_mir_type(ret, subst)),
+            },
+            MirTy::FuncThick { params, ret } => MirTy::FuncThick {
+                params: params
+                    .iter()
+                    .map(|p| self.substitute_mir_type(p, subst))
+                    .collect(),
+                ret: Box::new(self.substitute_mir_type(ret, subst)),
+            },
+            MirTy::AssociatedProjection { base, protocol, name } => MirTy::AssociatedProjection {
+                base: Box::new(self.substitute_mir_type(base, subst)),
+                protocol: *protocol,
+                name: name.clone(),
+            },
             _ => ty.clone(),
         }
     }
