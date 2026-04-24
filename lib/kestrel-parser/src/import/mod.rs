@@ -2,10 +2,12 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{emit_import_declaration, import_declaration_parser_internal};
+use crate::common::{emit_module_path, identifier, module_path_parser_internal, token};
 use crate::event::EventSink;
-use crate::input::{create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::module::ModulePath;
+
+use chumsky::prelude::*;
 
 /// Represents an import declaration
 ///
@@ -87,8 +89,6 @@ pub fn parse_import_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::prelude::*;
-
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
@@ -105,6 +105,142 @@ where
             }
         },
     }
+}
+
+/// Internal parser for import item (identifier or identifier as alias).
+fn import_item_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, Option<Span>), ParserExtra<'tokens>> + Clone {
+    identifier()
+        .then(token(Token::As).ignore_then(identifier()).or_not())
+        .boxed()
+}
+
+/// Internal parser for import items list.
+fn import_items_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Vec<(Span, Option<Span>)>, ParserExtra<'tokens>> + Clone
+{
+    token(Token::LParen)
+        .ignore_then(
+            import_item_parser_internal()
+                .separated_by(token(Token::Comma))
+                .at_least(1)
+                .collect(),
+        )
+        .then_ignore(token(Token::RParen))
+        .boxed()
+}
+
+/// Internal Chumsky parser for import declarations.
+pub(crate) fn import_declaration_parser_internal<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    (
+        Span,
+        Vec<Span>,
+        Option<Span>,
+        Option<Vec<(Span, Option<Span>)>>,
+    ),
+    ParserExtra<'tokens>,
+> + Clone {
+    token(Token::Import)
+        .then(module_path_parser_internal())
+        .then(
+            token(Token::As)
+                .ignore_then(identifier())
+                .map(|alias| (Some(alias), None))
+                .or(token(Token::Dot)
+                    .ignore_then(import_items_parser_internal())
+                    .map(|items| (None, Some(items))))
+                .or_not(),
+        )
+        .map(|((import_span, path_segments), alias_or_items)| {
+            let (alias, items) = match alias_or_items {
+                Some((alias, items)) => (alias, items),
+                None => (None, None),
+            };
+            (import_span, path_segments, alias, items)
+        })
+        .boxed()
+}
+
+/// Emit events for an import declaration.
+pub(crate) fn emit_import_declaration(
+    sink: &mut EventSink,
+    import_span: Span,
+    path_segments: &[Span],
+    alias: Option<Span>,
+    items: Option<Vec<(Span, Option<Span>)>>,
+) {
+    sink.start_node(SyntaxKind::ImportDeclaration);
+    sink.add_token(SyntaxKind::Import, import_span);
+
+    emit_module_path(sink, path_segments);
+
+    if let Some(items_list) = &items {
+        let last_segment = path_segments.last().unwrap();
+        let last_segment_end = last_segment.end;
+        let path_file_id = last_segment.file_id;
+        sink.add_token(
+            SyntaxKind::Dot,
+            Span::new(path_file_id, last_segment_end..last_segment_end + 1),
+        );
+        sink.add_token(
+            SyntaxKind::LParen,
+            Span::new(path_file_id, last_segment_end + 1..last_segment_end + 2),
+        );
+
+        for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
+            if i > 0 {
+                let prev_span = if let Some(alias_s) =
+                    items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref())
+                {
+                    alias_s
+                } else {
+                    &items_list.get(i - 1).unwrap().0
+                };
+                let prev_end = prev_span.end;
+                sink.add_token(
+                    SyntaxKind::Comma,
+                    Span::new(prev_span.file_id, prev_end..prev_end + 1),
+                );
+            }
+
+            sink.start_node(SyntaxKind::ImportItem);
+            sink.add_token(SyntaxKind::Identifier, name_span.clone());
+
+            if let Some(alias_s) = alias_span {
+                let as_start = name_span.end + 1;
+                sink.add_token(
+                    SyntaxKind::As,
+                    Span::new(name_span.file_id, as_start..as_start + 2),
+                );
+                sink.add_token(SyntaxKind::Identifier, alias_s.clone());
+            }
+            sink.finish_node();
+        }
+
+        let last_item = items_list.last().unwrap();
+        let last_item_span = if let Some(alias_s) = &last_item.1 {
+            alias_s
+        } else {
+            &last_item.0
+        };
+        let last_item_end = last_item_span.end;
+        sink.add_token(
+            SyntaxKind::RParen,
+            Span::new(last_item_span.file_id, last_item_end..last_item_end + 1),
+        );
+    } else if let Some(alias_span) = alias {
+        let last_segment = path_segments.last().unwrap();
+        let as_start = last_segment.end + 1;
+        sink.add_token(
+            SyntaxKind::As,
+            Span::new(last_segment.file_id, as_start..as_start + 2),
+        );
+        sink.add_token(SyntaxKind::Identifier, alias_span);
+    }
+
+    sink.finish_node();
 }
 
 #[cfg(test)]
