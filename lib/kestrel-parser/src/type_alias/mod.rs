@@ -366,42 +366,64 @@ fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoun
 }
 
 /// Emit events for a type alias declaration.
+///
+/// Destructures `TypeAliasDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
 pub(crate) fn emit_type_alias_declaration(
     sink: &mut EventSink,
     data: TypeAliasDeclarationData,
 ) {
+    let TypeAliasDeclarationData {
+        attributes,
+        visibility,
+        type_span,
+        target,
+        type_params,
+        bounds,
+        where_clause,
+        aliased,
+        semicolon_span,
+    } = data;
+
     sink.start_node(SyntaxKind::TypeAliasDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Type, data.type_span);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Type, type_span);
 
-    emit_associated_type_target(sink, &data.target);
+    emit_associated_type_target(sink, &target);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    if let Some(ref bounds) = data.bounds {
+    if let Some(ref bounds) = bounds {
         emit_associated_type_bounds(sink, bounds);
     }
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
-    if let Some((equals_span, ref aliased_type)) = data.aliased {
+    if let Some((equals_span, ref aliased_type)) = aliased {
         sink.add_token(SyntaxKind::Equals, equals_span);
         sink.start_node(SyntaxKind::AliasedType);
         emit_ty_variant(sink, aliased_type);
         sink.finish_node();
     }
 
-    if let Some(semicolon_span) = data.semicolon_span {
+    if let Some(semicolon_span) = semicolon_span {
         sink.add_token(SyntaxKind::Semicolon, semicolon_span);
     }
 
     sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for TypeAliasDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_type_alias_declaration(sink, self);
+    }
 }
 
 #[cfg(test)]

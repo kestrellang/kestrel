@@ -125,40 +125,61 @@ pub fn struct_declaration_parser_internal<'tokens>()
     struct_declaration_parser_unified()
 }
 
-/// Emit events for a struct declaration
+/// Emit events for a struct declaration.
 ///
-/// This is the single source of truth for struct declaration emission.
+/// Destructures `StructDeclarationData` without a `..` rest pattern: adding a
+/// field forces this function to stop compiling until the new field is
+/// handled in emission (see the `EmitSyntax` trait docs).
 pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData) {
+    let StructDeclarationData {
+        attributes,
+        visibility,
+        struct_span,
+        name_span,
+        type_params,
+        conformances,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
     sink.start_node(SyntaxKind::StructDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Struct, data.struct_span);
-    emit_name(sink, data.name_span);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Struct, struct_span);
+    emit_name(sink, name_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    if let Some(conf) = data.conformances {
+    if let Some(conf) = conformances {
         emit_conformance_list(sink, conf.colon_span, &conf.conformances);
     }
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
     sink.start_node(SyntaxKind::StructBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
 
-    for item in data.body {
+    for item in body {
         emit_type_declaration_body_item(sink, item);
     }
 
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
     sink.finish_node(); // StructBody
 
     sink.finish_node(); // StructDeclaration
+}
+
+impl crate::event::EmitSyntax for StructDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_struct_declaration(sink, self);
+    }
 }
 
 /// Parse a struct declaration and emit events
@@ -175,6 +196,44 @@ where
         struct_declaration_parser_internal(),
         emit_struct_declaration
     );
+}
+
+#[cfg(test)]
+mod emit_syntax_trait_tests {
+    use super::*;
+    use crate::event::{EmitSyntax, EventSink, TreeBuilder};
+    use kestrel_lexer::lex;
+
+    /// Calling `.emit(sink)` on a parsed `StructDeclarationData` must produce
+    /// the same tree as calling `emit_struct_declaration(sink, data)`. This
+    /// smoke-tests the EmitSyntax trait and locks in its contract.
+    #[test]
+    fn emit_syntax_impl_matches_free_function() {
+        let source = "struct Foo { }";
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|s| (s.value, s.span))
+            .collect();
+
+        let mut sink_fn = EventSink::new(0);
+        parse_struct_declaration(source, tokens.clone().into_iter(), &mut sink_fn);
+        let tree_fn = TreeBuilder::new(source, sink_fn.into_events()).build();
+
+        // Build the same tree by calling `.emit(sink)` through the trait.
+        use chumsky::Parser;
+        use crate::input::{create_input, prepare_tokens};
+        let prepared = prepare_tokens(tokens.into_iter());
+        let input = create_input(&prepared, source.len());
+        let data = struct_declaration_parser_internal()
+            .parse(input)
+            .into_output()
+            .expect("struct should parse");
+        let mut sink_trait = EventSink::new(0);
+        data.emit(&mut sink_trait);
+        let tree_trait = TreeBuilder::new(source, sink_trait.into_events()).build();
+
+        assert_eq!(tree_fn.text().to_string(), tree_trait.text().to_string());
+    }
 }
 
 #[cfg(test)]

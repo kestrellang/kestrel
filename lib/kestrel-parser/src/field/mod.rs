@@ -383,43 +383,65 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
     sink.finish_node();
 }
 
-/// Emit events for a field declaration
+/// Emit events for a field declaration.
 ///
-/// This is the single source of truth for field declaration emission.
+/// Destructures `FieldDeclarationData` without a `..` rest pattern: adding a
+/// field forces this function to stop compiling until the new field is
+/// handled in emission.
 pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) {
+    let FieldDeclarationData {
+        attributes,
+        visibility,
+        is_static,
+        mutability_span,
+        is_mutable,
+        name_span,
+        colon_span,
+        ty,
+        computed_body,
+        initializer,
+        semicolon,
+    } = data;
+
     sink.start_node(SyntaxKind::FieldDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    emit_static_modifier(sink, is_static);
 
-    if data.is_mutable {
-        sink.add_token(SyntaxKind::Var, data.mutability_span);
+    if is_mutable {
+        sink.add_token(SyntaxKind::Var, mutability_span);
     } else {
-        sink.add_token(SyntaxKind::Let, data.mutability_span);
+        sink.add_token(SyntaxKind::Let, mutability_span);
     }
 
-    emit_name(sink, data.name_span);
-    sink.add_token(SyntaxKind::Colon, data.colon_span);
-    emit_ty_variant(sink, &data.ty);
+    emit_name(sink, name_span);
+    sink.add_token(SyntaxKind::Colon, colon_span);
+    emit_ty_variant(sink, &ty);
 
     // Emit computed property body if present
-    if let Some(computed_body) = &data.computed_body {
+    if let Some(computed_body) = &computed_body {
         emit_property_accessors(sink, computed_body);
     }
 
     // Emit initializer if present
-    if let Some((equals_span, initializer_expr)) = data.initializer {
+    if let Some((equals_span, initializer_expr)) = initializer {
         sink.add_token(SyntaxKind::Equals, equals_span);
         emit_expr_variant(sink, &initializer_expr);
     }
 
     // Emit optional trailing semicolon
-    if let Some(semicolon_span) = data.semicolon {
+    if let Some(semicolon_span) = semicolon {
         sink.add_token(SyntaxKind::Semicolon, semicolon_span);
     }
 
     sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for FieldDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_field_declaration(sink, self);
+    }
 }
 
 /// Parse a field declaration and emit events

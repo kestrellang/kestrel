@@ -184,6 +184,43 @@ New/updated tests in `parser.rs` and `event.rs`:
 
 Verification: `cargo test -p kestrel-parser`
 
+### Step 10: Make Emitters Harder To Misuse
+
+Added an `EmitSyntax` trait in `event.rs` so every parser-data type can be
+emitted through a single uniform method (`data.emit(sink)`). The trait is
+paired with a stronger discipline in each implementor: every emitter for the
+declaration-level data structs now destructures its `Data` argument with a
+non-exhaustive-free pattern (no `..` rest). Adding a field to any of these
+structs is therefore a compile error until the field is handled in emission.
+
+Converted emitters for:
+
+- `StructDeclarationData`
+- `FunctionDeclarationData`
+- `FieldDeclarationData`
+- `EnumDeclarationData`
+- `EnumCaseDeclarationData`
+- `ExtensionDeclarationData`
+- `ProtocolDeclarationData`
+- `SubscriptDeclarationData`
+- `TypeAliasDeclarationData`
+- `InitializerDeclarationData`
+- `DeinitDeclarationData`
+- `VariableDeclarationData`
+- `DeinitStatementData`
+
+Enum dispatchers (`emit_declaration_item`, `emit_type_declaration_body_item`,
+`emit_stmt_variant`, `emit_expr_variant`, `emit_ty_variant`) already use
+exhaustive `match`, so variant additions are already compile errors. The
+destructuring discipline closes the complementary gap for struct-field
+additions.
+
+Added `emit_syntax_impl_matches_free_function` smoke test in
+`struct/mod.rs` that verifies the trait impl produces the same tree as the
+free function, locking in the trait contract.
+
+Verification: `cargo test -p kestrel-parser`
+
 ### Step 12: Deliberate Top-Level Error Recovery
 
 Added an explicit recovery anchor at the top-level declaration loop so a
@@ -262,14 +299,6 @@ Target ownership:
 - enum cases live in `enum_decl`
 - struct-specific body rules live in `struct`
 - shared recursion glue stays in `type_decl`
-
-### Step 10: Make Emitters Harder To Misuse
-
-Either colocate emitters next to parser data, or introduce a small trait such as
-`EmitSyntax`.
-
-Goal: adding a syntax field should fail compilation or local tests unless
-emission is handled.
 
 ## Acceptance Criteria
 

@@ -238,18 +238,36 @@ pub fn function_declaration_parser_internal<'tokens>()
         .boxed()
 }
 
-/// Emit events for a function declaration
+/// Emit events for a function declaration.
 ///
-/// This is the single source of truth for function declaration emission.
+/// Destructures `FunctionDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
 pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclarationData) {
+    let FunctionDeclarationData {
+        attributes,
+        visibility,
+        is_static,
+        receiver_modifier,
+        fn_span,
+        name_span,
+        type_params,
+        lparen,
+        parameters,
+        rparen,
+        return_type,
+        where_clause,
+        body,
+    } = data;
+
     sink.start_node(SyntaxKind::FunctionDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    emit_static_modifier(sink, is_static);
 
     // Emit receiver modifier (mutating/consuming) if present
-    if let Some((modifier, span)) = data.receiver_modifier {
+    if let Some((modifier, span)) = receiver_modifier {
         let kind = match modifier {
             ReceiverModifier::Mutating => SyntaxKind::Mutating,
             ReceiverModifier::Consuming => SyntaxKind::Consuming,
@@ -257,28 +275,34 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
         sink.add_token(kind, span);
     }
 
-    sink.add_token(SyntaxKind::Func, data.fn_span);
-    emit_name(sink, data.name_span);
+    sink.add_token(SyntaxKind::Func, fn_span);
+    emit_name(sink, name_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+    emit_parameter_list(sink, lparen, parameters, rparen);
 
-    if let Some((arrow_span, return_ty)) = data.return_type {
+    if let Some((arrow_span, return_ty)) = return_type {
         emit_return_type(sink, arrow_span, return_ty);
     }
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
-    if let Some(ref body) = data.body {
-        emit_function_body(sink, body);
+    if let Some(body) = body {
+        emit_function_body(sink, &body);
     }
 
     sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for FunctionDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_function_declaration(sink, self);
+    }
 }
 
 /// Parse a function declaration and emit events

@@ -446,34 +446,56 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
     sink.finish_node(); // SubscriptBody
 }
 
-/// Emit events for a subscript declaration
+/// Emit events for a subscript declaration.
 ///
-/// This is the single source of truth for subscript declaration emission.
+/// Destructures `SubscriptDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
 pub fn emit_subscript_declaration(sink: &mut EventSink, data: SubscriptDeclarationData) {
+    let SubscriptDeclarationData {
+        attributes,
+        visibility,
+        is_static,
+        subscript_span,
+        type_params,
+        lparen,
+        parameters,
+        rparen,
+        return_type,
+        where_clause,
+        body,
+    } = data;
+
     sink.start_node(SyntaxKind::SubscriptDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    emit_static_modifier(sink, is_static);
 
-    sink.add_token(SyntaxKind::Subscript, data.subscript_span);
+    sink.add_token(SyntaxKind::Subscript, subscript_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+    emit_parameter_list(sink, lparen, parameters, rparen);
 
-    let (arrow_span, return_ty) = data.return_type;
+    let (arrow_span, return_ty) = return_type;
     emit_return_type(sink, arrow_span, return_ty);
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
-    emit_subscript_body(sink, &data.body);
+    emit_subscript_body(sink, &body);
 
     sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for SubscriptDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_subscript_declaration(sink, self);
+    }
 }
 
 /// Parse a subscript declaration and emit events

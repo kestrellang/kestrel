@@ -23,6 +23,17 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
+/// Emit a typed piece of parser data to an [`EventSink`].
+///
+/// Implementors are expected to destructure their data without a `..` rest
+/// pattern so that adding a new field forces the emitter to be updated (or
+/// fail to compile). The combination — one trait, one destructure per impl
+/// — gives us a local compile-time check that a new syntax field is handled
+/// by the emitter instead of being silently dropped.
+pub trait EmitSyntax {
+    fn emit(self, sink: &mut EventSink);
+}
+
 /// Distinct trivia kinds that can appear between syntax tokens. Kept local to
 /// the tree builder so callers don't need to know the enumeration.
 fn is_trivia_kind(kind: SyntaxKind) -> bool {

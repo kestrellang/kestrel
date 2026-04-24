@@ -204,59 +204,98 @@ pub(crate) fn emit_enum_case_parameter_list(
     sink.finish_node();
 }
 
-/// Emit events for an enum case declaration
+/// Emit events for an enum case declaration.
+///
+/// Destructures `EnumCaseDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
 pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
-    sink.start_node(SyntaxKind::EnumCaseDeclaration);
-    emit_attribute_list(sink, &data.attributes);
-    sink.add_token(SyntaxKind::Case, data.case_span);
-    emit_name(sink, data.name_span);
+    let EnumCaseDeclarationData {
+        attributes,
+        case_span,
+        name_span,
+        parameters,
+    } = data;
 
-    if let Some((lparen, ref params, rparen)) = data.parameters {
+    sink.start_node(SyntaxKind::EnumCaseDeclaration);
+    emit_attribute_list(sink, &attributes);
+    sink.add_token(SyntaxKind::Case, case_span);
+    emit_name(sink, name_span);
+
+    if let Some((lparen, ref params, rparen)) = parameters {
         emit_enum_case_parameter_list(sink, lparen, params, rparen);
     }
 
     sink.finish_node();
 }
 
-/// Emit events for an enum declaration
+impl crate::event::EmitSyntax for EnumCaseDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_enum_case(sink, self);
+    }
+}
+
+/// Emit events for an enum declaration.
 ///
-/// This is the single source of truth for enum declaration emission.
+/// Destructures `EnumDeclarationData` without a `..` rest pattern: adding a
+/// field forces this function to stop compiling until the new field is
+/// handled in emission.
 pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
+    let EnumDeclarationData {
+        attributes,
+        visibility,
+        indirect,
+        enum_span,
+        name_span,
+        type_params,
+        conformances,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
     sink.start_node(SyntaxKind::EnumDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
 
-    if let Some(indirect_span) = data.indirect {
+    if let Some(indirect_span) = indirect {
         emit_indirect_modifier(sink, indirect_span);
     }
 
-    sink.add_token(SyntaxKind::Enum, data.enum_span);
-    emit_name(sink, data.name_span);
+    sink.add_token(SyntaxKind::Enum, enum_span);
+    emit_name(sink, name_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    if let Some(conf) = data.conformances {
+    if let Some(conf) = conformances {
         emit_conformance_list(sink, conf.colon_span, &conf.conformances);
     }
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
     sink.start_node(SyntaxKind::EnumBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
 
-    for item in data.body {
+    for item in body {
         emit_type_declaration_body_item(sink, item);
     }
 
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
     sink.finish_node(); // EnumBody
 
     sink.finish_node(); // EnumDeclaration
+}
+
+impl crate::event::EmitSyntax for EnumDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_enum_declaration(sink, self);
+    }
 }
 
 /// Parse an enum declaration and emit events

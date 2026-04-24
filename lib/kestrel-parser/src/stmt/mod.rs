@@ -231,35 +231,48 @@ pub fn emit_stmt_variant(sink: &mut EventSink, variant: &StmtVariant) {
     }
 }
 
-/// Emit events for a variable declaration
+/// Emit events for a variable declaration.
+///
+/// Destructures `VariableDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
 fn emit_variable_declaration(sink: &mut EventSink, data: &VariableDeclarationData) {
+    let VariableDeclarationData {
+        mutability_span,
+        is_mutable,
+        pattern,
+        type_annotation,
+        initializer,
+        semicolon,
+    } = data;
+
     sink.start_node(SyntaxKind::Statement);
     sink.start_node(SyntaxKind::VariableDeclaration);
 
     // let/var keyword
-    if data.is_mutable {
-        sink.add_token(SyntaxKind::Var, data.mutability_span.clone());
+    if *is_mutable {
+        sink.add_token(SyntaxKind::Var, mutability_span.clone());
     } else {
-        sink.add_token(SyntaxKind::Let, data.mutability_span.clone());
+        sink.add_token(SyntaxKind::Let, mutability_span.clone());
     }
 
     // Pattern
-    emit_pattern_variant(sink, &data.pattern);
+    emit_pattern_variant(sink, pattern);
 
     // Optional type annotation
-    if let Some((colon_span, ty)) = &data.type_annotation {
+    if let Some((colon_span, ty)) = type_annotation {
         sink.add_token(SyntaxKind::Colon, colon_span.clone());
         emit_ty_variant(sink, ty);
     }
 
     // Optional initializer
-    if let Some((eq_span, expr)) = &data.initializer {
+    if let Some((eq_span, expr)) = initializer {
         sink.add_token(SyntaxKind::Equals, eq_span.clone());
         emit_expr_variant(sink, expr);
     }
 
     // Semicolon
-    sink.add_token(SyntaxKind::Semicolon, data.semicolon.clone());
+    sink.add_token(SyntaxKind::Semicolon, semicolon.clone());
 
     sink.finish_node(); // Finish VariableDeclaration
     sink.finish_node(); // Finish Statement
@@ -277,14 +290,24 @@ fn emit_expression_statement(sink: &mut EventSink, expr: &ExprVariant, semicolon
     sink.finish_node(); // Finish Statement
 }
 
-/// Emit events for a deinit statement
+/// Emit events for a deinit statement.
+///
+/// Destructures `DeinitStatementData` without a `..` rest pattern: adding a
+/// field forces this function to stop compiling until the new field is
+/// handled in emission.
 fn emit_deinit_statement(sink: &mut EventSink, data: &DeinitStatementData) {
+    let DeinitStatementData {
+        deinit_span,
+        identifier_span,
+        semicolon,
+    } = data;
+
     sink.start_node(SyntaxKind::Statement);
     sink.start_node(SyntaxKind::DeinitStatement);
 
-    sink.add_token(SyntaxKind::Deinit, data.deinit_span.clone());
-    sink.add_token(SyntaxKind::Identifier, data.identifier_span.clone());
-    sink.add_token(SyntaxKind::Semicolon, data.semicolon.clone());
+    sink.add_token(SyntaxKind::Deinit, deinit_span.clone());
+    sink.add_token(SyntaxKind::Identifier, identifier_span.clone());
+    sink.add_token(SyntaxKind::Semicolon, semicolon.clone());
 
     sink.finish_node(); // Finish DeinitStatement
     sink.finish_node(); // Finish Statement

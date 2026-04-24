@@ -218,33 +218,48 @@ pub fn protocol_declaration_parser_internal<'tokens>()
         .boxed()
 }
 
-/// Emit events for a protocol declaration
+/// Emit events for a protocol declaration.
 ///
-/// This is the single source of truth for protocol declaration emission.
+/// Destructures `ProtocolDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
 pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclarationData) {
+    let ProtocolDeclarationData {
+        attributes,
+        visibility,
+        protocol_span,
+        name_span,
+        type_params,
+        inherited,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
     sink.start_node(SyntaxKind::ProtocolDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Protocol, data.protocol_span);
-    emit_name(sink, data.name_span);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Protocol, protocol_span);
+    emit_name(sink, name_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    if let Some(inherited) = data.inherited {
+    if let Some(inherited) = inherited {
         emit_conformance_list(sink, inherited.colon_span, &inherited.conformances);
     }
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
     sink.start_node(SyntaxKind::ProtocolBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
 
-    for item in data.body {
+    for item in body {
         match item {
             ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
             ProtocolBodyItem::Subscript(subscript_data) => {
@@ -260,10 +275,16 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
         }
     }
 
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
     sink.finish_node(); // ProtocolBody
 
     sink.finish_node(); // ProtocolDeclaration
+}
+
+impl crate::event::EmitSyntax for ProtocolDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_protocol_declaration(sink, self);
+    }
 }
 
 /// Parse a protocol declaration and emit events

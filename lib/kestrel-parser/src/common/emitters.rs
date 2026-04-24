@@ -268,41 +268,70 @@ pub fn emit_function_body(sink: &mut EventSink, body: &FunctionBodyData) {
 // Declaration Emitters - Single Source of Truth
 // =============================================================================
 
-/// Emit events for an initializer declaration
+/// Emit events for an initializer declaration.
 ///
-/// This is the single source of truth for initializer declaration emission.
+/// Destructures `InitializerDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
 pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDeclarationData) {
+    let InitializerDeclarationData {
+        attributes,
+        visibility,
+        init_span,
+        type_params,
+        lparen,
+        parameters,
+        rparen,
+        where_clause,
+        body,
+    } = data;
+
     sink.start_node(SyntaxKind::InitializerDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Init, data.init_span);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Init, init_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+    emit_parameter_list(sink, lparen, parameters, rparen);
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
-    if let Some(ref block) = data.body {
-        emit_function_body(sink, &FunctionBodyData::Block(block.clone()));
+    if let Some(block) = body {
+        emit_function_body(sink, &FunctionBodyData::Block(block));
     }
 
     sink.finish_node();
 }
 
-/// Emit events for a deinitializer declaration
+impl crate::event::EmitSyntax for InitializerDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_initializer_declaration(sink, self);
+    }
+}
+
+/// Emit events for a deinitializer declaration.
 ///
-/// This is the single source of truth for deinit declaration emission.
+/// Destructures `DeinitDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
 pub fn emit_deinit_declaration(sink: &mut EventSink, data: DeinitDeclarationData) {
+    let DeinitDeclarationData { deinit_span, body } = data;
     sink.start_node(SyntaxKind::DeinitDeclaration);
-    sink.add_token(SyntaxKind::Deinit, data.deinit_span);
-    emit_function_body(sink, &FunctionBodyData::Block(data.body));
+    sink.add_token(SyntaxKind::Deinit, deinit_span);
+    emit_function_body(sink, &FunctionBodyData::Block(body));
     sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for DeinitDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_deinit_declaration(sink, self);
+    }
 }
 
 /// Emit events for a type declaration body item (struct or enum body item)

@@ -182,31 +182,43 @@ pub fn extension_declaration_parser_internal<'tokens>()
         .boxed()
 }
 
-/// Emit events for an extension declaration
+/// Emit events for an extension declaration.
 ///
-/// This is the single source of truth for extension declaration emission.
+/// Destructures `ExtensionDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
 pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarationData) {
+    let ExtensionDeclarationData {
+        extend_span,
+        target_type,
+        conformances,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
     sink.start_node(SyntaxKind::ExtensionDeclaration);
 
-    sink.add_token(SyntaxKind::Extend, data.extend_span);
+    sink.add_token(SyntaxKind::Extend, extend_span);
 
     // Emit target type (e.g., Box[T, Int])
-    emit_ty_variant(sink, &data.target_type);
+    emit_ty_variant(sink, &target_type);
 
     // Emit conformance list if present
-    if let Some(conf) = data.conformances {
+    if let Some(conf) = conformances {
         emit_conformance_list(sink, conf.colon_span, &conf.conformances);
     }
 
     // Emit where clause if present
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
     sink.start_node(SyntaxKind::ExtensionBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
 
-    for item in data.body {
+    for item in body {
         match item {
             ExtensionBodyItem::Function(d) => emit_function_declaration(sink, d),
             ExtensionBodyItem::Subscript(d) => emit_subscript_declaration(sink, d),
@@ -215,10 +227,16 @@ pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarati
         }
     }
 
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
     sink.finish_node(); // ExtensionBody
 
     sink.finish_node(); // ExtensionDeclaration
+}
+
+impl crate::event::EmitSyntax for ExtensionDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_extension_declaration(sink, self);
+    }
 }
 
 /// Parse an extension declaration and emit events
