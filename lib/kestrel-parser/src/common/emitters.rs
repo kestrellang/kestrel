@@ -12,8 +12,7 @@ use super::data::{
     AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
     EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
     FunctionBodyData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
-    ProtocolBodyItem, ProtocolDeclarationData, StructDeclarationData, SubscriptBodyData,
-    SubscriptDeclarationData, TypeDeclarationBodyItem,
+    ProtocolBodyItem, ProtocolDeclarationData, StructDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -23,6 +22,7 @@ use crate::function::emit_function_declaration;
 use crate::import::emit_import_declaration;
 use crate::module::emit_module_declaration;
 use crate::pattern::emit_pattern_variant;
+use crate::subscript::emit_subscript_declaration;
 use crate::ty::emit_ty_variant;
 use crate::type_alias::emit_type_alias_declaration;
 use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
@@ -552,95 +552,3 @@ pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
     sink.finish_node(); // EnumDeclaration
 }
 
-// =============================================================================
-// Subscript Emitters
-// =============================================================================
-
-/// Emit events for subscript body
-fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
-    sink.start_node(SyntaxKind::SubscriptBody);
-
-    match body {
-        SubscriptBodyData::Shorthand(code_block) => {
-            // Shorthand: just emit the code block directly
-            emit_code_block(sink, code_block);
-        },
-        SubscriptBodyData::Accessors {
-            lbrace: _,
-            get_span,
-            getter,
-            set_span,
-            setter,
-            rbrace: _,
-        } => {
-            // Wrap accessors in PropertyAccessors node
-            sink.start_node(SyntaxKind::PropertyAccessors);
-
-            // Emit getter
-            if let Some(getter_body) = getter {
-                // Full getter with body: emit GetterClause containing Get token and code block
-                sink.start_node(SyntaxKind::GetterClause);
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-                emit_code_block(sink, getter_body);
-                sink.finish_node();
-            } else {
-                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-            }
-
-            // Emit setter
-            if let Some(setter_body) = setter {
-                // Check if this is a real setter body or a placeholder for protocol requirement
-                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: emit Set token without body
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                } else {
-                    // Full setter with body: emit SetterClause containing Set token and code block
-                    sink.start_node(SyntaxKind::SetterClause);
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                    emit_code_block(sink, setter_body);
-                    sink.finish_node();
-                }
-            }
-
-            sink.finish_node(); // PropertyAccessors
-        },
-    }
-
-    sink.finish_node(); // SubscriptBody
-}
-
-/// Emit events for a subscript declaration
-///
-/// This is the single source of truth for subscript declaration emission.
-pub fn emit_subscript_declaration(sink: &mut EventSink, data: SubscriptDeclarationData) {
-    sink.start_node(SyntaxKind::SubscriptDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
-
-    sink.add_token(SyntaxKind::Subscript, data.subscript_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
-
-    // Return type is required for subscripts
-    let (arrow_span, return_ty) = data.return_type;
-    emit_return_type(sink, arrow_span, return_ty);
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    emit_subscript_body(sink, &data.body);
-
-    sink.finish_node(); // SubscriptDeclaration
-}

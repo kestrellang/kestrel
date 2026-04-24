@@ -15,12 +15,12 @@ use crate::attribute::attribute_list_parser;
 use crate::common::ConformanceListData;
 use crate::common::{
     ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration, identifier,
-    initializer_declaration_parser_internal, subscript_declaration_parser_internal, token,
-    visibility_parser_internal,
+    initializer_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::field::field_declaration_parser_internal;
 use crate::function::function_declaration_parser_internal;
+use crate::subscript::subscript_declaration_parser_internal;
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};

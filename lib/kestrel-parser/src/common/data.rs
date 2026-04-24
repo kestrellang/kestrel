@@ -11,6 +11,7 @@ use crate::expr::ExprVariant;
 use crate::field::FieldDeclarationData;
 use crate::function::FunctionDeclarationData;
 use crate::pattern::PatternVariant;
+use crate::subscript::SubscriptDeclarationData;
 use crate::ty::TyVariant;
 use crate::type_alias::TypeAliasDeclarationData;
 use crate::type_param::{TypeParameterData, WhereClauseData};
@@ -307,41 +308,3 @@ pub enum ExtensionBodyItem {
     TypeAlias(TypeAliasDeclarationData),
 }
 
-/// Raw parsed data for subscript declaration internals
-///
-/// Subscript syntax: `(visibility)? (static)? subscript[T]?(params) -> Type (where ...)? { body }`
-/// Body can be shorthand `{ expr }`, explicit `{ get { } set { } }`, or protocol `{ get }` / `{ get set }`
-#[derive(Debug, Clone)]
-pub struct SubscriptDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub is_static: Option<Span>,
-    pub subscript_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub lparen: Span,
-    pub parameters: Vec<ParameterData>,
-    pub rparen: Span,
-    pub return_type: (Span, TyVariant), // (arrow_span, return_ty) - required for subscripts
-    pub where_clause: Option<WhereClauseData>,
-    pub body: SubscriptBodyData,
-}
-
-/// Body data for subscript declarations
-#[derive(Debug, Clone)]
-pub enum SubscriptBodyData {
-    /// Shorthand: `{ expr }` - just a code block with an expression
-    Shorthand(CodeBlockData),
-    /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
-    Accessors {
-        /// Span of the opening brace (for subscript body block)
-        lbrace: Span,
-        /// Span of the "get" keyword
-        get_span: Span,
-        getter: Option<CodeBlockData>, // None for protocol `{ get }`
-        /// Span of the "set" keyword (if present)
-        set_span: Option<Span>,
-        setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
-        /// Span of the closing brace (for subscript body block)
-        rbrace: Span,
-    },
-}

@@ -18,14 +18,11 @@ use crate::common::{
     ProtocolDeclarationData,
     // Shared data types
     StructDeclarationData,
-    SubscriptDeclarationData,
     emit_enum_declaration,
     emit_extension_declaration,
     // Shared emitters
     emit_protocol_declaration,
     emit_struct_declaration,
-    emit_subscript_declaration,
-    subscript_declaration_parser_internal,
 };
 use crate::enum_decl::EnumDeclaration;
 use crate::event::EventSink;
@@ -45,7 +42,10 @@ use crate::module::{
 };
 use crate::protocol::{ProtocolDeclaration, protocol_declaration_parser_internal};
 use crate::r#struct::StructDeclaration;
-use crate::subscript::SubscriptDeclaration;
+use crate::subscript::{
+    SubscriptDeclaration, SubscriptDeclarationData, emit_subscript_declaration,
+    subscript_declaration_parser_internal,
+};
 use crate::type_alias::{
     TypeAliasDeclaration, TypeAliasDeclarationData, emit_type_alias_declaration,
     type_alias_declaration_parser_internal,
