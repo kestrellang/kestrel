@@ -13,7 +13,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
 use crate::pattern::pattern_parser;
 use crate::stmt::{StmtVariant, emit_stmt_variant};
 
@@ -516,19 +517,13 @@ pub fn parse_code_block<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match code_block_parser().parse(input).into_result() {
-        Ok(data) => {
-            emit_code_block(sink, &data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        code_block_parser(),
+        |sink, data: CodeBlockData| emit_code_block(sink, &data)
+    );
 }
 
 #[cfg(test)]

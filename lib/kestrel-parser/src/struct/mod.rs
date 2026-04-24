@@ -16,7 +16,8 @@ use crate::common::{
     emit_type_declaration_body_item, emit_visibility,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
 use crate::type_decl::struct_declaration_parser_unified;
 use crate::type_param::{
     TypeParameterData, WhereClauseData, emit_conformance_list, emit_type_parameter_list,
@@ -167,22 +168,13 @@ pub fn parse_struct_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match struct_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_struct_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        struct_declaration_parser_internal(),
+        emit_struct_declaration
+    );
 }
 
 #[cfg(test)]

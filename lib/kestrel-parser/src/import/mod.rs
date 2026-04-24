@@ -4,7 +4,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{emit_module_path, identifier, module_path_parser_internal, token};
 use crate::event::EventSink;
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
 use crate::module::ModulePath;
 
 use chumsky::prelude::*;
@@ -89,22 +90,19 @@ pub fn parse_import_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match import_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok((import_span, path_segments, alias, items)) => {
-            emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        import_declaration_parser_internal(),
+        |sink,
+         (import_span, path_segments, alias, items): (
+            Span,
+            Vec<Span>,
+            Option<Span>,
+            Option<Vec<(Span, Option<Span>)>>,
+        )| emit_import_declaration(sink, import_span, &path_segments, alias, items)
+    );
 }
 
 /// Internal parser for import item (identifier or identifier as alias).

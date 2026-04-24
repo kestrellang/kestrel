@@ -16,7 +16,8 @@ use crate::common::{
     static_parser, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
 use crate::ty::TyVariant;
 use crate::type_param::{
     TypeParameterData, WhereClauseData, emit_type_parameter_list, emit_where_clause,
@@ -287,22 +288,13 @@ pub fn parse_function_declaration<I>(source: &str, tokens: I, sink: &mut EventSi
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match function_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_function_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        function_declaration_parser_internal(),
+        emit_function_declaration
+    );
 }
 
 #[cfg(test)]

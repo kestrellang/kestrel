@@ -15,7 +15,8 @@ use crate::common::{
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
 /// Represents a field declaration: (visibility)? (static)? let/var name: Type
@@ -428,22 +429,13 @@ pub fn parse_field_declaration<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match field_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_field_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        field_declaration_parser_internal(),
+        emit_field_declaration
+    );
 }
 
 #[cfg(test)]

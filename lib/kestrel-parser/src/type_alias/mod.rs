@@ -38,7 +38,8 @@ use crate::common::{
     visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 use crate::type_param::{
     TypeParameterData, WhereClauseData, emit_type_parameter_list, emit_where_clause,
@@ -316,22 +317,13 @@ pub fn parse_type_alias_declaration<I>(source: &str, tokens: I, sink: &mut Event
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match type_alias_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_type_alias_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        type_alias_declaration_parser_internal(),
+        emit_type_alias_declaration
+    );
 }
 
 /// Emit events for an associated type target.

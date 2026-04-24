@@ -18,7 +18,8 @@ use crate::event::{EventSink, TreeBuilder};
 use crate::function::{
     FunctionDeclarationData, emit_function_declaration, function_declaration_parser_internal,
 };
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
 use crate::subscript::{
     SubscriptDeclarationData, emit_subscript_declaration, subscript_declaration_parser_internal,
 };
@@ -227,24 +228,13 @@ pub fn parse_extension_declaration<I>(source: &str, tokens: I, sink: &mut EventS
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::Parser;
-
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match extension_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_extension_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        extension_declaration_parser_internal(),
+        emit_extension_declaration
+    );
 }
 
 #[cfg(test)]

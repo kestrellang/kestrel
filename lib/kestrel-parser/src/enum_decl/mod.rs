@@ -17,7 +17,8 @@ use crate::common::{
     emit_type_declaration_body_item, emit_visibility,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
 use crate::ty::{TyVariant, emit_ty_variant};
 use crate::type_decl::enum_declaration_parser_unified;
 use crate::type_param::{
@@ -265,22 +266,13 @@ pub fn parse_enum_declaration<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match enum_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_enum_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        enum_declaration_parser_internal(),
+        emit_enum_declaration
+    );
 }
 
 #[cfg(test)]

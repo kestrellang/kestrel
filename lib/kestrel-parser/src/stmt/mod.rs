@@ -12,7 +12,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
 use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
@@ -294,19 +295,13 @@ pub fn parse_stmt<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match stmt_parser().parse(input).into_result() {
-        Ok(variant) => {
-            emit_stmt_variant(sink, &variant);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        stmt_parser(),
+        |sink, variant: StmtVariant| emit_stmt_variant(sink, &variant)
+    );
 }
 
 #[cfg(test)]

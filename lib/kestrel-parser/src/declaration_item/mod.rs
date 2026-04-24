@@ -27,7 +27,8 @@ use crate::function::{
     function_declaration_parser_internal,
 };
 use crate::import::{ImportDeclaration, emit_import_declaration, import_declaration_parser_internal};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
 use crate::module::{
     ModuleDeclaration, emit_module_declaration, module_declaration_parser_internal,
 };
@@ -237,23 +238,13 @@ pub fn parse_declaration_item<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match declaration_item_parser_internal()
-        .then_ignore(skip_trivia())
-        .parse(input)
-        .into_result()
-    {
-        Ok(item_data) => {
-            emit_declaration_item(sink, item_data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        declaration_item_parser_internal().then_ignore(skip_trivia()),
+        emit_declaration_item
+    );
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -263,27 +254,19 @@ pub fn parse_source_file<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    sink.start_node(SyntaxKind::SourceFile);
-
-    match declaration_items_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(items) => {
-            for item_data in items {
-                emit_declaration_item(sink, item_data);
-            }
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
+    fn emit_items(sink: &mut EventSink, items: Vec<DeclarationItemData>) {
+        for item_data in items {
+            emit_declaration_item(sink, item_data);
+        }
     }
-
+    sink.start_node(SyntaxKind::SourceFile);
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        declaration_items_parser_internal(),
+        emit_items
+    );
     sink.finish_node();
 }
 
