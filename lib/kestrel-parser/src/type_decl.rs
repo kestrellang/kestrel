@@ -20,10 +20,10 @@ use crate::common::{
     StructDeclarationData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
     field_declaration_parser_internal, function_declaration_parser_internal, identifier,
     import_declaration_parser_internal, initializer_declaration_parser_internal,
-    module_declaration_parser_internal, subscript_declaration_parser_internal, token,
-    visibility_parser_internal,
+    subscript_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::module::module_declaration_parser_internal;
 use crate::ty::ty_parser;
 use crate::type_alias::type_alias_declaration_parser_internal;
 use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};

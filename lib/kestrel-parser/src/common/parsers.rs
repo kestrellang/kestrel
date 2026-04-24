@@ -123,21 +123,6 @@ pub fn visibility_parser_internal<'tokens>()
     .or_not()
 }
 
-/// Internal Chumsky parser for module declaration
-///
-/// Parses: `module A.B.C`
-/// Returns: `(module_keyword_span, path_segments)`
-///
-/// # Examples
-/// - `module A` → `(span(module), [span(A)])`
-/// - `module A.B.C` → `(span(module), [span(A), span(B), span(C)])`
-pub fn module_declaration_parser_internal<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<Span>), ParserExtra<'tokens>> + Clone {
-    token(Token::Module)
-        .then(module_path_parser_internal())
-        .boxed()
-}
-
 /// Internal parser for import item (identifier or identifier as alias)
 ///
 /// Parses a single import item, optionally with an alias:

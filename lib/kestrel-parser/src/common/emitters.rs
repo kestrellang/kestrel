@@ -20,6 +20,7 @@ use super::data::{
 use crate::block::emit_code_block;
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
+use crate::module::emit_module_declaration;
 use crate::pattern::emit_pattern_variant;
 use crate::ty::emit_ty_variant;
 use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
@@ -43,14 +44,6 @@ pub fn emit_module_path(sink: &mut EventSink, segments: &[Span]) {
         }
         sink.add_token(SyntaxKind::Identifier, span.clone());
     }
-    sink.finish_node();
-}
-
-/// Emit events for a module declaration
-pub fn emit_module_declaration(sink: &mut EventSink, module_span: Span, path_segments: &[Span]) {
-    sink.start_node(SyntaxKind::ModuleDeclaration);
-    sink.add_token(SyntaxKind::Module, module_span);
-    emit_module_path(sink, path_segments);
     sink.finish_node();
 }
 

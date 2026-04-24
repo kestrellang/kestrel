@@ -28,7 +28,6 @@ use crate::common::{
     emit_function_declaration,
     emit_import_declaration,
     // Shared emitters
-    emit_module_declaration,
     emit_protocol_declaration,
     emit_struct_declaration,
     emit_subscript_declaration,
@@ -36,7 +35,6 @@ use crate::common::{
     field_declaration_parser_internal,
     function_declaration_parser_internal,
     import_declaration_parser_internal,
-    module_declaration_parser_internal,
     subscript_declaration_parser_internal,
 };
 use crate::enum_decl::EnumDeclaration;
@@ -46,7 +44,9 @@ use crate::field::FieldDeclaration;
 use crate::function::FunctionDeclaration;
 use crate::import::ImportDeclaration;
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::module::ModuleDeclaration;
+use crate::module::{
+    ModuleDeclaration, emit_module_declaration, module_declaration_parser_internal,
+};
 use crate::protocol::{ProtocolDeclaration, protocol_declaration_parser_internal};
 use crate::r#struct::StructDeclaration;
 use crate::subscript::SubscriptDeclaration;
