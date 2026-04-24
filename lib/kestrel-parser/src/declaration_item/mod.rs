@@ -14,17 +14,18 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
     EnumDeclarationData,
-    ExtensionDeclarationData,
     // Shared data types
     StructDeclarationData,
     emit_enum_declaration,
-    emit_extension_declaration,
     // Shared emitters
     emit_struct_declaration,
 };
 use crate::enum_decl::EnumDeclaration;
 use crate::event::EventSink;
-use crate::extension::{ExtensionDeclaration, extension_declaration_parser_internal};
+use crate::extension::{
+    ExtensionDeclaration, ExtensionDeclarationData, emit_extension_declaration,
+    extension_declaration_parser_internal,
+};
 use crate::field::{
     FieldDeclaration, FieldDeclarationData, emit_field_declaration,
     field_declaration_parser_internal,
