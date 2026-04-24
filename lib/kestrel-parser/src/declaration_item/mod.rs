@@ -39,23 +39,19 @@ use crate::common::{
     module_declaration_parser_internal,
     subscript_declaration_parser_internal,
 };
-use crate::enum_decl::{EnumDeclaration, parse_enum_declaration};
+use crate::enum_decl::EnumDeclaration;
 use crate::event::EventSink;
-use crate::extension::{
-    ExtensionDeclaration, extension_declaration_parser_internal, parse_extension_declaration,
-};
-use crate::field::{FieldDeclaration, parse_field_declaration};
-use crate::function::{FunctionDeclaration, parse_function_declaration};
-use crate::import::{ImportDeclaration, parse_import_declaration};
+use crate::extension::{ExtensionDeclaration, extension_declaration_parser_internal};
+use crate::field::FieldDeclaration;
+use crate::function::FunctionDeclaration;
+use crate::import::ImportDeclaration;
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::module::{ModuleDeclaration, parse_module_declaration};
-use crate::protocol::{
-    ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
-};
-use crate::r#struct::{StructDeclaration, parse_struct_declaration};
-use crate::subscript::{SubscriptDeclaration, parse_subscript_declaration};
+use crate::module::ModuleDeclaration;
+use crate::protocol::{ProtocolDeclaration, protocol_declaration_parser_internal};
+use crate::r#struct::StructDeclaration;
+use crate::subscript::SubscriptDeclaration;
 use crate::type_alias::{
-    TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
+    TypeAliasDeclaration, type_alias_declaration_parser_internal,
 };
 use crate::type_decl::{TypeDeclarationData, type_declaration_parser_internal};
 
@@ -126,39 +122,6 @@ enum DeclarationItemData {
     Function(FunctionDeclarationData),
     Subscript(SubscriptDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
-}
-
-/// Helper to copy events from one sink to another
-fn copy_events(from: EventSink, to: &mut EventSink) {
-    for event in from.into_events() {
-        match event {
-            crate::event::Event::StartNode(kind) => to.start_node(kind),
-            crate::event::Event::AddToken(kind, span) => to.add_token(kind, span),
-            crate::event::Event::FinishNode => to.finish_node(),
-            crate::event::Event::Error { message, span } => to.error(message, span),
-        }
-    }
-}
-
-/// Try to parse with a given parser, returns true if successful
-fn try_parse<I, F>(source: &str, tokens: I, sink: &mut EventSink, parse_fn: F) -> bool
-where
-    I: Iterator<Item = (Token, Span)> + Clone,
-    F: FnOnce(&str, I, &mut EventSink),
-{
-    let mut temp_sink = EventSink::new(0);
-    parse_fn(source, tokens, &mut temp_sink);
-
-    let has_errors = temp_sink
-        .events()
-        .iter()
-        .any(|e| matches!(e, crate::event::Event::Error { .. }));
-    if !has_errors {
-        copy_events(temp_sink, sink);
-        true
-    } else {
-        false
-    }
 }
 
 /// Parser that skips trivia tokens
@@ -278,45 +241,28 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
 /// Parse a declaration item and emit events
 ///
 /// This is the primary event-driven parser function.
-/// Tries to parse as each declaration type until one succeeds.
+/// Uses the same Chumsky declaration router as source-file parsing.
 pub fn parse_declaration_item<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    // Try each parser in order until one succeeds
-    if try_parse(source, tokens.clone(), sink, parse_module_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_import_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_protocol_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_struct_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_enum_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_extension_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_function_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_subscript_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_field_declaration) {
-        return;
-    }
-    if try_parse(source, tokens, sink, parse_type_alias_declaration) {
-        return;
-    }
+    let prepared = prepare_tokens(tokens);
+    let input = create_input(&prepared, source.len());
 
-    // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, subscript, field, or type alias declaration".to_string());
+    match declaration_item_parser_internal()
+        .then_ignore(skip_trivia())
+        .parse(input)
+        .into_result()
+    {
+        Ok(item_data) => {
+            emit_declaration_item(sink, item_data);
+        },
+        Err(errors) => {
+            for error in errors {
+                sink.error_from_rich(&error);
+            }
+        },
+    }
 }
 
 /// Parse a source file (multiple declaration items) and emit events
