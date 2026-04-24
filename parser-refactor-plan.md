@@ -80,31 +80,68 @@ but the type is now owned by `type_alias`.
 
 Verification: `cargo test -p kestrel-parser`
 
+### Step 4d: Move Field Declaration Data And Emission
+
+Commit: `ecc224c4 refactor: move field declaration data into field`
+
+Moved field declaration data structs (`FieldDeclarationData`, `ComputedBodyData`),
+parser internals (`field_declaration_parser_internal`, `computed_body_parser`),
+and emitters (`emit_field_declaration`, `emit_property_accessors`) into
+`field/mod.rs`.
+
+### Step 4e: Move Function Declaration Data And Emission
+
+Commit: `965f8f9a refactor: move function declaration data into function`
+
+Moved `FunctionDeclarationData`, `ReceiverModifier`,
+`function_declaration_parser_internal`, `receiver_modifier_parser`, and
+`emit_function_declaration` into `function/mod.rs`.
+
+`FunctionBodyData`, `ParameterData`, and related emitters stay in `common`
+because they are shared with initializer, subscript, and deinit declarations.
+
+### Step 4f: Move Subscript Declaration Data And Emission
+
+Commit: `a225b590 refactor: move subscript declaration data into subscript`
+
+Moved `SubscriptDeclarationData`, `SubscriptBodyData`, the internal parsers,
+and `emit_subscript_declaration` into `subscript/mod.rs`.
+
+### Step 4h: Move Protocol Declaration Data And Emission
+
+Commit: `57232b90 refactor: move protocol declaration data into protocol`
+
+Moved `ProtocolDeclarationData`, `ProtocolBodyItem`, and
+`emit_protocol_declaration` into `protocol/mod.rs`. The parser was already
+colocated there.
+
+### Step 4i: Move Extension Declaration Data And Emission
+
+Commit: `5b1cd319 refactor: move extension declaration data into extension`
+
+Moved `ExtensionDeclarationData`, `ExtensionBodyItem`, and
+`emit_extension_declaration` into `extension/mod.rs`. The parser was already
+colocated there.
+
+### Step 4j: Move Struct/Enum Declaration Data And Emission
+
+Commit: `9a27e97e refactor: move struct and enum declaration data into their modules`
+
+Moved `StructDeclarationData` + `emit_struct_declaration` to `struct/mod.rs`.
+Moved `EnumDeclarationData`, `EnumCaseDeclarationData`,
+`EnumCaseParameterData`, and their emitters to `enum_decl/mod.rs`.
+
+`type_decl.rs` remains the mutual-recursion coordinator. `TypeDeclarationBodyItem`
+and `emit_type_declaration_body_item` stay in `common` as the shared dispatcher.
+
 ## Remaining Plan
 
-### Step 4d+: Continue Moving Declaration Ownership Out Of `common`
+### Step 4g (skipped): Initializer / Deinitializer
 
-Move the remaining declaration data/parsers/emitters out in small slices. Each
-slice should compile and commit independently.
-
-Suggested order:
-
-1. Field declarations
-2. Function declarations
-3. Subscript declarations
-4. Initializer/deinitializer declarations
-5. Protocol declarations
-6. Extension declarations
-7. Struct/enum declaration data and emitters, while keeping `type_decl.rs` as
-   the mutual-recursion coordinator
-
-Target direction:
-
-- declaration modules own their data structs, parsers, emitters, and CST wrapper
-  types
-- `common` keeps only reusable syntax fragments and small helpers
-- `common/data.rs` should shrink to genuinely shared body item enums or disappear
-  if those enums can be moved to better owners
+No separate `initializer/` or `deinit/` directory exists and these declarations
+are never surfaced as top-level `DeclarationItem` variants. Their data types
+(`InitializerDeclarationData`, `DeinitDeclarationData`), parsers, and emitters
+remain in `common`. Revisit only if their ownership becomes painful.
 
 ### Step 5: Introduce A Shared Parse Context
 
