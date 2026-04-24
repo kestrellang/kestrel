@@ -467,39 +467,59 @@ mod tests {
     use super::*;
     use crate::parse_source_file;
     use kestrel_lexer::lex;
+    use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-    #[test]
-    fn test_parser_with_valid_source() {
-        let source = "module Test";
-        let tokens: Vec<_> = lex(source, 0)
+    fn parse_source(source: &str, file_id: usize) -> ParseResult {
+        let tokens: Vec<_> = lex(source, file_id)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        Parser::parse(source, tokens.into_iter(), parse_source_file, file_id)
+    }
+
+    fn token_texts(node: &SyntaxNode, kinds: &[SyntaxKind]) -> Vec<String> {
+        let mut texts = Vec::new();
+        collect_token_texts(node, kinds, &mut texts);
+        texts
+    }
+
+    fn collect_token_texts(node: &SyntaxNode, kinds: &[SyntaxKind], texts: &mut Vec<String>) {
+        for element in node.children_with_tokens() {
+            if let Some(child) = element.clone().into_node() {
+                collect_token_texts(&child, kinds, texts);
+            } else if let Some(token) = element.into_token() {
+                if kinds.contains(&token.kind()) {
+                    texts.push(token.text().to_string());
+                }
+            }
+        }
+    }
+
+    fn count_nodes(node: &SyntaxNode, kind: SyntaxKind) -> usize {
+        let here = usize::from(node.kind() == kind);
+        here + node
+            .children()
+            .map(|child| count_nodes(&child, kind))
+            .sum::<usize>()
+    }
+
+    #[test]
+    fn test_parser_with_valid_source() {
+        let source = "module Test";
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
     fn test_parser_with_multiple_declarations() {
         let source = "module A.B.C\nimport X.Y.Z";
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
         assert_eq!(
             result.tree.children().count(),
             2,
@@ -519,12 +539,7 @@ module Test
 public struct A {}
 public struct B {}
 "#;
-        let tokens: Vec<_> = lex(valid_source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(valid_source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(valid_source, 0);
         assert_eq!(result.errors.len(), 0, "Valid code should have no errors");
         assert_eq!(
             result.tree.children().count(),
@@ -534,17 +549,9 @@ public struct B {}
 
         // Test case 2: Parser still creates a tree even with parse errors
         let source_with_errors = r#"module"#; // Incomplete module
-        let tokens: Vec<_> = lex(source_with_errors, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source_with_errors, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source_with_errors, 0);
         // Parser creates a SourceFile node even when parsing fails
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
 
         println!(
             "Error recovery test: {} declarations, {} errors",
@@ -558,12 +565,7 @@ public struct B {}
         // Test that parse errors include span information when errors occur
         // Use a syntax that will definitely cause a parse error
         let source = "struct 123"; // struct keyword followed by number instead of identifier
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         // Parser should report errors or successfully parse depending on error recovery
         // The important thing is that IF errors are reported, they should have spans
@@ -577,21 +579,13 @@ public struct B {}
         }
 
         // This test primarily documents that span tracking infrastructure is in place
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
     fn test_module_then_struct() {
         let source = "module Test\nstruct Empty {}";
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -604,12 +598,7 @@ public struct B {}
     #[test]
     fn test_module_then_struct_with_indentation() {
         let source = "module Test\n            struct Empty {}";
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -640,5 +629,46 @@ public struct B {}
                 );
             }
         }
+    }
+
+    #[test]
+    fn characterization_preserves_inter_declaration_trivia_text() {
+        let source = "module Test\n// keep this comment\nimport Std.IO";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(result.tree.text().to_string(), source);
+
+        let trivia = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
+        assert!(
+            trivia.iter().any(|text| text.contains("// keep this comment")),
+            "current tree builder stores inter-declaration comment text as trivia"
+        );
+    }
+
+    #[test]
+    fn characterization_nested_struct_enum_declarations() {
+        let source = "struct Outer { enum Inner { case Value struct Nested {} } }";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::StructDeclaration), 2);
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumDeclaration), 1);
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumCaseDeclaration), 1);
+    }
+
+    #[test]
+    fn characterization_operator_tokens_are_preserved_for_later_pratt_parser() {
+        let source = "func calc() { let value = a + b * c ?? d; }";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(
+            token_texts(
+                &result.tree,
+                &[SyntaxKind::Plus, SyntaxKind::Star, SyntaxKind::QuestionQuestion],
+            ),
+            vec!["+", "*", "??"]
+        );
     }
 }
