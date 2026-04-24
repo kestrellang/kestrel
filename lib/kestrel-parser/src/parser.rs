@@ -696,6 +696,61 @@ public struct B {}
     }
 
     #[test]
+    fn recovery_preserves_declarations_around_garbage_region() {
+        // A malformed token run between two valid declarations should not
+        // swallow the surrounding declarations — both should still parse.
+        let source = "module A\nxyz bad stuff\nimport Std.IO";
+        let result = parse_source(source, 0);
+
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "tree must still round-trip even when recovering"
+        );
+        assert!(!result.errors.is_empty(), "recovery should report an error");
+
+        // Both the module and import declarations should be in the tree.
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::ModuleDeclaration), 1);
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::ImportDeclaration), 1);
+        // The recovered garbage is wrapped in an Error node.
+        assert!(
+            count_nodes(&result.tree, SyntaxKind::Error) >= 1,
+            "recovered region should become an Error node"
+        );
+    }
+
+    #[test]
+    fn recovery_error_span_covers_skipped_garbage() {
+        let source = "module A\nxyz bad\nimport B";
+        let result = parse_source(source, 0);
+
+        assert!(!result.errors.is_empty());
+        let err = result.errors.iter().find(|e| e.span.is_some()).unwrap();
+        let span = err.span.as_ref().unwrap();
+        let covered = &source[span.start..span.end];
+        assert!(
+            covered.contains("xyz"),
+            "recovery span should include the skipped token, got {covered:?}"
+        );
+    }
+
+    #[test]
+    fn recovery_does_not_fire_on_trailing_trivia() {
+        // Trailing whitespace/comments after the final declaration must not
+        // trigger recovery — otherwise every file with a newline at the end
+        // would report a phantom error.
+        let source = "module A\n// trailing\n";
+        let result = parse_source(source, 0);
+
+        assert!(
+            result.errors.is_empty(),
+            "trailing trivia should not trigger recovery, got {:?}",
+            result.errors
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
     fn characterization_operator_tokens_are_preserved_for_later_pratt_parser() {
         let source = "func calc() { let value = a + b * c ?? d; }";
         let result = parse_source(source, 0);

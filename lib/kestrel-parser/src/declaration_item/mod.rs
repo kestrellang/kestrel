@@ -27,7 +27,7 @@ use crate::function::{
     function_declaration_parser_internal,
 };
 use crate::import::{ImportDeclaration, emit_import_declaration, import_declaration_parser_internal};
-use crate::input::{ParserExtra, ParserInput};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::parse_and_emit;
 use crate::module::{
     ModuleDeclaration, emit_module_declaration, module_declaration_parser_internal,
@@ -114,6 +114,41 @@ enum DeclarationItemData {
     Function(FunctionDeclarationData),
     Subscript(SubscriptDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
+    /// Recovered range: tokens skipped by the top-level recovery strategy
+    /// because they couldn't start a valid declaration.
+    Error(Span),
+}
+
+/// Tokens that can start a top-level declaration (or a modifier that precedes
+/// one). Used as recovery anchors: if declaration parsing fails, we skip
+/// forward until we see one of these so the next declaration can parse
+/// independently instead of the failure poisoning the rest of the file.
+fn is_declaration_starter(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Module
+            | Token::Import
+            | Token::Protocol
+            | Token::Struct
+            | Token::Enum
+            | Token::Extend
+            | Token::Func
+            | Token::Init
+            | Token::Deinit
+            | Token::Subscript
+            | Token::Type
+            | Token::Let
+            | Token::Var
+            | Token::Public
+            | Token::Private
+            | Token::Internal
+            | Token::Fileprivate
+            | Token::Static
+            | Token::Mutating
+            | Token::Consuming
+            | Token::Indirect
+            | Token::At
+    )
 }
 
 /// Parser that skips trivia tokens
@@ -180,11 +215,42 @@ fn declaration_item_parser_internal<'tokens>()
         .boxed()
 }
 
+/// Recovery parser for the top-level declaration loop.
+///
+/// When `declaration_item_parser_internal` fails, this kicks in: it skips any
+/// leading trivia, requires at least one non-trivia token (so progress is
+/// guaranteed and we don't fire on trailing-whitespace-only tails), then
+/// consumes following tokens until a declaration starter is the next token or
+/// EOF is reached. The consumed span is recorded as a
+/// `DeclarationItemData::Error` so the tree preserves the skipped source text
+/// as an `Error` node rather than silently swallowing it.
+fn declaration_recovery<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
+    let next_is_starter = any().filter(is_declaration_starter).ignored();
+    let non_trivia = any().filter(|t: &Token| {
+        !matches!(
+            t,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        )
+    });
+    skip_trivia()
+        .ignore_then(non_trivia)
+        .then(any().and_is(next_is_starter.not()).repeated())
+        .map_with(|_, e| DeclarationItemData::Error(to_kestrel_span(e.span())))
+        .boxed()
+}
+
 /// Internal Chumsky parser for multiple declaration items
+///
+/// Uses `.recover_with(via_parser(declaration_recovery()))` so a malformed
+/// item doesn't prevent the rest of the file from parsing — we emit an Error
+/// range covering the skipped bytes and resume at the next declaration
+/// starter.
 fn declaration_items_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<DeclarationItemData>, ParserExtra<'tokens>> + Clone
 {
     declaration_item_parser_internal()
+        .recover_with(via_parser(declaration_recovery()))
         .repeated()
         .at_least(0)
         .collect()
@@ -226,6 +292,19 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         },
         DeclarationItemData::TypeAlias(data) => {
             emit_type_alias_declaration(sink, data);
+        },
+        DeclarationItemData::Error(span) => {
+            // The span came from `to_kestrel_span`, which defaults file_id to
+            // 0 because Chumsky spans don't carry file IDs. Rebuild the span
+            // with the sink's file_id so diagnostics point at the real file.
+            let span = Span::new(sink.file_id(), span.start..span.end);
+            sink.error_at_span(
+                "expected a declaration; skipped to the next declaration starter".to_string(),
+                span.clone(),
+            );
+            sink.start_node(SyntaxKind::Error);
+            sink.add_token(SyntaxKind::Error, span);
+            sink.finish_node();
         },
     }
 }

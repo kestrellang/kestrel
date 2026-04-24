@@ -89,8 +89,10 @@ pub fn create_input(tokens: &[SpannedToken], source_len: usize) -> ParserInput<'
 
 /// Run a Chumsky parser against `(source, tokens)` and dispatch the result to `sink`.
 ///
-/// On success, calls `$on_ok($sink, data)`.
-/// On failure, each Chumsky `Rich` error is forwarded to `sink.error_from_rich`.
+/// Both the output (if present) and any emitted errors are forwarded: on a
+/// partial recovery, Chumsky may produce output AND secondary errors at the
+/// same time. Always emit the output when it exists so recovered trees reach
+/// the tree builder, and always forward every error to the sink.
 ///
 /// This factors out the repeated `prepare_tokens → create_input → match parse` pattern
 /// used by every `parse_*` entry point. Implemented as a macro because Chumsky parsers
@@ -102,13 +104,12 @@ macro_rules! parse_and_emit {
         use ::chumsky::Parser as _;
         let prepared = $crate::input::prepare_tokens($tokens);
         let input = $crate::input::create_input(&prepared, $source.len());
-        match $parser.parse(input).into_result() {
-            Ok(data) => $on_ok($sink, data),
-            Err(errors) => {
-                for error in errors {
-                    $sink.error_from_rich(&error);
-                }
-            },
+        let result = $parser.parse(input);
+        for error in result.errors() {
+            $sink.error_from_rich(error);
+        }
+        if let Some(data) = result.into_output() {
+            $on_ok($sink, data);
         }
     }};
 }

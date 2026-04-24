@@ -184,6 +184,46 @@ New/updated tests in `parser.rs` and `event.rs`:
 
 Verification: `cargo test -p kestrel-parser`
 
+### Step 12: Deliberate Top-Level Error Recovery
+
+Added an explicit recovery anchor at the top-level declaration loop so a
+malformed declaration no longer poisons the rest of the file. The anchor
+predicate `is_declaration_starter` matches the keywords (and `@`) that can
+begin a declaration; when `declaration_item_parser_internal` fails,
+`declaration_recovery` skips leading trivia, consumes at least one non-trivia
+token (to guarantee progress), then consumes tokens until the next declaration
+starter or EOF. The recovered span becomes a `DeclarationItemData::Error`
+variant that emits as an `Error` syntax node plus a diagnostic pinned at the
+skipped range.
+
+Fixed a related bug in `parse_and_emit!` that was discarding the parser's
+output whenever any error was emitted. Chumsky's `into_result()` returns
+`Err` even on recovered successes, so we now forward both the output and the
+errors to the sink independently. This fix is a prerequisite for recovery to
+surface in the tree.
+
+Recovery does NOT fire on:
+
+- trailing whitespace/comments after the last declaration (filter requires at
+  least one non-trivia token)
+- EOF (no token to consume)
+
+Not yet covered (explicit anchors remain implicit):
+
+- `}` inside block/body grammars
+- `;` inside statement grammars
+- recovery inside expressions and patterns
+
+These can be added in a follow-up slice using the same pattern.
+
+New tests in `parser.rs`:
+
+- `recovery_preserves_declarations_around_garbage_region`
+- `recovery_error_span_covers_skipped_garbage`
+- `recovery_does_not_fire_on_trailing_trivia`
+
+Verification: `cargo test -p kestrel-parser`
+
 ## Remaining Plan
 
 ### Step 7: Split `expr/mod.rs`
@@ -230,17 +270,6 @@ Either colocate emitters next to parser data, or introduce a small trait such as
 
 Goal: adding a syntax field should fail compilation or local tests unless
 emission is handled.
-
-### Step 12: Improve Error Recovery Deliberately
-
-Add explicit recovery anchors for:
-
-- declaration starters
-- `}`
-- semicolons
-- other syntax boundaries where recovery is useful
-
-Avoid relying on list parsing and parser failure order as implicit recovery.
 
 ## Acceptance Criteria
 
