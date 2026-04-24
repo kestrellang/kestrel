@@ -134,8 +134,6 @@ Moved `EnumDeclarationData`, `EnumCaseDeclarationData`,
 `type_decl.rs` remains the mutual-recursion coordinator. `TypeDeclarationBodyItem`
 and `emit_type_declaration_body_item` stay in `common` as the shared dispatcher.
 
-## Remaining Plan
-
 ### Step 4g (skipped): Initializer / Deinitializer
 
 No separate `initializer/` or `deinit/` directory exists and these declarations
@@ -143,18 +141,27 @@ are never surfaced as top-level `DeclarationItem` variants. Their data types
 (`InitializerDeclarationData`, `DeinitDeclarationData`), parsers, and emitters
 remain in `common`. Revisit only if their ownership becomes painful.
 
-### Step 5: Introduce A Shared Parse Context
+### Step 5: Shared Parse Context
 
-Centralize repeated parser entry boilerplate:
+Commit: `5711e662 refactor: introduce parse_and_emit! macro to reduce parser-entry boilerplate`
 
-- token preparation
-- input creation
-- parse error forwarding
-- file id handling
-- parse-to-events pattern
+Added `parse_and_emit!` macro in `crate::input` that centralizes the repeated
+`prepare_tokens → create_input → match parse` pattern. Applied to every
+non-custom parser entry point (declarations, module, import, ty, stmt, block,
+declaration_item, source file).
 
-This should remove repetitive `prepare_tokens/create_input/match parse` code
-from declaration modules.
+Parser wrappers with custom error-recovery shape (`expr`, `pattern`) keep their
+explicit bodies for now.
+
+### Step 11: Narrow Public API
+
+Commit: `422a037a refactor: make common and type_decl modules crate-private`
+
+`common` and `type_decl` are now `pub(crate)`. External consumers
+(`kestrel-compiler`) only use top-level parse entry points and `ParseResult`,
+so narrowing the internal modules matches their role as internal scaffolding.
+
+## Remaining Plan
 
 ### Step 6: Make Trivia Policy Explicit In Code
 
@@ -209,18 +216,6 @@ Either colocate emitters next to parser data, or introduce a small trait such as
 
 Goal: adding a syntax field should fail compilation or local tests unless
 emission is handled.
-
-### Step 11: Narrow Public API
-
-Revisit `lib.rs` exports.
-
-Likely public surface:
-
-- source-file parse entry point
-- specific parse entry points used by tests/tools
-- CST wrapper types
-
-Parser combinators and temporary parse data should stay crate-private.
 
 ### Step 12: Improve Error Recovery Deliberately
 
