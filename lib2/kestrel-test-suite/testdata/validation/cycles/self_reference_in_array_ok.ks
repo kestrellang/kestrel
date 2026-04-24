@@ -3,7 +3,11 @@
 
 module Main
 
-struct TreeNode {
+struct TreeNode: Cloneable {
     let value: lang.i64
     let children: [TreeNode]
+
+    func clone() -> TreeNode {
+        TreeNode(value: self.value, children: self.children.clone())
+    }
 }

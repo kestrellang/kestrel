@@ -1,2 +1,0 @@
-The job of a binder is essentially to read the syntax tree, and create Entities with Components from them. It should not parse anything or look at raw tokens, that is the job of the syntax tree. It should not throw diagnostics, it should not add behaviors recursively, and it should not depend on the semantic meaning of anything. Its main job is to provide semantic meaning. Any semantic meaning should not be a Behavior/Component. It should be a query. See the HECS.md file.
-

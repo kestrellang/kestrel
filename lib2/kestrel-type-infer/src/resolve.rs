@@ -1563,10 +1563,10 @@ impl WorldResolver<'_> {
             .collect();
         match matches.len() {
             0 => {
-                // If there's exactly one candidate and arity is a no-op (no args
-                // expected), accept it — preserves the pre-refactor behavior for
-                // zero-arg resolutions where label filtering is vacuous.
-                if all_candidates.len() == 1 && arg_labels.is_empty() {
+                // If there's exactly one candidate, accept it even when labels
+                // don't match so downstream label-checking can report the real
+                // "wrong argument label" diagnostic instead of "no member".
+                if all_candidates.len() == 1 {
                     Ok(Some(all_candidates[0]))
                 } else {
                     Ok(None)

@@ -67,7 +67,7 @@ public struct Repeat: Read {
 // ============================================================================
 
 /// A reader that reads from a byte array with a movable position.
-public struct Cursor: Read {
+public struct Cursor: Read, Cloneable {
     var data: Array[UInt8]
     var pos: Int64
 
@@ -75,6 +75,12 @@ public struct Cursor: Read {
     public init(data: Array[UInt8]) {
         self.data = data;
         self.pos = 0;
+    }
+
+    public func clone() -> Cursor {
+        var c = Cursor(data: self.data.clone());
+        c.pos = self.pos;
+        c
     }
 
     /// Reads bytes from the current position.

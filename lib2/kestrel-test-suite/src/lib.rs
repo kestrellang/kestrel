@@ -1,4 +1,4 @@
-//! kestrel-test-suite2: Hybrid test framework for the lib2 compiler pipeline.
+//! kestrel-test-suite2 — hybrid test framework for the lib2 compiler pipeline.
 //!
 //! Supports file-based `.ks` tests (auto-discovered via datatest-stable) and
 //! a programmatic Rust API for complex/multi-file tests.
@@ -7,6 +7,10 @@
 //!
 //! The stdlib is built once per process and cloned via `World::snapshot()`
 //! per test. This avoids re-parsing/inferring 1500+ bodies for every test.
+
+#[used]
+#[unsafe(no_mangle)]
+pub static BUILD_NONCE: u32 = 4;
 
 pub mod annotation;
 pub mod compiler;

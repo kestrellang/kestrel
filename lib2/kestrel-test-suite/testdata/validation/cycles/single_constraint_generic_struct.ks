@@ -7,6 +7,10 @@ protocol Hashable {
     func hash() -> lang.i64
 }
 
-struct MySet[T] where T: Hashable {
+struct MySet[T]: Cloneable where T: Hashable, T: Cloneable {
     let items: [T]
+
+    func clone() -> MySet[T] {
+        MySet(items: self.items.clone())
+    }
 }

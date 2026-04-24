@@ -429,6 +429,37 @@ impl LowerCtx<'_> {
         }
     }
 
+    /// `self.init(...)` is a delegating-init call and is only legal inside
+    /// another initializer body. In any other body (func, getter, setter,
+    /// deinit, ...) the call has no valid resolution — return `HirExpr::Error`
+    /// so downstream passes don't cascade into argument-label / mutability
+    /// errors that mislead the user.
+    fn is_self_init_call(&self, segments: &[ExprPathSegment]) -> bool {
+        use kestrel_ast_builder::NodeKind;
+        if segments.len() < 2 {
+            return false;
+        }
+        if segments[0].name != "self" || segments[segments.len() - 1].name != "init" {
+            return false;
+        }
+        !matches!(
+            self.ctx.get::<NodeKind>(self.owner),
+            Some(NodeKind::Initializer)
+        )
+    }
+
+    fn emit_init_outside_initializer(&mut self, span: &Span) -> HirExprId {
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message("cannot call 'init' outside of an initializer".to_string())
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("'self.init' is only valid inside another initializer"),
+                ]),
+        );
+        self.alloc_expr(HirExpr::Error { span: span.clone() })
+    }
+
     /// Emit a diagnostic for `self` used where no receiver is in scope.
     /// Distinguishes static methods (owner's parent is a type decl) from free functions.
     fn emit_self_out_of_scope(&mut self, self_span: &Span, full_span: &Span) -> HirExprId {
@@ -535,6 +566,11 @@ impl LowerCtx<'_> {
             // Path where first segment is a local: `local.method(args)` → MethodCall
             // The parser emits this as Path when the base is a simple name.
             AstExpr::Path { segments, .. } if segments.len() >= 2 => {
+                // `self.init(...)` is only legal inside another initializer;
+                // reject early so downstream passes don't cascade.
+                if self.is_self_init_call(segments) {
+                    return self.emit_init_outside_initializer(span);
+                }
                 let first = &segments[0];
                 if first.type_args.is_none() {
                     if let Some(_) = self.lookup_local(&first.name) {

@@ -1083,6 +1083,23 @@ fn report_and_poison(ctx: &mut InferCtx<'_>, err: InferError, a: TyVar, b: TyVar
 /// `LiteralNotAccepted` (stdlib disabled). Both render with wording that
 /// includes the phrase "type mismatch" so tests asserting either wording
 /// ("type mismatch" and "does not conform to protocol") both match.
+/// Check whether `to` could accept a coerced value via FromValue promotion
+/// once the source defaults to a concrete type. Used to decide whether a
+/// LiteralGuard failure in `solve_coerce` is definitely unsalvageable (and
+/// can surface `DoesNotConform` now) or might still succeed after literal
+/// defaulting.
+fn target_accepts_promotion(ctx: &InferCtx<'_>, to: TyVar) -> bool {
+    let resolved = ctx.resolve(to);
+    let to_kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k,
+        _ => return true, // unresolved — can't decide, stay conservative
+    };
+    let Some(from_value) = ctx.resolver.builtin(Builtin::FromValueProtocol) else {
+        return false;
+    };
+    ctx.resolver.conforms_to(to_kind, from_value)
+}
+
 fn mismatch_error(ctx: &InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> InferError {
     if let Some(err) = try_literal_mismatch(ctx, a, b, span.clone()) {
         return err;
@@ -1161,7 +1178,25 @@ fn solve_coerce(
     match unify::unify(ctx, from, to) {
         Ok(()) => return SolveResult::Solved,
         Err(UnifyError::LiteralGuard) => {
-            // Literal couldn't unify — fall through to promotion
+            // Literal couldn't unify with a concrete target. If the target
+            // can't be rescued by FromValue promotion, emit the literal's
+            // "does not conform" diagnostic now — deferring would let
+            // literal defaulting overwrite the literal slot (e.g. null →
+            // Optional[?]) and we'd lose the correct wording on retry.
+            if !target_accepts_promotion(ctx, to) {
+                if let Some(err) = try_literal_mismatch(ctx, from, to, span.clone())
+                    .or_else(|| try_literal_mismatch(ctx, to, from, span.clone()))
+                {
+                    ctx.errored_coerce_exprs.insert(expr);
+                    // Poison the literal side so phase 4.5 doesn't cascade
+                    // a "could not infer type" on the unresolved literal slot.
+                    if matches!(ctx.slot(ctx.resolve(from)), TySlot::Unresolved { .. }) {
+                        ctx.poison(from);
+                    }
+                    return SolveResult::Error(err);
+                }
+            }
+            // Otherwise fall through to promotion (possibly after defaulting).
         },
         Err(UnifyError::Mismatch) => {
             // Types don't match structurally — try promotion
@@ -1196,6 +1231,41 @@ fn solve_coerce(
     };
 
     if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
+        // Verify the source type matches the `from` method's `value: T` parameter
+        // once T is bound to the target's type args. Without this, any source
+        // type silently promotes to any FromValue-conforming target (e.g.
+        // `let x: String? = 5` would succeed).
+        let target_entity = to_kind.entity();
+        let target_args: Vec<TyVar> = to_kind.args().to_vec();
+        let qctx = ctx.query_ctx;
+        let root = ctx.root;
+        if let Some(target_e) = target_entity {
+            let target_tps: Vec<Entity> = qctx
+                .get::<TypeParams>(target_e)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            let subs: Vec<(Entity, TyVar)> = target_tps
+                .iter()
+                .copied()
+                .zip(target_args.iter().copied())
+                .collect();
+
+            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity: method, root }) {
+                if let Some(Some(value_hir_ty)) = param_hir_tys.first() {
+                    let param_tv =
+                        lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
+                    if unify::unify(ctx, from, param_tv).is_err() {
+                        ctx.errored_coerce_exprs.insert(expr);
+                        return SolveResult::Error(InferError::TypeMismatch {
+                            expected: param_tv,
+                            got: from,
+                            span,
+                        });
+                    }
+                }
+            }
+        }
+
         // Record the promotion for codegen
         ctx.promotions.insert(
             expr,

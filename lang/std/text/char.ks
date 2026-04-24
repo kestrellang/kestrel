@@ -232,7 +232,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 /// An extended grapheme cluster (user-perceived character).
 ///
 /// May consist of multiple code points (e.g., emoji sequences).
-public struct Grapheme: Equatable {
+public struct Grapheme: Equatable, Cloneable {
     private var _chars: Array[Char]
 
     // ========================================================================
@@ -248,6 +248,10 @@ public struct Grapheme: Equatable {
     /// Creates a Grapheme from multiple Chars.
     public init(chars chars: Array[Char]) {
         self._chars = chars;
+    }
+
+    public func clone() -> Grapheme {
+        Grapheme(chars: self._chars.clone())
     }
 
     // ========================================================================

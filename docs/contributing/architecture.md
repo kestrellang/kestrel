@@ -1,426 +1,191 @@
-# Kestrel Architecture
+# Kestrel Architecture (lib2)
 
-## Compilation Pipeline
+The Kestrel compiler lives under `lib2/`. It is built on a **hierarchical entity-component system** (hECS) with memoized queries — declarations are entities, facts about them are components, and every derived result (name resolution, HIR, types, diagnostics, MIR) is produced by a query that the runtime caches and invalidates automatically.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           COMPILATION PIPELINE                               │
-└─────────────────────────────────────────────────────────────────────────────┘
+This document describes the overall shape of the pipeline. For the motivation behind hECS see the `hecs` skill and `lib2/AGENTS.md`; per-crate deep-dives live in each crate's own `docs/` folder.
 
-Source Code ("module Main\nstruct Point { ... }")
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 1: LEXING                                    [kestrel-lexer]         │
-│  ────────────────                                                           │
-│  Input:  Source string                                                      │
-│  Output: Iterator<Spanned<Token>>                                           │
-│  Library: Logos                                                             │
-│                                                                             │
-│  "module" → Token::Module                                                   │
-│  "Main"   → Token::Identifier                                               │
-│  "struct" → Token::Struct                                                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 2: PARSING                                   [kestrel-parser]        │
-│  ────────────────                                                           │
-│  Input:  Tokens + Source                                                    │
-│  Output: Events (StartNode, AddToken, FinishNode)                           │
-│  Library: Chumsky                                                           │
-│                                                                             │
-│  Event-driven architecture:                                                 │
-│    1. Internal Chumsky parser returns raw data (spans, tuples)              │
-│    2. Emit functions convert data to events                                 │
-│    3. Events collected in EventSink                                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 3: SYNTAX TREE                               [kestrel-syntax-tree]   │
-│  ────────────────────                                                       │
-│  Input:  Events + Source                                                    │
-│  Output: SyntaxNode (lossless CST)                                          │
-│  Library: Rowan                                                             │
-│                                                                             │
-│  TreeBuilder converts events → GreenNode → SyntaxNode                       │
-│  Preserves all source text (whitespace, comments, trivia)                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 4: SEMANTIC ANALYSIS                                                 │
-│  ──────────────────────────                                                 │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  4a. BUILD                           [kestrel-semantic-tree-builder]│    │
-│  │  ─────────                                                          │    │
-│  │  Builders extract symbols from syntax nodes                         │    │
-│  │  Creates: ModuleSymbol, StructSymbol, FunctionSymbol, etc.          │    │
-│  │  Attaches: Behaviors (Visibility, Callable, Typed)                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  4b. BIND                             [kestrel-semantic-tree-binder]│    │
-│  │  ────────                                                           │    │
-│  │  Resolves type references to concrete types                         │    │
-│  │  Validates imports, detects cycles                                  │    │
-│  │  Body resolution for expressions/statements                         │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  4c. VALIDATE                      [kestrel-semantic-analyzers]     │    │
-│  │  ───────────                                                        │    │
-│  │  Three sub-phases of analysis (errors in earlier phases halt later): │    │
-│  │                                                                      │    │
-│  │  Phase 1 (pre-inference):                                           │    │
-│  │    Cycle detection, conformance, extension conflicts, field         │    │
-│  │    validation, definite assignment, dead code, closure analysis     │    │
-│  │                                                                      │    │
-│  │  Phase 2 (type resolution):                                         │    │
-│  │    TYPE INFERENCE (constraint solving per function/init/getter)     │    │
-│  │    Pattern checking, exhaustiveness, type checking                  │    │
-│  │    [kestrel-semantic-type-inference, kestrel-semantic-pattern-matching] │  │
-│  │                                                                      │    │
-│  │  Phase 3 (post-checking):                                           │    │
-│  │    Protocol methods, static context, duplicates, visibility,       │    │
-│  │    generics, recursive enums                                        │    │
-│  │                                                                      │    │
-│  │  See type-inference.md for details on the constraint solver.        │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 5: MIR LOWERING                  [kestrel-execution-graph-lowering]  │
-│  ──────────────────────                                                     │
-│  Input:  SemanticModel (bound, validated)                                   │
-│  Output: MirContext (mid-level IR)                                          │
-│                                                                             │
-│  Lowers semantic tree to flat, explicit, place-based IR:                    │
-│  - Statements: assign, call, drop                                          │
-│  - Terminators: jump, branch, return                                       │
-│  - Places: locals, fields, indexed, derefs                                 │
-│  - Generates __kestrel_init_statics() for static initialization            │
-└─────────────────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 6: CODE GENERATION               [kestrel-codegen-cranelift]        │
-│  ────────────────────────                                                   │
-│  Input:  MirContext                                                         │
-│  Output: Native object code                                                 │
-│                                                                             │
-│  1. Monomorphization collection (BFS discovers generic instantiations)     │
-│  2. Define statics (data section)                                          │
-│  3. Declare functions (all signatures)                                     │
-│  4. Define functions (MIR -> Cranelift IR for each instantiation)          │
-│  5. Link to executable                                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Semantic Model Mutation Points
-
-Kestrel keeps semantic analysis split into **BUILD**, **BIND**, and **VALIDATE** phases.
-To preserve clean boundaries (and keep the query system free to become incremental later),
-each phase has a clear “what it may mutate” rule:
-
-- **BUILD (`kestrel-semantic-tree-builder`)**: creates symbols and the initial `SemanticModel`.
-  - Allowed mutations: symbol creation, parent/child relationships, initial symbol metadata,
-    `syntax_map` entries, and `sources` registration.
-  - Not allowed: type/value resolution, cross-file binding, or any analysis that depends on
-    already-resolved types/paths.
-
-- **BIND (`kestrel-semantic-tree-binder`)**: resolves references and enriches the model.
-  - Allowed mutations: attach/compute derived semantic information (e.g. types, callable
-    signatures, executable bodies), populate resolution/registry structures, and link symbols
-    across files/modules.
-  - Not allowed: emitting new symbols that change the program surface area (those belong in BUILD).
-
-- **VALIDATE (`kestrel-semantic-analyzers`)**: read-only checks over the bound model.
-  - Allowed mutations: diagnostics accumulation only.
-  - Not allowed: mutating the model or changing resolution results.
-
-Guideline: if a component needs semantic information, prefer going through the `kestrel-semantic-model`
-query layer rather than ad-hoc traversals, even if the query currently computes eagerly.
-
-## Crate Dependencies
+## Compilation pipeline
 
 ```
-kestrel-compiler
-  ├─ kestrel-semantic-tree-builder     (BUILD)
-  ├─ kestrel-semantic-tree-binder      (BIND)
-  ├─ kestrel-semantic-analyzers        (VALIDATE)
-  │   ├─ kestrel-semantic-type-inference
-  │   └─ kestrel-semantic-pattern-matching
-  ├─ kestrel-execution-graph-lowering  (MIR lowering)
-  │   └─ kestrel-execution-graph       (MIR types)
-  ├─ kestrel-codegen-cranelift         (native codegen)
-  │   └─ kestrel-codegen               (layout, mangling)
-  ├─ kestrel-parser / kestrel-lexer / kestrel-syntax-tree
-  ├─ kestrel-semantic-model / kestrel-semantic-tree / semantic-tree
-  └─ kestrel-reporting / kestrel-span
+Source text
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  LEX            kestrel-lexer                        │
+│  Source → Token stream (logos)                       │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  PARSE          kestrel-parser + kestrel-syntax-tree │
+│  Tokens → lossless CST (rowan)                       │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  AST BUILD      kestrel-ast-builder                  │
+│  CST → entities + components in the hECS World       │
+│  One entity per declaration; components describe     │
+│  its syntax (Name, Callable, TypeAnnotation, Body,   │
+│  Vis, WhereClause, TypeParams, …).                   │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  NAME RESOLUTION    kestrel-name-res                 │
+│  Query-only: ResolveName, ResolveTypePath, etc.      │
+│  Entity + name → entity (or diagnostic)              │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  HIR LOWER       kestrel-hir-lower → kestrel-hir     │
+│  Per-body: AstBody → HirBody. Names resolvable       │
+│  purely from scope are resolved; method/field names  │
+│  stay as strings until type inference.               │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  TYPE INFER      kestrel-type-infer                  │
+│  Per-body: HirBody → TypedBody. Constraint-based     │
+│  solver with fixpoint iteration. Resolves method     │
+│  calls, associated types, overload sets, promotions. │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  ANALYZE         kestrel-analyze                     │
+│  Roslyn-style analyzers over entities and bodies:    │
+│  BodyCheck, DeclCheck, CompilationCheck.             │
+│  Produces diagnostics; does not mutate the world.    │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  MIR LOWER       kestrel-mir-lower → kestrel-mir     │
+│  Entities + TypedBodies → MirModule (flat, explicit) │
+│  Places, Rvalues, Statements, Terminators.           │
+│  Generics stay generic — monomorphized at codegen.   │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────┐
+│  CODEGEN         kestrel-codegen + …-cranelift       │
+│  Monomorphize, mangle, emit Cranelift IR, link.      │
+└──────────────────────────────────────────────────────┘
 ```
 
-## Key Types by Phase
+Each arrow is one or more memoized queries. Nothing in this pipeline is batch-imperative: analyzers don't run "a validate pass" over the world — they are queries that fire on demand and whose results are cached until the inputs change.
 
-### Phase 1: Lexing
-```rust
-// kestrel-lexer
-Token              // Enum: Identifier, Module, Struct, LBrace, ...
-Spanned<Token>     // Token + Span (Range<usize>)
+## The hECS world
 
-// Usage
-let tokens: Vec<Spanned<Token>> = lex(source).filter_map(|t| t.ok()).collect();
-```
+Everything after parsing lives in a `World` (`kestrel-hecs`). The contributor-level vocabulary:
 
-### Phase 2: Parsing
-```rust
-// kestrel-parser
-Event              // StartNode(SyntaxKind), AddToken(kind, span), FinishNode, Error
-EventSink          // Collects events during parsing
-TreeBuilder        // Converts events to SyntaxNode
+| Concept | What it is |
+|---------|------------|
+| `Entity` | A 32-bit handle. Every declaration gets one. |
+| **Component** | Any `Clone + 'static` struct stored against an entity. Components are small and orthogonal — a function entity has `Name`, `Callable`, `Body`, optionally `WhereClause`, etc. |
+| `NodeKind` | The discriminant component on every declaration entity (`Module`, `Struct`, `Enum`, `Protocol`, `Function`, `Field`, `TypeAlias`, …). |
+| **Query** | A `QueryFn` impl. Inputs: entity + root. Outputs: some derived fact (HIR body, inferred type, diagnostics, MIR). The framework caches results keyed on `(query, revision)` and re-runs them when inputs fingerprint-differ. |
+| **Revision** | A counter on the `World`. Bumped when the source changes. Feeds incremental invalidation. |
 
-// Pattern: internal parser → emit → public parse function
-fn foo_parser_internal() -> impl Parser<Token, RawData, ...>
-fn emit_foo(sink: &mut EventSink, data: RawData)
-pub fn parse_foo(source: &str, tokens: I, sink: &mut EventSink)
-```
+Because components are orthogonal, capability checks are "does this entity have component X?" instead of "what subclass is this symbol?" A computed property is a `Field` entity that also has a `Computed` marker. A static field is one that has a `Static` marker. Adding a new capability doesn't require editing a giant enum — you define a new component.
 
-### Phase 3: Syntax Tree
-```rust
-// kestrel-syntax-tree
-SyntaxKind         // Enum: tokens (Identifier, Module) + nodes (StructDeclaration, Name)
-SyntaxNode         // Rowan node with children
-SyntaxToken        // Rowan token with text
+### Typical component set per declaration kind
 
-// Tree structure
-StructDeclaration
-├── Visibility      // Wrapper (may be empty)
-│   └── Public      // Token (optional)
-├── Struct          // Token
-├── Name            // Wrapper (always has content)
-│   └── Identifier  // Token
-└── StructBody
-    └── ...
-```
+| Kind | Likely components (beyond `NodeKind`, `Name`, `DeclSpan`, `CstNode`, `Vis`) |
+|------|-----------------------------------------------------------------------------|
+| Function / Initializer / Deinit | `Callable`, `Valued` (pre-lower) or `Body` (post-lower), optional `WhereClause`, `TypeParams` |
+| Field | `TypeAnnotation`, `FieldMutability`, optionally `Computed`, `Static`, `Gettable`/`Settable`, `Valued` (default) |
+| Struct / Enum / Protocol / TypeAlias | `Typed` marker, optional `TypeParams`, `WhereClause` |
+| Subscript | `Callable`, `Subscript` marker, `Gettable`/`Settable` |
+| Type parameter | `TypeParameter` component with its constraints |
 
-### Phase 4: Semantic Analysis
-```rust
-// kestrel-semantic-tree
-Symbol<KestrelLanguage>     // Trait for all symbols
-SymbolMetadata              // Name, span, children, behaviors
-KestrelSymbolKind           // Module, Struct, Function, Field, ...
+The authoritative catalogue is `lib2/kestrel-ast-builder/src/components.rs`.
 
-// Specific symbols
-ModuleSymbol, StructSymbol, FunctionSymbol, FieldSymbol,
-ProtocolSymbol, TypeAliasSymbol, ImportSymbol, LocalSymbol
+## Crate map
 
-// Behaviors (attached to symbols)
-VisibilityBehavior          // Access control
-CallableBehavior            // Function signatures
-TypedBehavior               // Type information
-ExecutableBehavior          // Code bodies
+| Crate | Responsibility |
+|-------|----------------|
+| `kestrel-span` | Source locations, `Span`, `Spanned<T>`, file IDs. |
+| `kestrel-lexer` | Tokenization with logos. |
+| `kestrel-parser` | Event-driven parser; emits events consumed by `kestrel-syntax-tree`. |
+| `kestrel-syntax-tree` | Lossless CST (rowan). |
+| `kestrel-ast` | Arena-allocated AST types (`AstType`, `AstBody`, `AstExpr`, `AstStmt`, `AstPat`). |
+| `kestrel-ast-builder` | Lowers CST → hECS entities + components. Defines `NodeKind` and the component catalogue. |
+| `kestrel-hecs` | The ECS itself: `Entity`, `World`, `QueryFn`, `QueryContext`, `Fingerprint`, `Revision`, snapshots. |
+| `kestrel-name-res` | Scope and name resolution queries (`ResolveName`, `ResolveTypePath`, `ResolveValuePath`). |
+| `kestrel-hir` | Body HIR (`HirExpr`, `HirPat`, `HirStmt`, `HirBody`). |
+| `kestrel-hir-lower` | `LowerBody`, `LowerCallableTypes` queries — AST bodies → HIR bodies. |
+| `kestrel-type-infer` | Constraint-based inference; `InferBody` query, `Constraint` / `InferError` enums, `TypeResolver`. |
+| `kestrel-semantics` | Higher-level semantic queries (conformance, witness resolution). Used by infer/analyze. |
+| `kestrel-analyze` | Analyzer framework + every concrete analyzer. |
+| `kestrel-pattern-matching` | Exhaustiveness checking. |
+| `kestrel-mir` | MIR types: `MirModule`, `FunctionDef`, `Place`, `Rvalue`, `Statement`, `Terminator`. |
+| `kestrel-mir-lower` | `LowerMir` query — entities + typed bodies → MIR. |
+| `kestrel-codegen` | Backend-agnostic: type layout, symbol mangling (`kestrel-codegen/src/mangle.rs`). |
+| `kestrel-codegen-cranelift` | Cranelift backend, monomorphization, linking. |
+| `kestrel-compiler` | Low-level compiler / query engine. Owns the `World`. |
+| `kestrel-compiler-driver` | High-level orchestration used by the CLI and tests. |
+| `kestrel-debug` | Introspection utilities. |
+| `kestrel-reporting` | Diagnostic formatting (codespan-reporting wrapper). |
+| `kestrel-test-suite` | `.ks`-file test runner. Package name in `Cargo.toml` is `kestrel-test-suite2`. |
 
-// kestrel-semantic-tree-builder (BUILD)
-Builder                     // Trait: builds symbol from syntax
-SemanticModelBuilder         // Lowers syntax trees to a SemanticModel
-
-// kestrel-semantic-tree-binder (BIND)
-DeclarationBinder           // Trait: binds a symbol using its syntax node
-DeclarationBinderRegistry   // Maps SyntaxKind → DeclarationBinder
-TypeResolver                // Resolves types (during binding/body resolution)
-BodyResolver                // Resolves expressions/statements
-```
-
-### Phase 5: MIR
-```rust
-// kestrel-execution-graph
-MirContext             // Central context holding all MIR data
-MirTy                  // Type representation (primitives, pointers, named types, etc.)
-Statement / StatementKind  // IR operations: assign, call, drop
-Terminator / TerminatorKind // Block terminators: jump, branch, return
-Place / PlaceKind      // Memory locations: locals, fields, indexed, derefs
-Rvalue                 // Computed values: binops, unops, casts, calls, refs
-PassingMode            // Calling convention: Ref, MutRef, Copy, Move
-
-// kestrel-execution-graph-lowering
-lower_module(model, module) -> MirContext  // Main entry point
-```
-
-### Phase 6: Code Generation
-```rust
-// kestrel-codegen
-TargetConfig           // Target triple detection
-Layout / LayoutCache   // Type size and alignment calculation
-Mangler                // Linker symbol name mangling
-
-// kestrel-codegen-cranelift
-compile(mir, target, options)       // MIR -> object code bytes
-compile_and_link(mir, target, options, path) // MIR -> executable
-monomorphize::collect_all(mir)      // Discover all generic instantiations
-CodegenContext                      // Manages Cranelift ObjectModule
-```
-
-## File Organization
+## Data flow example — `5.toString()`
 
 ```
-lib/kestrel-lexer/
-└── src/lib.rs              # Single file: Token enum + lex()
+1. LEX          "5.toString()" → [Integer, Dot, Identifier, LParen, RParen]
 
-lib/kestrel-parser/
-└── src/
-    ├── lib.rs              # Re-exports
-    ├── event.rs            # Event, EventSink, TreeBuilder
-    ├── parser.rs           # High-level Parser API
-    ├── declaration_item/   # Top-level declarations
-    │   └── mod.rs
-    ├── module/             # Module-specific parsing
-    │   └── mod.rs
-    ├── struct/             # Struct-specific parsing
-    │   └── mod.rs
-    ├── function/           # Function-specific parsing
-    │   └── mod.rs
-    ├── expr/               # Expression parsing
-    │   └── mod.rs
-    └── common/             # Shared parser utilities
-        ├── data.rs
-        ├── emitters.rs
-        └── parsers.rs
+2. PARSE/CST    MethodCallExpr
+                 ├── Integer  "5"
+                 ├── Dot      "."
+                 ├── Identifier "toString"
+                 └── Arguments ()
 
-lib/kestrel-syntax-tree/
-└── src/lib.rs              # SyntaxKind enum + KestrelLanguage
+3. AST BUILD    The enclosing function entity gets a Valued component
+                pointing at its CST body. No new entities per call.
 
-lib/kestrel-semantic-tree/
-└── src/
-    ├── lib.rs              # Re-exports
-    ├── language.rs         # KestrelLanguage definition
-    ├── symbol/
-    │   ├── mod.rs
-    │   ├── kind.rs         # KestrelSymbolKind enum
-    │   ├── module.rs       # ModuleSymbol
-    │   ├── struct.rs       # StructSymbol
-    │   ├── function.rs     # FunctionSymbol
-    │   └── ...
-    ├── behavior/
-    │   ├── mod.rs
-    │   ├── visibility.rs
-    │   ├── callable.rs
-    │   └── ...
-    ├── ty/                 # Type system
-    │   └── mod.rs
-    ├── expr.rs             # Expression semantics
-    └── stmt.rs             # Statement semantics
+4. HIR LOWER    HirExpr::MethodCall {
+                    receiver: HirExpr::Literal(Int(5)),
+                    name: "toString",
+                    args: [],
+                }
+                The method NAME is a string — its target isn't known
+                until we know the receiver's type.
 
-lib/kestrel-semantic-tree-builder/
-└── src/
-    ├── lib.rs              # Public API: build(...), SemanticModelBuilder
-    ├── lowerer.rs          # SyntaxTree -> SemanticModel lowering driver
-    ├── builder.rs          # Builder trait
-    ├── builders/
-    │   ├── mod.rs
-    │   ├── module.rs
-    │   ├── struct.rs
-    │   ├── function.rs
-    │   └── ...
+5. TYPE INFER   Emits a Member constraint on the method call.
+                Once the receiver's type resolves to Int64, the solver
+                asks the semantics layer for Int64.toString, records
+                the resolved callee entity on the expression, and
+                unifies the result type with String.
 
-lib/kestrel-semantic-tree-binder/
-└── src/
-    ├── lib.rs              # Public API: SemanticBinder
-    ├── declaration_binder.rs# DeclarationBinder + registry
-    ├── binders/            # Per-declaration binding
-    ├── resolution/         # Binder orchestration + type resolution
-    ├── body_resolver/      # Expression/statement resolution
-    └── diagnostics/        # Bind-time diagnostics
+6. ANALYZE      TypeCheckAnalyzer etc. run against the typed body.
+                Any mismatches turn into diagnostics.
 
-lib/kestrel-semantic-analyzers/
-└── src/                    # Post-bind analyzers (VALIDATE)
-
-lib/kestrel-semantic-type-inference/
-└── src/
-    ├── lib.rs              # InferenceContext, Constraint, Solution
-    └── ...                 # Constraint generation, unification, solving
-
-lib/kestrel-semantic-pattern-matching/
-└── src/
-    ├── lib.rs              # is_irrefutable, check_exhaustiveness, is_useful
-    └── ...                 # Maranget's pattern matrix algorithm
-
-lib/kestrel-execution-graph/
-└── src/
-    ├── lib.rs              # MirContext, MirTy, Statement, Terminator, Place, Rvalue
-    └── ...                 # MIR type definitions and utilities
-
-lib/kestrel-execution-graph-lowering/
-└── src/
-    ├── lib.rs              # lower_module() entry point
-    ├── lowerer/            # Item-level lowering (functions, structs, enums, protocols)
-    ├── expr.rs             # Expression -> MIR lowering
-    ├── stmt.rs             # Statement -> MIR lowering
-    ├── pattern.rs          # Pattern -> MIR lowering
-    └── match_lowering.rs   # Match expressions -> control flow
-
-lib/kestrel-codegen/
-└── src/
-    ├── lib.rs              # TargetConfig, Layout, LayoutCache, Mangler
-    └── ...                 # Type layout calculation, name mangling
-
-lib/kestrel-codegen-cranelift/
-└── src/
-    ├── lib.rs              # compile(), compile_and_link()
-    ├── context.rs          # CodegenContext, Cranelift ObjectModule management
-    ├── monomorphize.rs     # Generic instantiation collection + substitution
-    ├── function.rs         # MIR function -> Cranelift IR
-    ├── block.rs            # Basic block lowering
-    ├── rvalue.rs           # Rvalue -> Cranelift instructions
-    ├── terminator.rs       # Terminator -> Cranelift branches
-    ├── types.rs            # MIR type -> Cranelift type translation
-    ├── place.rs            # Place -> memory address computation
-    └── link.rs             # Object file -> executable linking
-
-lib/kestrel-test-suite/
-└── src/lib.rs              # Test fluent API
-└── tests/
-    ├── body_resolution.rs  # Expression/statement tests
-    ├── functions.rs
-    ├── structs.rs
-    ├── protocols.rs
-    └── ...
+7. MIR LOWER    The method call becomes a concrete Call terminator
+                whose callee is the resolved entity (generic if
+                needed; monomorphized at codegen time).
 ```
 
-## Data Flow Example
+## Where the phase boundaries are (and aren't)
 
-Adding `5.toString()` (primitive method call):
+lib1 had explicit **BUILD → BIND → VALIDATE** phases that mutated a shared model in a specific order. lib2 does not.
 
-```
-1. LEXER
-   "5.toString()" → [Integer(5), Dot, Identifier(toString), LParen, RParen]
+- There is no "BIND pass." Name resolution is a query (`ResolveName`) fired as needed.
+- There is no "VALIDATE pass." Each analyzer is a query that runs on demand and caches its result.
+- The closest thing to a phase boundary is **component production**: `kestrel-ast-builder` is the only crate that writes components to the world. Everything downstream is read-only queries.
 
-2. PARSER
-   Internal parser extracts: receiver_span, dot_span, method_span, args_spans
-   Emitter produces events:
-     StartNode(MethodCallExpr)
-       AddToken(Integer, 0..1)
-       AddToken(Dot, 1..2)
-       AddToken(Identifier, 2..10)
-       AddToken(LParen, 10..11)
-       AddToken(RParen, 11..12)
-     FinishNode
+Practical consequence: to add a fact about a declaration, you either (a) add a component during AST build, or (b) write a query that computes the fact. You rarely need to thread it through a "pass."
 
-3. SYNTAX TREE
-   MethodCallExpr
-   ├── Integer "5"
-   ├── Dot "."
-   ├── Identifier "toString"
-   ├── LParen "("
-   └── RParen ")"
+## Further reading
 
-4. SEMANTIC ANALYSIS (body_resolver.rs)
-   - Recognize Integer literal → Expr::Integer(5)
-   - Look up "toString" method on Int type from prelude
-   - Resolve to: Expr::MethodCall { receiver: Int, method: toString, args: [] }
-   - Return type: String
-```
+- `lib2/AGENTS.md` — documentation conventions for each lib2 crate; also lists which crates have `docs/` folders.
+- `lib2/kestrel-hecs/docs/architecture.md` — the ECS mechanics in detail.
+- `lib2/kestrel-ast-builder/docs/components.md` and `entity-mapping.md` — the component catalogue.
+- `lib2/kestrel-hir/docs/` — HIR shape and desugaring.
+- `lib2/kestrel-type-infer/docs/` and `lib2/kestrel-type-infer/AGENTS.md` — inference internals.
+- `lib2/kestrel-analyze/AGENTS.md` — analyzer patterns.
+- `docs/contributing/type-inference.md` — contributor overview of inference.
+- `docs/contributing/quick-reference.md` — file paths by task.
+- `docs/contributing/workflows.md` — step-by-step guides for common tasks.

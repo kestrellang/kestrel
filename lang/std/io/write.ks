@@ -120,7 +120,7 @@ public struct Sink: Write {
 ///     try writeStr(writer: buf, s: "Hello, ")
 ///     try writeStr(writer: buf, s: "World!")
 ///     let result = buf.toString()  // "Hello, World!"
-public struct Buffer: Write {
+public struct Buffer: Write, Cloneable {
     var data: Array[UInt8]
 
     /// Creates an empty buffer writer.
@@ -129,6 +129,12 @@ public struct Buffer: Write {
     ///     var buf = Buffer()
     public init() {
         self.data = Array[UInt8]()
+    }
+
+    public func clone() -> Buffer {
+        var b = Buffer();
+        b.data = self.data.clone();
+        b
     }
 
     /// Creates a buffer writer with the specified initial capacity.

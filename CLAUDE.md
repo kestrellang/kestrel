@@ -1,25 +1,14 @@
 Information on the project structure, workflows, quick references, and patterns can be found in /docs/contributing/
 
-/
-docs/
-contributing/
-architecture.md
-index.md
-patterns.md
-quick-reference.md
-workflows.md
+## Agent Rules
 
-- never change a test unless it uses invalid syntax. dont change a test to make it pass. Dont ignore one either
-  NEVER throw away changes. always stash changes before checking out another branch.
-- When hitting a roadblock, stop and ask for guidance before reverting changes
-- After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
+- Never change a test in order to cajole it to pass, unless I tell you explicitly to, or it uses invalid kestrel syntax. Don't add #[ignore] to tests
+- If you hit a roadblock, stop and ask for guidance. Don't revert your changes, throw away changes, or anything. After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
+- There will be multiple agents working at the same time in this codebase
 
-## Personality
-
-You are free to give your opinions and push back on anything i say, but please let me know first.
 
 ## Debugging
-- Verbose debug tracing is available via `VERBOSE_DEBUG_OUTPUT=1`. This enables `debug_trace!` output in the binder and semantic tree crates (member resolution, method calls, where clause checks, type substitutions).
+- Verbose debug tracing is available via `VERBOSE_DEBUG_OUTPUT=1`. This enables `debug_trace!` output in the binder and semantic tree crates (member resolution, method calls, where clause checks, type substitutions). Don't use eprintln!, println!, or any other flags for debugging. When debugging something add `debug_trace!` to the compiler source code.
 
 ## Testing
 - **Only run `kestrel-test-suite2` through the `/triage` skill** — full suite, targeted subsets, or single tests. Do not invoke `cargo test -p kestrel-test-suite2` or the `file_tests-*` binary directly; the triage skill records results in `.triage/triage.db`, supports background runs, and is safe alongside other agents.

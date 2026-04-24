@@ -235,13 +235,19 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 
 /// Default implementation of StringInterpolationProtocol for String.
 @builtin(.DefaultStringInterpolation)
-public struct DefaultStringInterpolation: StringInterpolationProtocol {
+public struct DefaultStringInterpolation: StringInterpolationProtocol, Cloneable {
     private var parts: Array[String]
 
     /// Initialize with capacity hints.
     @builtin(.DefaultStringInterpolationInit)
     public init(literalCapacity: Int64, interpolationCount: Int64) {
         self.parts = [];
+    }
+
+    public func clone() -> DefaultStringInterpolation {
+        var c = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
+        c.parts = self.parts.clone();
+        c
     }
 
     /// Append a literal string segment.

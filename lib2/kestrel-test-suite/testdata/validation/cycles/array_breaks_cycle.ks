@@ -3,6 +3,10 @@
 
 module Main
 
-struct Node {
+struct Node: Cloneable {
     let children: [Node]
+
+    func clone() -> Node {
+        Node(children: self.children.clone())
+    }
 }

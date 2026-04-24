@@ -35,27 +35,6 @@ unicode-xid = "0.2"
 
 [workspace]
 members = [
-    "lib/kestrel-span",
-    "lib/kestrel-prelude",
-    "lib/kestrel-lexer",
-    "lib/kestrel-parser",
-    "lib/kestrel-syntax-tree",
-    "lib/semantic-tree",
-    "lib/kestrel-semantic-tree",
-    "lib/kestrel-semantic-model",
-    "lib/kestrel-semantic-analyzers",
-    "lib/kestrel-semantic-tree-builder",
-    "lib/kestrel-semantic-tree-binder",
-    "lib/kestrel-semantic-type-inference",
-    "lib/kestrel-semantic-pattern-matching",
-    "lib/kestrel-reporting",
-    "lib/kestrel-compiler",
-    "lib/kestrel-execution-graph",
-    "lib/kestrel-execution-graph-lowering",
-    "lib/kestrel-codegen",
-    "lib/kestrel-codegen-cranelift",
-    "lib/kestrel-lsp",
-    "lib/kestrel-test-suite",
     "lib2/kestrel-hecs",
     "lib2/kestrel-span",
     "lib2/kestrel-lexer",
@@ -109,9 +88,6 @@ type_complexity = "allow"     # Parser combinators have complex types
 # Reduce stack frame size in debug builds for recursive parsers
 [profile.dev]
 opt-level = 1
-
-[profile.dev.package.kestrel-parser]
-opt-level = 2
 
 [profile.dev.package.kestrel-parser2]
 opt-level = 2

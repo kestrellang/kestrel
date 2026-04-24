@@ -426,7 +426,7 @@
 
 ## Phase 11: Memory Model ✅ COMPLETE
 
-See [docs/memory-model/implementation-plan.md](docs/memory-model/implementation-plan.md) for detailed implementation plan.
+See [docs/memory-model/](docs/memory-model/) for the memory model specification.
 
 ### Phase 11.1: Parameter Access Modes + MIR Foundation ✅
 

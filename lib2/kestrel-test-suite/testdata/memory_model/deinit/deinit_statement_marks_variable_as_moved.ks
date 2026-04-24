@@ -16,5 +16,5 @@ func getId(h: Handle) -> lang.i64 {
 func example() {
     var handle = Handle(fd: 42);
     deinit handle;
-    let x = getId(h: handle); // ERROR: moved
+    let x = getId(handle); // ERROR: moved
 }
