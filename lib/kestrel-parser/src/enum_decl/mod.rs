@@ -7,16 +7,23 @@
 //! Note: The actual parsing is delegated to the unified type_decl module to handle
 //! mutual recursion between structs and enums efficiently.
 
+use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{EnumDeclarationData, emit_enum_declaration};
+use crate::common::{
+    AttributeData, ConformanceListData, TypeDeclarationBodyItem, emit_attribute_list, emit_name,
+    emit_type_declaration_body_item, emit_visibility,
+};
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
+use crate::ty::{TyVariant, emit_ty_variant};
 use crate::type_decl::enum_declaration_parser_unified;
-
-use chumsky::prelude::*;
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, emit_conformance_list, emit_type_parameter_list,
+    emit_where_clause,
+};
 
 /// Represents an enum declaration: (visibility)? (indirect)? enum Name[T]? (: Conformances)? (where ...)? { ... }
 ///
@@ -111,6 +118,46 @@ impl EnumDeclaration {
     }
 }
 
+/// Raw parsed data for enum case parameter
+///
+/// Supports both named (`label: Type`) and unnamed (`Type`) forms:
+/// - Named: `case Some(value: T)` - label and colon present
+/// - Unnamed: `case Some(T)` - label and colon are None
+#[derive(Debug, Clone)]
+pub struct EnumCaseParameterData {
+    /// Optional label name (None for unnamed parameters)
+    pub label: Option<Span>,
+    /// Optional colon (present only when label is present)
+    pub colon: Option<Span>,
+    /// The type of the parameter
+    pub ty: TyVariant,
+}
+
+/// Raw parsed data for enum case declaration
+#[derive(Debug, Clone)]
+pub struct EnumCaseDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub case_span: Span,
+    pub name_span: Span,
+    pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>, // (lparen, params, rparen)
+}
+
+/// Raw parsed data for enum declaration
+#[derive(Debug, Clone)]
+pub struct EnumDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub indirect: Option<Span>,
+    pub enum_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub conformances: Option<ConformanceListData>,
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<TypeDeclarationBodyItem>,
+    pub rbrace_span: Span,
+}
+
 /// Internal Chumsky parser for enum declaration
 ///
 /// This delegates to the unified type_decl parser which handles both struct and enum
@@ -118,6 +165,97 @@ impl EnumDeclaration {
 pub fn enum_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, EnumDeclarationData, ParserExtra<'tokens>> + Clone {
     enum_declaration_parser_unified()
+}
+
+/// Emit events for an indirect modifier
+pub(crate) fn emit_indirect_modifier(sink: &mut EventSink, indirect_span: Span) {
+    sink.start_node(SyntaxKind::IndirectModifier);
+    sink.add_token(SyntaxKind::Indirect, indirect_span);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case parameter
+///
+/// Supports both named (`label: Type`) and unnamed (`Type`) forms.
+pub(crate) fn emit_enum_case_parameter(sink: &mut EventSink, data: &EnumCaseParameterData) {
+    sink.start_node(SyntaxKind::EnumCaseParameter);
+    if let (Some(label), Some(colon)) = (&data.label, &data.colon) {
+        emit_name(sink, label.clone());
+        sink.add_token(SyntaxKind::Colon, colon.clone());
+    }
+    emit_ty_variant(sink, &data.ty);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case parameter list
+pub(crate) fn emit_enum_case_parameter_list(
+    sink: &mut EventSink,
+    lparen: Span,
+    parameters: &[EnumCaseParameterData],
+    rparen: Span,
+) {
+    sink.start_node(SyntaxKind::EnumCaseParameterList);
+    sink.add_token(SyntaxKind::LParen, lparen);
+    for param in parameters {
+        emit_enum_case_parameter(sink, param);
+    }
+    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.finish_node();
+}
+
+/// Emit events for an enum case declaration
+pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
+    sink.start_node(SyntaxKind::EnumCaseDeclaration);
+    emit_attribute_list(sink, &data.attributes);
+    sink.add_token(SyntaxKind::Case, data.case_span);
+    emit_name(sink, data.name_span);
+
+    if let Some((lparen, ref params, rparen)) = data.parameters {
+        emit_enum_case_parameter_list(sink, lparen, params, rparen);
+    }
+
+    sink.finish_node();
+}
+
+/// Emit events for an enum declaration
+///
+/// This is the single source of truth for enum declaration emission.
+pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
+    sink.start_node(SyntaxKind::EnumDeclaration);
+
+    emit_attribute_list(sink, &data.attributes);
+    emit_visibility(sink, data.visibility);
+
+    if let Some(indirect_span) = data.indirect {
+        emit_indirect_modifier(sink, indirect_span);
+    }
+
+    sink.add_token(SyntaxKind::Enum, data.enum_span);
+    emit_name(sink, data.name_span);
+
+    if let Some((lbracket, params, rbracket)) = data.type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(conf) = data.conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::EnumBody);
+    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+
+    for item in data.body {
+        emit_type_declaration_body_item(sink, item);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.finish_node(); // EnumBody
+
+    sink.finish_node(); // EnumDeclaration
 }
 
 /// Parse an enum declaration and emit events

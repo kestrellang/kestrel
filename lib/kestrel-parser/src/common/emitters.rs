@@ -10,10 +10,11 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
-    EnumCaseDeclarationData, EnumDeclarationData, FunctionBodyData, InitializerDeclarationData,
-    ParameterAccessMode, ParameterData, StructDeclarationData, TypeDeclarationBodyItem,
+    FunctionBodyData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
+use crate::enum_decl::{emit_enum_case, emit_enum_declaration};
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
 use crate::field::emit_field_declaration;
@@ -21,10 +22,11 @@ use crate::function::emit_function_declaration;
 use crate::import::emit_import_declaration;
 use crate::module::emit_module_declaration;
 use crate::pattern::emit_pattern_variant;
+use crate::r#struct::emit_struct_declaration;
 use crate::subscript::emit_subscript_declaration;
 use crate::ty::emit_ty_variant;
 use crate::type_alias::emit_type_alias_declaration;
-use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
+use crate::type_param::{emit_type_parameter_list, emit_where_clause};
 
 // =============================================================================
 // Module and Import Emitters
@@ -303,44 +305,11 @@ pub fn emit_deinit_declaration(sink: &mut EventSink, data: DeinitDeclarationData
     sink.finish_node();
 }
 
-/// Emit events for a struct declaration
-///
-/// This is the single source of truth for struct declaration emission.
-pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData) {
-    sink.start_node(SyntaxKind::StructDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Struct, data.struct_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    if let Some(conf) = data.conformances {
-        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::StructBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        emit_type_declaration_body_item(sink, item);
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // StructBody
-
-    sink.finish_node(); // StructDeclaration
-}
-
 /// Emit events for a type declaration body item (struct or enum body item)
-fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBodyItem) {
+pub(crate) fn emit_type_declaration_body_item(
+    sink: &mut EventSink,
+    item: TypeDeclarationBodyItem,
+) {
     match item {
         TypeDeclarationBodyItem::Field(data) => emit_field_declaration(sink, data),
         TypeDeclarationBodyItem::Function(data) => emit_function_declaration(sink, data),
@@ -360,102 +329,4 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
     }
 }
 
-// =============================================================================
-// Enum Emitters
-// =============================================================================
-
-/// Emit events for an indirect modifier
-pub fn emit_indirect_modifier(sink: &mut EventSink, indirect_span: Span) {
-    sink.start_node(SyntaxKind::IndirectModifier);
-    sink.add_token(SyntaxKind::Indirect, indirect_span);
-    sink.finish_node();
-}
-
-/// Emit events for an enum case parameter
-///
-/// Supports both named (`label: Type`) and unnamed (`Type`) forms.
-pub fn emit_enum_case_parameter(sink: &mut EventSink, data: &super::data::EnumCaseParameterData) {
-    sink.start_node(SyntaxKind::EnumCaseParameter);
-    // Emit label and colon if present (named parameter)
-    if let (Some(label), Some(colon)) = (&data.label, &data.colon) {
-        emit_name(sink, label.clone());
-        sink.add_token(SyntaxKind::Colon, colon.clone());
-    }
-    // Always emit the type
-    emit_ty_variant(sink, &data.ty);
-    sink.finish_node();
-}
-
-/// Emit events for an enum case parameter list
-pub fn emit_enum_case_parameter_list(
-    sink: &mut EventSink,
-    lparen: Span,
-    parameters: &[super::data::EnumCaseParameterData],
-    rparen: Span,
-) {
-    sink.start_node(SyntaxKind::EnumCaseParameterList);
-    sink.add_token(SyntaxKind::LParen, lparen);
-    for param in parameters {
-        emit_enum_case_parameter(sink, param);
-    }
-    sink.add_token(SyntaxKind::RParen, rparen);
-    sink.finish_node();
-}
-
-/// Emit events for an enum case declaration
-///
-/// This is the single source of truth for enum case declaration emission.
-pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
-    sink.start_node(SyntaxKind::EnumCaseDeclaration);
-    emit_attribute_list(sink, &data.attributes);
-    sink.add_token(SyntaxKind::Case, data.case_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lparen, ref params, rparen)) = data.parameters {
-        emit_enum_case_parameter_list(sink, lparen, params, rparen);
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for an enum declaration
-///
-/// This is the single source of truth for enum declaration emission.
-pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
-    sink.start_node(SyntaxKind::EnumDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-
-    if let Some(indirect_span) = data.indirect {
-        emit_indirect_modifier(sink, indirect_span);
-    }
-
-    sink.add_token(SyntaxKind::Enum, data.enum_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    if let Some(conf) = data.conformances {
-        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::EnumBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        emit_type_declaration_body_item(sink, item);
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // EnumBody
-
-    sink.finish_node(); // EnumDeclaration
-}
 

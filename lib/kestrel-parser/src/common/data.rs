@@ -7,10 +7,12 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
+use crate::enum_decl::{EnumCaseDeclarationData, EnumDeclarationData};
 use crate::expr::ExprVariant;
 use crate::field::FieldDeclarationData;
 use crate::function::FunctionDeclarationData;
 use crate::pattern::PatternVariant;
+use crate::r#struct::StructDeclarationData;
 use crate::subscript::SubscriptDeclarationData;
 use crate::ty::TyVariant;
 use crate::type_alias::TypeAliasDeclarationData;
@@ -173,21 +175,6 @@ pub struct ConformanceListData {
     pub conformances: Vec<ConformanceItemData>,
 }
 
-/// Raw parsed data for struct declaration internals
-#[derive(Debug, Clone)]
-pub struct StructDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub struct_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub conformances: Option<ConformanceListData>,
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<TypeDeclarationBodyItem>,
-    pub rbrace_span: Span,
-}
-
 /// Items that can appear in a type declaration body (struct or enum)
 /// Used to enable mutual nesting of structs and enums
 #[derive(Debug, Clone)]
@@ -209,50 +196,4 @@ pub enum TypeDeclarationBodyItem {
         Option<Vec<(Span, Option<Span>)>>,
     ), // import_span, path, alias, items
 }
-
-/// Deprecated: Use TypeDeclarationBodyItem instead
-/// Kept for backwards compatibility during migration
-#[deprecated(note = "Use TypeDeclarationBodyItem instead")]
-pub type StructBodyItem = TypeDeclarationBodyItem;
-
-/// Raw parsed data for enum case parameter
-///
-/// Supports both named (`label: Type`) and unnamed (`Type`) forms:
-/// - Named: `case Some(value: T)` - label and colon present
-/// - Unnamed: `case Some(T)` - label and colon are None
-#[derive(Debug, Clone)]
-pub struct EnumCaseParameterData {
-    /// Optional label name (None for unnamed parameters)
-    pub label: Option<Span>,
-    /// Optional colon (present only when label is present)
-    pub colon: Option<Span>,
-    /// The type of the parameter
-    pub ty: TyVariant,
-}
-
-/// Raw parsed data for enum case declaration
-#[derive(Debug, Clone)]
-pub struct EnumCaseDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub case_span: Span,
-    pub name_span: Span,
-    pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>, // (lparen, params, rparen)
-}
-
-/// Raw parsed data for enum declaration
-#[derive(Debug, Clone)]
-pub struct EnumDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub indirect: Option<Span>,
-    pub enum_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub conformances: Option<ConformanceListData>,
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<TypeDeclarationBodyItem>,
-    pub rbrace_span: Span,
-}
-
 

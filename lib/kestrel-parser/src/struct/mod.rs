@@ -6,16 +6,22 @@
 //! Note: The actual parsing is delegated to the unified type_decl module to handle
 //! mutual recursion between structs and enums efficiently.
 
+use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{StructDeclarationData, emit_struct_declaration};
+use crate::common::{
+    AttributeData, ConformanceListData, TypeDeclarationBodyItem, emit_attribute_list, emit_name,
+    emit_type_declaration_body_item, emit_visibility,
+};
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
 use crate::type_decl::struct_declaration_parser_unified;
-
-use chumsky::prelude::*;
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, emit_conformance_list, emit_type_parameter_list,
+    emit_where_clause,
+};
 
 /// Represents a struct declaration: (visibility)? struct Name[T]? (where ...)? { ... }
 ///
@@ -96,11 +102,62 @@ impl StructDeclaration {
 
 /// Internal Chumsky parser for struct declaration
 ///
+/// Raw parsed data for struct declaration internals
+#[derive(Debug, Clone)]
+pub struct StructDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub struct_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub conformances: Option<ConformanceListData>,
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<TypeDeclarationBodyItem>,
+    pub rbrace_span: Span,
+}
+
 /// This delegates to the unified type_decl parser which handles both struct and enum
 /// in a single recursive context to avoid stack overflow on deeply nested types.
 pub fn struct_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone {
     struct_declaration_parser_unified()
+}
+
+/// Emit events for a struct declaration
+///
+/// This is the single source of truth for struct declaration emission.
+pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData) {
+    sink.start_node(SyntaxKind::StructDeclaration);
+
+    emit_attribute_list(sink, &data.attributes);
+    emit_visibility(sink, data.visibility);
+    sink.add_token(SyntaxKind::Struct, data.struct_span);
+    emit_name(sink, data.name_span);
+
+    if let Some((lbracket, params, rbracket)) = data.type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(conf) = data.conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
+    if let Some(wc) = data.where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::StructBody);
+    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
+
+    for item in data.body {
+        emit_type_declaration_body_item(sink, item);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
+    sink.finish_node(); // StructBody
+
+    sink.finish_node(); // StructDeclaration
 }
 
 /// Parse a struct declaration and emit events
