@@ -200,11 +200,36 @@ modules:
 `expr/mod.rs` now re-exports these so existing external imports keep working.
 Net shrink: 3199 → 1943 lines in `expr/mod.rs`.
 
-Remaining under Step 7 (tracked as Step 7b): sub-parser extraction from the
-`recursive(|expr| ...)` closure in `expr_parser` into `atom.rs`, `postfix.rs`,
-`control.rs`, `closure.rs`, `operators.rs`. This is a structural rewrite —
-every sub-parser currently captures `expr` as a closure variable and would
-need to take it as an argument or go through a shared context type.
+Verification: `cargo test -p kestrel-parser`
+
+### Step 7b: Extract Expr Atoms, Operators, and Simple Control-Flow
+
+Pulled the three chunks of `expr_parser` that don't need shared sub-parser
+plumbing into their own modules:
+
+- `expr/atom.rs` (107 lines) — `full_type_args_parser`, `literal_parser`
+  (integer/float/string/raw-string/char/bool/null combined), `path_segment_parser`,
+  `path_parser`.
+- `expr/operators.rs` (78 lines) — `unary_op_parser`, `binary_op_parser`,
+  `compound_assign_op_parser` (pure token-level recognisers).
+- `expr/control.rs` (101 lines) — `break_parser`, `continue_parser`,
+  `return_parser(expr)`, `throw_parser(expr)`, `try_keyword_parser`,
+  `label_parser`.
+
+`return` and `throw` take the recursive `expr` handle as a generic `impl
+Parser<...> + Clone` parameter, which is the factory pattern for sub-parsers
+that need the recursion handle.
+
+`expr/mod.rs`: 1943 → 1788 lines (−44% from pre-Step 7 baseline of 3199).
+
+Remaining under Step 7 (deferred as Step 7c, not pursued in this pass): the
+postfix section (arg-list / member-access / tuple-index / postfix-bang,
+built into primary via `attach_trailing_closures`) and the closure section
+(`build_closure_expr` and trailing-closure argument). Both capture many
+other shared sub-parsers defined inside the `recursive(|expr| ...)` closure
+(`inline_code_block`, `inline_var_decl`, `condition_binary`, pattern and
+statement parsers) and would require threading those through as parameters
+or building a shared context struct. That's a larger structural rewrite.
 
 Verification: `cargo test -p kestrel-parser`
 
@@ -287,21 +312,14 @@ Verification: `cargo test -p kestrel-parser`
 
 ## Remaining Plan
 
-### Step 7: Split `expr/mod.rs`
+### Step 7c: Postfix and Closure Extraction (deferred)
 
-Break expression implementation into focused modules. Suggested layout:
-
-- `expr/data.rs`
-- `expr/atom.rs`
-- `expr/postfix.rs`
-- `expr/control.rs`
-- `expr/closure.rs`
-- `expr/operators.rs`
-- `expr/emit.rs`
-- `expr/mod.rs` as facade
-
-Do not add parser-level precedence. Operator handling should preserve syntax
-order for the later Pratt parser.
+`postfix.rs` and `closure.rs` are still to do. Both sections capture many
+shared sub-parsers defined inside the `recursive(|expr| ...)` closure
+(`inline_code_block`, `inline_var_decl`, `condition_binary`, pattern and
+statement parsers). Extracting them requires threading those through as
+parameters or introducing a shared context struct, which is a larger
+structural rewrite than the slices done so far.
 
 ### Step 8: Clarify Block/Stmt/Expr Boundaries
 
