@@ -184,6 +184,30 @@ New/updated tests in `parser.rs` and `event.rs`:
 
 Verification: `cargo test -p kestrel-parser`
 
+### Step 7a: Split Expression Data And Emit
+
+Extracted the two mechanically-separable halves of `expr/mod.rs` into sibling
+modules:
+
+- `expr/data.rs` (310 lines) — the 12 public data types (`ExprVariant`,
+  `PathSegmentData`, `TypeArgsData`, `CallArg`, `ArgumentListData`,
+  `MatchArmData`, `MatchGuardData`, `LabelData`, `ClosureParamsData`,
+  `ClosureParamData`, `ElseClause`, `IfCondition`)
+- `expr/emit.rs` (990 lines) — every `emit_*_expr` function, the
+  `emit_expr_variant` dispatcher, and the interpolation-detection helpers
+  (`string_contains_interpolation`, `maybe_convert_to_interpolated`)
+
+`expr/mod.rs` now re-exports these so existing external imports keep working.
+Net shrink: 3199 → 1943 lines in `expr/mod.rs`.
+
+Remaining under Step 7 (tracked as Step 7b): sub-parser extraction from the
+`recursive(|expr| ...)` closure in `expr_parser` into `atom.rs`, `postfix.rs`,
+`control.rs`, `closure.rs`, `operators.rs`. This is a structural rewrite —
+every sub-parser currently captures `expr` as a closure variable and would
+need to take it as an argument or go through a shared context type.
+
+Verification: `cargo test -p kestrel-parser`
+
 ### Step 10: Make Emitters Harder To Misuse
 
 Added an `EmitSyntax` trait in `event.rs` so every parser-data type can be
