@@ -9,16 +9,16 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, ComputedBodyData,
-    DeinitDeclarationData, EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem,
-    ExtensionDeclarationData, FieldDeclarationData, FunctionBodyData, FunctionDeclarationData,
-    InitializerDeclarationData, ParameterAccessMode, ParameterData, ProtocolBodyItem,
-    ProtocolDeclarationData, ReceiverModifier, StructDeclarationData, SubscriptBodyData,
-    SubscriptDeclarationData, TypeDeclarationBodyItem,
+    AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
+    EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
+    FunctionBodyData, FunctionDeclarationData, InitializerDeclarationData, ParameterAccessMode,
+    ParameterData, ProtocolBodyItem, ProtocolDeclarationData, ReceiverModifier,
+    StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
+use crate::field::emit_field_declaration;
 use crate::import::emit_import_declaration;
 use crate::module::emit_module_declaration;
 use crate::pattern::emit_pattern_variant;
@@ -304,98 +304,6 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
 
     if let Some(ref body) = data.body {
         emit_function_body(sink, body);
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for a field declaration
-///
-/// This is the single source of truth for field declaration emission.
-pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) {
-    sink.start_node(SyntaxKind::FieldDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
-
-    if data.is_mutable {
-        sink.add_token(SyntaxKind::Var, data.mutability_span);
-    } else {
-        sink.add_token(SyntaxKind::Let, data.mutability_span);
-    }
-
-    emit_name(sink, data.name_span);
-    sink.add_token(SyntaxKind::Colon, data.colon_span);
-    emit_ty_variant(sink, &data.ty);
-
-    // Emit computed property body if present
-    if let Some(computed_body) = &data.computed_body {
-        emit_property_accessors(sink, computed_body);
-    }
-
-    // Emit initializer if present
-    if let Some((equals_span, initializer_expr)) = data.initializer {
-        sink.add_token(SyntaxKind::Equals, equals_span);
-        emit_expr_variant(sink, &initializer_expr);
-    }
-
-    // Emit optional trailing semicolon
-    if let Some(semicolon_span) = data.semicolon {
-        sink.add_token(SyntaxKind::Semicolon, semicolon_span);
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for property accessors (computed property body)
-fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyData) {
-    sink.start_node(SyntaxKind::PropertyAccessors);
-
-    match computed_body {
-        ComputedBodyData::Shorthand(body) => {
-            // Shorthand: just emit the code block directly
-            emit_code_block(sink, body);
-        },
-        ComputedBodyData::Accessors {
-            lbrace: _,
-            get_span,
-            getter,
-            set_span,
-            setter,
-            rbrace: _,
-        } => {
-            // Emit getter
-            if let Some(getter_body) = getter {
-                // Full getter with body: emit GetterClause containing Get token and code block
-                sink.start_node(SyntaxKind::GetterClause);
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-                emit_code_block(sink, getter_body);
-                sink.finish_node();
-            } else {
-                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-            }
-
-            // Emit setter
-            if let Some(setter_body) = setter {
-                // Check if this is a real setter body or a placeholder for protocol requirement
-                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: emit Set token without body
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                } else {
-                    // Full setter with body: emit SetterClause containing Set token and code block
-                    sink.start_node(SyntaxKind::SetterClause);
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                    emit_code_block(sink, setter_body);
-                    sink.finish_node();
-                }
-            }
-        },
     }
 
     sink.finish_node();

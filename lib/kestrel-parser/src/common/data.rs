@@ -8,6 +8,7 @@ use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
 use crate::expr::ExprVariant;
+use crate::field::FieldDeclarationData;
 use crate::pattern::PatternVariant;
 use crate::ty::TyVariant;
 use crate::type_alias::TypeAliasDeclarationData;
@@ -154,45 +155,6 @@ pub struct FunctionDeclarationData {
     pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
     pub where_clause: Option<WhereClauseData>,
     pub body: Option<FunctionBodyData>, // Optional body - None for protocol methods
-}
-
-/// Body data for computed properties
-#[derive(Debug, Clone)]
-pub enum ComputedBodyData {
-    /// Shorthand: `{ expr }`
-    Shorthand(CodeBlockData),
-    /// Explicit: `{ get { } set { } }`
-    Accessors {
-        /// Span of the opening brace (for property accessors block)
-        lbrace: Span,
-        /// Span of the "get" keyword
-        get_span: Span,
-        getter: Option<CodeBlockData>, // None for protocol `{ get }`
-        /// Span of the "set" keyword (if present)
-        set_span: Option<Span>,
-        setter: Option<CodeBlockData>, // None for protocol `{ get set }`
-        /// Span of the closing brace (for property accessors block)
-        rbrace: Span,
-    },
-}
-
-/// Raw parsed data for field declaration internals
-#[derive(Debug, Clone)]
-pub struct FieldDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub is_static: Option<Span>,
-    pub mutability_span: Span,
-    pub is_mutable: bool,
-    pub name_span: Span,
-    pub colon_span: Span,
-    pub ty: TyVariant,
-    /// For computed properties: shorthand body OR accessors
-    pub computed_body: Option<ComputedBodyData>,
-    /// For constant initialization: (equals_span, expression)
-    pub initializer: Option<(Span, ExprVariant)>,
-    /// Optional trailing semicolon (for inline field declarations)
-    pub semicolon: Option<Span>,
 }
 
 /// Raw parsed data for initializer declaration internals
