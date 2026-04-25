@@ -92,6 +92,26 @@ pub fn get_decl_span(node: &SyntaxNode, file_id: usize) -> Span {
     Span::new(file_id, start..end)
 }
 
+/// Span of a declaration's identifier token (`foo` in `func foo(...)`).
+///
+/// Reads the `Name` child and returns its `Identifier` token span. Returns
+/// `None` for declarations without a `Name` child (e.g. `Module`, anonymous
+/// initializers) or when the name is missing — callers can fall back to
+/// [`get_decl_span`] for those cases.
+///
+/// Used by the LSP for `textDocument/rename` (to compute the edit range) and
+/// `documentSymbol.selectionRange` (to highlight just the name when an
+/// outline item is selected).
+pub fn get_name_span(node: &SyntaxNode, file_id: usize) -> Option<Span> {
+    let name_node = find_child(node, SyntaxKind::Name)?;
+    let ident = name_node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|tok| tok.kind() == SyntaxKind::Identifier)?;
+    let range = ident.text_range();
+    Some(Span::new(file_id, range.start().into()..range.end().into()))
+}
+
 /// Get the span of the visibility node.
 pub fn get_visibility_span(syntax: &SyntaxNode, file_id: usize) -> Option<Span> {
     let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;

@@ -10,6 +10,7 @@ pub mod documents;
 pub mod handlers;
 pub mod position;
 pub mod project;
+pub mod references;
 pub mod semantic;
 pub mod server;
 pub mod syntax;
@@ -110,6 +111,12 @@ impl LanguageServer for Backend {
                     trigger_characters: Some(vec![".".into()]),
                     ..Default::default()
                 }),
+                references_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                         legend: SemanticTokensLegend {
@@ -149,6 +156,28 @@ impl LanguageServer for Backend {
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>> {
         Ok(handlers::completion::handle(self.state.clone(), params).await)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        Ok(handlers::references::handle(self.state.clone(), params).await)
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        Ok(handlers::document_symbols::handle(self.state.clone(), params).await)
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        handlers::rename::prepare(self.state.clone(), params).await
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        handlers::rename::rename(self.state.clone(), params).await
     }
 
     async fn initialized(&self, _: InitializedParams) {
