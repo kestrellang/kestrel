@@ -538,10 +538,15 @@ impl LowerCtx {
         }
     }
 
-    /// Pure path: `a.b.c` or `Foo[Int].bar` — all segments are identifier tokens.
+    /// Pure path: `a.b.c` or `Foo[Int].bar` — all segments are identifier
+    /// tokens. A trailing `Dot + Missing[Identifier ""]` (parser recovery
+    /// for `foo.|`) is folded into a `MemberAccess` whose member name is
+    /// `""` so downstream lowering can produce `HirName::Missing` and the
+    /// LSP can find a Field at the cursor.
     fn lower_pure_path(&mut self, node: &SyntaxNode, span: Span) -> ExprId {
         let mut segments = Vec::new();
         let mut skip_next = false;
+        let mut trailing_missing_member = false;
 
         let elements: Vec<_> = node.children_with_tokens().collect();
         for (i, elem) in elements.iter().enumerate() {
@@ -570,8 +575,38 @@ impl LowerCtx {
                         type_args,
                         span: tok_span,
                     });
+                } else if token.kind() == SyntaxKind::Dot {
+                    // Bare trailing `.` with no identifier and no `Missing`
+                    // sibling either — count as a missing-member fold so the
+                    // chain still looks like an access.
+                    let has_following = elements[i + 1..]
+                        .iter()
+                        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Identifier)
+                            || e.as_node().is_some_and(|n| n.kind() == SyntaxKind::Missing));
+                    if !has_following {
+                        trailing_missing_member = true;
+                    }
+                }
+            } else if let Some(child) = elem.as_node() {
+                if child.kind() == SyntaxKind::Missing {
+                    // Parser recovered `.<missing>` after a path; treat it
+                    // as a member access whose member name is empty.
+                    trailing_missing_member = true;
                 }
             }
+        }
+
+        if trailing_missing_member && !segments.is_empty() {
+            let base = self.alloc_expr(AstExpr::Path {
+                segments,
+                span: span.clone(),
+            });
+            return self.alloc_expr(AstExpr::MemberAccess {
+                base,
+                member: String::new(),
+                type_args: None,
+                span,
+            });
         }
 
         self.alloc_expr(AstExpr::Path { segments, span })

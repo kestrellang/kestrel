@@ -1,7 +1,10 @@
 //! CST navigation helpers.
 //!
-//! Used by completion to find the receiver of a `.`-trigger, the
-//! identifier prefix at the cursor, and the enclosing declaration.
+//! `identifier_prefix` is the only consumer-facing helper now — used by
+//! completion (both member and scope modes) to filter results by the
+//! partial word the user has already typed. Member-vs-scope dispatch
+//! itself moved to a HIR walk in `handlers::completion` once the
+//! parser-recovery work made `foo.` parse to a real `HirExpr::Field`.
 
 use kestrel_syntax_tree::{SyntaxNode, SyntaxToken};
 use rowan::TextSize;
@@ -46,57 +49,6 @@ pub fn identifier_prefix(source: &str, offset: usize) -> &str {
     &source[start..end]
 }
 
-/// True if the byte immediately before `offset` is `.`. Tells us whether we
-/// should be doing member completion.
-pub fn is_after_dot(source: &str, offset: usize) -> bool {
-    let bytes = source.as_bytes();
-    let mut i = offset.min(bytes.len());
-    // Skip the in-progress identifier (LSP often invokes completion with the
-    // cursor mid-word: `foo.ba|`).
-    while i > 0 {
-        let b = bytes[i - 1];
-        if b == b'_' || b.is_ascii_alphanumeric() || b >= 0x80 {
-            i -= 1;
-        } else {
-            break;
-        }
-    }
-    i > 0 && bytes[i - 1] == b'.'
-}
-
-/// The bare identifier text before the dot at `offset`, if any. Returns
-/// `None` when the receiver is more complex (call, parenthesized, etc.).
-pub fn dot_receiver_identifier(source: &str, offset: usize) -> Option<&str> {
-    let bytes = source.as_bytes();
-    let mut i = offset.min(bytes.len());
-    while i > 0 {
-        let b = bytes[i - 1];
-        if b == b'_' || b.is_ascii_alphanumeric() || b >= 0x80 {
-            i -= 1;
-        } else {
-            break;
-        }
-    }
-    if i == 0 || bytes[i - 1] != b'.' {
-        return None;
-    }
-    let dot_at = i - 1;
-    let mut start = dot_at;
-    while start > 0 {
-        let b = bytes[start - 1];
-        if b == b'_' || b.is_ascii_alphanumeric() || b >= 0x80 {
-            start -= 1;
-        } else {
-            break;
-        }
-    }
-    if start == dot_at {
-        None
-    } else {
-        Some(&source[start..dot_at])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,23 +62,5 @@ mod tests {
         // Pure identifier
         assert_eq!(identifier_prefix("hello", 5), "hello");
         assert_eq!(identifier_prefix("hello world", 8), "wo");
-    }
-
-    #[test]
-    fn detects_dot_with_partial_member() {
-        assert!(is_after_dot("foo.", 4));
-        assert!(is_after_dot("foo.b", 5));
-        assert!(is_after_dot("foo.bar", 7));
-        assert!(!is_after_dot("foo", 3));
-        assert!(!is_after_dot("foo bar", 7));
-    }
-
-    #[test]
-    fn extracts_dot_receiver_identifier() {
-        assert_eq!(dot_receiver_identifier("foo.", 4), Some("foo"));
-        assert_eq!(dot_receiver_identifier("foo.bar", 7), Some("foo"));
-        assert_eq!(dot_receiver_identifier("a.b.c", 5), Some("b"));
-        assert_eq!(dot_receiver_identifier(".bar", 4), None); // no receiver
-        assert_eq!(dot_receiver_identifier("foo", 3), None); // no dot
     }
 }

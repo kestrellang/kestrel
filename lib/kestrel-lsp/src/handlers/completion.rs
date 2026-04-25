@@ -1,25 +1,27 @@
 //! `textDocument/completion`.
 //!
-//! Two modes, picked from the byte before the cursor:
+//! Two modes, dispatched by what the HIR says is at the cursor:
 //!
-//! * **Member completion** (`receiver.|`): resolve the receiver to a type,
-//!   list members of that type plus its extensions and protocol conformances.
-//!   The receiver detection is text-based for the M3 first cut — only a
-//!   bare identifier (`foo.`) is supported. Method-chains and parenthesised
-//!   receivers will use a CST walk in a follow-up.
+//! * **Member completion** (`receiver.|`): the parser-recovery work
+//!   (Phases 1–3 of the missing-token effort) makes `foo.` parse to a
+//!   well-formed `HirExpr::Field { base, name: HirName::Missing }`, so we
+//!   can look up the smallest `Field` covering the offset and ask
+//!   inference for the *base* expression's type. Works for arbitrary
+//!   receivers (locals, method-chains, parenthesised) — anything the
+//!   parser can produce a base expression for.
 //!
-//! * **Scope completion** (bare prefix): walk the `ScopeFor` chain from the
-//!   enclosing declaration up to the module, plus locals from the enclosing
-//!   `HirBody`. Filter by the identifier prefix at the cursor.
+//! * **Scope completion** (bare prefix): walk the `ScopeFor` chain from
+//!   the enclosing declaration up to the module, plus locals from the
+//!   enclosing `HirBody`. Filter by the identifier prefix at the cursor.
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_ast_builder::{Body, Callable, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Body, Callable, FileId, Name, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, World};
-use kestrel_hir::body::HirBody;
+use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::LowerBody;
-use kestrel_name_res::{NameResolution, ResolveName, Scope, ScopeFor};
-use kestrel_type_infer::result::ResolvedTy;
+use kestrel_name_res::{Scope, ScopeFor};
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use kestrel_type_infer::InferBody;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
@@ -55,28 +57,33 @@ pub async fn handle(
         let root = compiler.root();
         let ctx = world.query_context();
         let enclosing = semantic::enclosing_decl_at(world, file_entity, offset);
+        let prefix = syntax::identifier_prefix(&text, offset);
 
-        if syntax::is_after_dot(&text, offset) {
-            member_completion(&ctx, world, root, &text, offset, file_entity, enclosing)
-        } else {
-            let prefix = syntax::identifier_prefix(&text, offset);
-            let mut items = scope_completion(
-                &ctx, world, root, prefix, enclosing, offset, file_entity,
-            );
-            // At module / file top level, also offer keyword snippets. We
-            // detect "top level" as: enclosing is the file's module entity.
-            let is_top_level = enclosing
-                .map(|e| world.get::<NodeKind>(e) == Some(&NodeKind::Module))
-                .unwrap_or(true);
-            if is_top_level {
-                for snip in top_level_snippets() {
-                    if snip.label.starts_with(prefix) {
-                        items.push(snip);
-                    }
+        // Member completion fires when the smallest HIR expression covering
+        // the cursor is a Field — that's exactly the `foo.|` / `foo.bar|`
+        // shape, surfaced through the parser-recovery work. Falls back to
+        // scope completion when there's no Field at the cursor (no body, no
+        // dot, etc.).
+        if let Some(items) = member_completion(&ctx, world, root, file_entity, offset, prefix) {
+            return items;
+        }
+
+        let mut items = scope_completion(
+            &ctx, world, root, prefix, enclosing, offset, file_entity,
+        );
+        // At module / file top level, also offer keyword snippets. We
+        // detect "top level" as: enclosing is the file's module entity.
+        let is_top_level = enclosing
+            .map(|e| world.get::<NodeKind>(e) == Some(&NodeKind::Module))
+            .unwrap_or(true);
+        if is_top_level {
+            for snip in top_level_snippets() {
+                if snip.label.starts_with(prefix) {
+                    items.push(snip);
                 }
             }
-            items
         }
+        items
     })
     .await
     .ok()?;
@@ -86,98 +93,93 @@ pub async fn handle(
 
 // ===== Member completion =====
 
+/// Returns `Some(items)` when the cursor is at a member-access position
+/// (the smallest HIR expression covering it is a `Field`). `None` means
+/// the caller should fall through to scope completion.
+///
+/// `prefix` is the partial identifier already typed; we filter the
+/// member list against it for client-side parity with scope completion.
 fn member_completion(
     ctx: &QueryContext<'_>,
     world: &World,
     root: Entity,
-    text: &str,
-    offset: usize,
     file_entity: Entity,
-    enclosing: Option<Entity>,
-) -> Vec<CompletionItem> {
-    let Some(receiver_name) = syntax::dot_receiver_identifier(text, offset) else {
-        return vec![];
-    };
-    // Prefer the body entity at offset (works through partial parses); fall
-    // back to the enclosing decl, then root for free-name lookups.
-    // Prefer the body entity at offset (works through partial parses); fall
-    // back to the enclosing decl, then root for free-name lookups.
-    let context = semantic::body_entity_at(world, file_entity, offset)
-        .or(enclosing)
-        .unwrap_or(root);
+    offset: usize,
+    prefix: &str,
+) -> Option<Vec<CompletionItem>> {
+    let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
+    let hir = ctx.query(LowerBody { entity: body_entity, root })?;
+    let typed = ctx.query(InferBody { entity: body_entity, root })?;
 
-    let receiver_ty = receiver_type(ctx, world, root, file_entity, receiver_name, context);
+    let receiver_ty = receiver_type_at_dot(&hir, &typed, world, root, ctx, offset)?;
 
-    let Some(ty) = receiver_ty else {
-        return vec![];
-    };
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    push_members_for_type(ctx, world, root, &ty, &mut out, &mut seen);
-    out
+    push_members_for_type(ctx, world, root, &receiver_ty, &mut out, &mut seen);
+    if !prefix.is_empty() {
+        out.retain(|it| it.label.starts_with(prefix));
+    }
+    Some(out)
 }
 
-/// Resolve a bare identifier in the current scope to a type.
-///
-/// Tries: (1) a local in the enclosing body, (2) a value entity via
-/// `ResolveName`, (3) a type entity via `ResolveName` (for `TypeName.` —
-/// static member access).
-fn receiver_type(
-    ctx: &QueryContext<'_>,
+/// Locate the smallest `HirExpr::Field` covering `offset` and return the
+/// resolved type of its base expression. Returns `None` when the cursor
+/// isn't at a member-access position (no Field in scope) or the base
+/// type wasn't inferable (poisoned to `Error`, no entry in `expr_types`).
+fn receiver_type_at_dot(
+    hir: &HirBody,
+    typed: &TypedBody,
     world: &World,
     root: Entity,
-    file_entity: Entity,
-    name: &str,
-    context: Entity,
+    ctx: &QueryContext<'_>,
+    offset: usize,
 ) -> Option<ResolvedTy> {
-    // Local in body?
-    if let Some(body_entity) = body_entity_containing(world, file_entity, context)
-        && let (Some(typed), Some(hir)) = (
-            ctx.query(InferBody { entity: body_entity, root }),
-            ctx.query(LowerBody { entity: body_entity, root }),
+    let field_id = smallest_field_at(hir, offset)?;
+    let HirExpr::Field { base, .. } = &hir.exprs[field_id] else {
+        return None;
+    };
+    let base_ty = typed.expr_types.get(base)?;
+
+    // For static-member completion (`Foo.|`), the base expression is a
+    // `Def(entity)` referring to a type — `expr_types` records that as a
+    // first-class type value (e.g. the type itself, not an instance). We
+    // unwrap that into a `Named { entity, args: [] }` so push_members
+    // sees the type and lists its statics.
+    if let HirExpr::Def(entity, _, _) = &hir.exprs[*base]
+        && matches!(
+            world.get::<NodeKind>(*entity),
+            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::TypeAlias)
         )
     {
-        let hir: HirBody = hir;
-        for (id, local) in hir.locals.iter() {
-            if local.name == name
-                && let Some(ty) = typed.local_types.get(&id)
-            {
-                return Some(ty.clone());
+        let _ = (root, ctx);
+        return Some(ResolvedTy::Named { entity: *entity, args: vec![] });
+    }
+
+    Some(base_ty.clone())
+}
+
+/// Find the smallest `HirExpr::Field` whose span covers `offset`. Walks
+/// every Field in the body — bodies are small enough that this is cheap;
+/// avoids needing a parent-pointer in the HIR.
+fn smallest_field_at(hir: &HirBody, offset: usize) -> Option<kestrel_hir::body::HirExprId> {
+    let mut best: Option<(kestrel_hir::body::HirExprId, usize)> = None;
+    for (id, expr) in hir.exprs.iter() {
+        let HirExpr::Field { span, .. } = expr else { continue };
+        if span.start <= offset && offset <= span.end {
+            let len = span.end - span.start;
+            if best.map(|(_, l)| len < l).unwrap_or(true) {
+                best = Some((id, len));
             }
         }
     }
-
-    // Free name → entity. Prefer the value resolution if present, otherwise
-    // fall back to the type itself (so `String.` static completion works).
-    let res = ctx.query(ResolveName {
-        name: name.to_string(),
-        context,
-        root,
-    });
-    let entity = match res {
-        NameResolution::Found(es) if !es.is_empty() => es[0],
-        _ => return None,
-    };
-
-    // If the entity is itself a type, the receiver is the type — return a
-    // `Named` of the type with no args. Members will include statics.
-    let kind = world.get::<NodeKind>(entity)?;
-    match kind {
-        NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::TypeAlias => {
-            Some(ResolvedTy::Named { entity, args: vec![] })
-        },
-        // Otherwise it's a value — try to read its type-annotation entity to
-        // produce a `Named` ty. This is heuristic; fully accurate typing
-        // requires a body context.
-        _ => entity_value_type(ctx, world, entity),
-    }
+    best.map(|(id, _)| id)
 }
 
 fn body_entity_containing(world: &World, file_entity: Entity, mut entity: Entity) -> Option<Entity> {
     loop {
         if world.get::<Body>(entity).is_some()
             && world
-                .get::<kestrel_ast_builder::FileId>(entity)
+                .get::<FileId>(entity)
                 .map(|f| f.0 == file_entity)
                 .unwrap_or(false)
         {
@@ -185,15 +187,6 @@ fn body_entity_containing(world: &World, file_entity: Entity, mut entity: Entity
         }
         entity = world.parent_of(entity)?;
     }
-}
-
-
-/// Best-effort: read a value entity's type. For globals / fields / functions
-/// we'd need to lower / infer the type annotation. M3 leaves this as a stub
-/// (returns None) — most member completion the user reaches in practice
-/// will be on locals, which the body-level path above handles.
-fn entity_value_type(_ctx: &QueryContext<'_>, _world: &World, _entity: Entity) -> Option<ResolvedTy> {
-    None
 }
 
 fn push_members_for_type(
@@ -423,4 +416,58 @@ pub fn top_level_snippets() -> Vec<CompletionItem> {
         snip("protocol", "protocol ${1:Name} {\n\t$0\n}"),
         snip("extend", "extend ${1:Type}: ${2:Protocol} {\n\t$0\n}"),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_compiler::Compiler;
+
+    /// Phase 5 verification: `foo.|` (cursor right after the dot, no member
+    /// typed) must produce member completions. Phases 1–3 made the parser
+    /// recover the missing identifier as `HirName::Missing`, lowered the
+    /// chain to a `HirExpr::Field` whose base is the receiver, and
+    /// short-circuited inference to leave the base type intact. This test
+    /// confirms the LSP picks up that base type and lists fields.
+    #[test]
+    fn member_completion_after_trailing_dot_lists_struct_fields() {
+        let mut c = Compiler::new();
+        let src = "module Test\n\
+                   struct P { var x: lang.i64; var y: lang.i64 }\n\
+                   func foo(p: P) { p. }\n";
+        let f = c.set_source("/tmp/p.ks", src.into());
+        c.build(f);
+
+        // Cursor right after the dot in `p.`.
+        let dot = src.rfind("p.").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+
+        let items = member_completion(&ctx, world, root, f, dot, "")
+            .expect("member completion should fire on `p.`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("x") && labels.contains("y"),
+            "expected fields `x` and `y` in {:?}",
+            labels
+        );
+    }
+
+    /// Sanity: outside of a member-access position (cursor in a bare
+    /// identifier), `member_completion` must return `None` so the caller
+    /// falls through to scope completion.
+    #[test]
+    fn member_completion_returns_none_for_bare_identifier() {
+        let mut c = Compiler::new();
+        let src = "module Test\nfunc foo() { let x = 42; x }\n";
+        let f = c.set_source("/tmp/q.ks", src.into());
+        c.build(f);
+        let cursor = src.rfind("x").unwrap();
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cursor, "");
+        assert!(items.is_none(), "should fall through to scope: {:?}", items);
+    }
 }
