@@ -520,8 +520,25 @@ fn emit_call_expr(
             sink.add_token(SyntaxKind::Comma, commas[i].clone());
         }
     }
-    if let Some(rp) = rparen {
-        sink.add_token(SyntaxKind::RParen, rp.clone());
+    match rparen {
+        Some(rp) => sink.add_token(SyntaxKind::RParen, rp.clone()),
+        None => {
+            // Phase-4 recovery: synthesize a zero-width `)` at the
+            // current emit cursor. Pass `lparen.end` (or 0 as a fallback)
+            // as the `at` position — `TreeBuilder::emit_trivia_until`
+            // skips flushing when `at <= source_pos`, which is always
+            // true once the args have been emitted, so the Missing
+            // wrapper lands right after the last argument with no trivia
+            // consumed. The trivia between the would-be `)` and whatever
+            // follows stays available for the surrounding parser /
+            // recovery to wrap correctly.
+            let at_byte = lparen.map(|l| l.end).unwrap_or(0);
+            let file_id = lparen.map(|l| l.file_id).unwrap_or(0);
+            sink.missing_token(
+                SyntaxKind::RParen,
+                Span::new(file_id, at_byte..at_byte),
+            );
+        },
     }
     sink.finish_node();
     sink.finish_node();

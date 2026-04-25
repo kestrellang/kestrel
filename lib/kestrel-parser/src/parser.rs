@@ -878,6 +878,34 @@ public struct B {}
     }
 
     #[test]
+    fn missing_close_paren_recovers_with_missing_node() {
+        // Phase-4 recovery: cursor mid-edit `foo(1, 2` (no closing paren).
+        // The call should still parse (so inference can type the args and
+        // completion works on the receiver / next dot) and the source
+        // text must round-trip.
+        let source = "func f() { foo(1, 2 }";
+        let result = parse_source(source, 0);
+
+        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
+        assert!(
+            missing_count >= 1,
+            "expected a Missing wrapper for the absent `)`, tree:\n{:#?}",
+            result.tree
+        );
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected `)`"))
+            .collect();
+        assert!(
+            !recovery_errors.is_empty(),
+            "expected an `expected \\`)\\`` diagnostic, got {:?}",
+            result.errors
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
     fn missing_member_before_semicolon_recovers() {
         // Cursor mid-edit shape: `foo.;`. The `;` is not a valid member token,
         // so recovery emits Missing and the rest of the body still parses.

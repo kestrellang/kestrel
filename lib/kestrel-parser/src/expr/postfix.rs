@@ -101,6 +101,11 @@ pub(super) fn arg_list_parser<'tokens, P>(
 where
     P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
+    let rparen = skip_trivia()
+        .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(Some)
+        .or(empty().to(None));
+
     skip_inline_trivia()
         .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
         .then(
@@ -112,15 +117,23 @@ where
                 .allow_trailing()
                 .collect::<Vec<_>>(),
         )
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span()))),
-        )
+        .then(rparen)
+        .validate(|((lparen, arguments), rparen), e, emitter| {
+            if rparen.is_none() {
+                // Phase-4 recovery: the close paren is absent (cursor
+                // mid-edit, e.g. `foo(1, 2`). Emit a parse error and let
+                // the call live on with `rparen = None` so inference can
+                // still type the args and completion can fire on partial
+                // call expressions.
+                emitter.emit(Rich::custom(e.span(), "expected `)`"));
+            }
+            ((lparen, arguments), rparen)
+        })
         .map(|((lparen, arguments), rparen)| PostfixOp::Call {
             lparen: Some(lparen),
             arguments,
             commas: vec![],
-            rparen: Some(rparen),
+            rparen,
         })
         .boxed()
 }
