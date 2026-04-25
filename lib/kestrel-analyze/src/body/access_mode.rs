@@ -96,7 +96,7 @@ impl BodyCheck for AccessModeAnalyzer {
                     ..
                 } => {
                     // Find the protocol method entity
-                    if let Some(method_entity) = find_protocol_method(cx, *protocol, method) {
+                    if let Some(method_entity) = find_protocol_method(cx, *protocol, method.as_str_or_empty()) {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },

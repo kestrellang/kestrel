@@ -740,14 +740,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 type_args: hir_type_args,
                 args,
                 ..
-            } => self.lower_method_call(expr_id, *receiver, method, hir_type_args.as_deref(), args),
+            } => self.lower_method_call(expr_id, *receiver, method.as_str_or_empty(), hir_type_args.as_deref(), args),
             HirExpr::ProtocolCall {
                 receiver,
                 protocol,
                 method,
                 args,
                 ..
-            } => self.lower_protocol_call(expr_id, *receiver, *protocol, method, args),
+            } => self.lower_protocol_call(expr_id, *receiver, *protocol, method.as_str_or_empty(), args),
 
             // === Match expression ===
             HirExpr::Match {
@@ -784,7 +784,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         dest: Place::local(dest),
                         rvalue: Rvalue::EnumVariant {
                             enum_ty: result_ty,
-                            variant: name.clone(),
+                            variant: name.as_str_or_empty().to_string(),
                             payload,
                         },
                     }));
@@ -2850,7 +2850,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::EnumVariant {
                         enum_ty: expected_ty.clone(),
-                        variant: name.clone(),
+                        variant: name.as_str_or_empty().to_string(),
                         payload,
                     },
                 }));

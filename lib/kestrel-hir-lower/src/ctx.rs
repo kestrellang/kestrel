@@ -11,6 +11,20 @@ use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
 use kestrel_span::Span;
 
+/// Bridge from the AST's string-typed name field to `HirName`. The AST
+/// builder stores `""` for member identifiers that the parser recovered
+/// as missing (the `Missing[Identifier ""]` wrapper from the parser's
+/// recovery primitive). Translating that to `HirName::Missing` here
+/// gives inference a single, explicit signal to short-circuit instead
+/// of cascading "name not found" diagnostics.
+pub(crate) fn name_from_ast(name: String) -> HirName {
+    if name.is_empty() {
+        HirName::Missing
+    } else {
+        HirName::Name(name)
+    }
+}
+
 /// Mutable context for lowering a single function/getter/setter body.
 pub(crate) struct LowerCtx<'a> {
     pub ctx: &'a QueryContext<'a>,

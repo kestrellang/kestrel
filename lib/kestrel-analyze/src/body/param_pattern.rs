@@ -194,7 +194,7 @@ fn check_duplicate_bindings_hir(
             for field in fields {
                 if let Some(sub) = field.pattern {
                     check_duplicate_bindings_hir(hir, sub, seen, span, diags);
-                } else if seen.insert(field.field_name.clone(), true).is_some() {
+                } else if seen.insert(field.field_name.as_str_or_empty().to_string(), true).is_some() {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[0].id,
                         severity: DESCRIPTORS[0].default_severity,

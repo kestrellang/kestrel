@@ -433,7 +433,7 @@ fn analyze_expr(
             ..
         } => {
             if is_self_local(cx, *receiver) {
-                if method == "init" {
+                if method.as_str() == Some("init") {
                     // Delegating init — all fields are initialized by the delegate
                     for arg in args {
                         state = analyze_expr(cx, arg.value, state, false, vctx);

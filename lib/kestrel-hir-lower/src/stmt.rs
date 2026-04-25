@@ -8,7 +8,7 @@ use kestrel_hir::body::*;
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 
-use crate::ctx::LowerCtx;
+use crate::ctx::{LowerCtx, name_from_ast};
 
 impl LowerCtx<'_> {
     /// Lower an AST statement to an HIR statement.
@@ -50,7 +50,7 @@ impl LowerCtx<'_> {
                     );
                 }
                 self.alloc_stmt(HirStmt::Deinit {
-                    name: name.clone(),
+                    name: name_from_ast(name.clone()),
                     local,
                     span: span.clone(),
                 })

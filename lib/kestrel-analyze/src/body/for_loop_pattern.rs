@@ -100,7 +100,7 @@ fn extract_user_pattern(hir: &HirBody, pat_id: HirPatId) -> Option<HirPatId> {
     let HirPat::ImplicitVariant { name, args, .. } = &hir.pats[pat_id] else {
         return None;
     };
-    if name != "Some" || args.len() != 1 {
+    if name.as_str() != Some("Some") || args.len() != 1 {
         return None;
     }
     Some(args[0].pattern)

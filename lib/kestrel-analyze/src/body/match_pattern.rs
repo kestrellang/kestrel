@@ -264,8 +264,16 @@ fn walk_pat(
         },
 
         HirPat::ImplicitVariant { name, args, .. } => {
+            // Skip case validation entirely when the parser recovered a
+            // missing name — the parse error is already on screen.
+            let Some(name_str) = name.as_str() else {
+                for arg in args {
+                    walk_pat(cx, arg.pattern, None, diags);
+                }
+                return;
+            };
             // Try to resolve the case against the scrutinee's enum type.
-            let case_entity = expected.and_then(|ty| lookup_enum_case(cx, ty, name));
+            let case_entity = expected.and_then(|ty| lookup_enum_case(cx, ty, name_str));
 
             match (expected, case_entity) {
                 (Some(ty), None) if is_named_enum(cx, ty) => {
@@ -275,10 +283,10 @@ fn walk_pat(
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: d.id,
                         severity: d.default_severity,
-                        message: format!("unknown enum case '{}' on type '{}'", name, ty_desc),
+                        message: format!("unknown enum case '{}' on type '{}'", name_str, ty_desc),
                         labels: vec![DiagLabel {
                             span: util::pat_span(cx.hir, pat_id),
-                            message: format!("no case '{}' on '{}'", name, ty_desc),
+                            message: format!("no case '{}' on '{}'", name_str, ty_desc),
                             is_primary: true,
                         }],
                         notes: vec![],
@@ -287,7 +295,7 @@ fn walk_pat(
                 (_, Some(case)) => {
                     let expected_arity = variant_arity(cx, case);
                     if args.len() != expected_arity {
-                        emit_variant_arity(cx, pat_id, name, expected_arity, args.len(), diags);
+                        emit_variant_arity(cx, pat_id, name_str, expected_arity, args.len(), diags);
                     }
                 },
                 _ => {
@@ -701,7 +709,12 @@ pub fn is_invalid(cx: &BodyContext<'_>, pat_id: HirPatId, expected: Option<&Reso
                 || args.iter().any(|a| is_invalid(cx, a.pattern, None))
         },
         HirPat::ImplicitVariant { name, args, .. } => {
-            let case = expected.and_then(|ty| lookup_enum_case(cx, ty, name));
+            // Missing case name: parser already reported the gap; suppress
+            // every downstream analyzer (exhaustiveness, redundancy, …).
+            if name.is_missing() {
+                return true;
+            }
+            let case = expected.and_then(|ty| lookup_enum_case(cx, ty, name.as_str_or_empty()));
             let self_bad = match (expected, case) {
                 (Some(ty), None) => is_named_enum(cx, ty),
                 (_, Some(c)) => args.len() != variant_arity(cx, c),

@@ -40,7 +40,7 @@ impl LowerCtx<'_> {
                 return self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lhs,
                     protocol,
-                    method: method.to_string(),
+                    method: HirName::name(method),
                     type_args: None,
                     args: vec![HirCallArg {
                         label: label.map(|l| l.to_string()),
@@ -59,7 +59,7 @@ impl LowerCtx<'_> {
                 return self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lhs,
                     protocol,
-                    method: method.to_string(),
+                    method: HirName::name(method),
                     type_args: None,
                     args: vec![HirCallArg {
                         label: label.map(|l| l.to_string()),
@@ -96,7 +96,7 @@ impl LowerCtx<'_> {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lhs,
                 protocol,
-                method: "logicalAnd".to_string(),
+                method: HirName::name("logicalAnd"),
                 type_args: None,
                 args: vec![HirCallArg {
                     label: None,
@@ -133,7 +133,7 @@ impl LowerCtx<'_> {
             return self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_operand,
                 protocol,
-                method: method.to_string(),
+                method: HirName::name(method),
                 type_args: None,
                 args: Vec::new(),
                 span: span.clone(),
@@ -171,7 +171,7 @@ impl LowerCtx<'_> {
                 return self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lowered_lhs,
                     protocol,
-                    method: method.to_string(),
+                    method: HirName::name(method),
                     type_args: None,
                     args: vec![HirCallArg {
                         label: label.map(|l| l.to_string()),
@@ -281,7 +281,7 @@ impl LowerCtx<'_> {
                 self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: cond,
                     protocol,
-                    method: "logicalNot".to_string(),
+                    method: HirName::name("logicalNot"),
                     type_args: None,
                     args: Vec::new(),
                     span: span.clone(),
@@ -351,7 +351,7 @@ impl LowerCtx<'_> {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_iterable,
                 protocol,
-                method: "iter".to_string(),
+                method: HirName::name("iter"),
                 type_args: None,
                 args: Vec::new(),
                 span: span.clone(),
@@ -359,7 +359,7 @@ impl LowerCtx<'_> {
         } else {
             self.alloc_expr(HirExpr::MethodCall {
                 receiver: lowered_iterable,
-                method: "iter".to_string(),
+                method: HirName::name("iter"),
                 type_args: None,
                 args: Vec::new(),
                 span: span.clone(),
@@ -380,7 +380,7 @@ impl LowerCtx<'_> {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: iter_ref,
                 protocol,
-                method: "next".to_string(),
+                method: HirName::name("next"),
                 type_args: None,
                 args: Vec::new(),
                 span: span.clone(),
@@ -388,7 +388,7 @@ impl LowerCtx<'_> {
         } else {
             self.alloc_expr(HirExpr::MethodCall {
                 receiver: iter_ref,
-                method: "next".to_string(),
+                method: HirName::name("next"),
                 type_args: None,
                 args: Vec::new(),
                 span: span.clone(),
@@ -399,7 +399,7 @@ impl LowerCtx<'_> {
         self.push_scope();
         let lowered_pat = self.lower_pat(body, pattern);
         let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: "Some".to_string(),
+            name: HirName::name("Some"),
             args: vec![HirPatArg {
                 label: None,
                 pattern: lowered_pat,
@@ -421,7 +421,7 @@ impl LowerCtx<'_> {
 
         // .None => break
         let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: "None".to_string(),
+            name: HirName::name("None"),
             args: Vec::new(),
             span: span.clone(),
         });
@@ -509,7 +509,7 @@ impl LowerCtx<'_> {
             self.alloc_expr(HirExpr::ProtocolCall {
                 receiver: lowered_operand,
                 protocol,
-                method: "tryExtract".to_string(),
+                method: HirName::name("tryExtract"),
                 type_args: None,
                 args: vec![],
                 span: span.clone(),
@@ -534,7 +534,7 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
         let continue_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: success_name.to_string(),
+            name: HirName::name(success_name),
             args: vec![HirPatArg {
                 label: None,
                 pattern: value_binding,
@@ -551,7 +551,7 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
         let break_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: failure_name.to_string(),
+            name: HirName::name(failure_name),
             args: vec![HirPatArg {
                 label: None,
                 pattern: early_binding,
@@ -564,7 +564,7 @@ impl LowerCtx<'_> {
         let return_value = if has_tryable {
             // .fromResidual($early) — resolved against the function's return type
             self.alloc_expr(HirExpr::ImplicitMember {
-                name: "fromResidual".to_string(),
+                name: HirName::name("fromResidual"),
                 args: Some(vec![HirCallArg {
                     label: Some("residual".to_string()),
                     value: early_ref,
@@ -574,7 +574,7 @@ impl LowerCtx<'_> {
         } else {
             // .Err($early) fallback
             self.alloc_expr(HirExpr::ImplicitMember {
-                name: "Err".to_string(),
+                name: HirName::name("Err"),
                 args: Some(vec![HirCallArg {
                     label: None,
                     value: early_ref,
@@ -616,7 +616,7 @@ impl LowerCtx<'_> {
         let lowered_value = self.lower_expr(body, value);
 
         let err_wrap = self.alloc_expr(HirExpr::ImplicitMember {
-            name: "Err".to_string(),
+            name: HirName::name("Err"),
             args: Some(vec![HirCallArg {
                 label: None,
                 value: lowered_value,
@@ -652,7 +652,7 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
         let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: "Some".to_string(),
+            name: HirName::name("Some"),
             args: vec![HirPatArg {
                 label: None,
                 pattern: some_binding,
@@ -663,7 +663,7 @@ impl LowerCtx<'_> {
 
         // .None => trap (represented as Error for now — codegen will handle)
         let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: "None".to_string(),
+            name: HirName::name("None"),
             args: Vec::new(),
             span: span.clone(),
         });
@@ -739,7 +739,7 @@ impl LowerCtx<'_> {
                     // Call .description() on the interpolated expression
                     let formatted = self.alloc_expr(HirExpr::MethodCall {
                         receiver: lowered,
-                        method: "description".to_string(),
+                        method: HirName::name("description"),
                         type_args: None,
                         args: Vec::new(),
                         span: span.clone(),
@@ -766,7 +766,7 @@ impl LowerCtx<'_> {
                 result = self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: result,
                     protocol,
-                    method: "add".to_string(),
+                    method: HirName::name("add"),
                     type_args: None,
                     args: vec![HirCallArg {
                         label: None,

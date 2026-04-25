@@ -392,7 +392,7 @@ fn collect_bindings(
 
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
             let case_name = match &hir.pats[pat_id] {
-                HirPat::ImplicitVariant { name, .. } => name.clone(),
+                HirPat::ImplicitVariant { name, .. } => name.as_str_or_empty().to_string(),
                 HirPat::Variant { entity, .. } => query
                     .get::<Name>(*entity)
                     .map(|n| n.0.clone())
@@ -455,7 +455,7 @@ fn collect_bindings(
             for field in fields {
                 if let Some(pat) = field.pattern {
                     let mut field_path = path.clone();
-                    field_path.push(PathElement::Field(field.field_name.clone()));
+                    field_path.push(PathElement::Field(field.field_name.as_str_or_empty().to_string()));
                     collect_bindings(hir, query, pat, &field_path, bindings);
                 }
             }

@@ -102,6 +102,14 @@ pub enum HirName {
 }
 
 impl HirName {
+    /// Convenience constructor for the non-missing case. Use at desugar
+    /// sites that hard-code names (operator method names like `"add"`,
+    /// for-loop method names like `"next"`) — those are never missing
+    /// because the parser doesn't synthesize them.
+    pub fn name(s: impl Into<String>) -> Self {
+        HirName::Name(s.into())
+    }
+
     pub fn as_str(&self) -> Option<&str> {
         match self {
             HirName::Name(s) => Some(s),
@@ -191,7 +199,7 @@ pub enum HirExpr {
     },
     /// `.Case` or `.Case(args)` — resolved by type inference based on expected type
     ImplicitMember {
-        name: String,
+        name: HirName,
         args: Option<Vec<HirCallArg>>,
         span: Span,
     },
@@ -207,7 +215,7 @@ pub enum HirExpr {
     /// Method resolved by type inference.
     MethodCall {
         receiver: HirExprId,
-        method: String,
+        method: HirName,
         type_args: Option<Vec<HirTy>>,
         args: Vec<HirCallArg>,
         span: Span,
@@ -218,7 +226,7 @@ pub enum HirExpr {
     ProtocolCall {
         receiver: HirExprId,
         protocol: Entity,
-        method: String,
+        method: HirName,
         type_args: Option<Vec<HirTy>>,
         args: Vec<HirCallArg>,
         span: Span,
@@ -292,7 +300,7 @@ pub enum HirStmt {
     /// `local` is resolved during HIR lowering; `None` means the name did not
     /// resolve to any in-scope local (diagnostic is emitted at lowering time).
     Deinit {
-        name: String,
+        name: HirName,
         local: Option<LocalId>,
         span: Span,
     },
@@ -336,7 +344,7 @@ pub enum HirPat {
     },
     /// Implicit variant (`.Case`): resolved by type inference
     ImplicitVariant {
-        name: String,
+        name: HirName,
         args: Vec<HirPatArg>,
         span: Span,
     },
@@ -492,7 +500,7 @@ pub struct HirPatArg {
 /// A single field in a struct pattern.
 #[derive(Clone, Debug, Hash)]
 pub struct HirStructPatField {
-    pub field_name: String,
+    pub field_name: HirName,
     pub pattern: Option<HirPatId>,
 }
 

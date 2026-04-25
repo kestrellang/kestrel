@@ -8,7 +8,7 @@ use kestrel_hir::body::*;
 use kestrel_name_res::{ResolveTypePath, ResolveValuePath, TypeResolution, ValueResolution};
 use kestrel_span::Span;
 
-use crate::ctx::LowerCtx;
+use crate::ctx::{LowerCtx, name_from_ast};
 
 impl LowerCtx<'_> {
     /// Lower an AST pattern to an HIR pattern.
@@ -278,7 +278,7 @@ impl LowerCtx<'_> {
                 } else {
                     // Found something but it's not an enum case — treat as implicit
                     self.alloc_pat(HirPat::ImplicitVariant {
-                        name: case_name.to_string(),
+                        name: name_from_ast(case_name.to_string()),
                         args: lowered_args,
                         span: span.clone(),
                     })
@@ -287,7 +287,7 @@ impl LowerCtx<'_> {
             _ => {
                 // Not found or ambiguous — leave as implicit for type inference
                 self.alloc_pat(HirPat::ImplicitVariant {
-                    name: case_name.to_string(),
+                    name: name_from_ast(case_name.to_string()),
                     args: lowered_args,
                     span: span.clone(),
                 })
@@ -320,7 +320,7 @@ impl LowerCtx<'_> {
                     }))
                 };
                 HirStructPatField {
-                    field_name: f.field_name.clone(),
+                    field_name: name_from_ast(f.field_name.clone()),
                     pattern,
                 }
             })
@@ -345,22 +345,27 @@ impl LowerCtx<'_> {
                     .filter_map(|&c| self.ctx.get::<Name>(c).map(|n| n.0.clone()))
                     .collect();
 
-                // Check for unknown fields
+                // Check for unknown fields. Skip pattern fields whose name is
+                // `Missing` — the parser already reported the gap; "no field
+                // ``" would just be cascade noise.
                 let mut has_unknown = false;
                 for field in &lowered_fields {
-                    if !struct_field_names.contains(&field.field_name) {
+                    let Some(field_name) = field.field_name.as_str() else {
+                        continue;
+                    };
+                    if !struct_field_names.iter().any(|n| n == field_name) {
                         has_unknown = true;
                         self.ctx.accumulate(
                             kestrel_reporting::Diagnostic::error()
                                 .with_message(format!(
                                     "struct `{}` has no field `{}`",
-                                    name, field.field_name
+                                    name, field_name
                                 ))
                                 .with_labels(vec![
                                     kestrel_reporting::Label::primary(span.file_id, span.range())
                                         .with_message(format!(
                                             "unknown field `{}`",
-                                            field.field_name
+                                            field_name
                                         )),
                                 ]),
                         );
@@ -371,7 +376,7 @@ impl LowerCtx<'_> {
                 if !has_rest && !has_unknown {
                     let matched: std::collections::HashSet<&str> = lowered_fields
                         .iter()
-                        .map(|f| f.field_name.as_str())
+                        .filter_map(|f| f.field_name.as_str())
                         .collect();
                     let missing: Vec<&str> = struct_field_names
                         .iter()
@@ -447,7 +452,7 @@ impl LowerCtx<'_> {
                 let lowered_fields: Vec<HirStructPatField> = fields
                     .iter()
                     .map(|f| HirStructPatField {
-                        field_name: f.field_name.clone(),
+                        field_name: name_from_ast(f.field_name.clone()),
                         pattern: Some(self.lower_param_pattern(&f.pattern, span, force_mut)),
                     })
                     .collect();

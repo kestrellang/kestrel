@@ -10,21 +10,7 @@ use kestrel_name_res::{ResolveValuePath, ValueResolution};
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 
-use crate::ctx::LowerCtx;
-
-/// Bridge from the AST's string-typed name field to `HirName`. The AST
-/// builder stores `""` for member identifiers that the parser recovered
-/// as missing (the `Missing[Identifier ""]` wrapper produced by Phase 1
-/// of the parser-recovery work). Translating that to `HirName::Missing`
-/// here gives inference a single, explicit signal to short-circuit
-/// instead of cascading "name not found" diagnostics.
-fn name_from_ast(name: String) -> HirName {
-    if name.is_empty() {
-        HirName::Missing
-    } else {
-        HirName::Name(name)
-    }
-}
+use crate::ctx::{LowerCtx, name_from_ast};
 
 impl LowerCtx<'_> {
     /// Lower an AST expression to an HIR expression.
@@ -94,7 +80,7 @@ impl LowerCtx<'_> {
             } => {
                 let lowered_args = arguments.map(|args| self.lower_call_args(body, &args));
                 self.alloc_expr(HirExpr::ImplicitMember {
-                    name: member,
+                    name: name_from_ast(member),
                     args: lowered_args,
                     span,
                 })
@@ -570,7 +556,7 @@ impl LowerCtx<'_> {
 
                 self.alloc_expr(HirExpr::MethodCall {
                     receiver: lowered_base,
-                    method: member,
+                    method: name_from_ast(member),
                     type_args: lowered_type_args,
                     args: lowered_args,
                     span: span.clone(),
@@ -601,7 +587,7 @@ impl LowerCtx<'_> {
 
                         return self.alloc_expr(HirExpr::MethodCall {
                             receiver: current,
-                            method,
+                            method: name_from_ast(method),
                             type_args: lowered_type_args,
                             args: lowered_args,
                             span: span.clone(),
@@ -706,7 +692,7 @@ impl LowerCtx<'_> {
                                 .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
                             return self.alloc_expr(HirExpr::MethodCall {
                                 receiver,
-                                method: last.name.clone(),
+                                method: name_from_ast(last.name.clone()),
                                 type_args: lowered_type_args,
                                 args: lowered_args,
                                 span: span.clone(),
@@ -757,7 +743,7 @@ impl LowerCtx<'_> {
                             .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
                         return self.alloc_expr(HirExpr::MethodCall {
                             receiver,
-                            method: last.name.clone(),
+                            method: name_from_ast(last.name.clone()),
                             type_args: lowered_type_args,
                             args: lowered_args,
                             span: span.clone(),

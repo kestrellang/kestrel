@@ -296,7 +296,7 @@ pub fn flatten(
         // Implicit variant — resolve entity from scrutinee type's enum cases
         HirPat::ImplicitVariant { name, args, .. } => {
             let (entity, field_types) =
-                resolve_implicit_variant(query, name, args.len(), scrutinee_ty);
+                resolve_implicit_variant(query, name.as_str_or_empty(), args.len(), scrutinee_ty);
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
@@ -340,7 +340,7 @@ pub fn flatten(
                         .unwrap_or("");
                     let field_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
                     // Find matching pattern field
-                    let matched = fields.iter().find(|f| f.field_name == field_name);
+                    let matched = fields.iter().find(|f| f.field_name.as_str() == Some(field_name));
                     match matched.and_then(|f| f.pattern) {
                         Some(pat_id) => flatten(hir, query, pat_id, field_ty),
                         None => FlatPat::Wildcard,

@@ -207,7 +207,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                     if let Some(pat) = f.pattern {
                         format!("{}: {}", f.field_name, describe_pattern(hir, pat))
                     } else {
-                        f.field_name.clone()
+                        f.field_name.as_str_or_empty().to_string()
                     }
                 })
                 .collect();

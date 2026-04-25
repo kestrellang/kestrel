@@ -247,16 +247,26 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Consuming a Def(TypeParameter) as a MethodCall receiver is valid
             if is_static_ctx {
                 ctx.type_param_defs.remove(receiver);
+            }
+
+            let Some(method_str) = method.as_str() else {
+                // Parser already reported "expected identifier after `.`";
+                // short-circuit to Error so downstream constraints absorb.
+                ctx.poison(result_tv);
+                return result_tv;
+            };
+
+            if is_static_ctx {
                 let ext_args = if has_explicit {
                     explicit_targs.clone().unwrap()
                 } else {
                     Vec::new()
                 };
-                ctx.member_static(recv_tv, method, arg_tvs, result_tv, id, true, ext_args, span.clone());
+                ctx.member_static(recv_tv, method_str, arg_tvs, result_tv, id, true, ext_args, span.clone());
             } else if has_explicit {
                 ctx.member_with_type_args(
                     recv_tv,
-                    method,
+                    method_str,
                     arg_tvs,
                     result_tv,
                     id,
@@ -265,7 +275,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     span.clone(),
                 );
             } else {
-                ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+                ctx.member(recv_tv, method_str, arg_tvs, result_tv, id, true, span.clone());
             }
             result_tv
         },
@@ -284,8 +294,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
             // Receiver must conform to the protocol
             ctx.conforms(recv_tv, *protocol, span.clone());
+            let Some(method_str) = method.as_str() else {
+                ctx.poison(result_tv);
+                return result_tv;
+            };
             // Resolve method on the protocol
-            ctx.member(recv_tv, method, arg_tvs, result_tv, id, true, span.clone());
+            ctx.member(recv_tv, method_str, arg_tvs, result_tv, id, true, span.clone());
             result_tv
         },
 
@@ -345,8 +359,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 .unwrap_or_default();
             let result_tv = ctx.fresh();
 
+            let Some(name_str) = name.as_str() else {
+                ctx.poison(result_tv);
+                return result_tv;
+            };
             // Implicit constraint: resolved against expected type
-            ctx.implicit(result_tv, name, arg_tvs, result_tv, id, span.clone());
+            ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
             result_tv
         },
 
@@ -676,7 +694,12 @@ fn gen_pat(
         },
 
         HirPat::ImplicitVariant { name, args, span } => {
-            gen_implicit_variant_pat(ctx, hir, name, args, scrutinee_tv, span, source);
+            // Skip pattern-level resolution when the case name is missing —
+            // the parser already reported the gap. Walking sub-patterns
+            // would still emit unification noise, so leave them unresolved.
+            if let Some(name_str) = name.as_str() {
+                gen_implicit_variant_pat(ctx, hir, name_str, args, scrutinee_tv, span, source);
+            }
         },
 
         HirPat::Struct {
@@ -1811,11 +1834,14 @@ fn gen_struct_pat(
     // For each field in the pattern, find the matching Field child and constrain
     let children: Vec<Entity> = qctx.children_of(entity).to_vec();
     for field in fields {
+        let Some(field_name_str) = field.field_name.as_str() else {
+            // Pattern field with missing name — parser already reported the
+            // gap; skip resolution so we don't emit a "no field" cascade.
+            continue;
+        };
         let found = children.iter().find(|&&child| {
             qctx.get::<NodeKind>(child) == Some(&NodeKind::Field)
-                && qctx
-                    .get::<Name>(child)
-                    .is_some_and(|n| n.0 == field.field_name)
+                && qctx.get::<Name>(child).is_some_and(|n| n.0 == field_name_str)
         });
         let field_tv = found
             .and_then(|&child| {
