@@ -18,6 +18,13 @@ kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-analyze = { path = "../kestrel-analyze" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+rowan = { workspace = true }
 codespan-reporting = { workspace = true }
 tokio = { workspace = true }
 tower-lsp = { workspace = true }

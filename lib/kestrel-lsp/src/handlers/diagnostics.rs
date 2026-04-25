@@ -40,8 +40,6 @@ pub async fn refresh(state: SharedState, client: Client) {
         let _infer = driver.infer_all();
         let analyze = driver.analyze_all();
         let codespan_diags = compiler.diagnostics();
-        // Build a path-keyed entity table from the compiler so handlers
-        // can map file_id (entity index) back to a path.
         let id_to_path: HashMap<usize, String> = compiler
             .files()
             .iter()

@@ -45,14 +45,16 @@ Tracks progress against the milestone plan. Tick each item as it lands.
 - [ ] Manual Extension Development Host pass against `examples/pong/pong.ks`
 
 ## M2 — Hover, go-to-definition, semantic tokens
-- [ ] `syntax.rs::node_at_offset` (rowan `token_at_offset` + walk-up)
-- [ ] **Confirm or add** `DeclSpan` component on declaration entities in `kestrel-ast-builder` (verify first; ask before modifying)
-- [ ] `handlers/hover.rs` — find body, run `InferBody`, look up expr type, render via existing `kestrel-type-infer`/`kestrel-reporting` printer
-- [ ] `handlers/definition.rs` — `ResolveName` → entity → `DeclSpan` → `lsp_types::Location`
-- [ ] `handlers/semantic_tokens.rs` — declare legend (keyword, type, function, parameter, property, namespace, comment, string, number, operator), full + delta (delta optional in M2)
-- [ ] Server advertises `hoverProvider`, `definitionProvider`, `semanticTokensProvider` in `initialize`
-- [ ] Hover unit test against an `InferBody` fixture
-- [ ] Definition unit test: function call → declaration
+- [x] **Confirmed** `DeclSpan` component already exists in `kestrel-ast-builder/src/components.rs:43` and is set by every builder via `get_decl_span()`. No compiler changes needed.
+- [x] `semantic.rs` — `body_entity_at(world, file, offset)`, `hir_expr_at(body, offset)`, `hir_expr_span(expr)`. Unit tests cover both lookups.
+- [x] `ty_format.rs` — `format_ty(world, ResolvedTy)` walks `Named`/`Param`/`SelfType`/`Tuple`/`Function`/`Never`/`Error` and resolves entity paths from the world.
+- [x] `handlers/hover.rs` — find body via `Valued.text_range`, run `LowerBody` + `InferBody`, look up `expr_types[id]`, render via `format_ty`. Smoke verified: hover on `42` → `lang.i64` with the literal's exact range.
+- [x] `handlers/definition.rs` — Three-way dispatch on the HIR expression: `Def(entity)` → `DeclSpan`, `Local(id)` → `HirBody.locals[id].span`, `MethodCall`/`Field`/`Call`/`ProtocolCall` → `TypedBody.resolutions[id]`. Smoke verified: jump from `foo()` call to its `func foo` declaration.
+- [x] `handlers/semantic_tokens.rs` — Legend declared in init capabilities (keyword, type, function, variable, property, namespace, comment, string, number, operator). Per-file: `compiler.lex(file_entity)` → classify by `Token` variant, identifiers split via PascalCase heuristic. Multi-line tokens (block comments, raw strings) are skipped (TextMate covers them). Smarter classification via `ResolveName` deferred to M3.
+- [x] `Backend` advertises `hoverProvider`, `definitionProvider`, `semanticTokensProvider` and dispatches to the handlers.
+- [x] M2 smoke test (`/tmp/lsp_m2.py`) — verified hover, definition, and semantic-tokens responses on a literal-only file (no stdlib needed for inference).
+- [ ] Hover/definition that need stdlib operators (e.g. `a + b`) — gated on stdlib being loadable from `flock.toml` deps; works when the project's `flock.toml` resolves to the stdlib package.
+- [ ] `syntax.rs` — punted; not needed by M2 since we navigate via HirExpr spans. Will likely return for M3 completion (CST node-at-position).
 
 ## M3 — Completion
 - [ ] **Add query** `VisibleNamesAt { file, byte_offset }` in `kestrel-name-res` — share scope chain with `ResolveName`

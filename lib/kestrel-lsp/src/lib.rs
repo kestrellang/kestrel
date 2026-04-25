@@ -10,7 +10,9 @@ pub mod documents;
 pub mod handlers;
 pub mod position;
 pub mod project;
+pub mod semantic;
 pub mod server;
+pub mod ty_format;
 
 use std::sync::Arc;
 
@@ -101,9 +103,40 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                        legend: SemanticTokensLegend {
+                            token_types: handlers::semantic_tokens::LEGEND.to_vec(),
+                            token_modifiers: vec![],
+                        },
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                        range: None,
+                        ..Default::default()
+                    }),
+                ),
                 ..Default::default()
             },
         })
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        Ok(handlers::hover::handle(self.state.clone(), params).await)
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        Ok(handlers::definition::handle(self.state.clone(), params).await)
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        Ok(handlers::semantic_tokens::handle(self.state.clone(), params).await)
     }
 
     async fn initialized(&self, _: InitializedParams) {
