@@ -29,8 +29,10 @@ rowan = "0.16.1"
 indexmap = "2"
 stacker = "0.1"
 tokio = { version = "1", features = ["full"] }
+toml = "0.8"
 tower-lsp = "0.20"
 unicode-xid = "0.2"
+walkdir = "2"
 
 
 [workspace]
@@ -57,6 +59,7 @@ members = [
     "lib/kestrel-mir-lower",
     "lib/kestrel-codegen",
     "lib/kestrel-codegen-cranelift",
+    "lib/kestrel-lsp",
     "lib/kestrel-test-suite",
     "tools/triage"
 ]
