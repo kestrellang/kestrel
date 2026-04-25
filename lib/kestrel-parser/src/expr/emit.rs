@@ -73,7 +73,7 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             member,
             type_args,
         } => {
-            emit_member_access_expr(sink, base, dot.clone(), member.clone(), type_args.as_ref());
+            emit_member_access_expr(sink, base, dot.clone(), member.as_ref(), type_args.as_ref());
         },
         ExprVariant::TupleIndex { base, dot, index } => {
             emit_tuple_index_expr(sink, base, dot.clone(), index.clone());
@@ -431,7 +431,13 @@ fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
         } => {
             emit_expr_variant_inner(sink, base);
             sink.add_token(SyntaxKind::Dot, dot.clone());
-            sink.add_token(SyntaxKind::Identifier, member.clone());
+            match member {
+                Some(span) => sink.add_token(SyntaxKind::Identifier, span.clone()),
+                None => {
+                    let at = Span::new(dot.file_id, dot.end..dot.end);
+                    sink.missing_token(SyntaxKind::Identifier, at);
+                },
+            }
             if let Some(type_args) = type_args {
                 emit_type_args(sink, type_args);
             }
@@ -445,14 +451,22 @@ fn emit_member_access_expr(
     sink: &mut EventSink,
     base: &ExprVariant,
     dot: Span,
-    member: Span,
+    member: Option<&Span>,
     type_args: Option<&TypeArgsData>,
 ) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprPath);
     emit_expr_variant_inner(sink, base);
+    let dot_end = dot.end;
+    let dot_file_id = dot.file_id;
     sink.add_token(SyntaxKind::Dot, dot);
-    sink.add_token(SyntaxKind::Identifier, member);
+    match member {
+        Some(span) => sink.add_token(SyntaxKind::Identifier, span.clone()),
+        None => {
+            let at = Span::new(dot_file_id, dot_end..dot_end);
+            sink.missing_token(SyntaxKind::Identifier, at);
+        },
+    }
     if let Some(type_args) = type_args {
         emit_type_args(sink, type_args);
     }

@@ -53,6 +53,12 @@ pub enum Event {
     StartNode(SyntaxKind),
     /// Add a token to the current node
     AddToken(SyntaxKind, Span),
+    /// Emit a synthesized zero-width token wrapped in a `Missing` node.
+    /// Used by error recovery when a required token (e.g. the identifier
+    /// after `foo.`) is absent. `at` carries the byte position where the
+    /// token would have appeared (start == end for a zero-width span); the
+    /// inner token's `kind` is what consumers pattern-match against.
+    MissingToken { kind: SyntaxKind, at: Span },
     /// Finish the current syntax node
     FinishNode,
     /// A parse error occurred
@@ -88,6 +94,17 @@ impl EventSink {
     /// Add a token to the current node
     pub fn add_token(&mut self, kind: SyntaxKind, span: Span) {
         self.events.push(Event::AddToken(kind, span));
+    }
+
+    /// Emit a synthesized zero-width token wrapped in a `Missing` node at
+    /// the given position. The recovery primitive for "expected token X, got
+    /// nothing" — keeps the CST well-formed so downstream lowering /
+    /// inference / completion can still operate on the parent shape. The
+    /// caller is responsible for also emitting a corresponding parse error
+    /// (typically via Chumsky's `validate` emitter) so the diagnostic isn't
+    /// silently dropped.
+    pub fn missing_token(&mut self, kind: SyntaxKind, at: Span) {
+        self.events.push(Event::MissingToken { kind, at });
     }
 
     /// Finish the current syntax node
@@ -262,6 +279,19 @@ impl<'src> TreeBuilder<'src> {
                     let text = &self.source[span_range];
                     builder.token(kind.into(), text);
                     self.source_pos = span_end;
+                    self.pos += 1;
+                },
+                Event::MissingToken { kind, at } => {
+                    let kind = *kind;
+                    let at_start = at.start;
+
+                    // Flush trivia up to the recovery point so the missing
+                    // marker lands in the right place in the tree.
+                    self.emit_trivia_until(at_start, builder);
+
+                    builder.start_node(SyntaxKind::Missing.into());
+                    builder.token(kind.into(), "");
+                    builder.finish_node();
                     self.pos += 1;
                 },
                 Event::FinishNode => {

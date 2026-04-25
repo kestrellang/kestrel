@@ -68,6 +68,15 @@ Tracks progress against the milestone plan. Tick each item as it lands.
 - [ ] **Known limitation** — Member completion needs the source to parse. The instant `foo.` is typed (no member yet), the parser fails and no `Body` component is created, so we can't find the receiver's local. Real-IDE behaviour will need a "tolerant retry": insert a placeholder identifier after the dot, re-parse, lower. Tracked for follow-up.
 - [ ] Method-chain receivers (`a.b.c.`, `f().`, parenthesised) — falls through to the bare-identifier path, returns nothing. Will use a CST walk in M4/M5.
 
+## Parser recovery — missing tokens & HirName (in flight, predates M4)
+Background fix for the M3 known limitation: parser must produce a well-formed CST even on broken source so completion / hover / def can keep operating mid-edit. See `~/.claude/plans/i-want-to-build-proud-pillow.md` for the full design.
+- [x] **Phase 1** — `SyntaxKind::Missing` wrapper, `Event::MissingToken { kind, at }`, `EventSink::missing_token`. Postfix dot recovers via `select!.or(empty().to(None))` + `validate`. AST builder descends through `Missing` wrappers via `member_identifier_at`. `ParseError::from_token_error` passes `RichReason::Custom` through (was getting eaten by the `expected/found` formatter). 3 unit tests: `foo.`, `foo.bar`, `foo.;`.
+- [ ] **Phase 2** — `HirName` enum; migrate `HirExpr::Field` end-to-end (lowering → inference short-circuit to `ResolvedTy::Error` → analyzer suppression). Verifies the pipeline can carry "missing" without a diagnostic cascade.
+- [ ] **Phase 3** — roll `HirName` to remaining variants (MethodCall, ProtocolCall, ImplicitMember, ImplicitVariant pattern, struct pat field, loop labels, call/pat arg labels, Deinit).
+- [ ] **Phase 4** — apply `expect_or_missing` at other high-friction sites (`:` after param, `=` in let, `{` block open, `)` call close).
+- [ ] **Phase 5** — LSP completion handler swaps text heuristics for HIR walk; delete `dot_receiver_identifier` / `is_after_dot`.
+- [ ] **Phase 6** — `recover_via_skip` + statement-boundary application (skipped-token recovery; optional follow-up).
+
 ## M4 — References, rename, document symbols
 - [ ] **Add query** `ReferencesTo { entity }` in `kestrel-name-res` — scans `TypedBody.resolutions` + AST paths
 - [ ] `handlers/references.rs` — return `Vec<Location>`

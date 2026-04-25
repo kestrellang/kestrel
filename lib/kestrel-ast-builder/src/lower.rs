@@ -11,7 +11,7 @@ use kestrel_ast::arena::Arena;
 use kestrel_ast::ast_body::*;
 use kestrel_span::Span;
 use kestrel_syntax_tree::utils::{find_child, get_node_span, is_trivia};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 /// Lower a CodeBlock CST node into an AstBody.
 pub fn lower_body(code_block: &SyntaxNode, file_id: usize) -> AstBody {
@@ -601,38 +601,34 @@ impl LowerCtx {
             }
         }
 
-        // Walk remaining elements looking for Dot + Identifier [+ TypeArgumentList]
+        // Walk remaining elements looking for Dot + Identifier [+ TypeArgumentList].
+        // The identifier may be wrapped in a `Missing` node when the parser
+        // recovered from `foo.` with no member; treat that as an empty member
+        // name so the chain still lowers.
         let mut i = start_idx;
         while i < elements.len() {
             if let Some(token) = elements[i].as_token() {
                 if token.kind() == SyntaxKind::Dot {
                     i += 1;
-                    // Next should be an Identifier
-                    if i < elements.len() {
-                        if let Some(id_token) = elements[i].as_token() {
-                            if id_token.kind() == SyntaxKind::Identifier {
-                                let member = id_token.text().to_string();
+                    if let Some(id_text) = member_identifier_at(&elements, i) {
+                        i += 1;
+
+                        let type_args = elements
+                            .get(i)
+                            .and_then(|e| e.as_node())
+                            .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
+                            .map(|n| {
                                 i += 1;
+                                extract_type_args(n, self.file_id)
+                            });
 
-                                // Check for type arguments
-                                let type_args = elements
-                                    .get(i)
-                                    .and_then(|e| e.as_node())
-                                    .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
-                                    .map(|n| {
-                                        i += 1;
-                                        extract_type_args(n, self.file_id)
-                                    });
-
-                                current = self.alloc_expr(AstExpr::MemberAccess {
-                                    base: current,
-                                    member,
-                                    type_args,
-                                    span: span.clone(),
-                                });
-                                continue;
-                            }
-                        }
+                        current = self.alloc_expr(AstExpr::MemberAccess {
+                            base: current,
+                            member: id_text,
+                            type_args,
+                            span: span.clone(),
+                        });
+                        continue;
                     }
                 }
             }
@@ -860,7 +856,10 @@ impl LowerCtx {
     fn extract_arg_label(&self, node: &SyntaxNode) -> Option<String> {
         let mut iter = node
             .children_with_tokens()
-            .filter(|e| !e.as_token().is_some_and(|t| is_trivia(t.kind())));
+            .filter(|e| {
+                !e.as_token()
+                    .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
+            });
 
         let first = iter.next()?;
         let second = iter.next();
@@ -1572,7 +1571,10 @@ impl LowerCtx {
     fn extract_pattern_arg_label(&self, node: &SyntaxNode) -> Option<String> {
         let mut iter = node
             .children_with_tokens()
-            .filter(|e| !e.as_token().is_some_and(|t| is_trivia(t.kind())));
+            .filter(|e| {
+                !e.as_token()
+                    .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
+            });
 
         let first = iter.next()?;
         let second = iter.next();
@@ -1893,6 +1895,26 @@ fn extract_loop_label(node: &SyntaxNode) -> Option<String> {
 
 /// Extract label from break/continue: just an identifier token after the keyword.
 fn extract_jump_label(node: &SyntaxNode) -> Option<String> {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| t.text().to_string())
+}
+
+/// Identifier text at `idx` in a member-access child sequence, descending into
+/// a `Missing` wrapper when the parser recovered from an absent member name.
+/// Returns `Some("")` for missing names so the chain still lowers; downstream
+/// passes detect the gap by the empty string (Phase 1) or by a HirName::Missing
+/// variant (Phase 2+).
+fn member_identifier_at(elements: &[SyntaxElement], idx: usize) -> Option<String> {
+    let elem = elements.get(idx)?;
+    if let Some(t) = elem.as_token() {
+        return (t.kind() == SyntaxKind::Identifier).then(|| t.text().to_string());
+    }
+    let node = elem.as_node()?;
+    if node.kind() != SyntaxKind::Missing {
+        return None;
+    }
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Identifier)

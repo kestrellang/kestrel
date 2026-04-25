@@ -84,11 +84,16 @@ pub enum ExprVariant {
         segments: Vec<PathSegmentData>,
         dots: Vec<Span>,
     },
-    /// Member access expression: base.member or base.member[T]
+    /// Member access expression: base.member or base.member[T].
+    ///
+    /// `member` is `None` when the parser recovered from a missing identifier
+    /// after the dot (e.g. `foo.` at EOF or `foo.;`). The CST emitter wraps
+    /// the synthesized identifier in a `SyntaxKind::Missing` node so downstream
+    /// passes can detect the gap.
     MemberAccess {
         base: Box<ExprVariant>,
         dot: Span,
-        member: Span,
+        member: Option<Span>,
         type_args: Option<TypeArgsData>,
     },
     /// Tuple index expression: tuple.0, tuple.1

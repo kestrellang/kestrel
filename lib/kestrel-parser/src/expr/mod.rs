@@ -233,10 +233,11 @@ enum ConditionPostfixOp {
         commas: Vec<Span>,
         rparen: Option<Span>,
     },
-    /// Member access: .identifier or .identifier[T]
+    /// Member access: .identifier or .identifier[T].
+    /// `member` is `None` when the parser recovered from a missing identifier.
     MemberAccess {
         dot: Span,
-        member: Span,
+        member: Option<Span>,
         type_args: Option<TypeArgsData>,
     },
     /// Tuple index: .0, .1
@@ -665,21 +666,43 @@ pub fn expr_parser<'tokens>()
                 },
                 _ => unreachable!(),
             })
-            .or(skip_trivia()
-                .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
-                .then(skip_trivia().ignore_then(select! {
+            .or({
+                let condition_member = select! {
                     Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
                     Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
-                }))
-                .then(full_type_args_parser().or_not())
-                .map(|((dot, (token, span)), type_args)| match token {
-                    Token::Integer => ConditionPostfixOp::TupleIndex { dot, index: span },
-                    _ => ConditionPostfixOp::MemberAccess {
-                        dot,
-                        member: span,
-                        type_args,
-                    },
-                }));
+                }
+                .map(Some)
+                .or(empty().to(None));
+
+                skip_trivia()
+                    .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
+                    .then(skip_trivia().ignore_then(condition_member))
+                    .then(full_type_args_parser().or_not())
+                    .validate(|((dot, member), type_args), e, emitter| {
+                        if member.is_none() {
+                            emitter.emit(Rich::custom(
+                                e.span(),
+                                "expected identifier after `.`",
+                            ));
+                        }
+                        ((dot, member), type_args)
+                    })
+                    .map(|((dot, member), type_args)| match member {
+                        Some((Token::Integer, span)) => {
+                            ConditionPostfixOp::TupleIndex { dot, index: span }
+                        },
+                        Some((_, span)) => ConditionPostfixOp::MemberAccess {
+                            dot,
+                            member: Some(span),
+                            type_args,
+                        },
+                        None => ConditionPostfixOp::MemberAccess {
+                            dot,
+                            member: None,
+                            type_args,
+                        },
+                    })
+            });
 
         let condition_postfix = condition_primary
             .clone()

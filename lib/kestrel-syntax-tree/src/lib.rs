@@ -324,6 +324,12 @@ pub enum SyntaxKind {
 
     // Special
     Error,
+    /// Wrapper node around a zero-width synthesized token, emitted by the
+    /// parser when a required token is absent (e.g. the identifier after
+    /// `foo.`). The single child token retains its intended `SyntaxKind` so
+    /// downstream consumers still pattern-match cleanly; the `Missing` parent
+    /// is what flags the absence.
+    Missing,
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
@@ -705,6 +711,7 @@ impl Language for KestrelLanguage {
         const DOT_DOT: u16 = SyntaxKind::DotDot as u16;
         const TY_OPTIONAL: u16 = SyntaxKind::TyOptional as u16;
         const ERROR: u16 = SyntaxKind::Error as u16;
+        const MISSING: u16 = SyntaxKind::Missing as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
@@ -956,6 +963,7 @@ impl Language for KestrelLanguage {
             LINE_COMMENT => SyntaxKind::LineComment,
             BLOCK_COMMENT => SyntaxKind::BlockComment,
             ERROR => SyntaxKind::Error,
+            MISSING => SyntaxKind::Missing,
             _ => SyntaxKind::Error,
         }
     }

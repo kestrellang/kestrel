@@ -37,9 +37,13 @@ pub(super) enum PostfixOp {
         rparen: Option<Span>,
     },
     /// Member access: `.identifier` or `.identifier[T]`.
+    ///
+    /// `member` is `None` when the parser recovered from a missing identifier
+    /// after the dot. The downstream emitter renders the gap as a
+    /// `SyntaxKind::Missing` wrapper so consumers can spot it.
     MemberAccess {
         dot: Span,
-        member: Span,
+        member: Option<Span>,
         type_args: Option<TypeArgsData>,
     },
     /// Tuple index: `.0`, `.1`, ...
@@ -126,21 +130,45 @@ where
 /// IMPORTANT: does NOT skip leading trivia before the dot. The dot must
 /// immediately follow the previous token so that `.foo` on a new line is
 /// NOT treated as a member access on the previous expression.
+///
+/// Once the dot is committed, the member identifier is recovered as
+/// `Option<Span>`: `Some(span)` for a real token, `None` when nothing valid
+/// follows (cursor mid-edit, EOF, `.;`). The recovery emits a parse error
+/// at the recovery point and produces `PostfixOp::MemberAccess { member:
+/// None, .. }` so the postfix chain can keep folding.
 pub(super) fn member_access_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, PostfixOp, ParserExtra<'tokens>> + Clone {
+    let member_token = select! {
+        Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
+        Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
+        Token::Init = e => (Token::Init, to_kestrel_span(e.span())),
+    }
+    .map(Some)
+    .or(empty().to(None));
+
     just(Token::Dot)
         .map_with(|_, e| to_kestrel_span(e.span()))
-        .then(skip_trivia().ignore_then(select! {
-            Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
-            Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
-            Token::Init = e => (Token::Init, to_kestrel_span(e.span())),
-        }))
+        .then(skip_trivia().ignore_then(member_token))
         .then(full_type_args_parser().or_not())
-        .map(|((dot, (token, span)), type_args)| match token {
-            Token::Integer => PostfixOp::TupleIndex { dot, index: span },
-            _ => PostfixOp::MemberAccess {
+        .validate(|((dot, member), type_args), e, emitter| {
+            if member.is_none() {
+                emitter.emit(Rich::custom(
+                    e.span(),
+                    "expected identifier after `.`",
+                ));
+            }
+            ((dot, member), type_args)
+        })
+        .map(|((dot, member), type_args)| match member {
+            Some((Token::Integer, span)) => PostfixOp::TupleIndex { dot, index: span },
+            Some((_, span)) => PostfixOp::MemberAccess {
                 dot,
-                member: span,
+                member: Some(span),
+                type_args,
+            },
+            None => PostfixOp::MemberAccess {
+                dot,
+                member: None,
                 type_args,
             },
         })

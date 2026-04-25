@@ -324,9 +324,25 @@ impl ParseError {
     /// This version provides better formatting for Kestrel tokens
     pub fn from_token_error<'a>(error: &chumsky::error::Rich<'a, Token>) -> Self {
         use crate::input::to_kestrel_span;
-        use chumsky::error::RichPattern;
+        use chumsky::error::{RichPattern, RichReason};
 
         let span = Some(to_kestrel_span(*error.span()));
+
+        // `Rich::custom(...)` carries its message in the reason directly.
+        // Routing it through `build_error_message` (which only consults
+        // `expected`/`found`) discards the message and produces a generic
+        // "unexpected end of file" — masking recovery diagnostics like
+        // "expected identifier after `.`". Detect that shape and pass the
+        // custom message through.
+        if let RichReason::Custom(msg) = error.reason() {
+            return Self {
+                kind: ParseErrorKind::SyntaxError,
+                message: msg.to_string(),
+                span,
+                expected: Vec::new(),
+                found: None,
+            };
+        }
 
         // Determine error kind based on what was found
         let kind = if error.found().is_none() {
@@ -763,5 +779,67 @@ public struct B {}
             ),
             vec!["+", "*", "??"]
         );
+    }
+
+    #[test]
+    fn missing_member_after_dot_recovers_with_missing_node() {
+        // Cursor mid-edit: `foo.` with nothing after. The parser should
+        // recover by emitting a Missing wrapper around a zero-width
+        // Identifier token AND record exactly one parse error.
+        let source = "func f() { foo. }";
+        let result = parse_source(source, 0);
+
+        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
+        assert_eq!(missing_count, 1, "expected one Missing wrapper");
+
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected identifier after `.`"))
+            .collect();
+        assert_eq!(
+            recovery_errors.len(),
+            1,
+            "expected exactly one recovery diagnostic, got {:?}",
+            result.errors
+        );
+
+        // The synthesized identifier inside Missing should have empty text,
+        // so the source round-trips without garbage.
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn well_formed_member_access_does_not_emit_missing() {
+        // Sanity: real `foo.bar` must still produce zero Missing nodes and
+        // zero parse errors. Catches regressions where the recovery path
+        // fires on the happy case.
+        let source = "func f() { foo.bar }";
+        let result = parse_source(source, 0);
+
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 0);
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected identifier after `.`"))
+            .collect();
+        assert!(recovery_errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn missing_member_before_semicolon_recovers() {
+        // Cursor mid-edit shape: `foo.;`. The `;` is not a valid member token,
+        // so recovery emits Missing and the rest of the body still parses.
+        let source = "func f() { foo.; }";
+        let result = parse_source(source, 0);
+
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 1);
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected identifier after `.`"))
+            .collect();
+        assert_eq!(recovery_errors.len(), 1);
+        assert_eq!(result.tree.text().to_string(), source);
     }
 }
