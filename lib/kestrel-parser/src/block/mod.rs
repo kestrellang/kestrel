@@ -122,6 +122,223 @@ pub struct CodeBlockData {
     pub rbrace: Span,
 }
 
+/// Parser for items inside a guard-let `else { ... }` block, parameterized
+/// by the recursive `expr` and inline `let`/`var` parsers.
+///
+/// Yields `Vec<ElseBlockItem>`. The items are: variable declarations, regular
+/// expression statements (with semicolon), inline statement-like expressions
+/// (no semicolon needed for `if`/`while`/`loop`/`for`/`match`/`return`/
+/// `throw`/`try`), and an optional trailing expression.
+///
+/// Reused by inline guard-let inside `expr_parser` and inside closures so the
+/// grammar lives in one place.
+pub(crate) fn else_block_items_parser<'tokens, P, V>(
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ElseBlockItem>, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    let else_item = inline_var_decl
+        .map(ElseBlockItem::Statement)
+        .or(expr
+            .clone()
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                    .map(Some)
+                    .or(empty().to(None)),
+            )
+            .try_map(|(e, maybe_semi), _extra| {
+                if let Some(semi) = maybe_semi {
+                    Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
+                } else if crate::expr::is_inline_statement_like(&e) {
+                    Ok(ElseBlockItem::StatementExpr(e))
+                } else {
+                    Err(Rich::custom(
+                        chumsky::span::Span::new((), 0..0),
+                        "expected semicolon",
+                    ))
+                }
+            }));
+
+    else_item
+        .repeated()
+        .collect::<Vec<_>>()
+        .then(expr.map(ElseBlockItem::TrailingExpression).or_not())
+        .map(|(mut items, trailing)| {
+            if let Some(e) = trailing {
+                items.push(e);
+            }
+            items
+        })
+        .boxed()
+}
+
+/// Parser for an inline `guard let ... else { ... }` block item with chain
+/// support. Yields `BlockItem::GuardLet(GuardLetData)`.
+///
+/// Conditions form a chain starting with at least one `let pattern = expr`,
+/// followed by zero or more comma-separated `let` or boolean conditions.
+pub(crate) fn guard_let_block_item_parser<'tokens, P, V>(
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, BlockItem, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    let let_condition = skip_trivia()
+        .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(pattern_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(expr.clone())
+        .map(
+            |(((let_span, pattern), equals_span), value)| IfCondition::Let {
+                let_span,
+                pattern,
+                equals_span,
+                value,
+            },
+        );
+
+    let single_condition = let_condition
+        .clone()
+        .or(expr.clone().map(IfCondition::Expr));
+
+    let conditions = let_condition
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Comma))
+                .ignore_then(single_condition)
+                .repeated()
+                .collect::<Vec<_>>(),
+        )
+        .map(|(first, rest)| {
+            let mut conditions = vec![first];
+            conditions.extend(rest);
+            conditions
+        });
+
+    let else_items = else_block_items_parser(expr, inline_var_decl);
+
+    skip_trivia()
+        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(conditions)
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(else_items)
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(
+            |(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
+                BlockItem::GuardLet(GuardLetData {
+                    guard_span,
+                    conditions,
+                    else_span,
+                    else_lbrace,
+                    else_items,
+                    else_rbrace,
+                })
+            },
+        )
+        .boxed()
+}
+
+/// Parser for the items inside an inline code block. Yields `Vec<BlockItem>`
+/// with optional trailing expression already attached.
+///
+/// Item kinds: guard-let, variable declaration (via `inline_var_decl`),
+/// expression statement (with semicolon), statement-like expression (no
+/// semicolon needed), trailing expression. Does NOT include `deinit
+/// identifier;` — that is only valid in top-level blocks parsed via
+/// [`code_block_parser`].
+pub(crate) fn block_items_parser<'tokens, P, V>(
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<BlockItem>, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    let guard_let = guard_let_block_item_parser(expr.clone(), inline_var_decl.clone());
+    let stmt_decl = inline_var_decl.map(BlockItem::Statement);
+    let expr_item = expr
+        .clone()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                .or_not(),
+        )
+        .try_map(|(e, maybe_semi), _extra| {
+            if let Some(semi) = maybe_semi {
+                Ok(BlockItem::Statement(StmtVariant::Expression(e, semi)))
+            } else if crate::expr::is_inline_statement_like(&e) {
+                Ok(BlockItem::StatementExpr(e))
+            } else {
+                Err(Rich::custom(
+                    chumsky::span::Span::new((), 0..0),
+                    "expected semicolon",
+                ))
+            }
+        });
+
+    let block_item = guard_let.or(stmt_decl).or(expr_item);
+
+    block_item
+        .repeated()
+        .collect::<Vec<_>>()
+        .then(expr.map(BlockItem::TrailingExpression).or_not())
+        .map(|(mut items, trailing)| {
+            if let Some(e) = trailing {
+                items.push(e);
+            }
+            items
+        })
+        .boxed()
+}
+
+/// Parser for an inline `{ ... }` code block, parameterized by the `lbrace`
+/// parser, the recursive `expr` handle, and the inline `let`/`var` parser.
+///
+/// Returns `CodeBlockData`. Used as the body of `if`/`while`/`loop`/`for`
+/// expressions and `match` arms inside `expr_parser`.
+pub(crate) fn inline_code_block_parser<'tokens, L, P, V>(
+    lbrace_parser: L,
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone
+where
+    L: Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone + 'tokens,
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    lbrace_parser
+        .then(block_items_parser(expr, inline_var_decl))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(|((lbrace, items), rbrace)| CodeBlockData {
+            lbrace,
+            items,
+            rbrace,
+        })
+        .boxed()
+}
+
 /// Parser for a code block
 ///
 /// Syntax: { statement* expression? }

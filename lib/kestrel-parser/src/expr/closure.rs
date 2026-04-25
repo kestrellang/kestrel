@@ -19,14 +19,13 @@ use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
-use crate::block::{BlockItem, ElseBlockItem, GuardLetData};
+use crate::block::block_items_parser;
 use crate::common::{skip_inline_trivia, skip_trivia};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 use crate::stmt::StmtVariant;
 use crate::ty::ty_parser;
 
-use super::data::{CallArg, ClosureParamData, ClosureParamsData, ExprVariant, IfCondition};
-use super::is_inline_statement_like;
+use super::data::{CallArg, ClosureParamData, ClosureParamsData, ExprVariant};
 
 /// Build a closure-expression parser given:
 ///
@@ -90,142 +89,10 @@ where
             )
         });
 
-    let expr_for_closure = expr.clone();
-    let expr_for_closure_guard = expr.clone();
-    let expr_for_closure_else = expr;
-
-    // Inline else block items parser for guard-let in closures
-    let closure_else_item = inline_var_decl
-        .clone()
-        .map(ElseBlockItem::Statement)
-        .or(expr_for_closure_else
-            .clone()
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
-                    .map(Some)
-                    .or(empty().to(None)),
-            )
-            .try_map(|(e, maybe_semi), _extra| {
-                if let Some(semi) = maybe_semi {
-                    Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
-                } else if is_inline_statement_like(&e) {
-                    Ok(ElseBlockItem::StatementExpr(e))
-                } else {
-                    Err(Rich::custom(
-                        chumsky::span::Span::new((), 0..0),
-                        "expected semicolon",
-                    ))
-                }
-            }));
-
-    let closure_else_items = closure_else_item
-        .repeated()
-        .collect::<Vec<_>>()
-        .then(
-            expr_for_closure_else
-                .map(ElseBlockItem::TrailingExpression)
-                .or_not(),
-        )
-        .map(|(mut items, trailing)| {
-            if let Some(e) = trailing {
-                items.push(e);
-            }
-            items
-        });
-
-    // Inline guard-let parser for closures with chain support.
-    // Single let condition: `let pattern = expr`.
-    let closure_guard_let_condition = skip_trivia()
-        .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
-        .then(crate::pattern::pattern_parser())
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))),
-        )
-        .then(expr_for_closure_guard.clone())
-        .map(
-            |(((let_span, pattern), equals_span), value)| IfCondition::Let {
-                let_span,
-                pattern,
-                equals_span,
-                value,
-            },
-        );
-
-    // Single condition: either let-binding or boolean expression.
-    let closure_guard_single_condition = closure_guard_let_condition
-        .clone()
-        .or(expr_for_closure_guard.clone().map(IfCondition::Expr));
-
-    // Condition list: first must be let, followed by comma-separated conditions.
-    let closure_guard_conditions = closure_guard_let_condition
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::Comma))
-                .ignore_then(closure_guard_single_condition)
-                .repeated()
-                .collect::<Vec<_>>(),
-        )
-        .map(|(first, rest)| {
-            let mut conditions = vec![first];
-            conditions.extend(rest);
-            conditions
-        });
-
-    let closure_guard_let = skip_trivia()
-        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
-        .then(closure_guard_conditions)
-        .then(
-            skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
-        )
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
-        )
-        .then(closure_else_items)
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
-        )
-        .map(
-            |(
-                ((((guard_span, conditions), else_span), else_lbrace), else_items),
-                else_rbrace,
-            )| {
-                BlockItem::GuardLet(GuardLetData {
-                    guard_span,
-                    conditions,
-                    else_span,
-                    else_lbrace,
-                    else_items,
-                    else_rbrace,
-                })
-            },
-        );
-
-    let closure_block_item = closure_guard_let
-        .or(inline_var_decl.map(BlockItem::Statement))
-        .or(expr_for_closure
-            .clone()
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
-                    .map(Some)
-                    .or(empty().to(None)),
-            )
-            .try_map(|(e, maybe_semi), _extra| {
-                if let Some(semi) = maybe_semi {
-                    Ok(BlockItem::Statement(StmtVariant::Expression(e, semi)))
-                } else if is_inline_statement_like(&e) {
-                    Ok(BlockItem::StatementExpr(e))
-                } else {
-                    Err(Rich::custom(
-                        chumsky::span::Span::new((), 0..0),
-                        "expected semicolon",
-                    ))
-                }
-            }));
+    // Closure body items reuse the shared `block::block_items_parser` so the
+    // grammar (guard-let, inline `let`/`var`, expression statements, trailing
+    // expression) is defined once instead of duplicated here.
+    let body_items = block_items_parser(expr, inline_var_decl);
 
     lbrace_parser
         .then(
@@ -233,18 +100,7 @@ where
                 .or_not()
                 .map(|opt| opt.unwrap_or((None, None))),
         )
-        .then(
-            closure_block_item
-                .repeated()
-                .collect::<Vec<_>>()
-                .then(expr_for_closure.map(BlockItem::TrailingExpression).or_not())
-                .map(|(mut statements, trailing)| {
-                    if let Some(expr) = trailing {
-                        statements.push(expr);
-                    }
-                    statements
-                }),
-        )
+        .then(body_items)
         .then(
             skip_trivia()
                 .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),

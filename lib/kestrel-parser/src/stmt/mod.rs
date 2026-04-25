@@ -194,6 +194,62 @@ fn deinit_statement_parser<'tokens>()
         .boxed()
 }
 
+/// Inline variable-declaration parser parameterized by the recursive
+/// expression handle.
+///
+/// Returns a parser yielding `StmtVariant::VariableDeclaration(data)`. This is
+/// the inline counterpart of [`variable_declaration_parser`]: it threads the
+/// `expr` handle from a `recursive(|expr| ...)` closure instead of calling
+/// the top-level `expr_parser()`. Used by both `expr/mod.rs` (for inline
+/// `let`/`var` inside `inline_code_block`) and `expr/closure.rs` (for
+/// `let`/`var` inside closure bodies), so they share one source of truth.
+pub(crate) fn inline_variable_declaration_parser<'tokens, P>(
+    expr: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    skip_trivia()
+        .ignore_then(
+            just(Token::Let)
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
+        )
+        .then(pattern_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(ty_parser())
+                .or_not(),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(expr)
+                .or_not(),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(
+            |(
+                ((((mutability_span, is_mutable), pattern), type_annotation), initializer),
+                semicolon,
+            )| {
+                StmtVariant::VariableDeclaration(VariableDeclarationData {
+                    mutability_span,
+                    is_mutable,
+                    pattern,
+                    type_annotation,
+                    initializer,
+                    semicolon,
+                })
+            },
+        )
+        .boxed()
+}
+
 /// Parser for statements
 ///
 /// Currently supports:

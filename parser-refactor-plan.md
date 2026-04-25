@@ -310,8 +310,6 @@ New tests in `parser.rs`:
 
 Verification: `cargo test -p kestrel-parser`
 
-## Remaining Plan
-
 ### Step 9: Tame Struct/Enum Mutual Recursion
 
 `type_decl.rs` is now a thin coordinator (64 lines) rather than the owner of
@@ -371,13 +369,35 @@ Verification: `cargo test -p kestrel-parser`
 
 ### Step 8: Clarify Block/Stmt/Expr Boundaries
 
-Reduce duplicated inline statement/block parsing inside `expr`.
+The inline `let`/`var` and inline-block grammars used inside `expr_parser`
+(for `if`/`while`/`loop`/`for`/`match` bodies and guard-let chains) and
+inside `closure_parser` (for closure bodies and their guard-let chains) are
+no longer copy-pasted. They live in `stmt` and `block` and are consumed
+through narrow factory functions that take the recursive `expr` handle:
 
-Target ownership:
+- `stmt::inline_variable_declaration_parser<P>(expr)` — yields
+  `StmtVariant::VariableDeclaration`.
+- `block::block_items_parser<P, V>(expr, inline_var_decl)` — yields
+  `Vec<BlockItem>` for an inline block body.
+- `block::else_block_items_parser<P, V>(expr, inline_var_decl)` — yields
+  `Vec<ElseBlockItem>` for guard-let `else { ... }` blocks.
+- `block::guard_let_block_item_parser<P, V>(expr, inline_var_decl)` — yields
+  `BlockItem::GuardLet`.
+- `block::inline_code_block_parser<L, P, V>(lbrace, expr, inline_var_decl)`
+  — yields `CodeBlockData`, used as the body of `if`/`while`/`loop`/`for`/
+  `match` arms.
 
-- `block` owns block grammar
-- `stmt` owns statement grammar
-- `expr` calls into those through narrow recursive hooks
+`expr/mod.rs` shrank from 1405 → 1207 lines (−198) as `inline_var_decl` and
+the entire `inline_code_block` body are now one-line calls to the shared
+factories. `expr/closure.rs` shrank from 293 → 149 lines (−144) — the
+duplicated guard-let chain, else-items, and block-items code is gone.
+
+`block::code_block_parser` (the top-level function-body parser) is left
+alone for now: it still includes `deinit identifier;` items that are not
+valid in inline contexts, so it would change behavior to share the inline
+factory verbatim.
+
+Verification: `cargo test -p kestrel-parser`
 
 ## Acceptance Criteria
 
