@@ -1058,6 +1058,7 @@ dependencies = [
  "kestrel-hir",
  "kestrel-hir-lower",
  "kestrel-lexer",
+ "kestrel-name-res",
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-syntax-tree",

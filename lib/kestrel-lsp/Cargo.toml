@@ -23,6 +23,7 @@ kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-hir = { path = "../kestrel-hir" }
 kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 rowan = { workspace = true }
 codespan-reporting = { workspace = true }

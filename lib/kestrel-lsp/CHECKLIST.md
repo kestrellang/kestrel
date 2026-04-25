@@ -57,13 +57,16 @@ Tracks progress against the milestone plan. Tick each item as it lands.
 - [ ] `syntax.rs` — punted; not needed by M2 since we navigate via HirExpr spans. Will likely return for M3 completion (CST node-at-position).
 
 ## M3 — Completion
-- [ ] **Add query** `VisibleNamesAt { file, byte_offset }` in `kestrel-name-res` — share scope chain with `ResolveName`
-- [ ] `handlers/completion.rs` — detect `.` trigger vs identifier prefix
-- [ ] Member completion: receiver type → `ProtocolMembers` + nominal members + `ExtensionsFor`
-- [ ] Scope completion: `VisibleNamesAt` filtered by prefix
-- [ ] Snippet completions for top-level keywords on empty lines (`func`, `struct`, `protocol`, `extend`, `import`)
-- [ ] Server advertises `completionProvider { triggerCharacters: ["."] }`
-- [ ] Test: `ball.` in pong example yields field/method list
+- [x] No `VisibleNamesAt` query needed — `ScopeFor` already gives us declarations + selective_imports + wildcard_imports per entity, with a `parent` link for the chain. We walk that chain in the LSP rather than baking the consumer-specific shape into the compiler.
+- [x] `handlers/completion.rs` — `is_after_dot` decides member vs scope; `dot_receiver_identifier` extracts the bare receiver name; `identifier_prefix` finds the partial word for filtering.
+- [x] **Member completion**: receiver type → nominal `children_of` (fields, methods, init), `ExtensionsFor` → extension children, `ProtocolMembers` for protocols. Receiver resolution: locals via `LowerBody.locals` + `TypedBody.local_types`, free names via `ResolveName` in the enclosing scope. Static-on-type access (`Foo.`) handled by treating the type entity itself as `Named { entity, args: [] }`.
+- [x] **Scope completion**: walks `ScopeFor` parent chain from the enclosing decl to the module root, plus locals from the enclosing `HirBody` (filtered by `local.span.start <= offset`), plus type parameters of any enclosing generic. Wildcard imports are flattened by listing each source module's children.
+- [x] **Top-level snippets**: `module` / `import` / `func` / `struct` / `protocol` / `extend` injected when the enclosing entity is a `NodeKind::Module` (the file root).
+- [x] Server advertises `completionProvider { trigger_characters: ["."] }`.
+- [x] Smoke verified: `p.x` after a Point local → `x`/`y` fields with `FIELD` kind; `or` prefix in body → `origin` function with `FUNCTION` kind; empty file → 6 keyword snippets.
+- [x] Unit tests for `syntax::identifier_prefix`, `is_after_dot`, `dot_receiver_identifier` (3 new tests, 11 total).
+- [ ] **Known limitation** — Member completion needs the source to parse. The instant `foo.` is typed (no member yet), the parser fails and no `Body` component is created, so we can't find the receiver's local. Real-IDE behaviour will need a "tolerant retry": insert a placeholder identifier after the dot, re-parse, lower. Tracked for follow-up.
+- [ ] Method-chain receivers (`a.b.c.`, `f().`, parenthesised) — falls through to the bare-identifier path, returns nothing. Will use a CST walk in M4/M5.
 
 ## M4 — References, rename, document symbols
 - [ ] **Add query** `ReferencesTo { entity }` in `kestrel-name-res` — scans `TypedBody.resolutions` + AST paths

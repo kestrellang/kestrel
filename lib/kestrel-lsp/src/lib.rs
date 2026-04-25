@@ -12,6 +12,7 @@ pub mod position;
 pub mod project;
 pub mod semantic;
 pub mod server;
+pub mod syntax;
 pub mod ty_format;
 
 use std::sync::Arc;
@@ -105,6 +106,10 @@ impl LanguageServer for Backend {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![".".into()]),
+                    ..Default::default()
+                }),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                         legend: SemanticTokensLegend {
@@ -137,6 +142,13 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         Ok(handlers::semantic_tokens::handle(self.state.clone(), params).await)
+    }
+
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> Result<Option<CompletionResponse>> {
+        Ok(handlers::completion::handle(self.state.clone(), params).await)
     }
 
     async fn initialized(&self, _: InitializedParams) {

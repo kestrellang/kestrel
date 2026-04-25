@@ -3,7 +3,7 @@
 //! Most of M2's "what's at the cursor?" logic funnels through these helpers
 //! so handlers stay narrow and the lookup rules stay in one place.
 
-use kestrel_ast_builder::{Body, FileId, Valued};
+use kestrel_ast_builder::{Body, DeclSpan, FileId, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_span::Span;
@@ -91,6 +91,50 @@ pub fn hir_expr_at(body: &HirBody, offset: usize) -> Option<HirExprId> {
 /// than chasing `Valued` because not every node carries a CstNode pointer.
 pub fn file_cst(compiler: &kestrel_compiler::Compiler, file_entity: Entity) -> SyntaxNode {
     compiler.parse(file_entity).tree
+}
+
+/// Smallest entity in `file_entity` whose `DeclSpan` covers `offset`. Falls
+/// back to walking the module hierarchy when no `DeclSpan` matches (e.g.
+/// the cursor is at file scope between two top-level decls). Used by
+/// completion to find the lexical scope at the cursor.
+pub fn enclosing_decl_at(
+    world: &World,
+    file_entity: Entity,
+    offset: usize,
+) -> Option<Entity> {
+    let mut best: Option<(Entity, usize)> = None;
+    for (entity, span) in world.iter_component::<DeclSpan>() {
+        let Some(fid) = world.get::<FileId>(entity) else { continue };
+        if fid.0 != file_entity {
+            continue;
+        }
+        let s = &span.0;
+        if s.start <= offset && offset <= s.end {
+            let len = s.end - s.start;
+            if best.map(|(_, l)| len < l).unwrap_or(true) {
+                best = Some((entity, len));
+            }
+        }
+    }
+    best.map(|(e, _)| e).or_else(|| {
+        // Fall back to the module entity that owns this file. We find it by
+        // looking at any other declaration's parent; that's the file's
+        // module container. If the file is empty, return None.
+        for (entity, fid) in world.iter_component::<FileId>() {
+            if fid.0 != file_entity {
+                continue;
+            }
+            // Walk up to find a Module ancestor.
+            let mut cur = world.parent_of(entity);
+            while let Some(e) = cur {
+                if world.get::<NodeKind>(e) == Some(&NodeKind::Module) {
+                    return Some(e);
+                }
+                cur = world.parent_of(e);
+            }
+        }
+        None
+    })
 }
 
 #[cfg(test)]
