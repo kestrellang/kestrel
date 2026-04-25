@@ -827,6 +827,57 @@ public struct B {}
     }
 
     #[test]
+    fn block_recovery_skips_garbage_to_next_statement_boundary() {
+        // A garbage line (`@@@`) between two well-formed statements must
+        // not poison the rest of the body. Phase 6 wraps the broken stretch
+        // in an Error node and the second `let` still parses.
+        let source = "func f() { let x = 1; @@@ let y = 2; }";
+        let result = parse_source(source, 0);
+
+        // The body should contain at least one Error wrapper from recovery
+        // plus two Let statements (one before, one after the garbage).
+        let error_nodes = count_nodes(&result.tree, SyntaxKind::Error);
+        assert!(
+            error_nodes >= 1,
+            "expected at least one recovered Error node, tree:\n{:#?}",
+            result.tree
+        );
+        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        assert_eq!(
+            lets, 2,
+            "both `let` statements must still parse around the garbage; tree:\n{:#?}",
+            result.tree
+        );
+
+        // Source text must round-trip.
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn block_recovery_preserves_following_statements_for_completion() {
+        // Mid-edit shape: a stray punctuation token between two real
+        // statements shouldn't wipe out hover/completion on the next
+        // line. The second `let` needs to land in the tree so an LSP
+        // query at its position can still find a valid declaration.
+        //
+        // Note: recovery deliberately refuses to consume tokens that
+        // could begin an expression (identifiers, literals, `(`, …) so
+        // tail expressions like `{ () }` aren't swallowed. Garbage that
+        // starts with an expression-starter is a follow-up — see the
+        // CHECKLIST under "Parser recovery".
+        let source = "func f() { let x = 1; ?? let y = 7; }";
+        let result = parse_source(source, 0);
+
+        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        assert_eq!(
+            lets, 2,
+            "both `let` statements must survive the stray `??`; tree:\n{:#?}",
+            result.tree
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
     fn missing_member_before_semicolon_recovers() {
         // Cursor mid-edit shape: `foo.;`. The `;` is not a valid member token,
         // so recovery emits Missing and the rest of the body still parses.

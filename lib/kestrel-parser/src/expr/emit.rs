@@ -924,6 +924,14 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
             sink.finish_node(); // GuardLetStatement
             sink.finish_node(); // Statement
         },
+        BlockItem::Recovered(span) => {
+            // Same recovery shape as `block::emit_code_block` — wrap the
+            // skipped tokens in a `SyntaxKind::Error` node so the source
+            // round-trips and the LSP can spot the broken stretch.
+            sink.start_node(SyntaxKind::Error);
+            sink.add_token(SyntaxKind::Error, span.clone());
+            sink.finish_node();
+        },
     }
 }
 

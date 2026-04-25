@@ -109,6 +109,11 @@ pub enum BlockItem {
     TrailingExpression(ExprVariant),
     /// A guard-let statement (no semicolon required)
     GuardLet(GuardLetData),
+    /// Recovered range: tokens that didn't fit any block-item shape, skipped
+    /// up to the next statement boundary (`}` or a statement-starter
+    /// keyword) so the rest of the body still parses. Phase 6 of the
+    /// parser-recovery work — see `block_item_recovery`.
+    Recovered(Span),
 }
 
 /// Raw parsed data for a code block
@@ -638,8 +643,17 @@ fn code_block_items_parser<'tokens>()
         });
 
     // A block item is a guard-let, deinit statement, variable declaration, or expression-based item
-    // Guard-let and deinit must come first since they start with keywords
-    let block_item = guard_let.or(deinit_stmt).or(var_decl).or(expr_item);
+    // Guard-let and deinit must come first since they start with keywords.
+    // Recovery kicks in after every legitimate alternative fails: skip
+    // tokens until the next statement boundary, wrap the range as
+    // `Recovered`, and let the outer `.repeated()` continue. Without this,
+    // a half-typed line like `foo bar baz` would poison the entire body's
+    // parse and break completion / hover for everything below it.
+    let block_item = guard_let
+        .or(deinit_stmt)
+        .or(var_decl)
+        .or(expr_item)
+        .recover_with(via_parser(block_item_recovery()));
 
     block_item
         .repeated()
@@ -654,6 +668,77 @@ fn code_block_items_parser<'tokens>()
             }
             items
         })
+        .boxed()
+}
+
+/// Tokens that signal "the next block item starts here" — recovery stops
+/// at these so the surrounding parser sees them. `}` ends the block; the
+/// keywords each start a new statement / declaration.
+fn is_block_item_boundary(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::RBrace
+            | Token::Let
+            | Token::Var
+            | Token::Guard
+            | Token::Deinit
+            | Token::If
+            | Token::While
+            | Token::For
+            | Token::Loop
+            | Token::Match
+            | Token::Return
+            | Token::Break
+            | Token::Continue
+            | Token::Throw
+            | Token::Try
+    )
+}
+
+/// Tokens that can start a valid expression. Recovery refuses to consume
+/// these — input starting with an expression-starter is most likely the
+/// block's trailing expression, not garbage. Without this guard the
+/// recovery would swallow tail expressions like `{ () }` or `{ x }`.
+fn is_expr_starter(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Identifier
+            | Token::Integer
+            | Token::Float
+            | Token::String
+            | Token::RawString
+            | Token::Char
+            | Token::Boolean
+            | Token::Null
+            | Token::LParen
+            | Token::LBracket
+            | Token::LBrace
+            | Token::Bang
+            | Token::Minus
+            | Token::Dot
+    )
+}
+
+/// Recovery parser used when no legitimate `BlockItem` shape matched.
+/// Skips trivia, then consumes one **non-boundary, non-expression-starter**
+/// token plus any further non-boundary tokens. The first-token guards keep
+/// (a) closing braces / statement keywords available to outer parsers and
+/// (b) tail expressions intact so they reach the trailing-expression
+/// alternative.
+fn block_item_recovery<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, BlockItem, ParserExtra<'tokens>> + Clone {
+    let next_is_boundary = any().filter(is_block_item_boundary).ignored();
+    let recoverable_first = any().filter(|t: &Token| {
+        !matches!(
+            t,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        ) && !is_block_item_boundary(t)
+            && !is_expr_starter(t)
+    });
+    skip_trivia()
+        .ignore_then(recoverable_first)
+        .then(any().and_is(next_is_boundary.not()).repeated())
+        .map_with(|_, e| BlockItem::Recovered(to_kestrel_span(e.span())))
         .boxed()
 }
 
@@ -681,6 +766,17 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
             },
             BlockItem::GuardLet(guard_data) => {
                 emit_guard_let(sink, guard_data);
+            },
+            BlockItem::Recovered(span) => {
+                // Phase-6 recovery: wrap the skipped range as an Error node
+                // containing one Error token covering the whole range. The
+                // tree text round-trips with the source — TreeBuilder pulls
+                // the bytes from `span` — and downstream consumers (LSP,
+                // analyzers) can recognise `SyntaxKind::Error` to skip
+                // analysis of the broken stretch.
+                sink.start_node(SyntaxKind::Error);
+                sink.add_token(SyntaxKind::Error, span.clone());
+                sink.finish_node();
             },
         }
     }
