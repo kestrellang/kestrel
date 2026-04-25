@@ -259,7 +259,7 @@ fn lower_method_call() {
             assert!(args.is_empty());
             match &hir.exprs[*callee] {
                 HirExpr::Field { name, base, .. } => {
-                    assert_eq!(name, "toString");
+                    assert_eq!(name.as_str(), Some("toString"));
                     assert!(matches!(&hir.exprs[*base], HirExpr::Local(..)));
                 },
                 other => panic!("expected Field callee, got {:?}", other),
@@ -406,7 +406,7 @@ fn lower_field_access() {
     let tail = hir.tail_expr.expect("should have tail");
     match &hir.exprs[tail] {
         HirExpr::Field { base, name, .. } => {
-            assert_eq!(name, "count");
+            assert_eq!(name.as_str(), Some("count"));
             assert!(matches!(&hir.exprs[*base], HirExpr::Local(..)));
         },
         other => panic!("expected Field, got {:?}", other),

@@ -308,8 +308,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.type_param_defs.remove(base);
             }
 
-            // Member constraint with no args (field/property access)
-            ctx.member(base_tv, name, vec![], result_tv, id, false, span.clone());
+            match name {
+                HirName::Name(name_str) => {
+                    // Member constraint with no args (field/property access)
+                    ctx.member(base_tv, name_str, vec![], result_tv, id, false, span.clone());
+                },
+                HirName::Missing => {
+                    // Parser already reported "expected identifier after `.`".
+                    // Silently bind the result to Error so downstream constraints
+                    // absorb without cascading "name not found" diagnostics.
+                    ctx.poison(result_tv);
+                },
+            }
             result_tv
         },
 

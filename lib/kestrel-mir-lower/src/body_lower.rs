@@ -507,7 +507,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let result_ty = self.resolve_expr_type(expr_id);
                     let method_type_args = self.resolve_type_args(expr_id);
                     let callee =
-                        Callee::witness(protocol, name.clone(), self_type, method_type_args);
+                        Callee::witness(protocol, name.as_str_or_empty().to_string(), self_type, method_type_args);
                     self.emit_call(callee, vec![], result_ty)
                 } else if is_protocol_property {
                     let property_entity = resolved.unwrap();
@@ -519,7 +519,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let receiver_arg = CallArg::borrow(base_val);
                     let method_type_args = self.resolve_type_args(expr_id);
                     let callee =
-                        Callee::witness(protocol, name.clone(), receiver_ty, method_type_args);
+                        Callee::witness(protocol, name.as_str_or_empty().to_string(), receiver_ty, method_type_args);
                     self.emit_call(callee, vec![receiver_arg], result_ty)
                 } else if is_callable && is_static {
                     // Static computed property on concrete type: direct getter
@@ -558,7 +558,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // Stored field: direct place access
                     let base_val = self.lower_expr(*base);
                     match base_val {
-                        Value::Place(p) => Value::Place(p.field(name.clone())),
+                        Value::Place(p) => Value::Place(p.field(name.as_str_or_empty().to_string())),
                         _ => {
                             // Need to materialize the value into a temp first
                             let ty = self.resolve_expr_type(*base);
@@ -567,7 +567,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                 dest: Place::local(temp),
                                 rvalue: value_to_rvalue(base_val),
                             }));
-                            Value::Place(Place::local(temp).field(name.clone()))
+                            Value::Place(Place::local(temp).field(name.as_str_or_empty().to_string()))
                         },
                     }
                 }

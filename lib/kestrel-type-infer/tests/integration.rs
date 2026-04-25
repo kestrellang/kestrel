@@ -481,3 +481,49 @@ func caller(b: Bool, n: Bool) { Box(value: b, other: n) }
         typed.type_args,
     );
 }
+
+/// Phase 2 verification: a `HirExpr::Field` whose name lowered to
+/// `HirName::Missing` (parser recovered from `foo.` with no member token)
+/// must short-circuit to `ResolvedTy::Error` without emitting any
+/// "name not found" cascade. The parser already reported the gap.
+#[test]
+fn missing_field_name_resolves_to_error_without_cascade() {
+    // `x.` with the cursor at EOF — parser recovers as Field { name: Missing }.
+    let source = "module TestMod\nfunc foo() { let x = 42; x. }";
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let typed = infer_func(&ctx, root, "TestMod", "foo");
+
+    // The Field expression must have an Error type — not "no member" or any
+    // other inference diagnostic.
+    let has_error_field = typed
+        .expr_types
+        .values()
+        .any(|t| matches!(t, ResolvedTy::Error));
+    assert!(
+        has_error_field,
+        "expected the missing-field expression to resolve to Error: {:#?}",
+        typed.expr_types
+    );
+
+    // Most importantly: no member-resolution diagnostic should fire for the
+    // missing name. The parser already published "expected identifier after
+    // `.`"; inference must stay silent so the user doesn't see a cascade.
+    let member_errors: Vec<_> = typed
+        .errors
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                kestrel_type_infer::error::InferError::NoMember { .. }
+                    | kestrel_type_infer::error::InferError::MemberNotVisible { .. }
+                    | kestrel_type_infer::error::InferError::AmbiguousMember { .. }
+            )
+        })
+        .collect();
+    assert!(
+        member_errors.is_empty(),
+        "expected no member-resolution diagnostics for HirName::Missing, got {:?}",
+        member_errors
+    );
+}

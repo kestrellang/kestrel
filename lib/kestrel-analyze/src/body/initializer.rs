@@ -352,9 +352,10 @@ fn analyze_expr(
         // Field access on self: check if reading before assigned
         HirExpr::Field { base, name, .. } => {
             if is_self_local(cx, *base) {
+                let name_str = name.as_str();
                 if !is_assign_target
-                    && vctx.all_fields.contains(name)
-                    && !state.assigned.contains(name)
+                    && name_str.is_some_and(|s| vctx.all_fields.contains(s))
+                    && name_str.is_some_and(|s| !state.assigned.contains(s))
                 {
                     vctx.diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[2].id,
@@ -381,7 +382,9 @@ fn analyze_expr(
             // (Def pointing at a field of the enclosing struct). Both initialize
             // the field.
             let assigned_field = match &cx.hir.exprs[*target] {
-                HirExpr::Field { base, name, .. } if is_self_local(cx, *base) => Some(name.clone()),
+                HirExpr::Field { base, name, .. } if is_self_local(cx, *base) => {
+                    name.as_str().map(|s| s.to_string())
+                },
                 HirExpr::Def(entity, _, _)
                     if cx.query.get::<NodeKind>(*entity) == Some(&NodeKind::Field)
                         && cx.query.parent_of(*entity) == cx.query.parent_of(cx.entity) =>

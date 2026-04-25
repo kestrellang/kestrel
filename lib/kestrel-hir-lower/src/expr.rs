@@ -12,6 +12,20 @@ use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 
+/// Bridge from the AST's string-typed name field to `HirName`. The AST
+/// builder stores `""` for member identifiers that the parser recovered
+/// as missing (the `Missing[Identifier ""]` wrapper produced by Phase 1
+/// of the parser-recovery work). Translating that to `HirName::Missing`
+/// here gives inference a single, explicit signal to short-circuit
+/// instead of cascading "name not found" diagnostics.
+fn name_from_ast(name: String) -> HirName {
+    if name.is_empty() {
+        HirName::Missing
+    } else {
+        HirName::Name(name)
+    }
+}
+
 impl LowerCtx<'_> {
     /// Lower an AST expression to an HIR expression.
     pub fn lower_expr(&mut self, body: &AstBody, id: ExprId) -> HirExprId {
@@ -61,7 +75,7 @@ impl LowerCtx<'_> {
                 let lowered_base = self.lower_expr(body, base);
                 self.alloc_expr(HirExpr::Field {
                     base: lowered_base,
-                    name: member,
+                    name: name_from_ast(member),
                     span,
                 })
             },
@@ -239,7 +253,7 @@ impl LowerCtx<'_> {
                 for seg in &segments[1..] {
                     current = self.alloc_expr(HirExpr::Field {
                         base: current,
-                        name: seg.name.clone(),
+                        name: name_from_ast(seg.name.clone()),
                         span: seg.span.clone(),
                     });
                 }
@@ -291,7 +305,7 @@ impl LowerCtx<'_> {
                 for seg in &segments[1..] {
                     current = self.alloc_expr(HirExpr::Field {
                         base: current,
-                        name: seg.name.clone(),
+                        name: name_from_ast(seg.name.clone()),
                         span: seg.span.clone(),
                     });
                 }
@@ -370,7 +384,7 @@ impl LowerCtx<'_> {
                 let base = self.alloc_expr(HirExpr::Def(assoc_type, vec![], span.clone()));
                 self.alloc_expr(HirExpr::Field {
                     base,
-                    name: member_name,
+                    name: name_from_ast(member_name),
                     span: span.clone(),
                 })
             },
@@ -977,7 +991,7 @@ impl LowerCtx<'_> {
         for seg in &segments[1..segments.len() - 1] {
             current = self.alloc_expr(HirExpr::Field {
                 base: current,
-                name: seg.name.clone(),
+                name: name_from_ast(seg.name.clone()),
                 span: seg.span.clone(),
             });
         }

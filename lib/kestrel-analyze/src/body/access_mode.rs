@@ -259,7 +259,7 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
             // Check if the field entity itself is immutable (let field)
             if let Some(&field_entity) = cx.typed.resolutions.get(&expr_id) {
                 if !cx.query.has::<Settable>(field_entity) {
-                    return MutClass::ImmutableField(name.clone());
+                    return MutClass::ImmutableField(name.as_str_or_empty().to_string());
                 }
             }
             // Field is settable — check the base

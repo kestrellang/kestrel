@@ -88,6 +88,52 @@ pub struct HirBlock {
     pub tail_expr: Option<HirExprId>,
 }
 
+/// A name read from a name-bearing HIR position (field accesses, method
+/// calls, implicit-member, struct-pat fields, …).
+///
+/// `Missing` means the parser recovered from an absent identifier (cursor
+/// mid-edit, `foo.` with no member yet). Inference must short-circuit to
+/// `ResolvedTy::Error` on `Missing` instead of emitting a "name not found"
+/// cascade — the parser already reported the gap.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum HirName {
+    Name(String),
+    Missing,
+}
+
+impl HirName {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            HirName::Name(s) => Some(s),
+            HirName::Missing => None,
+        }
+    }
+
+    /// `&str` view that collapses `Missing` to `""`. Use at boundaries where
+    /// a string is structurally required — e.g. building MIR call witness
+    /// keys — and you've already verified inference will short-circuit
+    /// `Missing` to `Error` upstream so the empty string is unreachable in
+    /// practice. Prefer `as_str()` whenever the consumer can branch on the
+    /// `Option`.
+    pub fn as_str_or_empty(&self) -> &str {
+        self.as_str().unwrap_or("")
+    }
+
+    pub fn is_missing(&self) -> bool {
+        matches!(self, HirName::Missing)
+    }
+}
+
+impl std::fmt::Display for HirName {
+    /// Renders `Missing` as `""`. Same caveats as `as_str_or_empty`: only
+    /// used in diagnostic / debug paths that won't fire for missing names
+    /// because inference's `HirName::Missing` short-circuit poisons the
+    /// expression to `ResolvedTy::Error` first.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str_or_empty())
+    }
+}
+
 // ===== Expressions (19 variants) =====
 
 /// Desugared expression. All operators, for-loops, while-loops, try/throw,
@@ -135,7 +181,7 @@ pub enum HirExpr {
     // === Access (member name resolved by type inference) ===
     Field {
         base: HirExprId,
-        name: String,
+        name: HirName,
         span: Span,
     },
     TupleIndex {
