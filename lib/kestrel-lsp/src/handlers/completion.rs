@@ -115,7 +115,13 @@ fn member_completion(
     // handles `foo.|\n    bar.x` where the parser greedily fuses the
     // newline-separated identifier into the path (so the HIR sees one
     // long Field chain whose spans don't cover the cursor).
+    // Try the HIR-Field path first; treat ResolvedTy::Error like a miss so
+    // we fall back to the CST-Dot locator. Error commonly arises when the
+    // parser greedily fused the trailing dot into a longer expression
+    // (e.g. `g().` followed by another statement → fused into a Call), and
+    // the CST locator can still recover the real receiver.
     let receiver_ty = receiver_type_at_dot(&hir, &typed, world, root, ctx, offset)
+        .filter(|ty| !matches!(ty, ResolvedTy::Error))
         .or_else(|| receiver_type_via_cst_dot(world, &hir, &typed, body_entity, offset))?;
 
     let mut out = Vec::new();
@@ -611,6 +617,93 @@ mod tests {
             "expected fields x, y in {:?}",
             labels
         );
+    }
+
+    /// Method-chain receiver: `a.b.c.|` must complete on `c`'s type.
+    #[test]
+    fn member_completion_on_chained_receiver() {
+        let src = "module T\nstruct C { var z: lang.i64 }\nstruct B { var c: C }\nstruct A { var b: B }\nfunc f(a: A) { a.b.c. }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/chain.ks", src.into());
+        c.build(f);
+        let cur = src.find("a.b.c.").unwrap() + "a.b.c.".len();
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `a.b.c.`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(labels.contains("z"), "expected field z on C; got {:?}", labels);
+    }
+
+    /// Call-receiver: `g().|` must complete on the return type of `g`.
+    #[test]
+    fn member_completion_on_call_receiver() {
+        let src = "module T\nstruct R { var x: lang.i64 }\nfunc g() -> R { R(x: 1) }\nfunc h() { g(). }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/call.ks", src.into());
+        c.build(f);
+        let cur = src.find("g().").unwrap() + "g().".len();
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `g().`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(labels.contains("x"), "expected field x on R; got {:?}", labels);
+    }
+
+    /// Parenthesised receiver: `(a.b).|` must complete on `b`'s type.
+    #[test]
+    fn member_completion_on_paren_receiver() {
+        let src = "module T\nstruct C { var z: lang.i64 }\nstruct B { var c: C }\nstruct A { var b: B }\nfunc f(a: A) { (a.b). }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/paren.ks", src.into());
+        c.build(f);
+        let cur = src.find("(a.b).").unwrap() + "(a.b).".len();
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `(a.b).`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(labels.contains("c"), "expected field c on B; got {:?}", labels);
+    }
+
+    /// Method-chain receiver followed by another statement: parser greedily
+    /// fuses the chain into the next line. CST-Dot fallback must locate the
+    /// trailing `.` and find the `a.b.c` receiver to its left.
+    #[test]
+    fn member_completion_on_chain_with_following_stmt() {
+        let src = "module T\nstruct C { var z: lang.i64 }\nstruct B { var c: C }\nstruct A { var b: B }\nfunc f(a: A) {\n    a.b.c.\n    a.b.c.z;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/chain_follow.ks", src.into());
+        c.build(f);
+        let cur = src.find("a.b.c.\n").unwrap() + "a.b.c.".len();
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `a.b.c.|` with following stmt");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(labels.contains("z"), "expected field z on C; got {:?}", labels);
+    }
+
+    /// Call receiver followed by another statement.
+    #[test]
+    fn member_completion_on_call_with_following_stmt() {
+        let src = "module T\nstruct R { var x: lang.i64 }\nfunc g() -> R { R(x: 1) }\nfunc h() {\n    g().\n    g().x;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/call_follow.ks", src.into());
+        c.build(f);
+        let cur = src.find("g().\n").unwrap() + "g().".len();
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `g().|` with following stmt");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(labels.contains("x"), "expected field x on R; got {:?}", labels);
     }
 
     /// Sanity: outside of a member-access position (cursor in a bare

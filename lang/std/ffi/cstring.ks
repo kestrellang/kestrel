@@ -170,7 +170,7 @@ extend String {
         if ptr.isNull == false {
             // Copy bytes from source to destination if there are bytes to copy
             if byteCount > 0 {
-                let srcPtr: lang.ptr[lang.i8] = self.bytes.asRaw();
+                let srcPtr: lang.ptr[lang.i8] = self.bytes().asRaw();
                 let _ = memcpy(rawPtr, srcPtr, byteCount.raw);
             }
 

@@ -472,7 +472,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// let words = ["apple", "apricot", "banana", "blueberry"];
-    /// let grouped = Dictionary(grouping: words, by: { (w) in w.chars.first().unwrap() });
+    /// let grouped = Dictionary(grouping: words, by: { (w) in w.chars().first().unwrap() });
     /// // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
     ///
     /// let nums = [1, 2, 3, 4, 5];

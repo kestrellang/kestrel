@@ -33,17 +33,17 @@ module Test
             if slice(unchecked: 3) != 40 { return 8 }
             if slice(unchecked: 4) != 50 { return 9 }
 
-            // Test subscript(safe:) - valid index
-            let safe1 = slice(safe: 2);
+            // Test subscript(checked:) - valid index
+            let safe1 = slice(checked: 2);
             if safe1.isNone() { return 10 }
             if safe1.unwrap() != 30 { return 11 }
 
-            // Test subscript(safe:) - out of bounds
-            let safeOob = slice(safe: 10);
+            // Test subscript(checked:) - out of bounds
+            let safeOob = slice(checked: 10);
             if safeOob.isSome() { return 12 }
 
-            // Test subscript(safe:) - negative index
-            let safeNeg = slice(safe: -1);
+            // Test subscript(checked:) - negative index
+            let safeNeg = slice(checked: -1);
             if safeNeg.isSome() { return 13 }
 
             // Test first()
@@ -60,8 +60,8 @@ module Test
             if emptySlice.first().isSome() { return 18 }
             if emptySlice.last().isSome() { return 19 }
 
-            // Test slice(from:to:) - valid sub-slice
-            let sub = slice.slice(from: 1, to: 4);
+            // Test subscript(checked: Range) - valid sub-slice
+            let sub = slice(checked: std.core.Range[std.num.Int64](1, 4));
             if sub.isNone() { return 20 }
             let subSlice = sub.unwrap();
             if subSlice.count != 3 { return 21 }
@@ -69,22 +69,22 @@ module Test
             if subSlice(unchecked: 1) != 30 { return 23 }
             if subSlice(unchecked: 2) != 40 { return 24 }
 
-            // Test slice(from:to:) - empty sub-slice
-            let emptySub = slice.slice(from: 2, to: 2);
+            // Test subscript(checked: Range) - empty sub-slice
+            let emptySub = slice(checked: std.core.Range[std.num.Int64](2, 2));
             if emptySub.isNone() { return 25 }
             if emptySub.unwrap().count != 0 { return 26 }
 
-            // Test slice(from:to:) - full range
-            let fullSub = slice.slice(from: 0, to: 5);
+            // Test subscript(checked: Range) - full range
+            let fullSub = slice(checked: std.core.Range[std.num.Int64](0, 5));
             if fullSub.isNone() { return 27 }
             if fullSub.unwrap().count != 5 { return 28 }
 
-            // Test slice(from:to:) - invalid range returns None
-            let invalidSub = slice.slice(from: 3, to: 1);
+            // Test subscript(checked: Range) - invalid range returns None
+            let invalidSub = slice(checked: std.core.Range[std.num.Int64](3, 1));
             if invalidSub.isSome() { return 29 }
 
-            // Test slice(from:to:) - out of bounds returns None
-            let oobSub = slice.slice(from: 0, to: 10);
+            // Test subscript(checked: Range) - out of bounds returns None
+            let oobSub = slice(checked: std.core.Range[std.num.Int64](0, 10));
             if oobSub.isSome() { return 30 }
 
             // Test iter()

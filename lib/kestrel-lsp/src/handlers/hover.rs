@@ -11,14 +11,16 @@
 //! decl span (no body to trim). Doc comments are read from the
 //! `Documentation` component attached during AST building.
 
-use kestrel_ast_builder::{CstNode, DeclSpan, Documentation, FileId, FilePath, NodeKind};
+use kestrel_ast_builder::{CstNode, DeclSpan, Documentation, FileId, FilePath, NodeKind, Valued};
 use kestrel_syntax_tree::utils::get_name_span;
-use kestrel_type_infer::result::ResolvedTy;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
+use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_type_infer::InferBody;
+use rowan::TextSize;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Range};
 
@@ -53,6 +55,17 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
             return Some((md, range));
         }
 
+        // Type-position hover: cursor on `Foo` in `func bar(x: Foo)`. There
+        // is no expression at the cursor, so the body-based fallbacks below
+        // would miss it; resolve via the file CST instead.
+        let file_cst = compiler.parse(file_entity).tree;
+        if let Some((entity, span)) = crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset) {
+            if let Some(md) = render_entity(world, &sources, entity) {
+                let range = line_index.range_for(span.start, span.end);
+                return Some((md, range));
+            }
+        }
+
         // Fall back to "inferred type of the expression at the cursor".
         let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
         let ctx = world.query_context();
@@ -64,6 +77,22 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
             entity: body_entity,
             root,
         })?;
+
+        // Pattern-position cursor (e.g. on `x` in `let x = 42`): no HIR
+        // expression covers the binding, so the smallest-expr lookup below
+        // would miss it and the whole hover would return None. Try the CST
+        // BindingPattern path first.
+        if let Some((local_id, ty, range)) = local_at_binding(world, body_entity, &hir, &typed, offset, &line_index) {
+            let local = &hir.locals[local_id];
+            let kw = if local.is_mut { "var" } else { "let" };
+            let rendered = format_ty(world, &ty);
+            let mut md = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
+            if let Some(link) = type_decl_link(world, &sources, &ty) {
+                md.push_str(&format!("\n\n[Go to type definition]({link})"));
+            }
+            return Some((md, range));
+        }
+
         let expr_id = semantic::hir_expr_at(&hir, offset)?;
         let ty = typed.expr_types.get(&expr_id)?;
         let rendered = format_ty(world, ty);
@@ -93,6 +122,64 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
         }),
         range: Some(range),
     })
+}
+
+/// Cursor on a `BindingPattern` in the body's CST → the local being bound.
+/// Returns the local id, its inferred type, and the LSP range of the
+/// binding's identifier so the editor highlights just the name. Pattern
+/// positions don't appear in `hir.exprs`, so the standard expr-type
+/// fallback misses them; this fills the gap.
+fn local_at_binding(
+    world: &World,
+    body_entity: Entity,
+    hir: &HirBody,
+    typed: &TypedBody,
+    offset: usize,
+    line_index: &crate::position::LineIndex,
+) -> Option<(LocalId, ResolvedTy, Range)> {
+    let cst = world.get::<Valued>(body_entity)?.0.clone();
+    let pos = TextSize::from(offset as u32);
+
+    let mut best: Option<SyntaxNode> = None;
+    for n in cst.descendants() {
+        if n.kind() != SyntaxKind::BindingPattern { continue }
+        let r = n.text_range();
+        if r.start() <= pos && pos <= r.end() {
+            let smaller = best
+                .as_ref()
+                .map(|b| n.text_range().len() < b.text_range().len())
+                .unwrap_or(true);
+            if smaller {
+                best = Some(n);
+            }
+        }
+    }
+    let bp = best?;
+    let ident = bp
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)?;
+    let ident_range = ident.text_range();
+    let ident_start: usize = ident_range.start().into();
+    let ident_end: usize = ident_range.end().into();
+    if !(ident_start <= offset && offset <= ident_end) {
+        return None;
+    }
+    let name = ident.text();
+
+    // Locals carry the enclosing let/var stmt span. The right local is the
+    // one whose name matches and whose span contains the binding token.
+    for (id, local) in hir.locals.iter() {
+        if local.name == name
+            && local.span.start <= ident_start
+            && ident_end <= local.span.end
+        {
+            let ty = typed.local_types.get(&id)?.clone();
+            let range = line_index.range_for(ident_start, ident_end);
+            return Some((id, ty, range));
+        }
+    }
+    None
 }
 
 /// Locate the entity at the cursor and render its signature + docs as
@@ -437,6 +524,68 @@ mod tests {
         };
         let link = type_decl_link(c.world(), &sources, &ty).expect("link");
         assert!(link.starts_with("file:///tmp/link.ks#L"), "{link}");
+    }
+
+    #[test]
+    fn pattern_hover_for_let_binding() {
+        // Cursor on `x` in `let x = p` should render the local + its type,
+        // not None. This exercises `local_at_binding` since `x` at the
+        // binding site has no covering HIR expression.
+        let src = "module T\nstruct P { var x: lang.i64 }\nfunc f(p: P) {\n    let z = p;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/pat_hover.ks", src.into());
+        c.build(f);
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+
+        let body_entity = crate::semantic::body_entity_at(
+            world,
+            f,
+            src.find("let z").unwrap() + "let z".len() - 1,
+        )
+        .expect("body");
+        let hir = ctx
+            .query(LowerBody { entity: body_entity, root })
+            .expect("hir");
+        let typed = ctx
+            .query(InferBody { entity: body_entity, root })
+            .expect("typed");
+        let li = crate::position::LineIndex::new(src.to_string());
+        let cursor = src.find("let z").unwrap() + "let ".len(); // on `z`
+        let result = local_at_binding(world, body_entity, &hir, &typed, cursor, &li);
+        let (_id, ty, _range) = result.expect("pattern hover hit");
+        let rendered = format_ty(world, &ty);
+        assert!(rendered.contains("P"), "rendered = {rendered:?}");
+    }
+
+    #[test]
+    fn pattern_hover_var_keyword() {
+        let src = "module T\nstruct P { var x: lang.i64 }\nfunc f(p: P) {\n    var z = p;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/pat_hover_var.ks", src.into());
+        c.build(f);
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+
+        let body_entity = crate::semantic::body_entity_at(
+            world,
+            f,
+            src.find("var z").unwrap() + "var z".len() - 1,
+        )
+        .expect("body");
+        let hir = ctx
+            .query(LowerBody { entity: body_entity, root })
+            .expect("hir");
+        let typed = ctx
+            .query(InferBody { entity: body_entity, root })
+            .expect("typed");
+        let li = crate::position::LineIndex::new(src.to_string());
+        let cursor = src.find("var z").unwrap() + "var ".len();
+        let (id, _ty, _range) = local_at_binding(world, body_entity, &hir, &typed, cursor, &li)
+            .expect("pattern hover hit");
+        assert!(hir.locals[id].is_mut, "var binding must be mutable");
     }
 
     #[test]

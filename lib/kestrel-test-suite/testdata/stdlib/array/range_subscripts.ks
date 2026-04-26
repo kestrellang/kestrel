@@ -46,24 +46,24 @@ module Test
             if unchecked(unchecked: 0) != 30 { return 16 }
             if unchecked(unchecked: 1) != 40 { return 17 }
 
-            // subscript(clampingRange:) - range fully within bounds
-            let clamped = arr(clampingRange: std.core.Range[std.num.Int64](1, 3));
+            // subscript(clamped:) - range fully within bounds
+            let clamped = arr(clamped: std.core.Range[std.num.Int64](1, 3));
             if clamped.count != 2 { return 18 }
             if clamped(unchecked: 0) != 20 { return 19 }
             if clamped(unchecked: 1) != 30 { return 20 }
 
-            // subscript(clampingRange:) - out of bounds range clamped
-            let clampedWide = arr(clampingRange: std.core.Range[std.num.Int64](-5, 100));
+            // subscript(clamped:) - out of bounds range clamped
+            let clampedWide = arr(clamped: std.core.Range[std.num.Int64](-5, 100));
             if clampedWide.count != 5 { return 21 }
             if clampedWide(unchecked: 0) != 10 { return 22 }
             if clampedWide(unchecked: 4) != 50 { return 23 }
 
-            // subscript(clampingRange:) - both indices past end
-            let clampedPast = arr(clampingRange: std.core.Range[std.num.Int64](10, 20));
+            // subscript(clamped:) - both indices past end
+            let clampedPast = arr(clamped: std.core.Range[std.num.Int64](10, 20));
             if clampedPast.count != 0 { return 24 }
 
-            // subscript(clampingRange:) - negative range clamped to start
-            let clampedNeg = arr(clampingRange: std.core.Range[std.num.Int64](-5, 1));
+            // subscript(clamped:) - negative range clamped to start
+            let clampedNeg = arr(clamped: std.core.Range[std.num.Int64](-5, 1));
             if clampedNeg.count != 1 { return 25 }
             if clampedNeg(unchecked: 0) != 10 { return 26 }
 

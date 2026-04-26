@@ -7,7 +7,7 @@ module Test
             let s: std.text.String = "abc";
 
             // ---- bytes.iter() ----
-            let byteArr = s.bytes.iter().collect();
+            let byteArr = s.bytes().iter().collect();
             if byteArr.count != 3 { return 1 }
             // 'a' = 97
             let byteA: std.num.UInt8 = 97;
@@ -21,7 +21,7 @@ module Test
 
             // Empty string yields empty iter
             let empty = std.text.String();
-            let emptyBytes = empty.bytes.iter().collect();
+            let emptyBytes = empty.bytes().iter().collect();
             if emptyBytes.count != 0 { return 5 }
 
             0

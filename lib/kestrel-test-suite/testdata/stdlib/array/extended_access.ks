@@ -20,43 +20,43 @@ module Test
             // Also exercise unchecked subscript for equivalence
             arr(unchecked: 1) = 25;
 
-            // Test subscript(wrapping:) with negative index
-            let wrapLast = arr(wrapping: -1);
+            // Test subscript(wrapped:) with negative index
+            let wrapLast = arr(wrapped: -1);
             if wrapLast.isNone() { return 5 }
             if wrapLast.unwrap() != 30 { return 6 }
 
-            // Test subscript(wrapping:) with -2
-            let wrapSecond = arr(wrapping: -2);
+            // Test subscript(wrapped:) with -2
+            let wrapSecond = arr(wrapped: -2);
             if wrapSecond.isNone() { return 7 }
             if wrapSecond.unwrap() != 25 { return 8 }
 
-            // Test subscript(wrapping:) with overflow
-            let wrapOver = arr(wrapping: 3);
+            // Test subscript(wrapped:) with overflow
+            let wrapOver = arr(wrapped: 3);
             if wrapOver.isNone() { return 9 }
             if wrapOver.unwrap() != 10 { return 10 }
 
-            // Test subscript(wrapping:) on empty array
+            // Test subscript(wrapped:) on empty array
             let emptyArr = std.collections.Array[std.num.Int64]();
-            let wrapEmpty = emptyArr(wrapping: 0);
+            let wrapEmpty = emptyArr(wrapped: 0);
             if wrapEmpty.isSome() { return 11 }
 
-            // Test subscript(clamping:) with negative index
-            let clampNeg = arr(clamping: -5);
+            // Test subscript(clamped:) with negative index
+            let clampNeg = arr(clamped: -5);
             if clampNeg.isNone() { return 12 }
             if clampNeg.unwrap() != 10 { return 13 }
 
-            // Test subscript(clamping:) with over index
-            let clampOver = arr(clamping: 100);
+            // Test subscript(clamped:) with over index
+            let clampOver = arr(clamped: 100);
             if clampOver.isNone() { return 14 }
             if clampOver.unwrap() != 30 { return 15 }
 
-            // Test subscript(clamping:) with normal index
-            let clampNormal = arr(clamping: 1);
+            // Test subscript(clamped:) with normal index
+            let clampNormal = arr(clamped: 1);
             if clampNormal.isNone() { return 16 }
             if clampNormal.unwrap() != 25 { return 17 }
 
-            // Test subscript(clamping:) on empty array
-            let clampEmpty = emptyArr(clamping: 0);
+            // Test subscript(clamped:) on empty array
+            let clampEmpty = emptyArr(clamped: 0);
             if clampEmpty.isSome() { return 18 }
 
             // Test isValidIndex

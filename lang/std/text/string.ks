@@ -8,7 +8,7 @@ import std.num.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, Slice)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView)
+import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView, BytesIndex, BytesClampable, CharsIndex, CharsClampable)
 import std.text.unicode as unicode
 import std.ffi.(memcpy)
 
@@ -592,7 +592,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// String.fromUtf8(bytes: "héllo".bytes.asSlice());  // Some("héllo")
+    /// String.fromUtf8(bytes: "héllo".bytes().asSlice());  // Some("héllo")
     /// String.fromUtf8(bytes: badSlice);                 // None
     /// ```
     public static func fromUtf8(bytes: Slice[UInt8]) -> String? {
@@ -645,14 +645,69 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     // VIEW PROPERTIES
     // ========================================================================
 
-    /// A view over the raw UTF-8 bytes — O(1) byte indexing, byte-level iteration.
-    public var bytes: BytesView {
+    /// @name Bytes View
+    /// `s.bytes()` — view over the raw UTF-8 bytes. O(1) byte indexing,
+    /// byte-level iteration. Implemented as a method (rather than a
+    /// property) so the same name can take an index for `s.bytes(i)` /
+    /// `s.bytes(checked: i)` / `s.bytes(0..<n)` style indexing.
+    public func bytes() -> BytesView {
         BytesView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
-    /// A view over the Unicode code points — O(n) indexing, scalar-level iteration.
-    public var chars: CharsView {
+    /// @name Indexed Byte / Substring
+    /// `s.bytes(i)` returns a single byte; `s.bytes(0..<5)` returns a substring.
+    public func bytes[I](index: I) -> I.BytesYield where I: BytesIndex {
+        let view: BytesView = self.bytes();
+        view(index)
+    }
+
+    /// @name Checked Byte / Substring
+    /// `s.bytes(checked: i)` — `None` if out of bounds.
+    public func bytes[I](checked index: I) -> I.BytesYield? where I: BytesIndex {
+        let view: BytesView = self.bytes();
+        view(checked: index)
+    }
+
+    /// @name Unchecked Byte / Substring
+    /// `s.bytes(unchecked: i)` — UB on out-of-bounds.
+    public func bytes[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
+        let view: BytesView = self.bytes();
+        view(unchecked: index)
+    }
+
+    /// @name Clamped Byte / Substring
+    /// `s.bytes(clamped: i)` — saturates to valid bounds, never panics.
+    public func bytes[I](clamped index: I) -> I.BytesClampedYield where I: BytesClampable {
+        let view: BytesView = self.bytes();
+        view(clamped: index)
+    }
+
+    /// @name Chars View
+    /// `s.chars()` — view over the Unicode code points. O(n) indexing,
+    /// scalar-level iteration. Method form (see `bytes()` above) so the
+    /// same name supports `s.chars(i)` / `s.chars(checked: i)`.
+    public func chars() -> CharsView {
         CharsView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
+    }
+
+    /// @name Indexed Char / Substring
+    public func chars[I](index: I) -> I.CharsYield where I: CharsIndex {
+        let view: CharsView = self.chars();
+        view(index)
+    }
+
+    /// @name Checked Char / Substring
+    /// `s.chars(checked: i)` — `None` if out of bounds.
+    public func chars[I](checked index: I) -> I.CharsYield? where I: CharsIndex {
+        let view: CharsView = self.chars();
+        view(checked: index)
+    }
+
+    /// @name Clamped Char / Substring
+    /// `s.chars(clamped: i)` — saturates to valid bounds, never panics.
+    public func chars[I](clamped index: I) -> I.CharsClampedYield where I: CharsClampable {
+        let view: CharsView = self.chars();
+        view(clamped: index)
     }
 
     /// A view over the user-perceived characters (UAX #29 grapheme clusters).
@@ -843,10 +898,10 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// "abc".char(wrapping: -1);  // 'c'
-    /// "abc".char(wrapping: 5);   // 'c'  (5 % 3 == 2)
+    /// "abc".char(wrapped: -1);  // 'c'
+    /// "abc".char(wrapped: 5);   // 'c'  (5 % 3 == 2)
     /// ```
-    public func char(wrapping index: Int64) -> Char {
+    public func char(wrapped index: Int64) -> Char {
         let charCount = self.count;
         if charCount == Int64(intLiteral: 0) {
             lang.panic("String is empty")
@@ -869,10 +924,10 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// "abc".char(clamping: -1);  // 'a'
-    /// "abc".char(clamping: 99);  // 'c'
+    /// "abc".char(clamped: -1);  // 'a'
+    /// "abc".char(clamped: 99);  // 'c'
     /// ```
-    public func char(clamping index: Int64) -> Char {
+    public func char(clamped index: Int64) -> Char {
         let charCount = self.count;
         if charCount == Int64(intLiteral: 0) {
             lang.panic("String is empty")
@@ -1058,8 +1113,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     ///
     /// Out-of-range, inverted, or empty ranges return the empty
     /// string rather than panicking. The caller is responsible for
-    /// ensuring the bounds fall on UTF-8 boundaries — see
-    /// `BytesView.substring(checked:to:)` for a validated variant.
+    /// ensuring the bounds fall on UTF-8 boundaries — use
+    /// `s.bytes(checked: range)` for a validated alternative.
     ///
     /// # Examples
     ///
@@ -1642,7 +1697,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
         // Full Unicode path
         var result = String();
-        for c in self.chars.iter() {
+        for c in self.chars().iter() {
             if unicode.hasLowercaseExpansion(c) {
                 result.append(unicode.lowercaseExpansion(c))
             } else {
@@ -1688,7 +1743,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
         // Full Unicode path
         var result = String();
-        for c in self.chars.iter() {
+        for c in self.chars().iter() {
             if unicode.hasUppercaseExpansion(c) {
                 result.append(unicode.uppercaseExpansion(c))
             } else {
@@ -1716,7 +1771,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var result = String();
         var atWordStart = true;
 
-        for c in self.chars.iter() {
+        for c in self.chars().iter() {
             if c.isWhitespace() {
                 result.appendChar(c);
                 atWordStart = true
@@ -1753,8 +1808,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// ```
     public func equalsCaseInsensitive(other: String) -> Bool {
         // Compare case-folded versions
-        var selfIter = self.chars.iter();
-        var otherIter = other.chars.iter();
+        var selfIter = self.chars().iter();
+        var otherIter = other.chars().iter();
 
         while true {
             let selfChar = selfIter.next();

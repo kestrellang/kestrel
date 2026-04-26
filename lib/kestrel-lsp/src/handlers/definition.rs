@@ -43,13 +43,24 @@ pub async fn handle(
 
     let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<(Url, Range)> {
         let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let body_entity = semantic::body_entity_at(compiler.world(), file_entity, offset)?;
-
         let world = compiler.world();
+        let root = compiler.root();
+
+        // Type-position cursor (`func bar(x: Foo)`): resolve via CST before
+        // falling into the body-based path. The body lookup wouldn't find
+        // anything for type positions because they don't appear in HIR exprs.
+        let file_cst = compiler.parse(file_entity).tree;
+        if let Some((entity, _span)) = crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset) {
+            if let Some(loc) = target_to_location(world, &sources, Target::Entity(entity)) {
+                return Some(loc);
+            }
+        }
+
+        let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
         let ctx = world.query_context();
         let hir: HirBody =
-            ctx.query(LowerBody { entity: body_entity, root: compiler.root() })?;
-        let typed = ctx.query(InferBody { entity: body_entity, root: compiler.root() })?;
+            ctx.query(LowerBody { entity: body_entity, root })?;
+        let typed = ctx.query(InferBody { entity: body_entity, root })?;
 
         let expr_id = semantic::hir_expr_at(&hir, offset)?;
         let target = resolve_target(&hir, &typed, expr_id)?;

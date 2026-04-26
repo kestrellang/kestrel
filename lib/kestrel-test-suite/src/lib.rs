@@ -10,7 +10,7 @@
 
 #[used]
 #[unsafe(no_mangle)]
-pub static BUILD_NONCE: u32 = 4;
+pub static BUILD_NONCE: u32 = 14;
 
 pub mod annotation;
 pub mod compiler;

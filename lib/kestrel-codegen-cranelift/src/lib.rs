@@ -2,7 +2,9 @@
 //!
 //! Compiles `MirModule` → native object code via Cranelift.
 //!
-//! Pipeline: `MirModule` → monomorphize (BFS) → CodegenContext → compile all → object bytes → link
+//! Pipeline: `MirModule` → monomorphize (BFS) → CodegenContext → compile all → object bytes → link.
+
+const _CACHE_BUST: u8 = 2;
 
 pub mod block;
 pub mod common;

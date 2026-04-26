@@ -42,8 +42,8 @@ pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<L
         let world = compiler.world();
         let root = compiler.root();
 
-        let target = target_at(world, file_entity, offset, root)?;
-        let sites = collect_sites(world, root, &target, include_declaration);
+        let target = target_at(world, file_entity, offset, root, compiler)?;
+        let sites = collect_sites(world, root, &target, include_declaration, compiler);
 
         let mut by_file: HashMap<Entity, LineIndex> = HashMap::new();
         let mut out: Vec<Location> = Vec::new();
@@ -67,7 +67,19 @@ enum Target {
     Local { body: Entity, id: LocalId },
 }
 
-fn target_at(world: &World, file_entity: Entity, offset: usize, root: Entity) -> Option<Target> {
+fn target_at(
+    world: &World,
+    file_entity: Entity,
+    offset: usize,
+    root: Entity,
+    compiler: &kestrel_compiler::Compiler,
+) -> Option<Target> {
+    // Type-position cursor (`func bar(x: Foo)`): resolve via the file CST.
+    let file_cst = compiler.parse(file_entity).tree;
+    if let Some((entity, _)) = crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset) {
+        return Some(Target::Entity(entity));
+    }
+
     // First try: cursor is inside a function body. Resolve the HIR expression.
     if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
         let ctx = world.query_context();
@@ -119,11 +131,25 @@ fn collect_sites(
     root: Entity,
     target: &Target,
     include_declaration: bool,
+    compiler: &kestrel_compiler::Compiler,
 ) -> Vec<ReferenceSite> {
     let mut sites = match target {
         Target::Entity(e) => references::references_to(world, root, *e),
         Target::Local { body, id } => references::local_references(world, *body, root, *id),
     };
+
+    // Type-position references — `Foo` in parameter / return / field types.
+    // Not covered by `references_to` (those resolutions live transiently in
+    // `ResolveTypePath` and aren't kept on the AST). Walk the workspace CSTs.
+    if let Target::Entity(e) = target {
+        for (file, span) in crate::types::type_references_workspace(world, root, compiler, *e) {
+            sites.push(ReferenceSite {
+                file,
+                span,
+                kind: RefKind::Direct,
+            });
+        }
+    }
 
     if include_declaration {
         if let Target::Entity(e) = target {
@@ -269,6 +295,35 @@ mod tests {
         let clipped = clip_to_identifier("foo", &span, RefKind::Direct);
         assert_eq!(clipped.start, 0);
         assert_eq!(clipped.end, 3);
+    }
+
+    #[test]
+    fn type_position_references_collected() {
+        // `Point` appears once as a struct decl, once as a parameter type,
+        // and once as a return type. `references_to` only sees the body
+        // expr-side `Point(...)` constructor call (none here), so type-side
+        // walks must surface the `(p: Point) -> Point` references.
+        let mut c = Compiler::new();
+        let src = "module T\nstruct Point { var x: lang.i64 }\nfunc id(p: Point) -> Point { p }\n";
+        let f = c.set_source("/tmp/refs_type.ks", src.into());
+        c.build(f);
+        use kestrel_ast_builder::{FileId as F, Name};
+        let target = c
+            .world()
+            .iter_component::<Name>()
+            .find(|(e, n)| n.0 == "Point" && c.world().get::<F>(*e).map(|f2| f2.0) == Some(f))
+            .map(|(e, _)| e)
+            .expect("Point");
+        let sites = collect_sites(
+            c.world(),
+            c.root(),
+            &Target::Entity(target),
+            false,
+            &c,
+        );
+        let texts: Vec<&str> = sites.iter().map(|s| &src[s.span.start..s.span.end]).collect();
+        let count = texts.iter().filter(|t| **t == "Point").count();
+        assert_eq!(count, 2, "expected 2 type-position Point refs; got {texts:?}");
     }
 
     #[test]

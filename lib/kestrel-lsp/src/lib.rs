@@ -16,6 +16,7 @@ pub mod semantic;
 pub mod server;
 pub mod syntax;
 pub mod ty_format;
+pub mod types;
 
 use std::sync::Arc;
 
@@ -192,6 +193,7 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: Default::default(),
                 }),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
                         legend: SemanticTokensLegend {
@@ -271,6 +273,10 @@ impl LanguageServer for Backend {
         params: SignatureHelpParams,
     ) -> Result<Option<SignatureHelp>> {
         Ok(handlers::signature_help::handle(self.state.clone(), params).await)
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        Ok(handlers::inlay_hints::handle(self.state.clone(), params).await)
     }
 
     async fn initialized(&self, _: InitializedParams) {
