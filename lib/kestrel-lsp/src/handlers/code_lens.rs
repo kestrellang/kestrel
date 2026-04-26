@@ -13,31 +13,27 @@ use tower_lsp::lsp_types::{CodeLens, CodeLensParams, Command};
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{rebuild_compiler, url_to_path, SharedState};
+use crate::server::{url_to_path, SharedState};
 
 pub async fn handle(state: SharedState, params: CodeLensParams) -> Option<Vec<CodeLens>> {
     let uri = params.text_document.uri.clone();
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, line_index) = {
         let s = state.lock().await;
         let li = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), li)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, li)
     };
 
-    let lenses = tokio::task::spawn_blocking(move || -> Vec<CodeLens> {
-        let (compiler, _) = match Some(rebuild_compiler(&sources)) {
-            Some(c) => c,
-            None => return Vec::new(),
-        };
+    let lenses = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<CodeLens> {
         let world = compiler.world();
-        let Some(file_entity) = semantic::file_entity_for_path(&compiler, &path) else {
+        let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
             return Vec::new();
         };
         collect_main_lenses(world, file_entity, &uri, &line_index)
     })
-    .await
-    .ok()?;
+    .await?;
 
     if lenses.is_empty() {
         None

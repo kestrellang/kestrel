@@ -1,0 +1,205 @@
+{
+  "path": "std.io.write",
+  "name": "write",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "Buffer",
+      "anchor": "struct-Buffer",
+      "signature": "public struct Buffer: Write, Cloneable",
+      "doc": "A writer that accumulates bytes in a growable in-memory buffer.\n\nUseful for building byte sequences, capturing output, or testing.\nAccess the accumulated data via `asSlice()` or `toArray()`.\n\nExample:\n    var buf = Buffer()\n    try writeStr(writer: buf, s: \"Hello, \")\n    try writeStr(writer: buf, s: \"World!\")\n    let result = buf.toString()  // \"Hello, World!\"",
+      "source_path": "lang/std/io/write.ks",
+      "members": [
+        {
+          "kind": "function",
+          "name": "asSlice",
+          "anchor": "function-asSlice",
+          "signature": "public func asSlice() -> Slice[UInt8]",
+          "doc": "Returns a slice view of the buffer contents.\n\nExample:\n    var buf = Buffer()\n    try buf.write(from: [1, 2, 3].asSlice())\n    let slice = buf.asSlice()  // view of [1, 2, 3]",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clear",
+          "anchor": "function-clear",
+          "signature": "public mutating func clear()",
+          "doc": "Clears all bytes from the buffer.\n\nCapacity is retained for reuse.\n\nExample:\n    var buf = Buffer()\n    try buf.write(from: data.asSlice())\n    buf.clear()\n    buf.count()  // 0",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clone",
+          "anchor": "function-clone",
+          "signature": "public func clone() -> Buffer",
+          "doc": "",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "count",
+          "anchor": "function-count",
+          "signature": "public func count() -> Int64",
+          "doc": "Returns the number of bytes in the buffer.\n\nExample:\n    var buf = Buffer()\n    try buf.write(from: [1, 2, 3].asSlice())\n    buf.count()  // 3",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "field",
+          "name": "data",
+          "anchor": "field-data",
+          "signature": "var data: Array[UInt8",
+          "doc": "",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flush",
+          "anchor": "function-flush",
+          "signature": "public mutating func flush() -> Result[(), Error]",
+          "doc": "No-op flush, always succeeds.\n\nBuffer keeps data in memory, so flush has no effect.\n\nExample:\n    var buf = Buffer()\n    try buf.flush()  // Ok(())",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init()",
+          "doc": "",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(capacity: Int64)",
+          "doc": "Creates a buffer writer with the specified initial capacity.\n\nPre-allocating capacity avoids reallocations when the approximate\nfinal size is known.\n\nExample:\n    var buf = Buffer(capacity: 4096)",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isEmpty",
+          "anchor": "function-isEmpty",
+          "signature": "public func isEmpty() -> Bool",
+          "doc": "Returns true if the buffer is empty.\n\nExample:\n    var buf = Buffer()\n    buf.isEmpty()  // true\n    try buf.write(from: [1].asSlice())\n    buf.isEmpty()  // false",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "toArray",
+          "anchor": "function-toArray",
+          "signature": "public func toArray() -> Array[UInt8]",
+          "doc": "Returns the buffer contents as an owned array.\n\nExample:\n    var buf = Buffer()\n    try buf.write(from: [1, 2, 3].asSlice())\n    let arr = buf.toArray()  // [1, 2, 3]",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "toString",
+          "anchor": "function-toString",
+          "signature": "public func toString() -> String",
+          "doc": "Interprets the buffer contents as a UTF-8 string.\n\nAssumes the buffer contains valid UTF-8. Behavior is undefined\nif the buffer contains invalid UTF-8 sequences.\n\nExample:\n    var buf = Buffer()\n    try writeStr(writer: buf, s: \"Hello\")\n    buf.toString()  // \"Hello\"",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "write",
+          "anchor": "function-write",
+          "signature": "public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]",
+          "doc": "Appends bytes to the internal buffer.\n\nAlways succeeds and writes all bytes. Returns Ok(buf.count).\n\nExample:\n    var buf = Buffer()\n    let data: [UInt8] = [1, 2, 3]\n    try buf.write(from: data.asSlice())\n    buf.count()  // 3",
+          "source_path": "lang/std/io/write.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Sink",
+      "anchor": "struct-Sink",
+      "signature": "public struct Sink: Write",
+      "doc": "A writer that discards all bytes written to it.\n\nUseful for testing, benchmarking, or suppressing output.\nAnalogous to /dev/null.\n\nExample:\n    var sink = Sink()\n    try sink.write(from: hugeData.asSlice())  // instantly \"succeeds\"\n    // data is discarded, nothing stored",
+      "source_path": "lang/std/io/write.ks",
+      "members": [
+        {
+          "kind": "function",
+          "name": "flush",
+          "anchor": "function-flush",
+          "signature": "public mutating func flush() -> Result[(), Error]",
+          "doc": "No-op flush, always succeeds.\n\nExample:\n    var sink = Sink()\n    try sink.flush()  // Ok(())",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init()",
+          "doc": "Creates a sink writer that discards all data.\n\nExample:\n    let devNull = Sink()",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "write",
+          "anchor": "function-write",
+          "signature": "public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]",
+          "doc": "Discards all bytes and returns Ok with the buffer length.\n\nAlways succeeds, always reports all bytes as \"written\".\n\nExample:\n    var sink = Sink()\n    let n = try sink.write(from: data.asSlice())  // n == data.count",
+          "source_path": "lang/std/io/write.ks"
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "Write",
+      "anchor": "protocol-Write",
+      "signature": "public protocol Write",
+      "doc": "Protocol for types that can be written to as a sink for bytes.\n\nImplementors provide `write` and `flush` methods. Writers may buffer\ndata internally; call `flush` to ensure all data reaches its destination.\n\nExample implementation:\n    struct MyWriter: Write {\n        var buffer: [UInt8] = []\n\n        mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {\n            buffer.append(contentsOf: buf)\n            return .Ok(buf.count)\n        }\n\n        mutating func flush() -> Result[(), Error] {\n            // send buffer to destination\n            buffer.clear()\n            return .Ok(())\n        }\n    }",
+      "source_path": "lang/std/io/write.ks",
+      "members": [
+        {
+          "kind": "function",
+          "name": "flush",
+          "anchor": "function-flush",
+          "signature": "mutating func flush() -> Result[(), Error",
+          "doc": "",
+          "source_path": "lang/std/io/write.ks"
+        },
+        {
+          "kind": "function",
+          "name": "write",
+          "anchor": "function-write",
+          "signature": "mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error",
+          "doc": "Writes bytes from the buffer, returning the number of bytes written.\n\nBehavior:\n- Returns Ok(n) where n > 0: successfully wrote n bytes from buf[0..n]\n- Returns Ok(0): no bytes written (may indicate full buffer or would block)\n- Returns Err: an error occurred\n\nA write may write fewer bytes than provided. This is not an error -\nuse writeAll() to ensure all bytes are written, or retry with the\nremaining bytes.\n\nExample:\n    let data: [UInt8] = [1, 2, 3, 4, 5]\n    let n = try writer.write(from: data.asSlice())\n    // n bytes written, may be less than 5",
+          "source_path": "lang/std/io/write.ks"
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "writeAll",
+      "anchor": "function-writeAll",
+      "signature": "public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write",
+      "doc": "Writes all bytes from a slice to a writer.\n\nRetries partial writes until all bytes are written or an error occurs.\nUse this when you need to ensure the entire slice is written.\n\nExample:\n    var file = try File.create(path: \"output.bin\")\n    try writeAll(writer: file, from: data.asSlice())\n    // all bytes guaranteed written (or error)",
+      "source_path": "lang/std/io/write.ks"
+    },
+    {
+      "kind": "function",
+      "name": "writeByte",
+      "anchor": "function-writeByte",
+      "signature": "public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), Error] where W: Write",
+      "doc": "Writes a single byte to a writer.\n\nExample:\n    var file = try File.create(path: \"output.bin\")\n    try writeByte(writer: file, byte: 0xFF)",
+      "source_path": "lang/std/io/write.ks"
+    },
+    {
+      "kind": "function",
+      "name": "writeLine",
+      "anchor": "function-writeLine",
+      "signature": "public func writeLine[W](mutating writer: W, s: String) -> Result[(), Error] where W: Write",
+      "doc": "Writes a string followed by a newline to a writer.\n\nAppends a single '\\n' character after the string.\n\nExample:\n    var file = try File.create(path: \"lines.txt\")\n    try writeLine(writer: file, s: \"First line\")\n    try writeLine(writer: file, s: \"Second line\")",
+      "source_path": "lang/std/io/write.ks"
+    },
+    {
+      "kind": "function",
+      "name": "writeStr",
+      "anchor": "function-writeStr",
+      "signature": "public func writeStr[W](mutating writer: W, s: String) -> Result[(), Error] where W: Write",
+      "doc": "Writes a string as UTF-8 bytes to a writer.\n\nExample:\n    var file = try File.create(path: \"greeting.txt\")\n    try writeStr(writer: file, s: \"Hello, World!\")",
+      "source_path": "lang/std/io/write.ks"
+    }
+  ]
+}

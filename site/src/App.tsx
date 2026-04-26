@@ -3,6 +3,8 @@ import HomePage from "./pages/HomePage";
 import FlockPage from "./pages/FlockPage";
 import OrgPage from "./pages/OrgPage";
 import PackagePage from "./pages/PackagePage";
+import StdlibIndex from "./pages/StdlibIndex";
+import StdlibModule from "./pages/StdlibModule";
 
 function App() {
   return (
@@ -11,6 +13,8 @@ function App() {
       <Route path="/flock" element={<FlockPage />} />
       <Route path="/flock/:org" element={<OrgPage />} />
       <Route path="/flock/:org/:pkg" element={<PackagePage />} />
+      <Route path="/reference/stdlib" element={<StdlibIndex />} />
+      <Route path="/reference/stdlib/:modulePath" element={<StdlibModule />} />
     </Routes>
   );
 }

@@ -90,8 +90,95 @@ jobs:
             kestrel-${{ matrix.target }}.tar.gz
             jessup-${{ matrix.target }}.tar.gz
 
+  # Per-platform VS Code extension. Each runner builds its own kestrel-lsp
+  # natively, drops it into the extension's `server/<vsce_target>/` slot,
+  # and runs `vsce package --target <vsce_target>` to produce a
+  # marketplace-ready .vsix. Platform-specific extensions are how VS Code
+  # expects native binaries to ship — clients download only the .vsix
+  # matching their host.
+  vsix:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            vsce_target: darwin-arm64
+            exe: kestrel-lsp
+          - os: macos-13
+            vsce_target: darwin-x64
+            exe: kestrel-lsp
+          - os: ubuntu-latest
+            vsce_target: linux-x64
+            exe: kestrel-lsp
+          - os: windows-latest
+            vsce_target: win32-x64
+            exe: kestrel-lsp.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.vsce_target }}-cargo-lsp-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
+
+      - name: Install OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build kestrel-lsp
+        run: cargo build --release -p kestrel-lsp
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Compile extension
+        working-directory: editors/vscode
+        run: npm run compile
+
+      - name: Stage LSP binary
+        shell: bash
+        env:
+          VSCE_TARGET: ${{ matrix.vsce_target }}
+          EXE_NAME: ${{ matrix.exe }}
+        run: |
+          dst="editors/vscode/server/${VSCE_TARGET}"
+          mkdir -p "$dst"
+          cp "target/release/${EXE_NAME}" "$dst/${EXE_NAME}"
+          chmod +x "$dst/${EXE_NAME}" || true
+
+      - name: Package .vsix
+        working-directory: editors/vscode
+        env:
+          VSCE_TARGET: ${{ matrix.vsce_target }}
+        run: npx --yes @vscode/vsce@latest package --target "$VSCE_TARGET" --out "kestrel-$VSCE_TARGET.vsix"
+
+      - name: Upload .vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vsce_target }}
+          path: editors/vscode/kestrel-${{ matrix.vsce_target }}.vsix
+
   release:
-    needs: build
+    needs: [build, vsix]
     runs-on: ubuntu-latest
 
     steps:
@@ -116,4 +203,5 @@ jobs:
             --generate-notes \
             --latest \
             artifacts/kestrel-*.tar.gz \
-            artifacts/jessup-*.tar.gz
+            artifacts/jessup-*.tar.gz \
+            artifacts/kestrel-*.vsix

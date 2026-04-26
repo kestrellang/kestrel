@@ -1,0 +1,19 @@
+{
+  "path": "std.os",
+  "name": "os",
+  "submodules": [
+    "std.os.env",
+    "std.os.fs",
+    "std.os.proc"
+  ],
+  "items": [
+    {
+      "kind": "function",
+      "name": "platform",
+      "anchor": "function-platform",
+      "signature": "public func platform() -> String",
+      "doc": "Returns the current platform identifier.",
+      "source_path": "lang/std/os/platform.ks"
+    }
+  ]
+}

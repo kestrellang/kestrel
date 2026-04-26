@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::{Location, Range, ReferenceParams, Url};
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite};
 use crate::semantic;
-use crate::server::{path_to_url, rebuild_compiler, url_to_path, SharedState};
+use crate::server::{path_to_url, url_to_path, SharedState};
 
 pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<Location>> {
     let uri = params.text_document_position.text_document.uri;
@@ -29,16 +29,16 @@ pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<L
     let path = url_to_path(&uri);
     let include_declaration = params.context.include_declaration;
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, sources, line_index) = {
         let s = state.lock().await;
         let li = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), li)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
     };
     let offset = line_index.position_to_offset(pos);
 
-    tokio::task::spawn_blocking(move || -> Option<Vec<Location>> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let file_entity = semantic::file_entity_for_path(&compiler, &path)?;
+    handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<Vec<Location>> {
+        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
         let world = compiler.world();
         let root = compiler.root();
 
@@ -56,7 +56,6 @@ pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<L
         Some(out)
     })
     .await
-    .ok()
     .flatten()
 }
 

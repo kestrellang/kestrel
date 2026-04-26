@@ -1,0 +1,1737 @@
+{
+  "path": "std.collections",
+  "name": "collections",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "Array",
+      "anchor": "struct-Array",
+      "signature": "public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable",
+      "doc": "A dynamic growable array with copy-on-write semantics.\n\nArrays automatically grow when elements are added and use COW\nto efficiently share data between copies until mutation occurs.",
+      "source_path": "lang/std/collections/array.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Element",
+          "anchor": "typealias-Element",
+          "signature": "type Element = T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Iter",
+          "anchor": "typealias-Iter",
+          "signature": "type Iter = ArrayIterator[T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "all",
+          "anchor": "function-all",
+          "signature": "public func all(satisfy predicate: (T) -> Bool) -> Bool",
+          "doc": "Returns true if all elements satisfy the predicate.\n\nReturns true for an empty array (vacuous truth).\nShort-circuits on first non-matching element.\n\nExample:\n    [2, 4, 6].all(satisfy: { (x) in x % 2 == 0 })  // true\n    [2, 3, 6].all(satisfy: { (x) in x % 2 == 0 })  // false\n    [].all(satisfy: { (x) in false })              // true (empty)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "any",
+          "anchor": "function-any",
+          "signature": "public func any(satisfy predicate: (T) -> Bool) -> Bool",
+          "doc": "Returns true if any element satisfies the predicate.\n\nReturns false for an empty array.\nShort-circuits on first matching element.\n\nExample:\n    [1, 2, 3].any(satisfy: { (x) in x > 2 })  // true\n    [1, 2, 3].any(satisfy: { (x) in x > 5 })  // false\n    [].any(satisfy: { (x) in true })          // false (empty)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "append",
+          "anchor": "function-append",
+          "signature": "public mutating func append(element: T)",
+          "doc": "Adds an element to the end of the array.\n\nAmortized O(1). May trigger reallocation if capacity is exceeded.\n\nExample:\n    var arr = [1, 2]\n    arr.append( 3)  // [1, 2, 3]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "append",
+          "anchor": "function-append",
+          "signature": "public mutating func append(contentsOf other: Array[T])",
+          "doc": "Appends all elements from another array.\n\nExample:\n    var arr = [1, 2]\n    arr.append(contentsOf: [3, 4])  // [1, 2, 3, 4]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "appendFrom",
+          "anchor": "function-appendFrom",
+          "signature": "public mutating func appendFrom[I](iterable: I) where I: Iterable, I.Item = T",
+          "doc": "Appends all elements from an iterable source.\n\nExample:\n    var arr = [1, 2]\n    arr.appendFrom(3..<6)  // [1, 2, 3, 4, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "asPointer",
+          "anchor": "function-asPointer",
+          "signature": "public func asPointer() -> Pointer[T]",
+          "doc": "Returns a raw pointer to the array's element storage.\n\nWARNING: The pointer is invalidated by any mutation or reallocation.\nUse with caution for FFI or low-level operations.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "asSlice",
+          "anchor": "function-asSlice",
+          "signature": "public func asSlice() -> Slice[T]",
+          "doc": "Returns a slice view of the entire array.\n\nExample:\n    let slice = arr.asSlice()",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "capacity",
+          "anchor": "field-capacity",
+          "signature": "public var capacity: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "chunks",
+          "anchor": "function-chunks",
+          "signature": "public func chunks(of size: Int64) -> ChunksIterator[T]",
+          "doc": "Returns an iterator over non-overlapping chunks of the given size.\n\nThe last chunk may be smaller if count isn't evenly divisible.\nPanics if size is 0.\n\nExample:\n    let arr = [1, 2, 3, 4, 5]\n    for chunk in arr.chunks(of: 2) {\n        // yields [1, 2], then [3, 4], then [5]\n    }",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clear",
+          "anchor": "function-clear",
+          "signature": "public mutating func clear()",
+          "doc": "Removes all elements from the array.\n\nCapacity may be retained for reuse.\n\nExample:\n    var arr = [1, 2, 3]\n    arr.clear()  // arr is []",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clone",
+          "anchor": "function-clone",
+          "signature": "public func clone() -> Array[T]",
+          "doc": "Creates a shallow clone (COW - copy deferred until mutation).",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "count",
+          "anchor": "field-count",
+          "signature": "public var count: Int64 { get",
+          "doc": "Returns the number of elements in the array.\n\nExample:\n    [1, 2, 3].count  // 3\n    [].count         // 0",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "countWhere",
+          "anchor": "function-countWhere",
+          "signature": "public func countWhere(predicate: (T) -> Bool) -> Int64",
+          "doc": "Returns the number of elements satisfying the predicate.\n\nExample:\n    [1, 2, 3, 4, 5].countWhere({ (x) in x % 2 == 0 })  // 2",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "drop",
+          "anchor": "function-drop",
+          "signature": "public func drop(first count: Int64) -> Slice[T]",
+          "doc": "Returns a slice with the first count elements removed.\n\nPanics if count > self.count.\n\nExample:\n    [1, 2, 3, 4, 5].drop(first: 2)  // Slice[3, 4, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "drop",
+          "anchor": "function-drop",
+          "signature": "public func drop(last count: Int64) -> Slice[T]",
+          "doc": "Returns a slice with the last count elements removed.\n\nPanics if count > self.count.\n\nExample:\n    [1, 2, 3, 4, 5].drop(last: 2)  // Slice[1, 2, 3]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "first",
+          "anchor": "function-first",
+          "signature": "public func first() -> T?",
+          "doc": "Returns the first element, or None if empty.\n\nExample:\n    [1, 2, 3].first()  // Some(1)\n    [].first()         // None",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "first",
+          "anchor": "function-first",
+          "signature": "public func first(matching predicate: (T) -> Bool) -> T?",
+          "doc": "Returns the first element matching the predicate, or None.\n\nExample:\n    let arr = [1, 2, 3, 4, 5]\n    arr.first(matching: { (x) in x > 3 })  // Some(4)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "firstIndex",
+          "anchor": "function-firstIndex",
+          "signature": "public func firstIndex(matching predicate: (T) -> Bool) -> Int64?",
+          "doc": "Returns the index of the first element matching the predicate, or None.\n\nExample:\n    let arr = [1, 2, 3, 4, 5]\n    arr.firstIndex(matching: { (x) in x > 3 })   // Some(3) - index of 4\n    arr.firstIndex(matching: { (x) in x > 10 })  // None",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "grow",
+          "anchor": "function-grow",
+          "signature": "private mutating func grow(minCapacity: Int64)",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "indices",
+          "anchor": "field-indices",
+          "signature": "public var indices: Range[Int64]",
+          "doc": "Returns the valid index range for this array.\n\nEquivalent to `0..<count`. Useful for iteration or bounds checking.\n\nExample:\n    let arr = [10, 20, 30]\n    arr.indices  // 0..<3\n\n    for i in arr.indices {\n        print(arr(i))\n    }",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init()",
+          "doc": "Creates an empty array.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(capacity capacity: Int64)",
+          "doc": "Creates an empty array with the specified capacity.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64)",
+          "doc": "Internal initializer called by compiler for array literals.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(arrayLiteral elements: LiteralSlice[T])",
+          "doc": "Creates an array from an array literal.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(repeating value: T, count: Int64)",
+          "doc": "Creates an array by repeating a value count times.\n\nExample:\n    let zeros = Array(repeating: 0, count: 5)  // [0, 0, 0, 0, 0]\n    let empty = Array(repeating: \"x\", count: 0)  // []",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init[I](from iterable: I) where I: Iterable, I.Item = T",
+          "doc": "Creates an array from any iterable source.\n\nExample:\n    let fromRange = Array(from: 1..<5)  // [1, 2, 3, 4]\n    let fromSet = Array(from: mySet)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(count: Int64, generator: (Int64) -> T)",
+          "doc": "Creates an array of count elements using a generator function.\n\nThe generator receives the index (0 to count-1) for each element.\n\nExample:\n    let squares = Array(count: 5, generator: { (i) in i * i })  // [0, 1, 4, 9, 16]\n    let indices = Array(count: 3, generator: { (i) in i })  // [0, 1, 2]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "insert",
+          "anchor": "function-insert",
+          "signature": "public mutating func insert(element: T, at index: Int64)",
+          "doc": "Inserts an element at the specified index.\n\nShifts all elements from index onward to the right.\nPanics if index > count (index == count appends to end).\n\nExample:\n    var arr = [1, 3]\n    arr.insert(element: 2, at: 1)  // [1, 2, 3]\n    arr.insert(element: 0, at: 0)  // [0, 1, 2, 3]\n    arr.insert(element: 4, at: 4)  // [0, 1, 2, 3, 4] - append",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "isEmpty",
+          "anchor": "field-isEmpty",
+          "signature": "public var isEmpty: Bool",
+          "doc": "Returns true if the array contains no elements.\n\nEquivalent to `count == 0` but may be more readable.\n\nExample:\n    [].isEmpty      // true\n    [1].isEmpty     // false",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isValidIndex",
+          "anchor": "function-isValidIndex",
+          "signature": "public func isValidIndex(index: Int64) -> Bool",
+          "doc": "Returns true if index is within valid bounds [0, count).\n\nExample:\n    let arr = [1, 2, 3]\n    arr.isValidIndex(index: 0)   // true\n    arr.isValidIndex(index: 2)   // true\n    arr.isValidIndex(index: 3)   // false\n    arr.isValidIndex(index: -1)  // false",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> ArrayIterator[T]",
+          "doc": "Returns an iterator over the array's elements.\n\nExample:\n    for item in arr.iter() { ... }\n    let doubled = arr.iter().map { it * 2 }.collect()",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "last",
+          "anchor": "function-last",
+          "signature": "public func last() -> T?",
+          "doc": "Returns the last element, or None if empty.\n\nExample:\n    [1, 2, 3].last()  // Some(3)\n    [].last()         // None",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "last",
+          "anchor": "function-last",
+          "signature": "public func last(matching predicate: (T) -> Bool) -> T?",
+          "doc": "Returns the last element matching the predicate, or None.\n\nExample:\n    let arr = [1, 2, 3, 2, 1]\n    arr.last(matching: { (x) in x > 1 })  // Some(2) - the second 2",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "lastIndex",
+          "anchor": "function-lastIndex",
+          "signature": "public func lastIndex(matching predicate: (T) -> Bool) -> Int64?",
+          "doc": "Returns the index of the last element matching the predicate, or None.\n\nExample:\n    let arr = [1, 2, 3, 2, 1]\n    arr.lastIndex(matching: { (x) in x == 2 })  // Some(3)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "partition",
+          "anchor": "function-partition",
+          "signature": "public mutating func partition(by predicate: (T) -> Bool) -> Int64",
+          "doc": "Reorders elements so those satisfying predicate come first.\n\nReturns the index of the first element not satisfying predicate\n(i.e., the partition point).\nThe relative order within each partition is NOT preserved.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    let pivot = arr.partition(by: { (x) in x % 2 == 0 })\n    // arr might be [2, 4, 3, 1, 5] or similar\n    // pivot == 2 (first two elements satisfy predicate)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "partitioned",
+          "anchor": "function-partitioned",
+          "signature": "public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T])",
+          "doc": "Splits into two arrays: elements satisfying predicate and those that don't.\n\nPreserves relative order within each resulting array.\n\nExample:\n    let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: { (x) in x % 2 == 0 })\n    // evens = [2, 4]\n    // odds = [1, 3, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "pop",
+          "anchor": "function-pop",
+          "signature": "public mutating func pop() -> T?",
+          "doc": "Removes and returns the last element, or None if empty.\n\nExample:\n    var arr = [1, 2, 3]\n    arr.pop()  // Some(3), arr is [1, 2]\n    arr.pop()  // Some(2), arr is [1]\n    arr.pop()  // Some(1), arr is []\n    arr.pop()  // None, arr is still []",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "popFirst",
+          "anchor": "function-popFirst",
+          "signature": "public mutating func popFirst() -> T?",
+          "doc": "Removes and returns the first element, or None if empty.\n\nNote: O(n) as all elements must shift left.\n\nExample:\n    var arr = [1, 2, 3]\n    arr.popFirst()  // Some(1), arr is [2, 3]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "prefix",
+          "anchor": "function-prefix",
+          "signature": "public func prefix(count: Int64) -> Slice[T]",
+          "doc": "Returns a slice of the first count elements.\n\nPanics if count > self.count.\n\nExample:\n    [1, 2, 3, 4, 5].prefix(count: 3)  // Slice[1, 2, 3]\n    [1, 2].prefix(count: 0)           // Empty slice",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "ptr",
+          "anchor": "function-ptr",
+          "signature": "fileprivate func ptr() -> Pointer[T]",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "remove",
+          "anchor": "function-remove",
+          "signature": "public mutating func remove(at index: Int64) -> T",
+          "doc": "Removes and returns the element at the specified index.\n\nShifts subsequent elements left. Panics if index is out of bounds.\n\nExample:\n    var arr = [1, 2, 3, 4]\n    arr.remove(at: 1)  // returns 2, arr is [1, 3, 4]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "removeAll",
+          "anchor": "function-removeAll",
+          "signature": "public mutating func removeAll(matching predicate: (T) -> Bool)",
+          "doc": "Removes all elements that satisfy the predicate.\n\nThe inverse of `retain`. Elements are visited in order.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    arr.removeAll(matching: { (x) in x % 2 == 0 })  // arr is [1, 3, 5]\n\n    var names = [\"Alice\", \"\", \"Bob\", \"\"]\n    names.removeAll(matching: |s| s.isEmpty)  // [\"Alice\", \"Bob\"]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "removeSubrange",
+          "anchor": "function-removeSubrange",
+          "signature": "public mutating func removeSubrange(range: Range[Int64])",
+          "doc": "Removes elements in the specified range.\n\nPanics if range is out of bounds.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    arr.removeSubrange(range: 1..<4)  // arr is [1, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "replaceSubrange",
+          "anchor": "function-replaceSubrange",
+          "signature": "public mutating func replaceSubrange(range: Range[Int64], with replacement: Array[T])",
+          "doc": "Replaces elements in the specified range with elements from replacement.\n\nThe replacement can have a different length than the range.\nPanics if range is out of bounds.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    arr.replaceSubrange(range: 1..<4, with: [20, 30])  // [1, 20, 30, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "reserveCapacity",
+          "anchor": "function-reserveCapacity",
+          "signature": "public mutating func reserveCapacity(minimumCapacity: Int64)",
+          "doc": "Reserves capacity for at least minimumCapacity elements.\n\nDoes nothing if current capacity is already sufficient.\nUse when you know many elements will be added.\n\nExample:\n    var arr = Array[Int64]()\n    arr.reserveCapacity(minimumCapacity: 1000)\n    for i in 0..<1000 {\n        arr.append( i)  // No reallocations\n    }",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "retain",
+          "anchor": "function-retain",
+          "signature": "public mutating func retain(matching predicate: (T) -> Bool)",
+          "doc": "Retains only elements that satisfy the predicate.\n\nElements are visited in order. This is an in-place filter.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    arr.retain(matching: { (x) in x % 2 == 0 })  // arr is [2, 4]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "reverse",
+          "anchor": "function-reverse",
+          "signature": "public mutating func reverse()",
+          "doc": "Reverses the order of elements in place.\n\nExample:\n    var arr = [1, 2, 3]\n    arr.reverse()  // [3, 2, 1]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "reversed",
+          "anchor": "function-reversed",
+          "signature": "public func reversed() -> Array[T]",
+          "doc": "Returns a new array with elements in reversed order.\n\nThe original array is unchanged.\n\nExample:\n    let arr = [1, 2, 3]\n    let rev = arr.reversed()  // [3, 2, 1]\n    // arr is still [1, 2, 3]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "rotate",
+          "anchor": "function-rotate",
+          "signature": "public mutating func rotate(by amount: Int64)",
+          "doc": "Rotates elements left by the given amount.\n\nPositive amounts rotate left (first elements move to end).\nNegative amounts rotate right (last elements move to start).\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    arr.rotate(by: 2)   // [3, 4, 5, 1, 2]\n    arr.rotate(by: -1)  // [2, 3, 4, 5, 1]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "setUnchecked",
+          "anchor": "function-setUnchecked",
+          "signature": "public mutating func setUnchecked(index: Int64, value: T)",
+          "doc": "Sets the element at the given index without bounds checking.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shrinkToFit",
+          "anchor": "function-shrinkToFit",
+          "signature": "public mutating func shrinkToFit()",
+          "doc": "Reduces capacity to match the current count.\n\nFrees excess memory. Useful after removing many elements.\n\nExample:\n    var arr = Array[Int64](capacity: 1000)\n    arr.append( 1)\n    arr.shrinkToFit()  // capacity reduced to ~1",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shuffle",
+          "anchor": "function-shuffle",
+          "signature": "public mutating func shuffle[R](using rng: R) where R: RandomNumberGenerator",
+          "doc": "Randomly shuffles the array in place using the provided generator.\n\nUses the Fisher-Yates shuffle algorithm.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    var rng = Lcg64(seed: 42)\n    arr.shuffle(using: rng)  // deterministic shuffle",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shuffle",
+          "anchor": "function-shuffle",
+          "signature": "public mutating func shuffle()",
+          "doc": "Randomly shuffles the array in place.\n\nUses the default random number generator.\n\nExample:\n    var arr = [1, 2, 3, 4, 5]\n    arr.shuffle()  // e.g., [3, 1, 5, 2, 4]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shuffled",
+          "anchor": "function-shuffled",
+          "signature": "public func shuffled[R](using rng: R) -> Array[T] where R: RandomNumberGenerator",
+          "doc": "Returns a new array with elements in random order using the provided generator.\n\nExample:\n    let arr = [1, 2, 3, 4, 5]\n    var rng = Lcg64(seed: 42)\n    let result = arr.shuffled(using: rng)",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shuffled",
+          "anchor": "function-shuffled",
+          "signature": "public func shuffled() -> Array[T]",
+          "doc": "Returns a new array with elements in random order.\n\nUses the default random number generator.\nThe original array is unchanged.\n\nExample:\n    let arr = [1, 2, 3, 4, 5]\n    let shuffled = arr.shuffled()  // e.g., [4, 2, 5, 1, 3]\n    // arr is still [1, 2, 3, 4, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(index: Int64) -> T {\n        get",
+          "doc": "Accesses the element at the given index.\n\nPanics if index is out of bounds [0, count).\n\nExample:\n    let arr = [10, 20, 30]\n    arr(0)      // 10\n    arr(1) = 25 // arr is now [10, 25, 30]\n    arr(5)      // PANIC: index out of bounds",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(checked index: Int64) -> T? {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(unchecked index: Int64) -> T {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(wrapping index: Int64) -> T? {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(clamping index: Int64) -> T? {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(range range: Range[Int64]) -> Slice[T] {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(checkedRange range: Range[Int64]) -> Slice[T]? {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(uncheckedRange range: Range[Int64]) -> Slice[T] {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(clampingRange range: Range[Int64]) -> Slice[T] {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "suffix",
+          "anchor": "function-suffix",
+          "signature": "public func suffix(count: Int64) -> Slice[T]",
+          "doc": "Returns a slice of the last count elements.\n\nPanics if count > self.count.\n\nExample:\n    [1, 2, 3, 4, 5].suffix(count: 2)  // Slice[4, 5]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "swap",
+          "anchor": "function-swap",
+          "signature": "public mutating func swap(at i: Int64, with j: Int64)",
+          "doc": "Swaps the elements at the two given indices.\n\nPanics if either index is out of bounds.\n\nExample:\n    var arr = [1, 2, 3]\n    arr.swap(at: 0, with: 2)  // [3, 2, 1]",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "windows",
+          "anchor": "function-windows",
+          "signature": "public func windows(of size: Int64) -> WindowsIterator[T]",
+          "doc": "Returns an iterator over overlapping sliding windows of the given size.\n\nPanics if size is 0 or size > count.\n\nExample:\n    let arr = [1, 2, 3, 4]\n    for window in arr.windows(of: 2) {\n        // yields [1, 2], then [2, 3], then [3, 4]\n    }",
+          "source_path": "lang/std/collections/array.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ArrayIterator",
+      "anchor": "struct-ArrayIterator",
+      "signature": "public struct ArrayIterator[T]: Iterator",
+      "doc": "Iterator over array elements.",
+      "source_path": "lang/std/collections/array.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(ptr ptr: Pointer[T], remaining remaining: Int64)",
+          "doc": "Creates an array iterator.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> T?",
+          "doc": "Returns the next element, or None if exhausted.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "remaining",
+          "anchor": "field-remaining",
+          "signature": "private var remaining: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        }
+      ]
+    },
+    {
+      "kind": "typealias",
+      "name": "ArrayTypeOperator",
+      "anchor": "typealias-ArrayTypeOperator",
+      "signature": "public type ArrayTypeOperator[T] = Array[T]",
+      "doc": "Type operator alias: [T] desugars to Array[T].",
+      "source_path": "lang/std/collections/array.ks"
+    },
+    {
+      "kind": "struct",
+      "name": "ChunksIterator",
+      "anchor": "struct-ChunksIterator",
+      "signature": "public struct ChunksIterator[T]: Iterator",
+      "doc": "Iterator over non-overlapping chunks of an array.\n\nThe last chunk may be smaller than the chunk size if the array\nlength is not evenly divisible.\n\nExample:\n    let arr = [1, 2, 3, 4, 5]\n    for chunk in arr.chunks(of: 2) {\n        // yields: [1, 2], then [3, 4], then [5]\n    }",
+      "source_path": "lang/std/collections/array.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = Slice[T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(ptr ptr: Pointer[T], remaining remaining: Int64, chunkSize chunkSize: Int64)",
+          "doc": "Creates a chunks iterator.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> Slice[T]?",
+          "doc": "Returns the next chunk, or None if exhausted.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "ptr",
+          "anchor": "field-ptr",
+          "signature": "private var ptr: Pointer[T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "remaining",
+          "anchor": "field-remaining",
+          "signature": "private var remaining: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "DefaultHasher",
+      "anchor": "struct-DefaultHasher",
+      "signature": "public struct DefaultHasher: Hasher, Defaultable",
+      "doc": "Default hasher using the FNV-1a algorithm.\n\nFNV-1a is a non-cryptographic hash function created by Glenn Fowler,\nLandon Curt Noll, and Phong Vo. It's fast and has good distribution\nproperties for hash table use.",
+      "source_path": "lang/std/collections/hashing.ks",
+      "members": [
+        {
+          "kind": "function",
+          "name": "finish",
+          "anchor": "function-finish",
+          "signature": "public mutating func finish() -> UInt64",
+          "doc": "Finishes hashing and returns the final hash value.",
+          "source_path": "lang/std/collections/hashing.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init()",
+          "doc": "Creates a new hasher with the FNV-1a offset basis.",
+          "source_path": "lang/std/collections/hashing.ks"
+        },
+        {
+          "kind": "function",
+          "name": "write",
+          "anchor": "function-write",
+          "signature": "public mutating func write(bytes: Slice[UInt8])",
+          "doc": "Writes bytes into the hasher state.",
+          "source_path": "lang/std/collections/hashing.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Dictionary",
+      "anchor": "struct-Dictionary",
+      "signature": "public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: Hash, H: Hasher, H: Defaultable",
+      "doc": "A hash map with copy-on-write semantics.\n\nUses open addressing with linear probing. Keys must implement Hash.",
+      "source_path": "lang/std/collections/dictionary.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = (K, V)",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Iter",
+          "anchor": "typealias-Iter",
+          "signature": "type Iter = DictionaryIterator[K, V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "all",
+          "anchor": "function-all",
+          "signature": "public func all(satisfy predicate: (K, V) -> Bool) -> Bool",
+          "doc": "Returns true if all entries satisfy the predicate.\n\nReturns true for an empty dictionary (vacuous truth).\n\nExample:\n    [\"a\": 2, \"b\": 4].all(satisfy: { (k, v) in v % 2 == 0 })  // true\n    [\"a\": 1, \"b\": 2].all(satisfy: { (k, v) in v % 2 == 0 })  // false\n    [:].all(satisfy: { (k, v) in false })                    // true",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "any",
+          "anchor": "function-any",
+          "signature": "public func any(satisfy predicate: (K, V) -> Bool) -> Bool",
+          "doc": "Returns true if any entry satisfies the predicate.\n\nAlias for `contains(where:)`.\n\nExample:\n    [\"a\": 1, \"b\": 5].any(satisfy: { (k, v) in v > 3 })  // true",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "buckets",
+          "anchor": "function-buckets",
+          "signature": "private func buckets() -> Pointer[Bucket[K, V]]",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "capacity",
+          "anchor": "field-capacity",
+          "signature": "public var capacity: Int64 { get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clear",
+          "anchor": "function-clear",
+          "signature": "public mutating func clear()",
+          "doc": "Removes all entries from the dictionary.\n\nCapacity may be retained for reuse.\n\nExample:\n    var dict = [\"a\": 1, \"b\": 2]\n    dict.clear()  // dict is now [:]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clone",
+          "anchor": "function-clone",
+          "signature": "public func clone() -> Dictionary[K, V, H]",
+          "doc": "Creates a shallow clone (COW - copy deferred until mutation).",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "compactMapValues",
+          "anchor": "function-compactMapValues",
+          "signature": "public func compactMapValues[U](transform: (V) -> U?) -> Dictionary[K, U, H]",
+          "doc": "Returns a new dictionary with transformed values, removing None results.\n\nExample:\n    let dict = [\"a\": \"1\", \"b\": \"two\", \"c\": \"3\"]\n    let parsed = dict.compactMapValues { Int64.parse(it) }\n    // [\"a\": 1, \"c\": 3] - \"two\" couldn't be parsed",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "contains",
+          "anchor": "function-contains",
+          "signature": "public func contains(key: K) -> Bool",
+          "doc": "Returns true if the dictionary contains the given key.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "contains",
+          "anchor": "function-contains",
+          "signature": "public func contains(matching predicate: (K, V) -> Bool) -> Bool",
+          "doc": "Returns true if any entry satisfies the predicate.\n\nReturns false for an empty dictionary.\nShort-circuits on first matching entry.\n\nExample:\n    [\"a\": 1, \"b\": 5].contains(where: { (k, v) in v > 3 })  // true\n    [\"a\": 1, \"b\": 2].contains(where: { (k, v) in v > 3 })  // false",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "count",
+          "anchor": "field-count",
+          "signature": "public var count: Int64 { get",
+          "doc": "Returns the number of key-value pairs in the dictionary.\n\nExample:\n    [\"a\": 1, \"b\": 2].count  // 2\n    [:].count               // 0",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "countWhere",
+          "anchor": "function-countWhere",
+          "signature": "public func countWhere(predicate: (K, V) -> Bool) -> Int64",
+          "doc": "Returns the count of entries satisfying the predicate.\n\nExample:\n    [\"a\": 1, \"b\": 2, \"c\": 3].countWhere({ (k, v) in v > 1 })  // 2",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "filter",
+          "anchor": "function-filter",
+          "signature": "public func filter(matching predicate: (K, V) -> Bool) -> Dictionary[K, V, H]",
+          "doc": "Returns a new dictionary with only entries satisfying the predicate.\n\nExample:\n    let dict = [\"a\": 1, \"b\": 2, \"c\": 3]\n    let big = dict.filter(where: { (k, v) in v > 1 })  // [\"b\": 2, \"c\": 3]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "findEntry",
+          "anchor": "function-findEntry",
+          "signature": "private func findEntry(key: K) -> Int64?",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "first",
+          "anchor": "function-first",
+          "signature": "public func first(matching predicate: (K, V) -> Bool) -> (K, V)?",
+          "doc": "Returns the first entry matching the predicate, or None.\n\nNote: Since dictionary order is unspecified, \"first\" is arbitrary.\n\nExample:\n    let dict = [\"a\": 1, \"b\": 5, \"c\": 3]\n    dict.first(where: { (k, v) in v > 2 })  // Some entry with v > 2",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init()",
+          "doc": "Creates an empty dictionary.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(capacity capacity: Int64)",
+          "doc": "Creates an empty dictionary with initial capacity.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init[I](from pairs: I) where I: Iterable, I.Item = (K, V)",
+          "doc": "Creates a dictionary from an iterable of key-value tuples.\n\nIf duplicate keys exist, later values overwrite earlier ones.\n\nExample:\n    let pairs = [(\"a\", 1), (\"b\", 2)]\n    let dict = Dictionary(from: pairs)  // [\"a\": 1, \"b\": 2]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init[I, E](grouping elements: I, by keyFunc: (E) -> K)\n        where I: Iterable, I.Item = E, V = Array[E]",
+          "doc": "Creates a dictionary by grouping elements by a key function.\n\nEach key maps to an array of all elements that produced that key.\nNote: This initializer requires V = Array[E].\n\nExample:\n    let words = [\"apple\", \"apricot\", \"banana\", \"blueberry\"]\n    let grouped = Dictionary(grouping: words, by: { (w) in w.chars.first().unwrap() })\n    // [\"a\": [\"apple\", \"apricot\"], \"b\": [\"banana\", \"blueberry\"]]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init[I](uniqueKeysWithValues pairs: I) where I: Iterable, I.Item = (K, V)",
+          "doc": "Creates a dictionary from unique key-value pairs.\n\nPanics if duplicate keys are encountered. Use `init(from:)` if\nduplicates should be allowed (with later values winning).\n\nExample:\n    let dict = Dictionary(uniqueKeysWithValues: [(\"a\", 1), (\"b\", 2)])",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "insert",
+          "anchor": "function-insert",
+          "signature": "public mutating func insert(key: K, value: V) -> V?",
+          "doc": "Inserts or updates a value for the given key.\n\nReturns the old value if the key already existed.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "isEmpty",
+          "anchor": "field-isEmpty",
+          "signature": "public var isEmpty: Bool { get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> DictionaryIterator[K, V]",
+          "doc": "Returns an iterator over key-value pairs.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "keys",
+          "anchor": "field-keys",
+          "signature": "public var keys: KeysView[K, V] { get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "mapValues",
+          "anchor": "function-mapValues",
+          "signature": "public func mapValues[U](transform: (V) -> U) -> Dictionary[K, U, H]",
+          "doc": "Returns a new dictionary with transformed values.\n\nKeys are preserved; only values are transformed.\n\nExample:\n    let dict = [\"a\": 1, \"b\": 2]\n    let doubled = dict.mapValues { it * 2 }  // [\"a\": 2, \"b\": 4]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "merge",
+          "anchor": "function-merge",
+          "signature": "public mutating func merge(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V)",
+          "doc": "Merges another dictionary into this one.\n\nFor duplicate keys, the combine function determines the resulting value.\n\nExample:\n    var a = [\"x\": 1, \"y\": 2]\n    let b = [\"y\": 20, \"z\": 30]\n    a.merge( b, uniquingKeysWith: { (old, new) in old + new })\n    // a is now [\"x\": 1, \"y\": 22, \"z\": 30]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "mergeFrom",
+          "anchor": "function-mergeFrom",
+          "signature": "public mutating func mergeFrom[I](pairs: I, uniquingKeysWith combine: (V, V) -> V)\n        where I: Iterable, I.Item = (K, V)",
+          "doc": "Merges key-value pairs from an iterable into this dictionary.\n\nExample:\n    var dict = [\"a\": 1]\n    dict.mergeFrom([(\"b\", 2), (\"c\", 3)], uniquingKeysWith: { (_, new) in new })",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "merging",
+          "anchor": "function-merging",
+          "signature": "public func merging(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V)\n        -> Dictionary[K, V, H]",
+          "doc": "Returns a new dictionary merging this one with another.\n\nThis dictionary is unchanged.\n\nExample:\n    let a = [\"x\": 1, \"y\": 2]\n    let b = [\"y\": 20, \"z\": 30]\n    let merged = a.merging(other: b, uniquingKeysWith: { (_, new) in new })\n    // merged is [\"x\": 1, \"y\": 20, \"z\": 30]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "remove",
+          "anchor": "function-remove",
+          "signature": "public mutating func remove(key: K) -> V?",
+          "doc": "Removes the key and returns its value, or None if not found.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "removeAll",
+          "anchor": "function-removeAll",
+          "signature": "public mutating func removeAll(matching predicate: (K, V) -> Bool)",
+          "doc": "Removes all entries that satisfy the predicate.\n\nThe inverse of `retain(where:)`.\n\nExample:\n    var dict = [\"a\": 1, \"b\": 2, \"c\": 3]\n    dict.removeAll(where: { (k, v) in v < 2 })  // [\"b\": 2, \"c\": 3]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "reserveCapacity",
+          "anchor": "function-reserveCapacity",
+          "signature": "public mutating func reserveCapacity(minimumCapacity: Int64)",
+          "doc": "Reserves capacity for at least minimumCapacity entries.\n\nDoes nothing if current capacity is already sufficient.\n\nExample:\n    var dict = Dictionary[String, Int64]()\n    dict.reserveCapacity(minimumCapacity: 1000)",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "retain",
+          "anchor": "function-retain",
+          "signature": "public mutating func retain(matching predicate: (K, V) -> Bool)",
+          "doc": "Retains only entries that satisfy the predicate.\n\nExample:\n    var dict = [\"a\": 1, \"b\": 2, \"c\": 3]\n    dict.retain(where: { (k, v) in v > 1 })  // [\"b\": 2, \"c\": 3]",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shrinkToFit",
+          "anchor": "function-shrinkToFit",
+          "signature": "public mutating func shrinkToFit()",
+          "doc": "Reduces capacity to match the current count.\n\nFrees excess memory. Useful after removing many entries.\n\nExample:\n    var dict = Dictionary[String, Int64](capacity: 1000)\n    dict(\"a\") = 1\n    dict.shrinkToFit()  // capacity reduced",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "storage",
+          "anchor": "field-storage",
+          "signature": "private var storage: RcBox[DictionaryStorage[K, V, H",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(key: K) -> V? {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(key: K, default defaultValue: V) -> V {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "subscript",
+          "name": "subscript",
+          "anchor": "subscript-subscript",
+          "signature": "public subscript(unwrap key: K) -> V {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "update",
+          "anchor": "function-update",
+          "signature": "public mutating func update(key: K, with transform: (V) -> V) -> Bool",
+          "doc": "Updates the value for an existing key using a transform function.\n\nReturns true if the key existed and was updated, false otherwise.\n\nExample:\n    var dict = [\"a\": 1, \"b\": 2]\n    dict.update(key: \"a\", with: { (v) in v * 10 })  // true, dict[\"a\"] = 10\n    dict.update(key: \"z\", with: { (v) in v * 10 })  // false, no change",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "upsert",
+          "anchor": "function-upsert",
+          "signature": "public mutating func upsert(key: K, default defaultValue: V, with transform: (V) -> V)",
+          "doc": "Updates or inserts: applies transform if key exists, otherwise inserts default.\n\nExample:\n    var counts: [String: Int64] = [:]\n    counts.upsert(key: \"apple\", default: 0, with: { (n) in n + 1 })\n    counts.upsert(key: \"apple\", default: 0, with: { (n) in n + 1 })\n    counts(\"apple\")  // Some(2)",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "values",
+          "anchor": "field-values",
+          "signature": "public var values: ValuesView[K, V] { get",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "DictionaryIterator",
+      "anchor": "struct-DictionaryIterator",
+      "signature": "public struct DictionaryIterator[K, V]: Iterator",
+      "doc": "Iterator over dictionary key-value pairs.",
+      "source_path": "lang/std/collections/dictionary.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = (K, V)",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "capacity",
+          "anchor": "field-capacity",
+          "signature": "private var capacity: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64)",
+          "doc": "Creates a dictionary iterator.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> (K, V)?",
+          "doc": "Returns the next key-value pair, or None if exhausted.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        }
+      ]
+    },
+    {
+      "kind": "typealias",
+      "name": "DictionaryTypeOperator",
+      "anchor": "typealias-DictionaryTypeOperator",
+      "signature": "public type DictionaryTypeOperator[K, V] = Dictionary[K, V, DefaultHasher]",
+      "doc": "Type operator alias: [K: V] desugars to Dictionary[K, V].",
+      "source_path": "lang/std/collections/dictionary.ks"
+    },
+    {
+      "kind": "struct",
+      "name": "KeysIterator",
+      "anchor": "struct-KeysIterator",
+      "signature": "public struct KeysIterator[K, V]: Iterator where K: Hash",
+      "doc": "Iterator over dictionary keys.",
+      "source_path": "lang/std/collections/dictionary.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = K",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(dictIter dictIter: DictionaryIterator[K, V])",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> K?",
+          "doc": "Returns the next key, or None if exhausted.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "KeysView",
+      "anchor": "struct-KeysView",
+      "signature": "public struct KeysView[K, V]: Iterable where K: Hash",
+      "doc": "A view over dictionary keys.",
+      "source_path": "lang/std/collections/dictionary.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = K",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Iter",
+          "anchor": "typealias-Iter",
+          "signature": "type Iter = KeysIterator[K, V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "buckets",
+          "anchor": "field-buckets",
+          "signature": "private var buckets: Pointer[Bucket[K, V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "capacity",
+          "anchor": "field-capacity",
+          "signature": "private var capacity: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64)",
+          "doc": "Creates a keys view.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> KeysIterator[K, V]",
+          "doc": "Returns an iterator over the keys.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Set",
+      "anchor": "struct-Set",
+      "signature": "public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: Hasher, H: Defaultable",
+      "doc": "A hash set that stores unique elements with copy-on-write semantics.\n\nSets provide O(1) average-case lookup, insertion, and removal. They use\nCOW for efficient copying - the underlying storage is only duplicated\nwhen a shared set is mutated.\n\nBacked by a Dictionary internally.\n\nExample:\n    var fruits: Set = [\"apple\", \"banana\", \"cherry\"]\n    fruits.insert( \"date\")\n    fruits.contains( \"apple\")  // true\n    fruits.remove( \"banana\")\n\nSet literals use array syntax with type annotation:\n    let empty: Set[Int64] = []\n    let numbers: Set = [1, 2, 3]",
+      "source_path": "lang/std/collections/set.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = T",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Iter",
+          "anchor": "typealias-Iter",
+          "signature": "type Iter = SetIterator[T, H",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "all",
+          "anchor": "function-all",
+          "signature": "public func all(satisfy predicate: (T) -> Bool) -> Bool",
+          "doc": "Returns true if all elements satisfy the predicate.\n\nReturns true for an empty set (vacuous truth).\n\nExample:\n    Set([2, 4, 6]).all(satisfy: { (x) in x % 2 == 0 })  // true\n    Set([1, 2, 4]).all(satisfy: { (x) in x % 2 == 0 })  // false\n    Set[Int64]().all(satisfy: { (x) in false })         // true",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "any",
+          "anchor": "function-any",
+          "signature": "public func any(satisfy predicate: (T) -> Bool) -> Bool",
+          "doc": "Returns true if any element satisfies the predicate.\n\nAlias for `contains(where:)`.\n\nExample:\n    Set([1, 2, 3]).any(satisfy: { (x) in x > 2 })  // true",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "field",
+          "name": "capacity",
+          "anchor": "field-capacity",
+          "signature": "public var capacity: Int64 {\n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clear",
+          "anchor": "function-clear",
+          "signature": "public mutating func clear()",
+          "doc": "Removes all elements from the set.\n\nCapacity may be retained for reuse.\n\nExample:\n    var set: Set = [1, 2, 3]\n    set.clear()  // set is {}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "clone",
+          "anchor": "function-clone",
+          "signature": "public func clone() -> Set[T, H]",
+          "doc": "Creates a shallow clone of the set.\n\nDue to COW semantics, this is O(1) - the actual copy is deferred\nuntil either set is mutated.",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "compactMap",
+          "anchor": "function-compactMap",
+          "signature": "public func compactMap[U](transform: (T) -> U?) -> Set[U, H] where U: Hash",
+          "doc": "Returns a new set with elements transformed, removing None results.\n\nExample:\n    let set: Set = [\"1\", \"two\", \"3\"]\n    let nums = set.compactMap(transform: { (s) in Int64.parse(s) })  // {1, 3}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "contains",
+          "anchor": "function-contains",
+          "signature": "public func contains(element: T) -> Bool",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "contains",
+          "anchor": "function-contains",
+          "signature": "public func contains(matching predicate: (T) -> Bool) -> Bool",
+          "doc": "Returns true if any element satisfies the predicate.\n\nReturns false for an empty set.\nShort-circuits on first matching element.\n\nExample:\n    Set([1, 2, 3]).contains(where: { (x) in x > 2 })  // true\n    Set([1, 2, 3]).contains(where: { (x) in x > 5 })  // false",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "field",
+          "name": "count",
+          "anchor": "field-count",
+          "signature": "public var count: Int64 {\n        get",
+          "doc": "Returns the number of elements in the set.\n\nExample:\n    Set([1, 2, 3]).count  // 3\n    Set[Int64]().count    // 0",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "countWhere",
+          "anchor": "function-countWhere",
+          "signature": "public func countWhere(predicate: (T) -> Bool) -> Int64",
+          "doc": "Returns the count of elements satisfying the predicate.\n\nExample:\n    Set([1, 2, 3, 4, 5]).countWhere({ (x) in x % 2 == 0 })  // 2",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "field",
+          "name": "dict",
+          "anchor": "field-dict",
+          "signature": "var dict: Dictionary[T, Unit, H",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "difference",
+          "anchor": "function-difference",
+          "signature": "public func difference(other: Set[T, H]) -> Set[T, H]",
+          "doc": "Returns a new set containing elements in this set but not in the other.\n\nAlso known as \"subtracting\" the other set.\n\nExample:\n    let a: Set = [1, 2, 3]\n    let b: Set = [2, 3, 4]\n    a.difference(other: b)  // {1}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "filter",
+          "anchor": "function-filter",
+          "signature": "public func filter(matching predicate: (T) -> Bool) -> Set[T, H]",
+          "doc": "Returns a new set with only elements satisfying the predicate.\n\nExample:\n    let set: Set = [1, 2, 3, 4, 5]\n    let evens = set.filter(where: { (x) in x % 2 == 0 })  // {2, 4}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "first",
+          "anchor": "function-first",
+          "signature": "public func first(matching predicate: (T) -> Bool) -> T?",
+          "doc": "Returns the first element matching the predicate, or None.\n\nNote: Since set order is unspecified, \"first\" is arbitrary.\n\nExample:\n    let set: Set = [1, 2, 3, 4, 5]\n    set.first(where: { (x) in x > 3 })  // Some(4) or Some(5)",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flatMap",
+          "anchor": "function-flatMap",
+          "signature": "public func flatMap[U](transform: (T) -> Set[U, H]) -> Set[U, H] where U: Hash",
+          "doc": "Returns a new set with elements transformed by a function returning sets.\n\nThe resulting sets are unioned together.\n\nExample:\n    let set: Set = [1, 2]\n    let expanded = set.flatMap(transform: { (x) in Set([x, x * 10]) })\n    // {1, 10, 2, 20}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "formDifference",
+          "anchor": "function-formDifference",
+          "signature": "public mutating func formDifference(other: Set[T, H])",
+          "doc": "Removes elements that are in the other set (mutating difference).\n\nExample:\n    var a: Set = [1, 2, 3]\n    let b: Set = [2, 3, 4]\n    a.formDifference(other: b)  // a is {1}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "formIntersection",
+          "anchor": "function-formIntersection",
+          "signature": "public mutating func formIntersection(other: Set[T, H])",
+          "doc": "Removes elements not in the other set (mutating intersection).\n\nExample:\n    var a: Set = [1, 2, 3]\n    let b: Set = [2, 3, 4]\n    a.formIntersection(other: b)  // a is {2, 3}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "formSymmetricDifference",
+          "anchor": "function-formSymmetricDifference",
+          "signature": "public mutating func formSymmetricDifference(other: Set[T, H])",
+          "doc": "Replaces this set with the symmetric difference (mutating).\n\nExample:\n    var a: Set = [1, 2, 3]\n    let b: Set = [2, 3, 4]\n    a.formSymmetricDifference(other: b)  // a is {1, 4}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "formUnion",
+          "anchor": "function-formUnion",
+          "signature": "public mutating func formUnion(other: Set[T, H])",
+          "doc": "Adds the elements of another set to this set (mutating union).\n\nExample:\n    var a: Set = [1, 2]\n    let b: Set = [2, 3]\n    a.formUnion( b)  // a is {1, 2, 3}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "getDict",
+          "anchor": "function-getDict",
+          "signature": "func getDict() -> Dictionary[T, Unit, H]",
+          "doc": "Returns the internal dictionary (for extensions).",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init()",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(capacity capacity: Int64)",
+          "doc": "Creates an empty set with the specified initial capacity.\n\nPre-allocating capacity can improve performance when the approximate\nfinal size is known, avoiding repeated reallocations.\n\nExample:\n    var set = Set[String](capacity: 1000)\n    set.capacity  // >= 1000\n    set.count     // 0",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init[I](from elements: I) where I: Iterable, I.Item = T",
+          "doc": "Creates a set from an iterable of elements.\n\nDuplicate elements are automatically removed.\n\nExample:\n    let arr = [1, 2, 2, 3, 3, 3]\n    let set = Set(from: arr)  // {1, 2, 3}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(arrayLiteral elements: LiteralSlice[T])",
+          "doc": "Creates a set from an array literal (used by compiler).",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "insert",
+          "anchor": "function-insert",
+          "signature": "public mutating func insert(element: T) -> Bool",
+          "doc": "Inserts an element into the set.\n\nReturns true if the element was newly inserted, false if it already existed.\n\nExample:\n    var set: Set = [1, 2]\n    set.insert( 3)  // true, set is {1, 2, 3}\n    set.insert( 2)  // false, already present",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "insert",
+          "anchor": "function-insert",
+          "signature": "public mutating func insert[I](contentsOf elements: I) where I: Iterable, I.Item = T",
+          "doc": "Inserts all elements from an iterable into the set.\n\nExample:\n    var set: Set = [1, 2]\n    set.insert(contentsOf: [3, 4, 5])  // {1, 2, 3, 4, 5}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "intersection",
+          "anchor": "function-intersection",
+          "signature": "public func intersection(other: Set[T, H]) -> Set[T, H]",
+          "doc": "Returns a new set containing only elements present in both sets.\n\nExample:\n    let a: Set = [1, 2, 3]\n    let b: Set = [2, 3, 4]\n    a.intersection(other: b)  // {2, 3}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isDisjoint",
+          "anchor": "function-isDisjoint",
+          "signature": "public func isDisjoint(with other: Set[T, H]) -> Bool",
+          "doc": "Returns true if this set and the other share no common elements.\n\nExample:\n    let a: Set = [1, 2]\n    let b: Set = [3, 4]\n    let c: Set = [2, 3]\n    a.isDisjoint(with: b)  // true\n    a.isDisjoint(with: c)  // false",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "field",
+          "name": "isEmpty",
+          "anchor": "field-isEmpty",
+          "signature": "public var isEmpty: Bool { \n        get",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isStrictSubset",
+          "anchor": "function-isStrictSubset",
+          "signature": "public func isStrictSubset(of other: Set[T, H]) -> Bool",
+          "doc": "Returns true if this set is a subset of the other but not equal.\n\nExample:\n    let a: Set = [1, 2]\n    let b: Set = [1, 2, 3]\n    a.isStrictSubset(of: b)  // true\n    a.isStrictSubset(of: a)  // false",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isStrictSuperset",
+          "anchor": "function-isStrictSuperset",
+          "signature": "public func isStrictSuperset(of other: Set[T, H]) -> Bool",
+          "doc": "Returns true if this set is a superset of the other but not equal.\n\nExample:\n    let a: Set = [1, 2, 3]\n    let b: Set = [1, 2]\n    a.isStrictSuperset(of: b)  // true\n    a.isStrictSuperset(of: a)  // false",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isSubset",
+          "anchor": "function-isSubset",
+          "signature": "public func isSubset(of other: Set[T, H]) -> Bool",
+          "doc": "Returns true if all elements of this set are in the other set.\n\nA set is always a subset of itself.\n\nExample:\n    let a: Set = [1, 2]\n    let b: Set = [1, 2, 3]\n    a.isSubset(of: b)  // true\n    b.isSubset(of: a)  // false\n    a.isSubset(of: a)  // true",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isSuperset",
+          "anchor": "function-isSuperset",
+          "signature": "public func isSuperset(of other: Set[T, H]) -> Bool",
+          "doc": "Returns true if all elements of the other set are in this set.\n\nA set is always a superset of itself.\n\nExample:\n    let a: Set = [1, 2, 3]\n    let b: Set = [1, 2]\n    a.isSuperset(of: b)  // true\n    b.isSuperset(of: a)  // false",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> SetIterator[T, H]",
+          "doc": "Returns an iterator over the set's elements.\n\nIteration order is not guaranteed to match insertion order.\n\nExample:\n    for item in set.iter() {\n        print(item)\n    }",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "map",
+          "anchor": "function-map",
+          "signature": "public func map[U](transform: (T) -> U) -> Set[U, H] where U: Hash",
+          "doc": "Returns a new set with elements transformed by the function.\n\nNote: The resulting set may have fewer elements if the transform\nproduces duplicates.\n\nExample:\n    let set: Set = [1, 2, 3]\n    let doubled = set.map(transform: { (x) in x * 2 })  // {2, 4, 6}\n\n    let words: Set = [\"Hello\", \"WORLD\"]\n    let lower = words.map(transform: { (s) in s.lowercase() })\n    // may be {\"hello\", \"world\"} or just {\"hello\"} if collision",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "remove",
+          "anchor": "function-remove",
+          "signature": "public mutating func remove(element: T) -> Bool",
+          "doc": "Removes an element from the set.\n\nReturns true if the element was present and removed, false otherwise.\n\nExample:\n    var set: Set = [1, 2, 3]\n    set.remove( 2)  // true, set is {1, 3}\n    set.remove( 5)  // false, not present",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "removeAll",
+          "anchor": "function-removeAll",
+          "signature": "public mutating func removeAll(matching predicate: (T) -> Bool)",
+          "doc": "Removes all elements that satisfy the predicate.\n\nThe inverse of `retain(where:)`.\n\nExample:\n    var set: Set = [1, 2, 3, 4, 5]\n    set.removeAll(where: { (x) in x % 2 == 0 })  // {1, 3, 5}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "reserveCapacity",
+          "anchor": "function-reserveCapacity",
+          "signature": "public mutating func reserveCapacity(minimumCapacity: Int64)",
+          "doc": "Reserves capacity for at least minimumCapacity elements.\n\nDoes nothing if current capacity is already sufficient.\n\nExample:\n    var set = Set[String]()\n    set.reserveCapacity( 1000)",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "retain",
+          "anchor": "function-retain",
+          "signature": "public mutating func retain(matching predicate: (T) -> Bool)",
+          "doc": "Retains only elements that satisfy the predicate.\n\nExample:\n    var set: Set = [1, 2, 3, 4, 5]\n    set.retain(where: { (x) in x % 2 == 0 })  // {2, 4}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "shrinkToFit",
+          "anchor": "function-shrinkToFit",
+          "signature": "public mutating func shrinkToFit()",
+          "doc": "Reduces capacity to match the current count.\n\nFrees excess memory. Useful after removing many elements.\n\nExample:\n    var set = Set[String](capacity: 1000)\n    set.insert( \"a\")\n    set.shrinkToFit()  // capacity reduced",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "symmetricDifference",
+          "anchor": "function-symmetricDifference",
+          "signature": "public func symmetricDifference(other: Set[T, H]) -> Set[T, H]",
+          "doc": "Returns a new set containing elements in either set but not both.\n\nExample:\n    let a: Set = [1, 2, 3]\n    let b: Set = [2, 3, 4]\n    a.symmetricDifference(other: b)  // {1, 4}",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "toArray",
+          "anchor": "function-toArray",
+          "signature": "public func toArray() -> Array[T]",
+          "doc": "Returns an array containing all elements of the set.\n\nThe order of elements in the array is unspecified.\n\nExample:\n    let set: Set = [1, 2, 3]\n    let arr = set.toArray()  // [1, 2, 3] in some order",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "union",
+          "anchor": "function-union",
+          "signature": "public func union(other: Set[T, H]) -> Set[T, H]",
+          "doc": "Returns a new set containing all elements from both sets.\n\nExample:\n    let a: Set = [1, 2, 3]\n    let b: Set = [3, 4, 5]\n    a.union(other: b)  // {1, 2, 3, 4, 5}",
+          "source_path": "lang/std/collections/set.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SetIterator",
+      "anchor": "struct-SetIterator",
+      "signature": "public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hasher, H: Defaultable",
+      "doc": "Iterator for Set that yields elements sequentially.\n\nObtained by calling `iter()` on a set. Typically used implicitly\nvia for-in loops or iterator methods.\n\nExample:\n    let set: Set = [1, 2, 3]\n    for item in set {\n        print(item)\n    }",
+      "source_path": "lang/std/collections/set.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = T",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(dictIter dictIter: DictionaryIterator[T, Unit])",
+          "doc": "",
+          "source_path": "lang/std/collections/set.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> T?",
+          "doc": "Returns the next element, or None if exhausted.",
+          "source_path": "lang/std/collections/set.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ValuesIterator",
+      "anchor": "struct-ValuesIterator",
+      "signature": "public struct ValuesIterator[K, V]: Iterator where K: Hash",
+      "doc": "Iterator over dictionary values.",
+      "source_path": "lang/std/collections/dictionary.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(dictIter dictIter: DictionaryIterator[K, V])",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> V?",
+          "doc": "Returns the next value, or None if exhausted.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ValuesView",
+      "anchor": "struct-ValuesView",
+      "signature": "public struct ValuesView[K, V]: Iterable where K: Hash",
+      "doc": "A view over dictionary values.",
+      "source_path": "lang/std/collections/dictionary.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Iter",
+          "anchor": "typealias-Iter",
+          "signature": "type Iter = ValuesIterator[K, V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "buckets",
+          "anchor": "field-buckets",
+          "signature": "private var buckets: Pointer[Bucket[K, V",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "field",
+          "name": "capacity",
+          "anchor": "field-capacity",
+          "signature": "private var capacity: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64)",
+          "doc": "Creates a values view.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> ValuesIterator[K, V]",
+          "doc": "Returns an iterator over the values.",
+          "source_path": "lang/std/collections/dictionary.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "WindowsIterator",
+      "anchor": "struct-WindowsIterator",
+      "signature": "public struct WindowsIterator[T]: Iterator",
+      "doc": "Iterator over overlapping sliding windows of an array.\n\nAll windows have exactly the specified size. If the array is\nsmaller than the window size, no windows are yielded.\n\nExample:\n    let arr = [1, 2, 3, 4]\n    for window in arr.windows(of: 2) {\n        // yields: [1, 2], then [2, 3], then [3, 4]\n    }",
+      "source_path": "lang/std/collections/array.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = Slice[T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(ptr ptr: Pointer[T], totalCount totalCount: Int64, windowSize windowSize: Int64)",
+          "doc": "Creates a windows iterator.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> Slice[T]?",
+          "doc": "Returns the next window, or None if exhausted.",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "ptr",
+          "anchor": "field-ptr",
+          "signature": "private var ptr: Pointer[T",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        },
+        {
+          "kind": "field",
+          "name": "remaining",
+          "anchor": "field-remaining",
+          "signature": "private var remaining: Int64",
+          "doc": "",
+          "source_path": "lang/std/collections/array.ks"
+        }
+      ]
+    }
+  ]
+}

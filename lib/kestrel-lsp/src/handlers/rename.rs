@@ -27,7 +27,7 @@ use tower_lsp::lsp_types::{
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite};
 use crate::semantic;
-use crate::server::{path_to_url, rebuild_compiler, url_to_path, SharedState};
+use crate::server::{path_to_url, url_to_path, SharedState};
 
 // ===== prepareRename =====
 
@@ -39,18 +39,18 @@ pub async fn prepare(
     let pos = params.position;
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, sources, line_index) = {
         let s = state.lock().await;
         let Some(li) = s.docs.get(&uri).map(|d| d.line_index.clone()) else {
             return Ok(None);
         };
-        (s.sources.clone(), li)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
     };
     let offset = line_index.position_to_offset(pos);
 
-    let result = tokio::task::spawn_blocking(move || -> Option<PrepareRenameResponse> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let file_entity = semantic::file_entity_for_path(&compiler, &path)?;
+    let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<PrepareRenameResponse> {
+        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
         let world = compiler.world();
         let root = compiler.root();
 
@@ -62,7 +62,6 @@ pub async fn prepare(
         Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
     })
     .await
-    .ok()
     .flatten();
 
     Ok(result)
@@ -87,19 +86,21 @@ pub async fn rename(
         });
     }
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, sources, line_index) = {
         let s = state.lock().await;
         let Some(li) = s.docs.get(&uri).map(|d| d.line_index.clone()) else {
             return Ok(None);
         };
-        (s.sources.clone(), li)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
     };
     let offset = line_index.position_to_offset(pos);
 
-    let outcome = tokio::task::spawn_blocking(
-        move || -> Result<Option<WorkspaceEdit>, RpcError> {
-            let (compiler, _) = rebuild_compiler(&sources);
-            let file_entity = match semantic::file_entity_for_path(&compiler, &path) {
+    let outcome: Result<Option<WorkspaceEdit>, RpcError> = handle.with_compiler(
+        stdlib,
+        user,
+        move |compiler, _by_path| -> Result<Option<WorkspaceEdit>, RpcError> {
+            let file_entity = match semantic::file_entity_for_path(compiler, &path) {
                 Some(f) => f,
                 None => return Ok(None),
             };
@@ -134,9 +135,9 @@ pub async fn rename(
         },
     )
     .await
-    .map_err(|_| RpcError::internal_error())??;
+    .unwrap_or_else(|| Err(RpcError::internal_error()));
 
-    Ok(outcome)
+    outcome
 }
 
 // ===== Shared dispatch =====

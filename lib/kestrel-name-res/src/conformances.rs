@@ -291,6 +291,71 @@ fn gather_protocol_conformances(
     }
 }
 
+/// Find the init on `target` that witnesses `protocol`, restricted to those
+/// matching `predicate` (used to pick out a specific labeled-arg shape, e.g.
+/// `init(boolLiteral:)`).
+///
+/// Considered scopes:
+/// * `target`'s own children — accepted only if `target` directly declares
+///   conformance to `protocol`.
+/// * Children of every extension of `target` — accepted only if that
+///   extension declares conformance to `protocol`.
+///
+/// The conformance scope check is what makes this safe to use for literal
+/// init lookup: a coincidentally-shaped init on a type that doesn't
+/// actually conform (e.g. a user `init(intLiteral: …)` on an unrelated
+/// type) is rejected. Returns the first matching init by scan order; for
+/// the literal-init use case this is unambiguous because each protocol
+/// declares one init.
+pub fn find_protocol_witness_init<P>(
+    ctx: &QueryContext<'_>,
+    target: Entity,
+    protocol: Entity,
+    root: Entity,
+    predicate: P,
+) -> Option<Entity>
+where
+    P: Fn(&kestrel_ast_builder::Callable) -> bool,
+{
+    use kestrel_ast_builder::Callable;
+
+    let declares_protocol = |parent: Entity| -> bool {
+        let Some(conformances) = ctx.get::<Conformances>(parent) else {
+            return false;
+        };
+        conformances.0.iter().any(|item| {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                return false;
+            };
+            resolve_conformance_entity(ctx, ast_ty, parent, root) == Some(protocol)
+        })
+    };
+
+    let matching_init_in = |parent: Entity| -> Option<Entity> {
+        ctx.children_of(parent).iter().copied().find(|&child| {
+            ctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer)
+                && ctx.get::<Callable>(child).is_some_and(|c| predicate(c))
+        })
+    };
+
+    if declares_protocol(target) {
+        if let Some(init) = matching_init_in(target) {
+            return Some(init);
+        }
+    }
+
+    let extensions = ctx.query(ExtensionsFor { target, root });
+    for ext in extensions {
+        if declares_protocol(ext) {
+            if let Some(init) = matching_init_in(ext) {
+                return Some(init);
+            }
+        }
+    }
+
+    None
+}
+
 /// Resolve a conformance AstType to an entity via `ResolveTypePath`.
 ///
 /// Uses the conformance-bearing entity as resolution context — protocol

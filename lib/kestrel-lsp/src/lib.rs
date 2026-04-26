@@ -5,6 +5,7 @@
 //!
 //! See `lib/kestrel-lsp/CHECKLIST.md` for milestone progress.
 
+pub mod compiler_worker;
 pub mod convert;
 pub mod documents;
 pub mod handlers;
@@ -55,10 +56,14 @@ impl Backend {
         };
 
         let mut new_sources: Vec<(String, String)> = Vec::new();
+        let mut new_stdlib_paths: Vec<String> = Vec::new();
         let mut cache_misses: Vec<String> = Vec::new();
 
         // Stdlib first so workspace files (which may import std modules)
         // can resolve. Loaded only if `kestrel.stdlibPath` is configured.
+        // Stdlib paths are tracked separately so the compiler worker can
+        // partition stdlib (immutable, cached forever) from user code
+        // (rebuilt on edit).
         if let Some(stdlib) = stdlib_path {
             let mut paths: Vec<std::path::PathBuf> = Vec::new();
             project::walk_kestrel_sources(&stdlib, &mut paths);
@@ -66,6 +71,7 @@ impl Backend {
                 let Ok(canon) = path.canonicalize() else { continue };
                 let key = canon.to_string_lossy().into_owned();
                 let Ok(text) = std::fs::read_to_string(&canon) else { continue };
+                new_stdlib_paths.push(key.clone());
                 new_sources.push((key, text));
             }
         }
@@ -99,6 +105,9 @@ impl Backend {
             if let Ok(p) = folder.uri.to_file_path() {
                 state.workspace_roots.push(p);
             }
+        }
+        for path in new_stdlib_paths {
+            state.stdlib_paths.insert(path);
         }
         for (path, text) in new_sources {
             state.disk_line_indices.insert(path.clone(), position::LineIndex::new(text.clone()));
@@ -376,6 +385,7 @@ impl LanguageServer for Backend {
             let folders: Vec<WorkspaceFolder> = {
                 let mut state = self.state.lock().await;
                 state.sources.clear();
+                state.stdlib_paths.clear();
                 state.disk_line_indices.clear();
                 let folders = state
                     .workspace_roots

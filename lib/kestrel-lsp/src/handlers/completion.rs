@@ -29,7 +29,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::semantic;
-use crate::server::{rebuild_compiler, url_to_path, SharedState};
+use crate::server::{url_to_path, SharedState};
 use crate::syntax;
 
 pub async fn handle(
@@ -40,17 +40,17 @@ pub async fn handle(
     let pos = params.text_document_position.position;
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, line_index) = {
         let s = state.lock().await;
         let line_index = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), line_index)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, line_index)
     };
     let offset = line_index.position_to_offset(pos);
     let text = line_index.text().to_string();
 
-    let items = tokio::task::spawn_blocking(move || -> Vec<CompletionItem> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let Some(file_entity) = semantic::file_entity_for_path(&compiler, &path) else {
+    let items = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<CompletionItem> {
+        let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
             return vec![];
         };
         let world = compiler.world();
@@ -85,8 +85,7 @@ pub async fn handle(
         }
         items
     })
-    .await
-    .ok()?;
+    .await?;
 
     Some(CompletionResponse::Array(items))
 }

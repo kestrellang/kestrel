@@ -90,7 +90,7 @@ pub fn build_function(
 /// Build an initializer declaration entity from CST.
 ///
 /// Components: NodeKind::Initializer, FileId, Vis, Callable,
-/// [Valued (body)], [TypeParams], [WhereClause], [Attributes]
+/// [Valued (body)], [TypeParams], [WhereClause], [Attributes], [Documentation]
 pub fn build_initializer(
     world: &mut World,
     node: &SyntaxNode,
@@ -126,6 +126,7 @@ pub fn build_initializer(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    set_documentation(world, entity, node);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
 }

@@ -18,7 +18,13 @@ let client: LanguageClient | undefined;
 
 export async function activate(context: ExtensionContext) {
   const config = workspace.getConfiguration("kestrel");
-  const command = config.get<string>("lsp.path") ?? "kestrel-lsp";
+  // Resolve order:
+  //   1. `kestrel.lsp.path` setting (explicit override; absolute or PATH name)
+  //   2. Bundled `server/<platform>-<arch>/kestrel-lsp` shipped with the .vsix
+  //   3. `kestrel-lsp` on PATH (for users with a manually-built binary)
+  const settingPath = (config.get<string>("lsp.path") ?? "").trim();
+  const bundled = resolveBundledLsp(context);
+  const command = settingPath || bundled || "kestrel-lsp";
 
   const serverOptions: ServerOptions = {
     run: { command, transport: TransportKind.stdio },
@@ -112,6 +118,27 @@ export async function deactivate() {
   if (client) {
     await client.stop();
   }
+}
+
+/**
+ * Locate the kestrel-lsp binary shipped with this extension. We bundle a
+ * per-platform binary under `server/<platform>-<arch>/kestrel-lsp` so the
+ * extension works out of the box without requiring users to build the LSP
+ * themselves or have it on PATH.
+ *
+ * Returns `undefined` if no matching bundled binary exists — e.g. when
+ * running an unbundled .vsix on an unsupported platform, or in the
+ * Extension Development Host before `npm run server:build` has copied the
+ * dev binary in.
+ */
+function resolveBundledLsp(context: ExtensionContext): string | undefined {
+  const exeName = process.platform === "win32" ? "kestrel-lsp.exe" : "kestrel-lsp";
+  const target = `${process.platform}-${process.arch}`;
+  const candidate = path.join(context.extensionPath, "server", target, exeName);
+  if (isExecutableFile(candidate)) {
+    return candidate;
+  }
+  return undefined;
 }
 
 /**

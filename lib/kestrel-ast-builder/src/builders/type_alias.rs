@@ -12,7 +12,7 @@ use crate::components::*;
 /// Build a type alias declaration entity from CST.
 ///
 /// Components: NodeKind::TypeAlias, Name, FileId, Vis, Typed,
-/// TypeAnnotation (target), [TypeParams], [Attributes]
+/// TypeAnnotation (target), [TypeParams], [Attributes], [Documentation]
 pub fn build_type_alias(
     world: &mut World,
     node: &SyntaxNode,
@@ -78,6 +78,7 @@ pub fn build_type_alias(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    set_documentation(world, entity, node);
     // Associated types in protocols can have bounds: `type Iter: Iterator`
     set_conformances(world, entity, node, file_id);
     // And where clauses: `type Iter: Iterator where Iter.Item = Item`

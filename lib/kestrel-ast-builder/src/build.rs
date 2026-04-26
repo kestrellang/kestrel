@@ -709,6 +709,81 @@ mod tests {
     }
 
     // ================================================================
+    // Doc comment extraction
+    // ================================================================
+
+    fn doc_for_struct(src: &str, name: &str) -> Option<String> {
+        let (world, root, _) = build_from_source(src);
+        let m = find_child_by_name(&world, root, &NodeKind::Module, "M")?;
+        let s = find_child_by_name(&world, m, &NodeKind::Struct, name)?;
+        world.get::<Documentation>(s).map(|d| d.0.clone())
+    }
+
+    #[test]
+    fn doc_attaches_to_bare_decl() {
+        let src = "module M\n/// hello\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S").as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn doc_attaches_through_visibility() {
+        let src = "module M\n/// hello\npublic struct S {}";
+        assert_eq!(doc_for_struct(src, "S").as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn doc_attaches_through_attribute_list() {
+        let src = "module M\n/// hello\n@inline\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S").as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn doc_block_comment() {
+        let src = "module M\n/**\n * line one\n * line two\n */\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S").as_deref(), Some("line one\nline two"));
+    }
+
+    #[test]
+    fn doc_section_divider_is_not_doc() {
+        let src = "module M\n//// section\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S"), None);
+    }
+
+    #[test]
+    fn doc_decoration_block_is_not_doc() {
+        let src = "module M\n/*** decoration */\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S"), None);
+    }
+
+    #[test]
+    fn doc_inner_line_comment_is_not_doc() {
+        // `//!` is intentionally unsupported — treat as a regular comment
+        // that resets any preceding doc accumulator.
+        let src = "module M\n/// hello\n//! inner\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S"), None);
+    }
+
+    #[test]
+    fn doc_non_doc_comment_resets() {
+        let src = "module M\n/// stale\n// regular\n/// real\nstruct S {}";
+        assert_eq!(doc_for_struct(src, "S").as_deref(), Some("real"));
+    }
+
+    #[test]
+    fn doc_attaches_to_initializer_and_enum_case() {
+        let src = "module M\nenum E {\n  /// one\n  case One\n}\nstruct S {\n  /// init doc\n  init() {}\n}";
+        let (world, root, _) = build_from_source(src);
+        let m = find_child_by_name(&world, root, &NodeKind::Module, "M").unwrap();
+        let e = find_child_by_name(&world, m, &NodeKind::Enum, "E").unwrap();
+        let one = find_child_by_name(&world, e, &NodeKind::EnumCase, "One").unwrap();
+        assert_eq!(world.get::<Documentation>(one).map(|d| d.0.as_str()), Some("one"));
+
+        let s = find_child_by_name(&world, m, &NodeKind::Struct, "S").unwrap();
+        let init = find_child_by_kind(&world, s, &NodeKind::Initializer).unwrap();
+        assert_eq!(world.get::<Documentation>(init).map(|d| d.0.as_str()), Some("init doc"));
+    }
+
+    // ================================================================
     // Integration: real Kestrel source file
     // ================================================================
 
@@ -743,11 +818,9 @@ mod tests {
         let conf = world.get::<Conformances>(ordering).unwrap();
         assert_eq!(conf.0.len(), 2);
 
-        // Documentation — doc comments may not attach depending on CST trivia
-        // placement, so we just check the enum itself
-        if let Some(doc) = world.get::<Documentation>(ordering) {
-            assert!(doc.0.contains("comparing"), "doc: {}", doc.0);
-        }
+        // Documentation: descendants walk picks up trivia inside Visibility.
+        let doc = world.get::<Documentation>(ordering).expect("doc attached");
+        assert!(doc.0.contains("comparing"), "doc: {}", doc.0);
 
         // Enum cases: Less, Equal, Greater
         let less = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Less").unwrap();

@@ -1,0 +1,13 @@
+{
+  "path": "std.io",
+  "name": "io",
+  "submodules": [
+    "std.io.error",
+    "std.io.file",
+    "std.io.libc",
+    "std.io.read",
+    "std.io.stdio",
+    "std.io.write"
+  ],
+  "items": []
+}

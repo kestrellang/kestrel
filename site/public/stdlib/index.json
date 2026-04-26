@@ -1,0 +1,124 @@
+{
+  "modules": [
+    {
+      "path": "std",
+      "name": "std",
+      "item_count": 0
+    },
+    {
+      "path": "std.collections",
+      "name": "collections",
+      "item_count": 213
+    },
+    {
+      "path": "std.core",
+      "name": "core",
+      "item_count": 215
+    },
+    {
+      "path": "std.ffi",
+      "name": "ffi",
+      "item_count": 13
+    },
+    {
+      "path": "std.io",
+      "name": "io",
+      "item_count": 0
+    },
+    {
+      "path": "std.io.error",
+      "name": "error",
+      "item_count": 13
+    },
+    {
+      "path": "std.io.file",
+      "name": "file",
+      "item_count": 25
+    },
+    {
+      "path": "std.io.libc",
+      "name": "libc",
+      "item_count": 21
+    },
+    {
+      "path": "std.io.read",
+      "name": "read",
+      "item_count": 20
+    },
+    {
+      "path": "std.io.stdio",
+      "name": "stdio",
+      "item_count": 21
+    },
+    {
+      "path": "std.io.write",
+      "name": "write",
+      "item_count": 24
+    },
+    {
+      "path": "std.iter",
+      "name": "iter",
+      "item_count": 170
+    },
+    {
+      "path": "std.memory",
+      "name": "memory",
+      "item_count": 98
+    },
+    {
+      "path": "std.net",
+      "name": "net",
+      "item_count": 0
+    },
+    {
+      "path": "std.net.libc",
+      "name": "libc",
+      "item_count": 20
+    },
+    {
+      "path": "std.net.socket",
+      "name": "socket",
+      "item_count": 14
+    },
+    {
+      "path": "std.num",
+      "name": "num",
+      "item_count": 896
+    },
+    {
+      "path": "std.os",
+      "name": "os",
+      "item_count": 1
+    },
+    {
+      "path": "std.os.env",
+      "name": "env",
+      "item_count": 0
+    },
+    {
+      "path": "std.os.fs",
+      "name": "fs",
+      "item_count": 13
+    },
+    {
+      "path": "std.os.proc",
+      "name": "proc",
+      "item_count": 3
+    },
+    {
+      "path": "std.result",
+      "name": "result",
+      "item_count": 62
+    },
+    {
+      "path": "std.text",
+      "name": "text",
+      "item_count": 270
+    },
+    {
+      "path": "std.text.unicode",
+      "name": "unicode",
+      "item_count": 32
+    }
+  ]
+}

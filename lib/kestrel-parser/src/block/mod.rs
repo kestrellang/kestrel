@@ -363,6 +363,8 @@ pub fn code_block_parser<'tokens>()
     skip_trivia()
         .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_items_parser())
+        // Closing brace is recoverable. Emitter anchors diagnostic via
+        // `add_token_or_missing`.
         .then(
             skip_trivia().ignore_then(
                 just(Token::RBrace)
@@ -588,24 +590,15 @@ fn code_block_items_parser<'tokens>()
                 .then(expr_parser())
                 .or_not(),
         )
-        // Semicolon is recoverable: if missing, synthesize a zero-width
-        // span at the current position so a half-typed line like
-        // `let z = p` doesn't bail out of the entire block. Without this,
-        // recovery refuses `let` (it's a block-item boundary) and the
-        // surrounding `code_block_parser` fails, taking the whole
-        // FunctionBody / FunctionDeclaration with it.
-        //
-        // The `empty()` branch runs *before* trivia is skipped so the
-        // synthesised span sits right after the previous parsed thing
-        // (i.e. the end of the let-RHS expression) instead of on the
-        // whitespace of the following line — that's where the missing-`;`
-        // diagnostic should anchor.
+        // Semicolon is recoverable: a half-typed line synthesises a
+        // zero-width span at the parse position. The emitter widens this
+        // to anchor on the last real token via `add_token_or_missing`.
         .then(
-            just(Token::Semicolon)
-                .map_with(|_, e| to_kestrel_span(e.span()))
-                .or(skip_trivia()
-                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))))
-                .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(
+                just(Token::Semicolon)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
         )
         .map(
             |(

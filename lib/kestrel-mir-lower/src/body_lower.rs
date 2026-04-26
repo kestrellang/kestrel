@@ -2689,11 +2689,23 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // If the type is a Named struct, wrap the primitive via init call.
         // e.g. `42` with result type Int64 → Int64(intLiteral: 42)
         if let MirTy::Named { entity, .. } = &result_ty {
-            let label = match lit {
-                HirLiteral::Bool(_) => "boolLiteral",
-                HirLiteral::Integer(_) => "intLiteral",
-                HirLiteral::Float(_) => "floatLiteral",
-                HirLiteral::Char(_) => "charLiteral",
+            let (label, protocol) = match lit {
+                HirLiteral::Bool(_) => (
+                    "boolLiteral",
+                    kestrel_hir::Builtin::ExpressibleByBoolLiteral,
+                ),
+                HirLiteral::Integer(_) => (
+                    "intLiteral",
+                    kestrel_hir::Builtin::ExpressibleByIntegerLiteral,
+                ),
+                HirLiteral::Float(_) => (
+                    "floatLiteral",
+                    kestrel_hir::Builtin::ExpressibleByFloatLiteral,
+                ),
+                HirLiteral::Char(_) => (
+                    "charLiteral",
+                    kestrel_hir::Builtin::ExpressibleByCharLiteral,
+                ),
                 HirLiteral::String { value: content, .. } => {
                     // String literals need a 2-arg init: init(stringLiteral: ptr, length: i64)
                     if let Some(init_entity) = self.find_string_literal_init(*entity) {
@@ -2707,11 +2719,26 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     return self.lower_literal_primitive(lit, &result_ty);
                 },
                 HirLiteral::Null => {
+                    // `null` is sugar for the `ExpressibleByNullLiteral.init()`
+                    // protocol method, which the conforming type implements
+                    // (e.g. `Optional[T].init()` sets `self = .None`). Without
+                    // this call the destination slot is left uninitialized, so
+                    // a downstream `match` reads a garbage discriminant.
+                    if let Some(init_entity) = self.find_null_literal_init(*entity) {
+                        self.ctx.register_name(init_entity);
+                        let type_args = self.prepend_receiver_type_args(&result_ty, vec![]);
+                        let callee = Callee::Direct {
+                            func: init_entity,
+                            type_args,
+                            self_type: Some(result_ty.clone()),
+                        };
+                        return self.emit_call_maybe_init(callee, vec![], result_ty);
+                    }
                     return self.lower_literal_primitive(lit, &result_ty);
                 },
             };
 
-            if let Some(init_entity) = self.find_literal_init(*entity, label) {
+            if let Some(init_entity) = self.find_literal_init(*entity, protocol, label) {
                 // Use the init's parameter type for the primitive width.
                 // e.g. Float32.init(floatLiteral: lang.f64) → f64 literal
                 let param_ty = self
@@ -2892,54 +2919,61 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         types.into_iter().next().flatten()
     }
 
-    /// Find a literal protocol init (e.g., init(boolLiteral:)) on a struct entity.
-    fn find_literal_init(&self, struct_entity: Entity, label: &str) -> Option<Entity> {
-        use kestrel_ast_builder::{Callable, NodeKind};
+    /// Resolve a literal-protocol witness init on `struct_entity`. Returns
+    /// `None` if the protocol or its witness can't be found. The conformance
+    /// scope (a parent must declare the protocol) is enforced inside
+    /// `find_protocol_witness_init` — see that helper for why predicate-only
+    /// matching would be unsafe.
+    fn find_literal_protocol_init<P>(
+        &self,
+        struct_entity: Entity,
+        protocol: kestrel_hir::Builtin,
+        predicate: P,
+    ) -> Option<Entity>
+    where
+        P: Fn(&kestrel_ast_builder::Callable) -> bool,
+    {
+        let proto_entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: protocol,
+            root: self.ctx.root,
+        })?;
+        kestrel_name_res::find_protocol_witness_init(
+            &self.ctx.query,
+            struct_entity,
+            proto_entity,
+            self.ctx.root,
+            predicate,
+        )
+    }
 
-        for &child in self.ctx.world.children_of(struct_entity) {
-            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if *kind != NodeKind::Initializer {
-                continue;
-            }
-            let Some(callable) = self.ctx.world.get::<Callable>(child) else {
-                continue;
-            };
-            // Match init with exactly 1 param whose label matches
-            if callable.params.len() == 1 {
-                if callable.params[0].label.as_deref() == Some(label) {
-                    return Some(child);
-                }
-            }
-        }
-        None
+    /// Find a literal protocol init (e.g., init(boolLiteral:)) on a struct entity.
+    fn find_literal_init(
+        &self,
+        struct_entity: Entity,
+        protocol: kestrel_hir::Builtin,
+        label: &str,
+    ) -> Option<Entity> {
+        self.find_literal_protocol_init(struct_entity, protocol, |c| {
+            c.params.len() == 1 && c.params[0].label.as_deref() == Some(label)
+        })
+    }
+
+    /// Find the null literal init: `init()` from `ExpressibleByNullLiteral`.
+    fn find_null_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
+        self.find_literal_protocol_init(
+            struct_entity,
+            kestrel_hir::Builtin::ExpressibleByNullLiteral,
+            |c| c.params.is_empty(),
+        )
     }
 
     /// Find the string literal init: init(stringLiteral: ptr, length: i64).
-    /// This is a 2-param init unlike other literal inits.
     fn find_string_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
-        use kestrel_ast_builder::{Callable, NodeKind};
-
-        // Search direct children first
-        for &child in self.ctx.world.children_of(struct_entity) {
-            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if *kind != NodeKind::Initializer {
-                continue;
-            }
-            let Some(callable) = self.ctx.world.get::<Callable>(child) else {
-                continue;
-            };
-            // Second param has no external label (single-name param: "length: lang.i64")
-            if callable.params.len() == 2
-                && callable.params[0].label.as_deref() == Some("stringLiteral")
-            {
-                return Some(child);
-            }
-        }
-        None
+        self.find_literal_protocol_init(
+            struct_entity,
+            kestrel_hir::Builtin::ExpressibleByStringLiteral,
+            |c| c.params.len() == 2 && c.params[0].label.as_deref() == Some("stringLiteral"),
+        )
     }
 
     /// Resolve the internal array-literal initializer and its concrete element type.

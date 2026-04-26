@@ -11,7 +11,7 @@ use crate::components::*;
 /// Build an extension declaration entity from CST.
 ///
 /// Components: NodeKind::Extension, FileId, ExtensionTarget,
-/// [Conformances], [WhereClause], [Attributes]
+/// [Conformances], [WhereClause], [Attributes], [Documentation]
 ///
 /// Extensions have no Name — they extend an existing type.
 pub fn build_extension(
@@ -39,6 +39,7 @@ pub fn build_extension(
     }
 
     set_attributes(world, entity, node, file_id);
+    set_documentation(world, entity, node);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
 

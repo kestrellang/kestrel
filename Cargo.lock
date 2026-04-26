@@ -1013,6 +1013,19 @@ name = "kestrel-debug"
 version = "0.15.0"
 
 [[package]]
+name = "kestrel-doc"
+version = "0.15.0"
+dependencies = [
+ "clap",
+ "kestrel-ast-builder",
+ "kestrel-compiler",
+ "kestrel-hecs",
+ "kestrel-syntax-tree",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kestrel-hecs"
 version = "0.15.0"
 

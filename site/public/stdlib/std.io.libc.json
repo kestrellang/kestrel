@@ -1,0 +1,175 @@
+{
+  "path": "std.io.libc",
+  "name": "libc",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "typealias",
+      "name": "Fd",
+      "anchor": "typealias-Fd",
+      "signature": "public type Fd = Int32",
+      "doc": "File descriptor type (wraps an int).",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "MODE_DEFAULT",
+      "anchor": "function-MODE-DEFAULT",
+      "signature": "public func MODE_DEFAULT() -> Int32",
+      "doc": "Default file mode (rw-r--r-- = 0o644 = 420 decimal).",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_APPEND",
+      "anchor": "function-O-APPEND",
+      "signature": "public func O_APPEND() -> Int32",
+      "doc": "Append to end of file.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_CREAT",
+      "anchor": "function-O-CREAT",
+      "signature": "public func O_CREAT() -> Int32",
+      "doc": "",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_EXCL",
+      "anchor": "function-O-EXCL",
+      "signature": "public func O_EXCL() -> Int32",
+      "doc": "Fail if file exists (with O_CREAT).",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_RDONLY",
+      "anchor": "function-O-RDONLY",
+      "signature": "public func O_RDONLY() -> Int32",
+      "doc": "Open for reading only.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_RDWR",
+      "anchor": "function-O-RDWR",
+      "signature": "public func O_RDWR() -> Int32",
+      "doc": "Open for reading and writing.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_TRUNC",
+      "anchor": "function-O-TRUNC",
+      "signature": "public func O_TRUNC() -> Int32",
+      "doc": "Truncate file to zero length.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "O_WRONLY",
+      "anchor": "function-O-WRONLY",
+      "signature": "public func O_WRONLY() -> Int32",
+      "doc": "Open for writing only.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SEEK_CUR",
+      "anchor": "function-SEEK-CUR",
+      "signature": "public func SEEK_CUR() -> Int32",
+      "doc": "Seek from current position.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SEEK_END",
+      "anchor": "function-SEEK-END",
+      "signature": "public func SEEK_END() -> Int32",
+      "doc": "Seek from end of file.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SEEK_SET",
+      "anchor": "function-SEEK-SET",
+      "signature": "public func SEEK_SET() -> Int32",
+      "doc": "Seek from beginning of file.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "STDERR",
+      "anchor": "function-STDERR",
+      "signature": "public func STDERR() -> Fd",
+      "doc": "Standard error file descriptor.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "STDIN",
+      "anchor": "function-STDIN",
+      "signature": "public func STDIN() -> Fd",
+      "doc": "Standard input file descriptor.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "STDOUT",
+      "anchor": "function-STDOUT",
+      "signature": "public func STDOUT() -> Fd",
+      "doc": "Standard output file descriptor.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "close",
+      "anchor": "function-close",
+      "signature": "public func close(fd: Int32) -> Int32",
+      "doc": "Closes a file descriptor. Returns 0 on success, -1 on error.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "errno",
+      "anchor": "function-errno",
+      "signature": "public func errno() -> Int32",
+      "doc": "Returns the current errno value.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "lseek",
+      "anchor": "function-lseek",
+      "signature": "public func lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64",
+      "doc": "Seeks to a position in a file. Returns new position or -1 on error.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "open",
+      "anchor": "function-open",
+      "signature": "public func open(path: Pointer[UInt8], flags: Int32, mode: Int32) -> Fd",
+      "doc": "Opens a file. Returns file descriptor or -1 on error.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "read",
+      "anchor": "function-read",
+      "signature": "public func read(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64",
+      "doc": "Reads from a file descriptor. Returns bytes read, 0 on EOF, -1 on error.",
+      "source_path": "lang/std/io/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "write",
+      "anchor": "function-write",
+      "signature": "public func write(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64",
+      "doc": "Writes to a file descriptor. Returns bytes written or -1 on error.",
+      "source_path": "lang/std/io/libc.ks"
+    }
+  ]
+}

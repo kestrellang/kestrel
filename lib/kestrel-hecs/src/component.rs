@@ -174,6 +174,15 @@ impl ComponentStore {
         self.column::<T>().map_or(0, |col| col.len())
     }
 
+    /// Remove this entity from every column it appears in. After this
+    /// call `get` returns `None` and `iter` skips the entity for every
+    /// component type. Used by `World::despawn`.
+    pub fn despawn_all(&mut self, entity: Entity) {
+        for col in self.columns.values_mut() {
+            col.remove(entity);
+        }
+    }
+
     // -- private helpers --
 
     fn column<T: Component>(&self) -> Option<&TypedColumn<T>> {

@@ -211,13 +211,27 @@ impl<'a> QueryContext<'a> {
         self.components.has::<T>(entity)
     }
 
-    /// Get children of an entity.
+    /// Get children of an entity. Records a dependency on the entity
+    /// so the query re-fires when children are added or removed
+    /// (`World::set_parent` and `Hierarchy::detach` both mark the
+    /// parent as changed). Without this, despawning a child would
+    /// leave queries that walked the parent's children list returning
+    /// stale dead-entity IDs from cache.
     pub fn children_of(&self, entity: Entity) -> &'a [Entity] {
+        self.deps.borrow_mut().push(Dependency::Component {
+            entity,
+            component_type: hierarchy_dep_type(),
+        });
         self.hierarchy.children_of(entity)
     }
 
-    /// Get parent of an entity.
+    /// Get parent of an entity. Records a dependency on the entity
+    /// for the same reason as `children_of`.
     pub fn parent_of(&self, entity: Entity) -> Option<Entity> {
+        self.deps.borrow_mut().push(Dependency::Component {
+            entity,
+            component_type: hierarchy_dep_type(),
+        });
         self.hierarchy.parent_of(entity)
     }
 
@@ -405,6 +419,14 @@ impl<'a> QueryContext<'a> {
         }
         true
     }
+}
+
+/// Synthetic `TypeId` used as the `component_type` field on hierarchy
+/// dependency records. `deps_unchanged` only cares whether the entity
+/// itself changed (it ignores the type id), so any stable, unique
+/// value works — we use the `Hierarchy` struct's TypeId.
+fn hierarchy_dep_type() -> TypeId {
+    TypeId::of::<crate::world::Hierarchy>()
 }
 
 /// Compute a QueryKey for a query value.

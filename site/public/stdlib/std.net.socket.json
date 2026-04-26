@@ -1,0 +1,123 @@
+{
+  "path": "std.net.socket",
+  "name": "socket",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "TcpListener",
+      "anchor": "struct-TcpListener",
+      "signature": "public struct TcpListener",
+      "doc": "",
+      "source_path": "lang/std/net/socket.ks",
+      "members": [
+        {
+          "kind": "function",
+          "name": "accept",
+          "anchor": "function-accept",
+          "signature": "public func accept() -> Result[TcpStream, Error]",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "function",
+          "name": "bind",
+          "anchor": "function-bind",
+          "signature": "public static func bind(port: UInt16) -> Result[TcpListener, Error]",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "field",
+          "name": "fd",
+          "anchor": "field-fd",
+          "signature": "var fd: Int32",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "init(fd: Int32)",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "function",
+          "name": "rawFd",
+          "anchor": "function-rawFd",
+          "signature": "public func rawFd() -> Int32",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TcpStream",
+      "anchor": "struct-TcpStream",
+      "signature": "public struct TcpStream: Read, Write",
+      "doc": "",
+      "source_path": "lang/std/net/socket.ks",
+      "members": [
+        {
+          "kind": "function",
+          "name": "detachFd",
+          "anchor": "function-detachFd",
+          "signature": "public mutating func detachFd() -> Int32",
+          "doc": "Returns the file descriptor and detaches it from this stream.\nAfter calling this, the TcpStream will NOT close the fd on destruction.",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "field",
+          "name": "fd",
+          "anchor": "field-fd",
+          "signature": "var fd: Int32",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flush",
+          "anchor": "function-flush",
+          "signature": "public mutating func flush() -> Result[(), Error]",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(fd: Int32)",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "function",
+          "name": "rawFd",
+          "anchor": "function-rawFd",
+          "signature": "public func rawFd() -> Int32",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "function",
+          "name": "read",
+          "anchor": "function-read",
+          "signature": "public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        },
+        {
+          "kind": "function",
+          "name": "write",
+          "anchor": "function-write",
+          "signature": "public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]",
+          "doc": "",
+          "source_path": "lang/std/net/socket.ks"
+        }
+      ]
+    }
+  ]
+}

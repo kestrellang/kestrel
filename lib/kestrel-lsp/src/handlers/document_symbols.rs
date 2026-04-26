@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::{
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{rebuild_compiler, url_to_path, SharedState};
+use crate::server::{url_to_path, SharedState};
 
 pub async fn handle(
     state: SharedState,
@@ -25,20 +25,19 @@ pub async fn handle(
     let uri = params.text_document.uri;
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, line_index) = {
         let s = state.lock().await;
         let li = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), li)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, li)
     };
 
-    tokio::task::spawn_blocking(move || -> Option<DocumentSymbolResponse> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let file_entity = semantic::file_entity_for_path(&compiler, &path)?;
+    handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<DocumentSymbolResponse> {
+        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
         let symbols = build_outline(compiler.world(), file_entity, &line_index);
         Some(DocumentSymbolResponse::Nested(symbols))
     })
     .await
-    .ok()
     .flatten()
 }
 

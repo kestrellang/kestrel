@@ -58,6 +58,22 @@ impl Hierarchy {
         self.children.entry(parent).or_default().push(child);
     }
 
+    /// Detach `entity` from the hierarchy: drop its parent link, remove
+    /// it from its parent's children list, and forget its own children
+    /// list. Returns the former parent so the caller can mark it as
+    /// changed (its children list mutated). Children become orphans —
+    /// callers should despawn them too.
+    pub fn detach(&mut self, entity: Entity) -> Option<Entity> {
+        let parent = self.parent.remove(&entity);
+        if let Some(p) = parent
+            && let Some(siblings) = self.children.get_mut(&p)
+        {
+            siblings.retain(|&e| e != entity);
+        }
+        self.children.remove(&entity);
+        parent
+    }
+
     pub fn parent_of(&self, entity: Entity) -> Option<Entity> {
         self.parent.get(&entity).copied()
     }
@@ -158,6 +174,31 @@ impl World {
         entity.index() < self.entities.len() && self.entities[entity.index()].alive
     }
 
+    /// Mark `entity` as dead and remove every component it carries.
+    /// Detaches it from the hierarchy and marks it as changed so any
+    /// memoized query that read its components re-fires on next access.
+    ///
+    /// Entity IDs are not reused — `spawn()` always allocates a fresh
+    /// index, so a despawned entity stays a stable "tombstone" that
+    /// reports `is_alive == false` and `get == None` forever.
+    pub fn despawn(&mut self, entity: Entity) {
+        if !self.is_alive(entity) {
+            return;
+        }
+        self.components.despawn_all(entity);
+        let former_parent = self.hierarchy.detach(entity);
+        self.entities[entity.index()].alive = false;
+        self.entities[entity.index()].last_changed = self.revision;
+        self.changes.mark_changed(entity);
+        // Detaching mutated the parent's children list — mark it
+        // changed so queries that walked `children_of(parent)` see
+        // the despawned entity disappear from cache.
+        if let Some(p) = former_parent {
+            self.changes.mark_changed(p);
+            self.entities[p.index()].last_changed = self.revision;
+        }
+    }
+
     /// When this entity was last modified.
     pub fn last_changed(&self, entity: Entity) -> Revision {
         self.entities[entity.index()].last_changed
@@ -213,7 +254,21 @@ impl World {
     // -- Hierarchy --
 
     pub fn set_parent(&mut self, child: Entity, parent: Entity) {
+        // Snapshot the old parent before mutation so we can mark it
+        // changed too — moving a child away from `old_parent` mutates
+        // its children list, and queries that read it must re-fire.
+        let old_parent = self.hierarchy.parent_of(child);
         self.hierarchy.set_parent(child, parent);
+        // The parent's children list changed; queries that walked it
+        // (via `QueryContext::children_of`) need to re-fire.
+        self.changes.mark_changed(parent);
+        self.entities[parent.index()].last_changed = self.revision;
+        if let Some(op) = old_parent
+            && op != parent
+        {
+            self.changes.mark_changed(op);
+            self.entities[op.index()].last_changed = self.revision;
+        }
     }
 
     pub fn parent_of(&self, entity: Entity) -> Option<Entity> {
@@ -521,6 +576,243 @@ mod tests {
         let result2 = ctx.query(GetHealth { entity: e });
         assert_eq!(result2, Some(42));
         assert_eq!(SNAP_EXEC.with(|c| *c.borrow()), 1);
+    }
+
+    // -- Despawn tests --
+
+    #[test]
+    fn despawn_then_read_returns_none() {
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        world.set(e, Name("Alice".into()));
+        world.set(e, Health(100));
+
+        world.despawn(e);
+
+        assert!(!world.is_alive(e));
+        assert_eq!(world.get::<Name>(e), None);
+        assert_eq!(world.get::<Health>(e), None);
+        assert!(!world.has::<Name>(e));
+    }
+
+    #[test]
+    fn despawn_skips_entity_in_iter_component() {
+        let mut world = World::new();
+        world.begin_revision();
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+        world.set(e1, Health(10));
+        world.set(e2, Health(20));
+
+        world.despawn(e1);
+
+        let healths: Vec<_> = world.iter_component::<Health>().collect();
+        assert_eq!(healths.len(), 1);
+        assert_eq!(healths[0].0, e2);
+    }
+
+    #[test]
+    fn despawn_detaches_from_parent() {
+        let mut world = World::new();
+        world.begin_revision();
+        let parent = world.spawn();
+        let child = world.spawn();
+        world.set_parent(child, parent);
+        assert_eq!(world.children_of(parent), &[child]);
+
+        world.despawn(child);
+
+        assert_eq!(world.parent_of(child), None);
+        assert!(world.children_of(parent).is_empty());
+    }
+
+    #[test]
+    fn respawn_after_despawn_yields_new_id() {
+        let mut world = World::new();
+        world.begin_revision();
+        let e1 = world.spawn();
+        world.despawn(e1);
+        let e2 = world.spawn();
+        assert_ne!(e1, e2);
+        assert!(!world.is_alive(e1));
+        assert!(world.is_alive(e2));
+    }
+
+    #[test]
+    fn despawn_marks_entity_changed() {
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        world.set(e, Health(100));
+
+        world.begin_revision(); // clear changes
+        assert!(!world.changes().is_changed(e));
+
+        world.despawn(e);
+        assert!(world.changes().is_changed(e));
+    }
+
+    #[test]
+    fn despawn_invalidates_dependent_query() {
+        use crate::query::QueryFn;
+        use std::cell::RefCell;
+
+        thread_local! {
+            static EXEC: RefCell<u32> = const { RefCell::new(0) };
+        }
+
+        #[derive(Clone, PartialEq, Eq, Hash)]
+        struct GetHealth {
+            entity: Entity,
+        }
+
+        impl QueryFn for GetHealth {
+            type Output = Option<i32>;
+            fn execute(&self, ctx: &crate::query::QueryContext<'_>) -> Self::Output {
+                EXEC.with(|c| *c.borrow_mut() += 1);
+                ctx.get::<Health>(self.entity).map(|h| h.0)
+            }
+        }
+
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        world.set(e, Health(42));
+
+        // First call: executes, caches.
+        {
+            let ctx = world.query_context();
+            assert_eq!(ctx.query(GetHealth { entity: e }), Some(42));
+        }
+        assert_eq!(EXEC.with(|c| *c.borrow()), 1);
+
+        // Despawn between revisions, then query again — should re-execute
+        // because the entity's component dep is marked changed and the
+        // read now returns None.
+        world.begin_revision();
+        world.despawn(e);
+
+        let ctx = world.query_context();
+        let r2 = ctx.query(GetHealth { entity: e });
+        assert_eq!(r2, None);
+        assert_eq!(EXEC.with(|c| *c.borrow()), 2);
+    }
+
+    #[test]
+    fn despawn_invalidates_children_of_query() {
+        // A query that walks `ctx.children_of(parent)` and reads a
+        // component on each child must re-fire when one of those
+        // children is despawned, even though it never read a
+        // component on the parent itself. Before the hierarchy-dep
+        // tracking fix, the query would return stale results
+        // pointing at dead entities.
+        use crate::query::QueryFn;
+        use std::cell::RefCell;
+
+        thread_local! {
+            static EXEC: RefCell<u32> = const { RefCell::new(0) };
+        }
+
+        #[derive(Clone, PartialEq, Eq, Hash)]
+        struct ChildNames {
+            parent: Entity,
+        }
+
+        impl QueryFn for ChildNames {
+            type Output = Vec<String>;
+            fn execute(&self, ctx: &crate::query::QueryContext<'_>) -> Self::Output {
+                EXEC.with(|c| *c.borrow_mut() += 1);
+                ctx.children_of(self.parent)
+                    .iter()
+                    .filter_map(|&c| ctx.get::<Name>(c).map(|n| n.0.clone()))
+                    .collect()
+            }
+        }
+
+        let mut world = World::new();
+        world.begin_revision();
+        let parent = world.spawn();
+        let c1 = world.spawn();
+        world.set(c1, Name("alpha".into()));
+        world.set_parent(c1, parent);
+        let c2 = world.spawn();
+        world.set(c2, Name("beta".into()));
+        world.set_parent(c2, parent);
+
+        // First execution.
+        {
+            let ctx = world.query_context();
+            let mut names = ctx.query(ChildNames { parent });
+            names.sort();
+            assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+        }
+        assert_eq!(EXEC.with(|c| *c.borrow()), 1);
+
+        // Despawn one child between revisions.
+        world.begin_revision();
+        world.despawn(c1);
+
+        // Query must re-fire and see only the surviving child.
+        let ctx = world.query_context();
+        let names = ctx.query(ChildNames { parent });
+        assert_eq!(names, vec!["beta".to_string()]);
+        assert_eq!(EXEC.with(|c| *c.borrow()), 2);
+    }
+
+    #[test]
+    fn set_parent_invalidates_children_of_query() {
+        // Adding a new child to a parent must invalidate cached
+        // queries that read the parent's children list.
+        use crate::query::QueryFn;
+        use std::cell::RefCell;
+
+        thread_local! {
+            static EXEC: RefCell<u32> = const { RefCell::new(0) };
+        }
+
+        #[derive(Clone, PartialEq, Eq, Hash)]
+        struct ChildCount {
+            parent: Entity,
+        }
+
+        impl QueryFn for ChildCount {
+            type Output = usize;
+            fn execute(&self, ctx: &crate::query::QueryContext<'_>) -> Self::Output {
+                EXEC.with(|c| *c.borrow_mut() += 1);
+                ctx.children_of(self.parent).len()
+            }
+        }
+
+        let mut world = World::new();
+        world.begin_revision();
+        let parent = world.spawn();
+
+        {
+            let ctx = world.query_context();
+            assert_eq!(ctx.query(ChildCount { parent }), 0);
+        }
+        assert_eq!(EXEC.with(|c| *c.borrow()), 1);
+
+        world.begin_revision();
+        let new_child = world.spawn();
+        world.set_parent(new_child, parent);
+
+        let ctx = world.query_context();
+        assert_eq!(ctx.query(ChildCount { parent }), 1);
+        assert_eq!(EXEC.with(|c| *c.borrow()), 2);
+    }
+
+    #[test]
+    fn despawn_idempotent() {
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        world.set(e, Health(100));
+        world.despawn(e);
+        // Calling again must not panic.
+        world.despawn(e);
+        assert!(!world.is_alive(e));
     }
 
     #[test]

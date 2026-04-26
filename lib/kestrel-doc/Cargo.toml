@@ -1,0 +1,23 @@
+[package]
+name = "kestrel-doc"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "kestrel-doc"
+path = "src/main.rs"
+
+[dependencies]
+kestrel-compiler = { path = "../kestrel-compiler" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+clap = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

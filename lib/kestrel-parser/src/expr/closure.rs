@@ -101,10 +101,7 @@ where
                 .map(|opt| opt.unwrap_or((None, None))),
         )
         .then(body_items)
-        // Closing brace is recoverable: a half-typed closure body keeps its
-        // shape so member completion / hover see the inner expressions
-        // instead of falling through to scope and leaking module-level
-        // snippets. See parser_recovery_pattern in user memory.
+        // Closing brace is recoverable. Emitter anchors via `add_token_or_missing`.
         .then(
             skip_trivia().ignore_then(
                 just(Token::RBrace)

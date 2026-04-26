@@ -1,0 +1,113 @@
+{
+  "path": "std.io.error",
+  "name": "error",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "Error",
+      "anchor": "struct-Error",
+      "signature": "public struct Error",
+      "doc": "Represents an I/O error with a POSIX error code.",
+      "source_path": "lang/std/io/error.ks",
+      "members": [
+        {
+          "kind": "field",
+          "name": "code",
+          "anchor": "field-code",
+          "signature": "var code: Int32",
+          "doc": "",
+          "source_path": "lang/std/io/error.ks"
+        },
+        {
+          "kind": "function",
+          "name": "description",
+          "anchor": "function-description",
+          "signature": "public func description() -> String",
+          "doc": "Returns a human-readable description of the error.",
+          "source_path": "lang/std/io/error.ks"
+        },
+        {
+          "kind": "function",
+          "name": "errno",
+          "anchor": "function-errno",
+          "signature": "public func errno() -> Int32",
+          "doc": "Returns the raw POSIX error code.",
+          "source_path": "lang/std/io/error.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(code: Int32)",
+          "doc": "Creates an error from an error code.",
+          "source_path": "lang/std/io/error.ks"
+        },
+        {
+          "kind": "function",
+          "name": "last",
+          "anchor": "function-last",
+          "signature": "public static func last() -> Error",
+          "doc": "Creates an error from the current errno value.",
+          "source_path": "lang/std/io/error.ks"
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "alreadyExists",
+      "anchor": "function-alreadyExists",
+      "signature": "public func alreadyExists() -> Error",
+      "doc": "Creates an \"already exists\" error (EEXIST).",
+      "source_path": "lang/std/io/error.ks"
+    },
+    {
+      "kind": "function",
+      "name": "brokenPipe",
+      "anchor": "function-brokenPipe",
+      "signature": "public func brokenPipe() -> Error",
+      "doc": "Creates a \"broken pipe\" error (EPIPE).",
+      "source_path": "lang/std/io/error.ks"
+    },
+    {
+      "kind": "function",
+      "name": "interrupted",
+      "anchor": "function-interrupted",
+      "signature": "public func interrupted() -> Error",
+      "doc": "Creates an \"interrupted\" error (EINTR).",
+      "source_path": "lang/std/io/error.ks"
+    },
+    {
+      "kind": "function",
+      "name": "invalidInput",
+      "anchor": "function-invalidInput",
+      "signature": "public func invalidInput() -> Error",
+      "doc": "Creates an \"invalid input\" error (EINVAL).",
+      "source_path": "lang/std/io/error.ks"
+    },
+    {
+      "kind": "function",
+      "name": "notFound",
+      "anchor": "function-notFound",
+      "signature": "public func notFound() -> Error",
+      "doc": "Creates a \"not found\" error (ENOENT).",
+      "source_path": "lang/std/io/error.ks"
+    },
+    {
+      "kind": "function",
+      "name": "permissionDenied",
+      "anchor": "function-permissionDenied",
+      "signature": "public func permissionDenied() -> Error",
+      "doc": "Creates a \"permission denied\" error (EACCES).",
+      "source_path": "lang/std/io/error.ks"
+    },
+    {
+      "kind": "function",
+      "name": "wouldBlock",
+      "anchor": "function-wouldBlock",
+      "signature": "public func wouldBlock() -> Error",
+      "doc": "Creates a \"would block\" error (EAGAIN).",
+      "source_path": "lang/std/io/error.ks"
+    }
+  ]
+}

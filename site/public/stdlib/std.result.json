@@ -1,0 +1,511 @@
+{
+  "path": "std.result",
+  "name": "result",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "enum",
+      "name": "Optional",
+      "anchor": "enum-Optional",
+      "signature": "public enum Optional[T]",
+      "doc": "Represents an optional value: either `Some(value)` or `None`.\n\nUsed for values that may be absent, providing a type-safe alternative to\nnull pointers. The compiler enforces handling of the None case.\n\nSyntactic sugar:\n    T?           desugars to  Optional[T]\n    null         creates      Optional.None\n\nExample:\n    func find(id: Int64) -> User? {\n        if let user = users.get(id) {\n            return user\n        }\n        return null\n    }\n\n    let user = find(id: 42)\n    match user {\n        case .Some(let u) => print(u.name)\n        case .None => print(\"Not found\")\n    }\n\nThe `try` operator extracts values, returning early on None:\n    func process() -> Result? {\n        let a = try getA()  // returns None if getA() is None\n        let b = try getB()\n        return transform(a, b)\n    }",
+      "source_path": "lang/std/result/optional.ks",
+      "members": [
+        {
+          "kind": "case",
+          "name": "None",
+          "anchor": "case-None",
+          "signature": "case None",
+          "doc": "Contains no value.",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "case",
+          "name": "Some",
+          "anchor": "case-Some",
+          "signature": "case Some(T)",
+          "doc": "Contains a value.",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "expect",
+          "anchor": "function-expect",
+          "signature": "public func expect(message: String) -> T",
+          "doc": "Returns the contained value, panicking with a custom message if None.\n\nUse this for better error messages when a None is unexpected.\n\nExample:\n    let config = loadConfig().expect(message: \"Config file required\")\n    None.expect(message: \"Should never happen\")  // PANIC: Should never happen",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "filter",
+          "anchor": "function-filter",
+          "signature": "public func filter(predicate: (T) -> Bool) -> Optional[T]",
+          "doc": "Returns Some if predicate returns true, otherwise None.\n\nExample:\n    Some(4).filter({ it % 2 == 0 })  // Some(4)\n    Some(3).filter({ it % 2 == 0 })  // None\n    None.filter({ it % 2 == 0 })     // None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flatMap",
+          "anchor": "function-flatMap",
+          "signature": "public func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U]",
+          "doc": "Transforms the contained value, flattening the result.\n\nUse when your transform function returns an Optional.\nEquivalent to `map` followed by `flatten`.\n\nExample:\n    func parse(s: String) -> Int64? { ... }\n\n    Some(\"42\").flatMap(parse)   // Some(42)\n    Some(\"abc\").flatMap(parse)  // None (parse failed)\n    None.flatMap(parse)         // None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flatten",
+          "anchor": "function-flatten",
+          "signature": "public func flatten[U]() -> Optional[U] where T = Optional[U]",
+          "doc": "Flattens a nested Optional.\n\nConverts `Optional[Optional[T]]` to `Optional[T]`.\n\nExample:\n    Some(Some(42)).flatten()  // Some(42)\n    Some(None).flatten()      // None\n    None.flatten()            // None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "inspect",
+          "anchor": "function-inspect",
+          "signature": "public func inspect(fn: (T) -> ()) -> Optional[T]",
+          "doc": "Calls the function with the contained value for side effects.\n\nReturns self unchanged. Useful for logging or debugging in a chain.\n\nExample:\n    getUser(id)\n        .inspect({ print(\"Found: \\{it.name}\") })\n        .map({ it.email })",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isNone",
+          "anchor": "function-isNone",
+          "signature": "public func isNone() -> Bool",
+          "doc": "Returns true if this is None.\n\nExample:\n    Some(42).isNone()  // false\n    None.isNone()      // true",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isSome",
+          "anchor": "function-isSome",
+          "signature": "public func isSome() -> Bool",
+          "doc": "Returns true if this is Some.\n\nExample:\n    Some(42).isSome()  // true\n    None.isSome()      // false",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isSomeAnd",
+          "anchor": "function-isSomeAnd",
+          "signature": "public func isSomeAnd(predicate: (T) -> Bool) -> Bool",
+          "doc": "Returns true if this is Some and the value satisfies the predicate.\n\nExample:\n    Some(42).isSomeAnd({ it > 0 })   // true\n    Some(-1).isSomeAnd({ it > 0 })   // false\n    None.isSomeAnd({ it > 0 })       // false",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> OptionalIterator[T]",
+          "doc": "Returns an iterator over the contained value (0 or 1 elements).\n\nUseful for integrating with iterator-based APIs.\n\nExample:\n    for value in Some(42).iter() {\n        print(value)  // prints 42\n    }\n\n    for value in None.iter() {\n        print(value)  // never executes\n    }",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "map",
+          "anchor": "function-map",
+          "signature": "public func map[U](transform: (T) -> U) -> Optional[U]",
+          "doc": "Transforms the contained value using the function.\n\nReturns None if this is None, otherwise applies the function to the\ncontained value and wraps the result in Some.\n\nExample:\n    Some(2).map({ it * 2 })        // Some(4)\n    None.map({ it * 2 })           // None\n    Some(\"hello\").map({ it.len })  // Some(5)",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "none",
+          "anchor": "function-none",
+          "signature": "public static func none() -> Optional[T]",
+          "doc": "Creates a None.\n\nTypically not needed - use `null` literal instead.\n\nExample:\n    let opt = Optional[Int64].none()  // None\n    let opt: Int64? = null            // Same, preferred",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "okOr",
+          "anchor": "function-okOr",
+          "signature": "public func okOr[E](error: E) -> Result[T, E]",
+          "doc": "Converts to Result, using the provided error if None.\n\nNote: The error is eagerly evaluated. Use `okOrElse` for lazy evaluation.\n\nExample:\n    Some(42).okOr(error: \"missing\")  // Ok(42)\n    None.okOr(error: \"missing\")      // Err(\"missing\")",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "okOrElse",
+          "anchor": "function-okOrElse",
+          "signature": "public func okOrElse[E](error: () -> E) -> Result[T, E]",
+          "doc": "Converts to Result, calling the function to create an error if None.\n\nExample:\n    Some(42).okOrElse(|| NotFoundError())  // Ok(42), no call\n    None.okOrElse(|| NotFoundError())      // Err(NotFoundError())",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "orElse",
+          "anchor": "function-orElse",
+          "signature": "public func orElse(alternative: () -> Optional[T]) -> Optional[T]",
+          "doc": "Returns this if Some, otherwise calls alternative.\n\nFor the common case of providing a default value, prefer the `??` operator.\nUse `orElse` when you need to return another Optional (not unwrap).\n\nExample:\n    Some(1).orElse(|| Some(2))        // Some(1), no call\n    None.orElse(|| Some(2))           // Some(2)\n    None.orElse(|| loadFromCache())   // calls function\n\n    // For unwrapping with a default, prefer ??:\n    let value = optionalInt ?? 0",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "replace",
+          "anchor": "function-replace",
+          "signature": "public mutating func replace(value: T) -> Optional[T]",
+          "doc": "Replaces the value, returning the old value.\n\nExample:\n    var opt = Some(1)\n    opt.replace(value: 2)  // Some(1), opt is now Some(2)\n\n    var none: Int64? = null\n    none.replace(value: 1)  // None, none is now Some(1)",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "some",
+          "anchor": "function-some",
+          "signature": "public static func some(value: T) -> Optional[T]",
+          "doc": "Creates a Some containing the value.\n\nTypically not needed - just return the value directly and it will\nbe wrapped automatically.\n\nExample:\n    let opt = Optional.some(value: 42)  // Some(42)\n    let opt: Int64? = 42                // Same, preferred",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "take",
+          "anchor": "function-take",
+          "signature": "public mutating func take() -> Optional[T]",
+          "doc": "Takes the value out, leaving None in its place.\n\nReturns the original value (Some or None).\n\nExample:\n    var opt = Some(42)\n    opt.take()  // Some(42), opt is now None\n    opt.take()  // None, opt is still None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "takeIf",
+          "anchor": "function-takeIf",
+          "signature": "public mutating func takeIf(predicate: (T) -> Bool) -> Optional[T]",
+          "doc": "Takes the value if the predicate is satisfied.\n\nIf Some and predicate returns true, takes the value leaving None.\nOtherwise returns None and leaves self unchanged.\n\nExample:\n    var opt = Some(42)\n    opt.takeIf({ it > 0 })   // Some(42), opt is now None\n\n    var opt2 = Some(42)\n    opt2.takeIf({ it < 0 })  // None, opt2 is still Some(42)",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "then",
+          "anchor": "function-then",
+          "signature": "public func then[U](other: Optional[U]) -> Optional[U]",
+          "doc": "Returns other if this is Some, otherwise None.\n\nNote: `other` is eagerly evaluated. Use `flatMap` for lazy evaluation.\n\nExample:\n    Some(1).then(other: Some(\"a\"))  // Some(\"a\")\n    Some(1).then(other: None)       // None\n    None.then(other: Some(\"a\"))     // None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrap",
+          "anchor": "function-unwrap",
+          "signature": "public func unwrap() -> T",
+          "doc": "Returns the contained value, panicking if None.\n\nWARNING: Only use when you are certain the value is Some.\nPrefer `unwrapOr`, `unwrap(orElse:)`, or pattern matching.\n\nExample:\n    Some(42).unwrap()  // 42\n    None.unwrap()      // PANIC: called unwrap on None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrap",
+          "anchor": "function-unwrap",
+          "signature": "public func unwrap(orElse defaultFn: () -> T) -> T",
+          "doc": "Returns the contained value or calls the function if None.\n\nThe function is only called if the Optional is None.\n\nExample:\n    Some(42).unwrap(orElse: || expensiveDefault())  // 42, no call\n    None.unwrap(orElse: || expensiveDefault())      // calls function",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrapOr",
+          "anchor": "function-unwrapOr",
+          "signature": "public func unwrapOr(default: T) -> T",
+          "doc": "Returns the contained value or the default if None.\n\nNote: The default is eagerly evaluated. Use `unwrap(orElse:)` for\nlazy evaluation when the default is expensive to compute.\n\nExample:\n    Some(42).unwrapOr(default: 0)  // 42\n    None.unwrapOr(default: 0)      // 0",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "xor",
+          "anchor": "function-xor",
+          "signature": "public func xor(other: Optional[T]) -> Optional[T]",
+          "doc": "Returns Some if exactly one of this or other is Some.\n\nExample:\n    Some(1).xor(other: None)     // Some(1)\n    None.xor(other: Some(2))     // Some(2)\n    Some(1).xor(other: Some(2))  // None\n    None.xor(other: None)        // None",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "zip",
+          "anchor": "function-zip",
+          "signature": "public func zip[U](with other: Optional[U]) -> Optional[(T, U)]",
+          "doc": "Combines two Optionals into an Optional of a tuple.\n\nReturns Some only if both are Some.\n\nExample:\n    Some(1).zip(with: Some(\"a\"))  // Some((1, \"a\"))\n    Some(1).zip(with: None)       // None\n    None.zip(with: Some(\"a\"))     // None",
+          "source_path": "lang/std/result/optional.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OptionalIterator",
+      "anchor": "struct-OptionalIterator",
+      "signature": "public struct OptionalIterator[T]: Iterator",
+      "doc": "Iterator for Optional that yields 0 or 1 elements.\n\nObtained by calling `iter()` on an Optional.\n\nExample:\n    let items: [Int64] = Some(42).iter().collect()  // [42]\n    let empty: [Int64] = None.iter().collect()      // []",
+      "source_path": "lang/std/result/optional.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = T",
+          "doc": "",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(value: Optional[T])",
+          "doc": "",
+          "source_path": "lang/std/result/optional.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> Optional[T]",
+          "doc": "Returns the next element, or None if exhausted.",
+          "source_path": "lang/std/result/optional.ks"
+        }
+      ]
+    },
+    {
+      "kind": "typealias",
+      "name": "OptionalTypeOperator",
+      "anchor": "typealias-OptionalTypeOperator",
+      "signature": "public type OptionalTypeOperator[T] = Optional[T]",
+      "doc": "Type operator alias: T? desugars to Optional[T].\n\nThis provides convenient syntax for optional types.\n\nExample:\n    var name: String? = null       // same as Optional[String]\n    func find(id: Int64) -> User?  // returns Optional[User]\n    let nested: Int64?? = null     // Optional[Optional[Int64]]",
+      "source_path": "lang/std/result/optional.ks"
+    },
+    {
+      "kind": "enum",
+      "name": "Result",
+      "anchor": "enum-Result",
+      "signature": "public enum Result[T, E]: Tryable",
+      "doc": "Represents the result of an operation: either `Ok(value)` or `Err(error)`.\n\nUsed for operations that can fail, providing explicit error handling\nwithout exceptions. The compiler enforces handling of the error case.\n\nSyntactic sugar:\n    T throws E   desugars to  Result[T, E]",
+      "source_path": "lang/std/result/result.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Early",
+          "anchor": "typealias-Early",
+          "signature": "type Early = E",
+          "doc": "",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "case",
+          "name": "Err",
+          "anchor": "case-Err",
+          "signature": "case Err(E)",
+          "doc": "Contains an error value.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "case",
+          "name": "Ok",
+          "anchor": "case-Ok",
+          "signature": "case Ok(T)",
+          "doc": "Contains a success value.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "typealias",
+          "name": "Output",
+          "anchor": "typealias-Output",
+          "signature": "type Output = T",
+          "doc": "",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "andThen",
+          "anchor": "function-andThen",
+          "signature": "public func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E]",
+          "doc": "Alias for flatMap - chains result operations.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "andValue",
+          "anchor": "function-andValue",
+          "signature": "public func andValue[U](other: Result[U, E]) -> Result[U, E]",
+          "doc": "Returns other if this is Ok, otherwise returns the Err.\nNote: 'and' is a keyword, so we use 'andValue'.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "err",
+          "anchor": "function-err",
+          "signature": "public static func err(error: E) -> Result[T, E]",
+          "doc": "Creates an Err containing the error.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "err",
+          "anchor": "function-err",
+          "signature": "public func err() -> Optional[E]",
+          "doc": "Converts to Optional, discarding the success value.\n\nReturns Some(error) if Err, None if Ok.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flatMap",
+          "anchor": "function-flatMap",
+          "signature": "public func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E]",
+          "doc": "Transforms the success value, flattening the result.\n\nUse when your transform function returns a Result.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "flatMapErr",
+          "anchor": "function-flatMapErr",
+          "signature": "public func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F]",
+          "doc": "Transforms the error value, flattening the result.\n\nUse when your transform function returns a Result.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isErr",
+          "anchor": "function-isErr",
+          "signature": "public func isErr() -> Bool",
+          "doc": "Returns true if this is Err.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "isOk",
+          "anchor": "function-isOk",
+          "signature": "public func isOk() -> Bool",
+          "doc": "Returns true if this is Ok.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "iter",
+          "anchor": "function-iter",
+          "signature": "public func iter() -> ResultIterator[T, E]",
+          "doc": "Returns an iterator over the success value (0 or 1 elements).",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "map",
+          "anchor": "function-map",
+          "signature": "public func map[U](transform: (T) -> U) -> Result[U, E]",
+          "doc": "Transforms the success value using the function.\n\nReturns Err unchanged if this is Err.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "mapErr",
+          "anchor": "function-mapErr",
+          "signature": "public func mapErr[F](transform: (E) -> F) -> Result[T, F]",
+          "doc": "Transforms the error value using the function.\n\nReturns Ok unchanged if this is Ok.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "ok",
+          "anchor": "function-ok",
+          "signature": "public static func ok(value: T) -> Result[T, E]",
+          "doc": "Creates an Ok containing the value.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "ok",
+          "anchor": "function-ok",
+          "signature": "public func ok() -> Optional[T]",
+          "doc": "Converts to Optional, discarding the error.\n\nReturns Some(value) if Ok, None if Err.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "orElse",
+          "anchor": "function-orElse",
+          "signature": "public func orElse[F](alternative: (E) -> Result[T, F]) -> Result[T, F]",
+          "doc": "Returns this if Ok, otherwise calls alternative with the error.\n\nThe function receives the error and can attempt recovery.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "orValue",
+          "anchor": "function-orValue",
+          "signature": "public func orValue(other: Result[T, E]) -> Result[T, E]",
+          "doc": "Returns this if Ok, otherwise returns other.\nNote: 'or' is a keyword, so we use 'orValue'.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "tryExtract",
+          "anchor": "function-tryExtract",
+          "signature": "public func tryExtract() -> ControlFlow[T, E]",
+          "doc": "Extracts the value for the try operator.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrap",
+          "anchor": "function-unwrap",
+          "signature": "public func unwrap() -> T",
+          "doc": "Returns the success value, panicking if Err.\n\nWARNING: Only use when you are certain the result is Ok.\nPrefer `unwrapOr`, `unwrap(orElse:)`, or pattern matching.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrap",
+          "anchor": "function-unwrap",
+          "signature": "public func unwrap(orElse defaultFn: (E) -> T) -> T",
+          "doc": "Returns the success value or calls the function with the error if Err.\n\nThe function receives the error and can use it to compute a default.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrapErr",
+          "anchor": "function-unwrapErr",
+          "signature": "public func unwrapErr() -> E",
+          "doc": "Returns the error value, panicking if Ok.\n\nUseful in tests to assert that an operation failed.",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "unwrapOr",
+          "anchor": "function-unwrapOr",
+          "signature": "public func unwrapOr(default: T) -> T",
+          "doc": "Returns the success value or the default if Err.\n\nNote: The default is eagerly evaluated. Use `unwrap(orElse:)` for\nlazy evaluation when the default is expensive to compute.",
+          "source_path": "lang/std/result/result.ks"
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ResultIterator",
+      "anchor": "struct-ResultIterator",
+      "signature": "public struct ResultIterator[T, E]",
+      "doc": "Iterator for Result that yields 0 or 1 elements (only Ok values).\n\nObtained by calling `iter()` on a Result.",
+      "source_path": "lang/std/result/result.ks",
+      "members": [
+        {
+          "kind": "typealias",
+          "name": "Item",
+          "anchor": "typealias-Item",
+          "signature": "type Item = T",
+          "doc": "",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "initializer",
+          "name": "init",
+          "anchor": "initializer-init",
+          "signature": "public init(result: Result[T, E])",
+          "doc": "",
+          "source_path": "lang/std/result/result.ks"
+        },
+        {
+          "kind": "function",
+          "name": "next",
+          "anchor": "function-next",
+          "signature": "public mutating func next() -> Optional[T]",
+          "doc": "Returns the next element, or None if exhausted.",
+          "source_path": "lang/std/result/result.ks"
+        }
+      ]
+    },
+    {
+      "kind": "typealias",
+      "name": "ResultTypeOperator",
+      "anchor": "typealias-ResultTypeOperator",
+      "signature": "public type ResultTypeOperator[T, E] = Result[T, E]",
+      "doc": "Type operator alias: `T throws E` desugars to `Result[T, E]`.",
+      "source_path": "lang/std/result/result.ks"
+    }
+  ]
+}

@@ -2,8 +2,9 @@
 //! resulting diagnostics, grouped per file.
 //!
 //! Called from `didOpen`/`didChange`/`didClose`. The actual compiler work
-//! (`infer_all`, `analyze_all`) runs on a `spawn_blocking` worker so the
-//! tokio IO thread stays responsive.
+//! (`infer_all`, `analyze_all`) runs against the persistent `Compiler`
+//! owned by [`crate::compiler_worker`]; on cache hits this is essentially
+//! free.
 
 use std::collections::HashMap;
 
@@ -13,14 +14,14 @@ use tower_lsp::lsp_types::{Diagnostic as LspDiagnostic, Url};
 
 use crate::convert::{from_analyze, from_codespan, FileMap};
 use crate::position::LineIndex;
-use crate::server::{path_to_url, rebuild_compiler, SharedState};
+use crate::server::{path_to_url, SharedState};
 
 /// Reanalyze + publish. Idempotent — safe to call from any handler.
 pub async fn refresh(state: SharedState, client: Client) {
     // Snapshot inputs while the lock is held briefly.
-    let (token_at_start, sources, doc_indices, disk_indices, prev_published) = {
+    let (token_at_start, handle, stdlib, user, doc_indices, disk_indices, prev_published) = {
         let s = state.lock().await;
-        let sources = s.sources.clone();
+        let (stdlib, user) = s.partition_sources();
         let doc_indices: HashMap<String, LineIndex> = s
             .docs
             .iter()
@@ -28,27 +29,38 @@ pub async fn refresh(state: SharedState, client: Client) {
             .collect();
         let disk = s.disk_line_indices.clone();
         let pub_set = s.published.clone();
-        (s.revision_token, sources, doc_indices, disk, pub_set)
+        (
+            s.revision_token,
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            doc_indices,
+            disk,
+            pub_set,
+        )
     };
 
-    // Heavy work on a blocking worker.
-    let analysis = tokio::task::spawn_blocking(move || {
-        let (compiler, _by_path) = rebuild_compiler(&sources);
-        let driver = CompilerDriver::new(&compiler);
-        // infer_all populates per-body diagnostics; analyze_all returns
-        // its own diagnostic vector and also accumulates into the world.
-        let _infer = driver.infer_all();
-        let analyze = driver.analyze_all();
-        let codespan_diags = compiler.diagnostics();
-        let id_to_path: HashMap<usize, String> = compiler
-            .files()
-            .iter()
-            .map(|(p, e)| (e.index(), p.clone()))
-            .collect();
-        (codespan_diags, analyze.diagnostics, id_to_path)
-    })
-    .await
-    .expect("analysis worker panicked");
+    // Heavy work runs on the worker thread. With the persistent
+    // compiler, repeated refreshes after the first sync are cache hits.
+    let Some(analysis) = handle
+        .with_compiler(stdlib, user, |compiler, _by_path| {
+            let driver = CompilerDriver::new(compiler);
+            // infer_all populates per-body diagnostics; analyze_all returns
+            // its own diagnostic vector and also accumulates into the world.
+            let _infer = driver.infer_all();
+            let analyze = driver.analyze_all();
+            let codespan_diags = compiler.diagnostics();
+            let id_to_path: HashMap<usize, String> = compiler
+                .files()
+                .iter()
+                .map(|(p, e)| (e.index(), p.clone()))
+                .collect();
+            (codespan_diags, analyze.diagnostics, id_to_path)
+        })
+        .await
+    else {
+        return;
+    };
 
     let (codespan_diags, analyze_diags, id_to_path) = analysis;
 

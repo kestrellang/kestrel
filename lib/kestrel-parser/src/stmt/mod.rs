@@ -228,10 +228,8 @@ where
                 .then(expr)
                 .or_not(),
         )
-        // Trailing semicolon is recoverable: a half-typed `let z = it`
-        // inside a closure / inline block synthesises a zero-width span so
-        // the surrounding parser still constructs a valid VariableDeclaration
-        // and doesn't tear down the enclosing closure / function body.
+        // Trailing semicolon is recoverable. Emitter widens the diagnostic
+        // span back to the last real token via `add_token_or_missing`.
         .then(
             skip_trivia().ignore_then(
                 just(Token::Semicolon)

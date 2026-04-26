@@ -22,7 +22,7 @@ pub mod visibility;
 // Re-export primary query types
 pub use conformances::{
     ConformingProtocolInstantiations, ConformingProtocols, expand_protocol_closure,
-    expand_protocol_closure_in_place, extract_ast_type_args,
+    expand_protocol_closure_in_place, extract_ast_type_args, find_protocol_witness_init,
 };
 pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
 pub use protocol_members::{

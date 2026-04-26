@@ -51,7 +51,6 @@ func invokeBuild(
     var cmd = String();
     cmd.append(compilerPath());
     cmd.append(" build");
-    cmd.append(stdFlag());
 
     for source in sources {
         cmd.append(" ");
@@ -131,7 +130,6 @@ func invokeCheck(sources sources: Array[String]) -> Result[(), FlockError] {
     var cmd = String();
     cmd.append(compilerPath());
     cmd.append(" dump diagnostics");
-    cmd.append(stdFlag());
 
     for source in sources {
         cmd.append(" ");
@@ -153,18 +151,6 @@ func compilerPath() -> String {
     match getenv("KESTREL") {
         .Some(path) => path,
         .None => "kestrel"
-    }
-}
-
-func stdFlag() -> String {
-    match getenv("KESTREL_STD") {
-        .Some(stdPath) => {
-            var s = String();
-            s.append(" --std ");
-            s.append(quoteArg(stdPath));
-            s
-        },
-        .None => String()
     }
 }
 

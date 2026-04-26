@@ -170,6 +170,28 @@ impl Compiler {
         );
     }
 
+    /// Despawn the file entity and every declaration entity owned by it
+    /// (anything carrying `FileId(file_entity)`). Drops the path from
+    /// the path → entity map so a subsequent `set_source` allocates a
+    /// fresh entity. Modules are not despawned — they span files and
+    /// stay live for other consumers.
+    ///
+    /// Used by the LSP worker to "unbuild" a file before re-running
+    /// `build()` on its new source. Phase 1 calls this for every user
+    /// file on any user-side change; Phase 2 calls it per-file.
+    pub fn unbuild_file(&mut self, file_entity: Entity) {
+        let owned: Vec<Entity> = self
+            .world
+            .iter_component::<kestrel_ast_builder::FileId>()
+            .filter_map(|(e, fid)| (fid.0 == file_entity).then_some(e))
+            .collect();
+        for e in owned {
+            self.world.despawn(e);
+        }
+        self.world.despawn(file_entity);
+        self.files.retain(|_, e| *e != file_entity);
+    }
+
     /// Root module entity — parent of all top-level modules.
     pub fn root(&self) -> Entity {
         self.root
@@ -677,6 +699,83 @@ mod tests {
     // ================================================================
     // Incremental: only changed files get reparsed
     // ================================================================
+
+    // ================================================================
+    // unbuild_file: incremental teardown
+    // ================================================================
+
+    #[test]
+    fn unbuild_file_removes_file_and_owned_decls() {
+        // Build a file with a struct, then unbuild it. The file entity
+        // and the struct's declaration entity should be despawned.
+        use kestrel_ast_builder::FileId;
+        let mut c = Compiler::new();
+        let f = c.set_source("t.ks", "module M\nstruct Foo {}".into());
+        c.build(f);
+
+        // Find the struct decl by FileId.
+        let owned_before: Vec<_> = c
+            .world
+            .iter_component::<FileId>()
+            .filter(|(_, fid)| fid.0 == f)
+            .map(|(e, _)| e)
+            .collect();
+        assert!(
+            !owned_before.is_empty(),
+            "expected at least one owned decl after build"
+        );
+
+        c.unbuild_file(f);
+
+        assert!(!c.world.is_alive(f), "file entity should be despawned");
+        for e in &owned_before {
+            assert!(!c.world.is_alive(*e), "owned decl {:?} should be despawned", e);
+        }
+        assert!(c.files.get("t.ks").is_none(), "path entry should be dropped");
+    }
+
+    #[test]
+    fn unbuild_file_does_not_disturb_other_files() {
+        use kestrel_ast_builder::FileId;
+        let mut c = Compiler::new();
+        let a = c.set_source("a.ks", "module A\nstruct AA {}".into());
+        let b = c.set_source("b.ks", "module B\nstruct BB {}".into());
+        c.build(a);
+        c.build(b);
+
+        let b_decls: Vec<_> = c
+            .world
+            .iter_component::<FileId>()
+            .filter(|(_, fid)| fid.0 == b)
+            .map(|(e, _)| e)
+            .collect();
+
+        c.unbuild_file(a);
+
+        assert!(c.world.is_alive(b));
+        for e in &b_decls {
+            assert!(c.world.is_alive(*e), "b's decl {:?} should still be alive", e);
+        }
+    }
+
+    #[test]
+    fn rebuild_after_unbuild_yields_new_entities() {
+        let mut c = Compiler::new();
+        let f1 = c.set_source("t.ks", "module M\nstruct Foo {}".into());
+        c.build(f1);
+
+        c.unbuild_file(f1);
+        c.begin_revision();
+
+        let f2 = c.set_source("t.ks", "module M\nstruct Bar {}".into());
+        c.build(f2);
+
+        assert_ne!(f1, f2, "rebuild must allocate a new file entity");
+        assert!(c.world.is_alive(f2));
+        // Parse should reflect the new source.
+        let r = c.parse(f2);
+        assert!(r.tree.children().any(|n| n.kind() == kestrel_syntax_tree::SyntaxKind::StructDeclaration));
+    }
 
     #[test]
     fn only_changed_file_gets_reparsed() {

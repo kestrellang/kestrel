@@ -52,7 +52,7 @@ pub fn build_enum(
 
 /// Build an enum case declaration entity from CST.
 ///
-/// Components: NodeKind::EnumCase, Name, FileId, Vis, [Callable]
+/// Components: NodeKind::EnumCase, Name, FileId, Vis, [Callable], [Documentation]
 pub fn build_enum_case(
     world: &mut World,
     node: &SyntaxNode,
@@ -73,6 +73,7 @@ pub fn build_enum_case(
     }
 
     set_visibility(world, entity, node);
+    set_documentation(world, entity, node);
 
     // Enum cases with associated values get Callable (from EnumCaseParameterList)
     if let Some(param_list) = find_child(node, SyntaxKind::EnumCaseParameterList) {

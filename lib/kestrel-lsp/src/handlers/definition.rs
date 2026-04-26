@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::{GotoDefinitionParams, GotoDefinitionResponse, Locatio
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{path_to_url, rebuild_compiler, url_to_path, SharedState};
+use crate::server::{path_to_url, url_to_path, SharedState};
 
 pub async fn handle(
     state: SharedState,
@@ -33,16 +33,16 @@ pub async fn handle(
     let pos = params.text_document_position_params.position;
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, sources, line_index) = {
         let s = state.lock().await;
         let line_index = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), line_index)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), line_index)
     };
     let offset = line_index.position_to_offset(pos);
 
-    let result = tokio::task::spawn_blocking(move || -> Option<(Url, Range)> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let file_entity = semantic::file_entity_for_path(&compiler, &path)?;
+    let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<(Url, Range)> {
+        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
         let body_entity = semantic::body_entity_at(compiler.world(), file_entity, offset)?;
 
         let world = compiler.world();
@@ -56,8 +56,7 @@ pub async fn handle(
 
         target_to_location(world, &sources, target)
     })
-    .await
-    .ok()??;
+    .await??;
 
     let (uri, range) = result;
     Some(GotoDefinitionResponse::Scalar(Location { uri, range }))

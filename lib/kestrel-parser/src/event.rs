@@ -183,21 +183,40 @@ impl EventSink {
         expected_label: &str,
     ) {
         if span.start == span.end {
-            // Use the sink's file_id, not the span's: chumsky-derived
-            // spans always have file_id 0 (see `to_kestrel_span`), which
-            // would route the diagnostic to the wrong file in the LSP's
-            // file_id → URL map and silently drop it.
-            let diag_start = span.start.saturating_sub(1);
+            // Anchor the diagnostic on the last real (non-trivia) token
+            // already emitted into this sink — that's the end of the
+            // expression / item that should have been followed by the
+            // missing closing token. Without this, the squiggle lands on
+            // whitespace at the start of the next line because chumsky's
+            // `skip_trivia` consumed the newline before the recovery
+            // branch fired.
+            let anchor_end = self.last_real_token_end().unwrap_or(span.end);
+            let diag_start = anchor_end.saturating_sub(1);
             self.error_at_span(
                 format!("expected `{}`", expected_label),
-                Span::new(self.file_id, diag_start..span.end),
+                // file_id from the sink, not the input span: chumsky
+                // spans use file_id 0, which the LSP's file_id → URL
+                // map would silently drop for any non-zero file.
+                Span::new(self.file_id, diag_start..anchor_end),
             );
-            // Same fix for the missing_token CST event so downstream
-            // consumers can locate the gap by file.
             self.missing_token(kind, Span::new(self.file_id, span.start..span.end));
         } else {
             self.add_token(kind, span);
         }
+    }
+
+    /// End offset of the most recently emitted non-trivia `AddToken`.
+    /// Used by `add_token_or_missing` to anchor diagnostics for parser-
+    /// synthesised tokens at the end of the previous real content.
+    fn last_real_token_end(&self) -> Option<usize> {
+        for ev in self.events.iter().rev() {
+            if let Event::AddToken(k, span) = ev {
+                if !is_trivia_kind(*k) {
+                    return Some(span.end);
+                }
+            }
+        }
+        None
     }
 
     /// Get the collected events

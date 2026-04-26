@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{rebuild_compiler, url_to_path, SharedState};
+use crate::server::{url_to_path, SharedState};
 
 /// Token-type legend, indexed by the `tokenType` field in the wire format.
 /// Order matters — clients use these indices.
@@ -45,21 +45,20 @@ pub async fn handle(
     let uri = params.text_document.uri;
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, line_index) = {
         let s = state.lock().await;
         let line_index = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), line_index)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, line_index)
     };
 
-    let data = tokio::task::spawn_blocking(move || -> Option<Vec<SemanticToken>> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let file_entity = semantic::file_entity_for_path(&compiler, &path)?;
+    let data = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<Vec<SemanticToken>> {
+        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
         let raw_tokens = compiler.lex(file_entity);
         let source = line_index.text();
         Some(encode(&raw_tokens, source, &line_index))
     })
-    .await
-    .ok()??;
+    .await??;
 
     Some(SemanticTokensResult::Tokens(SemanticTokens { result_id: None, data }))
 }

@@ -111,31 +111,105 @@ fn extract_value_from_tokens(tokens: &[kestrel_syntax_tree::SyntaxToken]) -> Opt
     }
 }
 
-/// Extract and set documentation from leading line comments.
+/// Extract and set documentation from leading `///` line comments and
+/// `/** … */` block comments attached to a declaration.
+///
+/// The parser splices trivia into the tree right before the next AddToken
+/// event, so the placement depends on whether the decl has a visibility
+/// modifier or attributes:
+///
+/// - `public struct Foo` — trivia lands *inside* the `Visibility` node,
+///   before the `public` keyword token.
+/// - `@attr struct Foo` — trivia lands *inside* the `AttributeList`.
+/// - `struct Foo` (no preamble) — trivia is a sibling token of the empty
+///   `Visibility` node, just before the `struct` keyword.
+///
+/// To handle all three cases uniformly, we walk `descendants_with_tokens`
+/// (a flat in-order token stream) and collect every doc comment we see
+/// until we hit the first non-preamble token — i.e. the declaration's
+/// own keyword or its name identifier. A non-doc comment between doc
+/// blocks resets the accumulator (matches the rustdoc convention).
 pub fn set_documentation(world: &mut World, entity: Entity, node: &SyntaxNode) {
-    let mut doc_lines = Vec::new();
-
-    // Walk tokens before the first non-trivia element to find doc comments
-    for elem in node.children_with_tokens() {
-        match elem {
-            rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::LineComment => {
-                let text = t.text();
-                // Strip comment prefix: "///" doc comment or "//" regular comment
-                let stripped = if let Some(rest) = text.strip_prefix("///") {
-                    rest.strip_prefix(' ').unwrap_or(rest)
+    let mut chunks: Vec<String> = Vec::new();
+    for elem in node.descendants_with_tokens() {
+        let rowan::NodeOrToken::Token(tok) = elem else {
+            continue;
+        };
+        match tok.kind() {
+            SyntaxKind::Whitespace | SyntaxKind::Newline => continue,
+            SyntaxKind::LineComment => {
+                let text = tok.text();
+                if is_doc_line(text) {
+                    chunks.push(strip_doc_line(text));
                 } else {
-                    continue; // Skip non-doc comments
-                };
-                doc_lines.push(stripped.to_string());
+                    chunks.clear();
+                }
             },
-            rowan::NodeOrToken::Token(t) if is_trivia(t.kind()) => continue,
-            _ => break, // Stop at first non-trivia element
+            SyntaxKind::BlockComment => {
+                let text = tok.text();
+                if is_doc_block(text) {
+                    chunks.push(strip_doc_block(text));
+                } else {
+                    chunks.clear();
+                }
+            },
+            // Preamble tokens that may legitimately appear before the
+            // declaration keyword.
+            SyntaxKind::Public
+            | SyntaxKind::Private
+            | SyntaxKind::Internal
+            | SyntaxKind::Fileprivate
+            | SyntaxKind::At => continue,
+            // Anything else is the declaration's own content; stop.
+            _ => break,
         }
     }
-
-    if !doc_lines.is_empty() {
-        world.set(entity, Documentation(doc_lines.join("\n")));
+    let docs = chunks.join("\n").trim().to_string();
+    if !docs.is_empty() {
+        world.set(entity, Documentation(docs));
     }
+}
+
+/// `///` (but not `////` which is a section divider).
+fn is_doc_line(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if !bytes.starts_with(b"///") {
+        return false;
+    }
+    bytes.len() == 3 || bytes[3] != b'/'
+}
+
+/// `/** … */` (but not `/*** … */` which is decorative).
+fn is_doc_block(text: &str) -> bool {
+    text.starts_with("/**") && !text.starts_with("/***")
+}
+
+fn strip_doc_line(text: &str) -> String {
+    let t = text.trim_end_matches(['\n', '\r']);
+    let body = t.strip_prefix("///").unwrap_or(t);
+    body.strip_prefix(' ').unwrap_or(body).to_string()
+}
+
+fn strip_doc_block(text: &str) -> String {
+    let t = text
+        .strip_prefix("/**")
+        .and_then(|s| s.strip_suffix("*/"))
+        .unwrap_or(text);
+    // Drop a leading `*` from each line (and an optional space after it),
+    // matching the canonical block-comment doc style.
+    let mut out = String::with_capacity(t.len());
+    for (i, line) in t.lines().enumerate() {
+        let trimmed = line.trim_start();
+        let body = trimmed
+            .strip_prefix('*')
+            .map(|s| s.strip_prefix(' ').unwrap_or(s))
+            .unwrap_or(line);
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(body.trim_end());
+    }
+    out.trim().to_string()
 }
 
 /// Extract and set conformances from a ConformanceList child.
@@ -485,4 +559,5 @@ pub fn spawn_setter(
     if is_static {
         world.set(setter, Static);
     }
+    set_documentation(world, setter, setter_clause);
 }

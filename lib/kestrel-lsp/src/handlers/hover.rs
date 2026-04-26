@@ -8,11 +8,10 @@
 //! protocols, extensions, type aliases) it's the source text up to the
 //! body block too — so the user sees the type's header + generics +
 //! conformances without the noise of the body. Stored fields use the full
-//! decl span (no body to trim). Doc comments are extracted from leading
-//! `///` line comments and `/** … */` block comments immediately preceding
-//! the declaration.
+//! decl span (no body to trim). Doc comments are read from the
+//! `Documentation` component attached during AST building.
 
-use kestrel_ast_builder::{CstNode, DeclSpan, FileId, FilePath, NodeKind};
+use kestrel_ast_builder::{CstNode, DeclSpan, Documentation, FileId, FilePath, NodeKind};
 use kestrel_syntax_tree::utils::get_name_span;
 use kestrel_type_infer::result::ResolvedTy;
 use kestrel_hecs::{Entity, World};
@@ -20,12 +19,11 @@ use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir_lower::LowerBody;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_type_infer::InferBody;
-use rowan::NodeOrToken;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Range};
 
 use crate::semantic;
-use crate::server::{rebuild_compiler, url_to_path, SharedState};
+use crate::server::{url_to_path, SharedState};
 use crate::ty_format::format_ty;
 
 pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
@@ -33,16 +31,16 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
     let pos = params.text_document_position_params.position;
     let path = url_to_path(&uri);
 
-    let (sources, line_index) = {
+    let (handle, stdlib, user, sources, line_index) = {
         let s = state.lock().await;
         let line_index = s.docs.get(&uri).map(|d| d.line_index.clone())?;
-        (s.sources.clone(), line_index)
+        let (stdlib, user) = s.partition_sources();
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), line_index)
     };
     let offset = line_index.position_to_offset(pos);
 
-    let result = tokio::task::spawn_blocking(move || -> Option<(String, Range)> {
-        let (compiler, _) = rebuild_compiler(&sources);
-        let file_entity = semantic::file_entity_for_path(&compiler, &path)?;
+    let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<(String, Range)> {
+        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
         let world = compiler.world();
         let root = compiler.root();
 
@@ -85,8 +83,7 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
         let range = line_index.range_for(span.start, span.end);
         Some((md, range))
     })
-    .await
-    .ok()??;
+    .await??;
 
     let (md, range) = result;
     Some(Hover {
@@ -221,7 +218,10 @@ fn render_entity(
     let source = sources.get(&file_path)?;
 
     let signature = signature_text(source, &cst.0, &decl_span);
-    let docs = collect_doc_comments(&cst.0);
+    let docs = world
+        .get::<Documentation>(entity)
+        .map(|d| d.0.clone())
+        .unwrap_or_default();
 
     let mut md = String::new();
     md.push_str("```kestrel\n");
@@ -284,107 +284,6 @@ fn first_body_block_offset(cst: &SyntaxNode) -> Option<usize> {
     None
 }
 
-/// Collect leading `///` line comments and `/** … */` block comments
-/// attached to a declaration.
-///
-/// The parser splices trivia into the tree right before the next AddToken
-/// event, so the placement depends on whether the decl has a visibility
-/// modifier or attributes:
-///
-/// - `public struct Foo` — trivia lands *inside* the `Visibility` node,
-///   before the `public` keyword token.
-/// - `@attr struct Foo` — trivia lands *inside* the `AttributeList`.
-/// - `struct Foo` (no preamble) — trivia is a sibling token of the empty
-///   `Visibility` node, just before the `struct` keyword.
-///
-/// To handle all three cases uniformly, we walk `descendants_with_tokens`
-/// (a flat in-order token stream) and collect every doc comment we see
-/// until we hit the first non-preamble token — i.e. the declaration's
-/// own keyword or its name identifier.
-fn collect_doc_comments(cst: &SyntaxNode) -> String {
-    let mut chunks: Vec<String> = Vec::new();
-    for elem in cst.descendants_with_tokens() {
-        let NodeOrToken::Token(tok) = elem else {
-            continue;
-        };
-        match tok.kind() {
-            SyntaxKind::Whitespace | SyntaxKind::Newline => continue,
-            SyntaxKind::LineComment => {
-                let text = tok.text();
-                if is_doc_line(text) {
-                    chunks.push(strip_doc_line(text));
-                } else {
-                    chunks.clear();
-                }
-            },
-            SyntaxKind::BlockComment => {
-                let text = tok.text();
-                if is_doc_block(text) {
-                    chunks.push(strip_doc_block(text));
-                } else {
-                    chunks.clear();
-                }
-            },
-            // Preamble tokens that may legitimately appear before the
-            // declaration keyword.
-            SyntaxKind::Public
-            | SyntaxKind::Private
-            | SyntaxKind::Internal
-            | SyntaxKind::Fileprivate
-            | SyntaxKind::At => continue,
-            // Anything else is the declaration's own content; stop.
-            _ => break,
-        }
-    }
-    chunks.join("\n").trim().to_string()
-}
-
-fn is_doc_line(text: &str) -> bool {
-    // `///` (but not `////` which is a section divider) or `//!`
-    let bytes = text.as_bytes();
-    if bytes.starts_with(b"///") {
-        return bytes.len() == 3 || bytes[3] != b'/';
-    }
-    if bytes.starts_with(b"//!") {
-        return true;
-    }
-    false
-}
-
-fn is_doc_block(text: &str) -> bool {
-    text.starts_with("/**") && !text.starts_with("/***")
-}
-
-fn strip_doc_line(text: &str) -> String {
-    // Strip the `///` or `//!` prefix (and one optional space) and any
-    // trailing newline.
-    let t = text.trim_end_matches(['\n', '\r']);
-    let body = t.strip_prefix("///").or_else(|| t.strip_prefix("//!")).unwrap_or(t);
-    body.strip_prefix(' ').unwrap_or(body).to_string()
-}
-
-fn strip_doc_block(text: &str) -> String {
-    let t = text
-        .strip_prefix("/**")
-        .and_then(|s| s.strip_suffix("*/"))
-        .unwrap_or(text);
-    // Drop a leading `*` from each line (and an optional space after it),
-    // matching the canonical block-comment doc style.
-    let mut out = String::with_capacity(t.len());
-    for (i, line) in t.lines().enumerate() {
-        let trimmed = line.trim_start();
-        let body = trimmed
-            .strip_prefix('*')
-            .map(|s| s.strip_prefix(' ').unwrap_or(s))
-            .unwrap_or(line);
-        if i > 0 {
-            out.push('\n');
-        }
-        out.push_str(body.trim_end());
-    }
-    out.trim().to_string()
-}
-
 /// Find the on-disk path of the file that contains `entity`. Decl entities
 /// carry a `FileId(file_entity)` pointing at the file entity, which itself
 /// owns the `FilePath` — `FilePath` is NOT propagated to children, so we
@@ -428,35 +327,6 @@ fn type_decl_link(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn doc_line_strips_prefix_and_space() {
-        assert_eq!(strip_doc_line("/// hello"), "hello");
-        assert_eq!(strip_doc_line("///hello"), "hello");
-        assert_eq!(strip_doc_line("//! header"), "header");
-        assert_eq!(strip_doc_line("/// hello\n"), "hello");
-    }
-
-    #[test]
-    fn doc_line_predicate() {
-        assert!(is_doc_line("/// doc"));
-        assert!(is_doc_line("//!"));
-        assert!(!is_doc_line("// not doc"));
-        assert!(!is_doc_line("//// section"));
-    }
-
-    #[test]
-    fn doc_block_predicate() {
-        assert!(is_doc_block("/** doc */"));
-        assert!(!is_doc_block("/* not doc */"));
-        assert!(!is_doc_block("/*** decoration */"));
-    }
-
-    #[test]
-    fn doc_block_strips_stars() {
-        let s = "/**\n * line one\n * line two\n */";
-        assert_eq!(strip_doc_block(s), "line one\nline two");
-    }
 
     use kestrel_compiler::Compiler;
     use std::collections::HashMap;

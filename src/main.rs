@@ -295,11 +295,17 @@ impl Globals {
         let mut compiler = Compiler::new().with_target(self.ast_target());
 
         if !self.no_std {
-            let std_dir = self
-                .std_path
-                .as_deref()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_std_path);
+            let std_dir = match self.std_path.as_deref() {
+                Some(p) => PathBuf::from(p),
+                None => default_std_path().map_err(|e| {
+                    eprintln!("error: could not locate the Kestrel stdlib");
+                    for (source, path) in &e.tried {
+                        eprintln!("  tried {} -> {}", source, path.display());
+                    }
+                    eprintln!("hint: set KESTREL_STD or pass --std <path>");
+                    ExitCode::FAILURE
+                })?,
+            };
             if self.verbose {
                 eprintln!("  Loading stdlib from {}", std_dir.display());
             }
@@ -352,12 +358,49 @@ impl Globals {
 // Small helpers
 // ============================================================================
 
-/// Honor `KESTREL_STD` env var (matches kestrel-test-suite convention),
-/// else fall back to `lang/std` relative to CWD.
-fn default_std_path() -> PathBuf {
-    std::env::var_os("KESTREL_STD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("lang/std"))
+struct StdLookupError {
+    tried: Vec<(&'static str, PathBuf)>,
+}
+
+/// Locate the stdlib via, in priority order:
+///   1. `KESTREL_STD` env var (matches kestrel-test-suite convention)
+///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
+///   3. `<CARGO_MANIFEST_DIR>/lang/std` baked at build time (in-repo dev)
+///
+/// Each candidate must `exists()` to win; otherwise we fall through and
+/// surface every path we tried so the user can see what went wrong.
+/// Order must stay fixed: explicit override > installed toolchain > repo dev.
+fn default_std_path() -> Result<PathBuf, StdLookupError> {
+    let mut tried = Vec::new();
+
+    if let Some(p) = std::env::var_os("KESTREL_STD") {
+        let p = PathBuf::from(p);
+        if p.exists() {
+            return Ok(p);
+        }
+        tried.push(("KESTREL_STD", p));
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(p) = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("lib/std"))
+        {
+            if p.exists() {
+                return Ok(p);
+            }
+            tried.push(("exe-relative", p));
+        }
+    }
+
+    let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
+    if baked.exists() {
+        return Ok(baked);
+    }
+    tried.push(("CARGO_MANIFEST_DIR", baked));
+
+    Err(StdLookupError { tried })
 }
 
 fn default_output_path(files: &[String]) -> PathBuf {
