@@ -3,7 +3,6 @@
 //! Handles: literals, locals, assignments, return, if/else, loops,
 //! break/continue, blocks, field access, tuple index, calls (direct,
 //! method, protocol/witness).
-//
 
 use std::collections::HashMap;
 

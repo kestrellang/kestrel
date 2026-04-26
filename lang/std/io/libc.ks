@@ -1,6 +1,10 @@
 // libc bindings for I/O
 //
-// This module provides raw bindings to libc I/O functions via @extern(.C).
+// Thin `@extern(.C)` wrappers around the POSIX I/O syscalls plus the
+// platform constants the higher-level types in `std.io` need (open
+// flags, seek anchors, default mode bits). Prefer `File`, `Stdin`,
+// `Stdout`, `Stderr`, and the `read`/`write` helpers in `std.io` over
+// these raw bindings; reach for `libc.*` only for FFI interop.
 
 module std.io.libc
 

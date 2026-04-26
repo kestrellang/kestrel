@@ -76,13 +76,13 @@ After each file:
 
 ## io/
 
-- [ ] `io/io.ks`
-- [ ] `io/read.ks` — Reader protocol
-- [ ] `io/write.ks` — Writer protocol
-- [ ] `io/file.ks` — File handle
-- [ ] `io/stdio.ks` — stdin/stdout/stderr
-- [ ] `io/error.ks` — IO errors
-- [ ] `io/libc.ks` — FFI; minimal docs OK
+- [x] `io/io.ks`
+- [x] `io/read.ks` — Reader protocol
+- [x] `io/write.ks` — Writer protocol
+- [x] `io/file.ks` — File handle
+- [x] `io/stdio.ks` — stdin/stdout/stderr
+- [x] `io/error.ks` — IO errors
+- [x] `io/libc.ks` — FFI; minimal docs OK
 
 ## ffi/
 
