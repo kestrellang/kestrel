@@ -405,18 +405,7 @@ public struct CharsView: Iterable {
 
     /// Internal: build a `String` covering byte range `[startByte, endByte)`.
     fileprivate func _substringFromByteRange(startByte startByte: Int64, endByte endByte: Int64) -> String {
-        let count = endByte - startByte;
-        if count <= Int64(intLiteral: 0) {
-            return String()
-        }
-        var result = String(capacity: count);
-        for i in startByte..<endByte {
-            let rawOffset: lang.i64 = i.raw;
-            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
-            result.appendByte(UInt8(raw: signedByte))
-        }
-        result
+        _copyByteRange(ptr: self.ptr, startByte: startByte, endByte: endByte)
     }
 }
 
@@ -660,18 +649,7 @@ public struct GraphemesView: Iterable {
 
     /// Internal: build a `String` covering byte range `[startByte, endByte)`.
     fileprivate func _substringFromByteRange(startByte startByte: Int64, endByte endByte: Int64) -> String {
-        let count = endByte - startByte;
-        if count <= Int64(intLiteral: 0) {
-            return String()
-        }
-        var result = String(capacity: count);
-        for i in startByte..<endByte {
-            let rawOffset: lang.i64 = i.raw;
-            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
-            result.appendByte(UInt8(raw: signedByte))
-        }
-        result
+        _copyByteRange(ptr: self.ptr, startByte: startByte, endByte: endByte)
     }
 }
 
@@ -854,6 +832,37 @@ public struct LinesView: Iterable {
     public func iter() -> LinesIterator {
         LinesIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0), done: false)
     }
+
+    /// Number of lines in the view. **O(n)** — walks the buffer
+    /// scanning for terminators. Cache the result if you need it more
+    /// than once.
+    public var count: Int64 {
+        var n: Int64 = Int64(intLiteral: 0);
+        for _ in self.iter() {
+            n = n + Int64(intLiteral: 1)
+        }
+        n
+    }
+
+    /// @name Indexed Line
+    /// Reads the line at index `index`. **O(n)** — walks the buffer
+    /// from the start. Panics on out-of-bounds.
+    public subscript[I](index: I) -> I.LinesYield where I: LinesIndex {
+        get { index.readLines(from: self) }
+    }
+
+    /// @name Checked Index
+    /// Reads at `index`, returning `.None` on out-of-bounds.
+    public subscript[I](checked index: I) -> I.LinesYield? where I: LinesIndex {
+        get { index.readLinesChecked(from: self) }
+    }
+
+    /// @name Clamping
+    /// Reads at `index` saturated to `[0, count)`. Yields `String?`
+    /// (`.None` only when the view holds no lines).
+    public subscript[I](clamped index: I) -> I.LinesClampedYield where I: LinesClampable {
+        get { index.readLinesClamped(from: self) }
+    }
 }
 
 // ============================================================================
@@ -1025,18 +1034,29 @@ fileprivate func _bytesViewSubstringChecked(view view: BytesView, start start: I
     .Some(_bytesViewSubstringRaw(view: view, start: start, end: end))
 }
 
-// Internal helper: copy bytes `[start, end)` into a fresh String, no
-// validation. Caller must ensure the bounds are sane.
-fileprivate func _bytesViewSubstringRaw(view view: BytesView, start start: Int64, end end: Int64) -> String {
-    let count = end - start;
+// Internal helper: copy bytes `[startByte, endByte)` from a raw UTF-8
+// buffer into a fresh `String`. No validation; caller ensures sane
+// bounds. Shared by all view-level substring builders so the byte-copy
+// loop lives in one place.
+fileprivate func _copyByteRange(ptr ptr: lang.ptr[lang.i8], startByte startByte: Int64, endByte endByte: Int64) -> String {
+    let count = endByte - startByte;
     if count <= Int64(intLiteral: 0) {
         return String()
     }
     var result = String(capacity: count);
-    for i in start..<end {
-        result.appendByte(view._readByteRaw(index: i))
+    for i in startByte..<endByte {
+        let rawOffset: lang.i64 = i.raw;
+        let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
+        let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+        result.appendByte(UInt8(raw: signedByte))
     }
     result
+}
+
+// Internal helper: copy bytes `[start, end)` from a `BytesView` into a
+// fresh String, no validation. Thin wrapper around `_copyByteRange`.
+fileprivate func _bytesViewSubstringRaw(view view: BytesView, start start: Int64, end end: Int64) -> String {
+    _copyByteRange(ptr: view.asRaw(), startByte: start, endByte: end)
 }
 
 extend Range[Int64]: BytesIndex {
@@ -1417,5 +1437,78 @@ extend ClosedRange[Int64]: GraphemesIndex {
             return .None
         }
         .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+    }
+}
+
+// ============================================================================
+// LINES VIEW INDEX PROTOCOLS
+// ============================================================================
+
+/// Stdlib-internal index types for `LinesView` subscripts.
+///
+/// Only `Int64` conforms today; range subscripts are deferred — joining
+/// lines back into a single string is lossy because the original
+/// terminators (`\n` vs `\r\n` vs `\r`) aren't reconstructable from the
+/// yielded strings alone.
+internal protocol LinesIndex {
+    type LinesYield
+    func readLines(from view: LinesView) -> LinesYield
+    func readLinesChecked(from view: LinesView) -> LinesYield?
+}
+
+internal protocol LinesClampable {
+    type LinesClampedYield
+    func readLinesClamped(from view: LinesView) -> LinesClampedYield
+}
+
+// Internal: walk the iterator to line index `i` and return that line,
+// or `.None` if `i` is past the end (or negative).
+fileprivate func _linesViewAt(view view: LinesView, lineIndex lineIndex: Int64) -> String? {
+    if lineIndex < Int64(intLiteral: 0) {
+        return .None
+    }
+    var li: Int64 = Int64(intLiteral: 0);
+    var it = view.iter();
+    while true {
+        let next = it.next();
+        if let .Some(line) = next {
+            if li == lineIndex {
+                return .Some(line)
+            }
+            li = li + Int64(intLiteral: 1)
+        } else {
+            return .None
+        }
+    }
+    .None
+}
+
+extend Int64: LinesIndex {
+    type LinesYield = String
+
+    public func readLines(from view: LinesView) -> String {
+        match _linesViewAt(view: view, lineIndex: self) {
+            .Some(s) => s,
+            .None => lang.panic("LinesView index out of bounds")
+        }
+    }
+
+    public func readLinesChecked(from view: LinesView) -> String? {
+        _linesViewAt(view: view, lineIndex: self)
+    }
+}
+
+extend Int64: LinesClampable {
+    type LinesClampedYield = String?
+
+    public func readLinesClamped(from view: LinesView) -> String? {
+        let n = view.count;
+        if n == Int64(intLiteral: 0) {
+            return .None
+        }
+        var idx = self;
+        if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
+        if idx >= n { idx = n - Int64(intLiteral: 1) }
+        _linesViewAt(view: view, lineIndex: idx)
     }
 }

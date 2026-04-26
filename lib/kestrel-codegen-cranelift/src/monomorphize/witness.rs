@@ -84,17 +84,14 @@ pub fn resolve_witness_call(
             type_args.extend(concrete_method_type_args.iter().cloned());
         },
         MethodSource::Extension { .. } => {
-            // Extension method: prepend bindings for the extension's own
-            // TypeParams (which include any free params introduced on the
-            // conformance RHS, e.g. `extend Slot: Indexer[T]`'s `T`), then
-            // append the method-level type args. Without this, the method
-            // dispatches with too few type_args and the monomorphizer
-            // rejects the instantiation.
-            for tp in &witness.type_params {
-                if let Some(bound) = bindings.get(&tp.entity) {
-                    type_args.push(bound.clone());
-                }
-            }
+            // Protocol-extension default (`extend Proto { default impl }`):
+            // the implementation lives in the protocol's extension and its
+            // type_params are method-only. The implementing type's params
+            // (witness.type_params) flow in through `Self` / parent_self
+            // at the dispatch site, not via type-arg prepending. Prepending
+            // them would push the call-site's method type args past the
+            // truncate cap, leaving K bound to the implementing type's
+            // first param instead of the actual K argument.
             type_args.extend(concrete_method_type_args.iter().cloned());
         },
     }
