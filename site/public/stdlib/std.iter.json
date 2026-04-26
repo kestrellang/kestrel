@@ -1,0 +1,2303 @@
+{
+  "path": "std.iter",
+  "name": "iter",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "ChainIterator",
+      "anchor": "struct-ChainIterator",
+      "signature": "public struct ChainIterator[A, B] where A: Iterator, B: Iterator, B.Item == A.Item { /* private fields */ }",
+      "doc": "Chains two iterators together.\nFirst yields all elements from first, then all from second.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "first",
+              "anchor": "field-first",
+              "signature": "internal var first: A",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "firstDone",
+              "anchor": "field-firstDone",
+              "signature": "internal var firstDone: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(first: A, second: B)",
+              "doc": "Creates an iterator that chains first and second together.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "second",
+              "anchor": "field-second",
+              "signature": "internal var second: B",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = A.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> A.Item?",
+              "doc": "Returns the next element from first, or from second if first is exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "CycleIterator",
+      "anchor": "struct-CycleIterator",
+      "signature": "public struct CycleIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Repeats an iterator forever by cloning it when exhausted.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "current",
+              "anchor": "field-current",
+              "signature": "internal var current: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(iter: I)",
+              "doc": "Creates an iterator that repeats iter infinitely.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "original",
+              "anchor": "field-original",
+              "signature": "internal var original: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element, restarting from the beginning if needed.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "DoubleEndedIterator",
+      "anchor": "protocol-DoubleEndedIterator",
+      "signature": "public protocol DoubleEndedIterator",
+      "doc": "Protocol for iterators that can traverse from both ends.\n\nDouble-ended iterators can yield elements from the back as well as the front,\nenabling efficient reverse iteration without collecting into an array first.\n\nExample:\n    struct Range: DoubleEndedIterator {\n        type Item = Int64\n        var start: Int64\n        var end: Int64\n\n        mutating func next() -> Int64? {\n            if start >= end { return None }\n            let value = start\n            start += 1\n            return Some(value)\n        }\n\n        mutating func nextBack() -> Int64? {\n            if start >= end { return None }\n            end -= 1\n            return Some(end)\n        }\n    }\n\nUsage:\n    var range = Range(start: 1, end: 4)\n    range.next()      // Some(1)\n    range.nextBack()  // Some(3)\n    range.next()      // Some(2)\n    range.nextBack()  // None (start >= end)",
+      "source_path": "lang/std/iter/iterator.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "nextBack",
+              "anchor": "function-nextBack",
+              "signature": "mutating func nextBack() -> Item?",
+              "doc": "Returns the next element from the back, or None if exhausted.\n\nRepeated calls will return elements in reverse order until the\niterator is exhausted. Can be interleaved with `next()` calls.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "rev",
+              "anchor": "function-rev",
+              "signature": "public func rev() -> RevIterator[Self]",
+              "doc": "Returns an iterator that yields elements in reverse order.\n\nUnlike collecting and reversing, this is lazy and O(1) to create.\n\nExample:\n    [1, 2, 3, 4, 5].iter().rev().collect()  // [5, 4, 3, 2, 1]\n\n    // Take last 3 elements efficiently\n    [1, 2, 3, 4, 5].iter().rev().take(count: 3).collect()  // [5, 4, 3]\n\n    // Find last matching element\n    [1, 2, 3, 4, 5].iter().rev().find({ it % 2 == 0 })  // Some(4)",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item",
+              "doc": "The type of elements yielded by this iterator.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "mutating func next() -> Item?",
+              "doc": "Returns the next element, or None if the sequence is exhausted.\n\nOnce None is returned, subsequent calls should continue to return None\n(though `fuse()` can enforce this guarantee).",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "EmptyIterator",
+      "anchor": "struct-EmptyIterator",
+      "signature": "public struct EmptyIterator[T] { /* private fields */ }",
+      "doc": "An iterator that yields nothing.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates an empty iterator.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> T?",
+              "doc": "Always returns None.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "EnumerateIterator",
+      "anchor": "struct-EnumerateIterator",
+      "signature": "public struct EnumerateIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Yields (index, item) pairs.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "index",
+              "anchor": "field-index",
+              "signature": "internal var index: Int64",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I)",
+              "doc": "Creates an iterator that pairs each element with its zero-based index.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = (Int64, I.Item)",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> (Int64, I.Item)?",
+              "doc": "Returns the next (index, element) pair, or None if exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "ExactSizeIterator",
+      "anchor": "protocol-ExactSizeIterator",
+      "signature": "public protocol ExactSizeIterator",
+      "doc": "Protocol for iterators that know their exact remaining length.\n\nThis enables optimizations like pre-allocating exact capacity when\ncollecting into an array.\n\nExample:\n    struct ArrayIterator[T]: ExactSizeIterator {\n        type Item = T\n        var ptr: Pointer[T]\n        var remaining: Int64\n\n        var remaining: Int64 { get { remaining } }\n\n        mutating func next() -> T? {\n            if remaining == 0 { return None }\n            let value = ptr.pointee\n            ptr = ptr.advanced(by: 1)\n            remaining -= 1\n            return Some(value)\n        }\n    }",
+      "source_path": "lang/std/iter/iterator.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "isEmpty",
+              "anchor": "function-isEmpty",
+              "signature": "public func isEmpty() -> Bool",
+              "doc": "Returns true if the iterator has no more elements.\n\nEquivalent to `remaining == 0`.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "field",
+              "name": "remaining",
+              "anchor": "field-remaining",
+              "signature": "var remaining: Int64 { get }",
+              "doc": "Returns the exact number of remaining elements.\n\nThis value decreases by 1 for each `next()` call that returns Some.\nWhen this returns 0, `next()` will return None.",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item",
+              "doc": "The type of elements yielded by this iterator.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "mutating func next() -> Item?",
+              "doc": "Returns the next element, or None if the sequence is exhausted.\n\nOnce None is returned, subsequent calls should continue to return None\n(though `fuse()` can enforce this guarantee).",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "FilterIterator",
+      "anchor": "struct-FilterIterator",
+      "signature": "public struct FilterIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Yields only elements matching a predicate.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, predicate: (I.Item) -> Bool)",
+              "doc": "Creates a filter iterator that yields only elements where predicate returns true.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "predicate",
+              "anchor": "field-predicate",
+              "signature": "internal var predicate: (I.Item) -> Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next matching element, or None if exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "FilterMapIterator",
+      "anchor": "struct-FilterMapIterator",
+      "signature": "public struct FilterMapIterator[I, U] where I: Iterator { /* private fields */ }",
+      "doc": "Filters and transforms in one step.\nElements where transform returns None are skipped.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, transform: (I.Item) -> U?)",
+              "doc": "Creates an iterator that applies transform and yields only Some results.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "transform",
+              "anchor": "field-transform",
+              "signature": "internal var transform: (I.Item) -> U?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = U",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> U?",
+              "doc": "Returns the next transformed element, or None if exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "FlatMapIterator",
+      "anchor": "struct-FlatMapIterator",
+      "signature": "public struct FlatMapIterator[I, U] where I: Iterator, U: Iterator { /* private fields */ }",
+      "doc": "Transforms each element into an iterator and flattens the results.\n\nEach element is transformed into an iterator, and all resulting\nelements are yielded sequentially.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "current",
+              "anchor": "field-current",
+              "signature": "internal var current: U?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, transform: (I.Item) -> U)",
+              "doc": "Creates an iterator that applies transform to each element and flattens.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "transform",
+              "anchor": "field-transform",
+              "signature": "internal var transform: (I.Item) -> U",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = U.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> U.Item?",
+              "doc": "Returns the next element from the flattened sequence, or None if exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "FlattenIterator",
+      "anchor": "struct-FlattenIterator",
+      "signature": "public struct FlattenIterator[I] where I: Iterator, I.Item: Iterator { /* private fields */ }",
+      "doc": "Flattens nested iterators into a single iterator.\n\nTakes an iterator of iterators and yields all elements from each\ninner iterator sequentially.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "current",
+              "anchor": "field-current",
+              "signature": "internal var current: I.Item?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I)",
+              "doc": "Creates an iterator that flattens nested iterators.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item.Item?",
+              "doc": "Returns the next element from the flattened sequence.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "FuseIterator",
+      "anchor": "struct-FuseIterator",
+      "signature": "public struct FuseIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Stops permanently after yielding None once.\nUseful for iterators that might resume after None.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "done",
+              "anchor": "field-done",
+              "signature": "internal var done: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I)",
+              "doc": "Creates a fused iterator that stops permanently after the first None.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element, or None permanently after first exhaustion.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "InspectIterator",
+      "anchor": "struct-InspectIterator",
+      "signature": "public struct InspectIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Calls a function on each element as it passes through.\n\nUseful for debugging or logging without affecting the iterator chain.\nThe inspector function receives a reference to each element.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, inspector: (I.Item) -> ())",
+              "doc": "Creates an iterator that calls inspector on each element.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inspector",
+              "anchor": "field-inspector",
+              "signature": "internal var inspector: (I.Item) -> ()",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element after calling the inspector on it.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "IntersperseIterator",
+      "anchor": "struct-IntersperseIterator",
+      "signature": "public struct IntersperseIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Inserts a separator between each element.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, separator: I.Item)",
+              "doc": "Creates an iterator that inserts separator between elements.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "needsSeparator",
+              "anchor": "field-needsSeparator",
+              "signature": "internal var needsSeparator: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "pendingItem",
+              "anchor": "field-pendingItem",
+              "signature": "internal var pendingItem: I.Item?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "separator",
+              "anchor": "field-separator",
+              "signature": "internal var separator: I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element or separator.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "IntersperseWithIterator",
+      "anchor": "struct-IntersperseWithIterator",
+      "signature": "public struct IntersperseWithIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Inserts a lazily-generated separator between each element.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, separator: () -> I.Item)",
+              "doc": "Creates an iterator that inserts separators generated by the function.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "needsSeparator",
+              "anchor": "field-needsSeparator",
+              "signature": "internal var needsSeparator: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "pendingItem",
+              "anchor": "field-pendingItem",
+              "signature": "internal var pendingItem: I.Item?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "separator",
+              "anchor": "field-separator",
+              "signature": "internal var separator: () -> I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element or generated separator.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "Iterable",
+      "anchor": "protocol-Iterable",
+      "signature": "public protocol Iterable",
+      "doc": "Protocol for types that can produce an iterator.\n\nEnables for-in loops and other iteration constructs.\nCollections typically implement Iterable to allow iteration over their elements.\n\nExample:\n    for item in myCollection {\n        // item is each element from myCollection.iter()\n    }\n\n    // Equivalent to:\n    var iter = myCollection.iter()\n    while let item = iter.next() {\n        // ...\n    }",
+      "source_path": "lang/std/iter/iterator.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item",
+              "doc": "The type of elements produced by iteration.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter",
+              "doc": "The type of iterator that will be produced.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "func iter() -> Iter",
+              "doc": "Creates an iterator over this collection's elements.",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "Iterator",
+      "anchor": "protocol-Iterator",
+      "signature": "public protocol Iterator",
+      "doc": "",
+      "source_path": "lang/std/iter/iterator.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "all",
+              "anchor": "function-all",
+              "signature": "public mutating func all((Item) -> Bool) -> Bool",
+              "doc": "Returns true if all elements satisfy the predicate.\n\nShort-circuits on first non-match.\nReturns true for an empty iterator (vacuous truth).\n\nExample:\n    [2, 4, 6].iter().all({ it % 2 == 0 })  // true\n    [2, 3, 4].iter().all({ it % 2 == 0 })  // false (stops at 3)\n    [].iter().all({ false })               // true (empty)",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "any",
+              "anchor": "function-any",
+              "signature": "public mutating func any((Item) -> Bool) -> Bool",
+              "doc": "Returns true if any element satisfies the predicate.\n\nShort-circuits on first match (doesn't consume remaining elements).\nReturns false for an empty iterator.\n\nExample:\n    [1, 2, 3, 4].iter().any({ it > 3 })  // true (stops at 4)\n    [1, 2, 3].iter().any({ it > 10 })    // false\n    [].iter().any({ true })              // false",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "chain",
+              "anchor": "function-chain",
+              "signature": "public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item",
+              "doc": "Chains another iterator after this one.\n\nYields all elements from self, then all from other.\n\nExample:\n    [1, 2].iter().chain(other: [3, 4].iter()).collect()  // [1, 2, 3, 4]\n\n    // Concatenate multiple iterators\n    a.iter().chain(other: b.iter()).chain(other: c.iter())",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "collect",
+              "anchor": "function-collect",
+              "signature": "public consuming func collect() -> Array[Item]",
+              "doc": "Collects all elements into an array.\n\nConsumes the entire iterator.\n\nExample:\n    [1, 2, 3].iter().filter({ it > 1 }).collect()  // [2, 3]\n    (1..5).iter().map({ it * it }).collect()  // [1, 4, 9, 16]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "compactMap",
+              "anchor": "function-compactMap",
+              "signature": "public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]",
+              "doc": "Filters out None values and unwraps the Some values.\n\nEquivalent to `filterMap({ it })` but more readable when the elements\nare already optionals.\n\nExample:\n    let maybeNumbers: [Int64?] = [Some(1), None, Some(2), None, Some(3)]\n    maybeNumbers.iter().compactMap().collect()  // [1, 2, 3]\n\n    // With transformation\n    [\"1\", \"two\", \"3\"].iter()\n        .map({ Int64.parse(it) })  // [Some(1), None, Some(3)]\n        .compactMap()              // [1, 3]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "contains",
+              "anchor": "function-contains",
+              "signature": "public mutating func contains(Item) -> Bool",
+              "doc": "Returns true if any element equals the given value.\n\nShort-circuits on first match.\n\nExample:\n    [1, 2, 3].iter().contains(element: 2)  // true\n    [1, 2, 3].iter().contains(element: 5)  // false",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "count",
+              "anchor": "function-count",
+              "signature": "public consuming func count() -> Int64",
+              "doc": "Returns the number of elements.\n\nConsumes the entire iterator.\n\nExample:\n    [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).count()  // 2",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "cycle",
+              "anchor": "function-cycle",
+              "signature": "public func cycle() -> CycleIterator[Self]",
+              "doc": "Repeats this iterator forever by copying when exhausted.\n\nWARNING: Creates an infinite iterator. Use with `take()` to limit.\n\nExample:\n    [1, 2, 3].iter().cycle().take(count: 7).collect()\n    // [1, 2, 3, 1, 2, 3, 1]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "enumerate",
+              "anchor": "function-enumerate",
+              "signature": "public func enumerate() -> EnumerateIterator[Self]",
+              "doc": "Pairs each element with its zero-based index.\n\nExample:\n    [\"a\", \"b\", \"c\"].iter().enumerate().collect()\n    // [(0, \"a\"), (1, \"b\"), (2, \"c\")]\n\n    for (i, item) in arr.iter().enumerate() {\n        print(\"Index \\(i): \\(item)\")\n    }",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "filter",
+              "anchor": "function-filter",
+              "signature": "public func filter((Item) -> Bool) -> FilterIterator[Self]",
+              "doc": "Yields only elements satisfying the predicate.\n\nLazy - elements are tested as they are consumed.\n\nExample:\n    [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).collect()  // [2, 4]\n    [\"\", \"a\", \"\", \"b\"].iter().filter({ !it.isEmpty }).collect()  // [\"a\", \"b\"]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "filterMap",
+              "anchor": "function-filterMap",
+              "signature": "public func filterMap[U]((Item) -> U?) -> FilterMapIterator[Self, U]",
+              "doc": "Transforms elements and filters out None results in one step.\n\nCombines map and filter - useful when transformation might fail.\n\nExample:\n    [\"1\", \"two\", \"3\"].iter()\n        .filterMap({ Int64.parse(it) })\n        .collect()  // [1, 3]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "find",
+              "anchor": "function-find",
+              "signature": "public mutating func find((Item) -> Bool) -> Item?",
+              "doc": "Returns the first element satisfying the predicate, or None.\n\nShort-circuits on first match.\n\nExample:\n    [1, 2, 3, 4, 5].iter().find({ it > 3 })   // Some(4)\n    [1, 2, 3].iter().find({ it > 10 })        // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "first",
+              "anchor": "function-first",
+              "signature": "public mutating func first() -> Item?",
+              "doc": "Returns the first element, or None if empty.\n\nConsumes only the first element.\n\nExample:\n    [1, 2, 3].iter().first()  // Some(1)\n    [].iter().first()         // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "flatMap",
+              "anchor": "function-flatMap",
+              "signature": "public func flatMap[U]((Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator",
+              "doc": "Transforms each element into an iterator and flattens the results.\n\nEach element is passed to transform, which returns an iterator.\nAll elements from all resulting iterators are yielded sequentially.\n\nExample:\n    [[1, 2], [3, 4], [5]].iter()\n        .flatMap({ it.iter() })\n        .collect()  // [1, 2, 3, 4, 5]\n\n    // Get all characters from all words\n    [\"hello\", \"world\"].iter()\n        .flatMap({ it.chars() })\n        .collect()  // ['h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd']\n\n    // Filter and expand in one step\n    [1, 2, 3].iter()\n        .flatMap({ if it % 2 == 0 { [it, it].iter() } else { [].iter() } })\n        .collect()  // [2, 2]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "flatten",
+              "anchor": "function-flatten",
+              "signature": "public func flatten() -> FlattenIterator[Self]",
+              "doc": "Flattens nested iterators into a single iterator.\n\nEach inner iterator is fully consumed before moving to the next.\n\nExample:\n    let nested = [[1, 2], [3, 4], [5]].iter().map({ it.iter() })\n    nested.flatten().collect()  // [1, 2, 3, 4, 5]\n\n    // Equivalent to flatMap when you already have iterators\n    let iters: [ArrayIterator[Int64]] = ...\n    iters.iter().flatten().collect()",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fold",
+              "anchor": "function-fold",
+              "signature": "public consuming func fold[Acc](initial: Acc, combine: (Acc, Item) -> Acc) -> Acc",
+              "doc": "Reduces elements to a single value using an accumulator.\n\nStarts with initial value and applies combine(accumulator, element)\nfor each element. Returns initial if the iterator is empty.\n\nExample:\n    [1, 2, 3, 4].iter().fold(initial: 0, combine: |acc, x| acc + x)  // 10\n    [1, 2, 3].iter().fold(initial: 1, combine: |acc, x| acc * x)  // 6\n    [].iter().fold(initial: 42, combine: |acc, x| acc + x)  // 42",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "forEach",
+              "anchor": "function-forEach",
+              "signature": "public consuming func forEach((Item) -> ())",
+              "doc": "Calls action on each element.\n\nConsumes the entire iterator. Use when you need side effects.\n\nExample:\n    [1, 2, 3].iter().forEach({ print(it) })",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fuse",
+              "anchor": "function-fuse",
+              "signature": "public func fuse() -> FuseIterator[Self]",
+              "doc": "Stops permanently after yielding None once.\n\nSome iterators might return Some again after returning None (non-fused).\nThis adapter guarantees once None is returned, it's always None.\n\nExample:\n    var iter = possiblyNonFusedIterator.fuse()\n    // After iter.next() returns None, it will always return None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "inspect",
+              "anchor": "function-inspect",
+              "signature": "public func inspect((Item) -> ()) -> InspectIterator[Self]",
+              "doc": "Calls a function on each element as it passes through.\n\nThe iterator chain continues unchanged; this is purely for side effects.\nUseful for debugging, logging, or observing values mid-chain.\n\nExample:\n    [1, 2, 3].iter()\n        .inspect({ print(\"before filter: \\(it)\") })\n        .filter({ it > 1 })\n        .inspect({ print(\"after filter: \\(it)\") })\n        .collect()\n    // Prints: before filter: 1\n    //         before filter: 2\n    //         after filter: 2\n    //         before filter: 3\n    //         after filter: 3\n    // Returns: [2, 3]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "intersperse",
+              "anchor": "function-intersperse",
+              "signature": "public func intersperse(Item) -> IntersperseIterator[Self]",
+              "doc": "Inserts a separator between each pair of elements.\n\nThe separator is copied for each insertion.\n\nExample:\n    [1, 2, 3].iter().intersperse(separator: 0).collect()\n    // [1, 0, 2, 0, 3]\n\n    [\"a\", \"b\", \"c\"].iter().intersperse(separator: \"-\").collect()\n    // [\"a\", \"-\", \"b\", \"-\", \"c\"]\n\n    [1].iter().intersperse(separator: 0).collect()\n    // [1] - no separator for single element\n\n    [].iter().intersperse(separator: 0).collect()\n    // [] - empty stays empty",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "intersperseWith",
+              "anchor": "function-intersperseWith",
+              "signature": "public func intersperseWith(() -> Item) -> IntersperseWithIterator[Self]",
+              "doc": "Inserts separators generated by a function between each pair of elements.\n\nUseful when the separator is expensive to create or needs to vary.\n\nExample:\n    var counter = 0\n    [1, 2, 3].iter()\n        .intersperseWith(separator: || { counter += 1; counter * 10 })\n        .collect()\n    // [1, 10, 2, 20, 3]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isSorted",
+              "anchor": "function-isSorted",
+              "signature": "public consuming func isSorted() -> Bool",
+              "doc": "Returns true if the iterator yields elements in sorted (ascending) order.\n\nConsumes the entire iterator. Returns true for empty or single-element\niterators.\n\nExample:\n    [1, 2, 3, 4, 5].iter().isSorted()  // true\n    [1, 3, 2, 4, 5].iter().isSorted()  // false\n    [1, 1, 2, 2, 3].iter().isSorted()  // true (equal elements OK)\n    [].iter().isSorted()               // true\n    [42].iter().isSorted()             // true\n\n    // Short-circuits on first out-of-order pair\n    [1, 0, 2, 3, 4, 5, ...].iter().isSorted()  // false (stops at 1, 0)",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isSorted",
+              "anchor": "function-isSorted",
+              "signature": "public consuming func isSorted(by: (Item, Item) -> Bool) -> Bool",
+              "doc": "Returns true if elements are sorted according to the comparator.\n\nThe comparator should return true if the first argument should come\nbefore the second (i.e., they are in the correct order).\n\nExample:\n    // Check descending order\n    [5, 4, 3, 2, 1].iter().isSorted(by: |a, b| a >= b)  // true\n\n    // Check sorted by absolute value\n    [-1, 2, -3, 4].iter().isSorted(by: |a, b| a.abs() <= b.abs())  // true\n\n    // Case-insensitive string sorting\n    [\"Apple\", \"banana\", \"Cherry\"].iter()\n        .isSorted(by: |a, b| a.lowercase() <= b.lowercase())  // true",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isSortedBy",
+              "anchor": "function-isSortedBy",
+              "signature": "public consuming func isSortedBy[K]((Item) -> K) -> Bool where K: Comparable",
+              "doc": "Returns true if elements are sorted by the given key in ascending order.\n\nExample:\n    let people = [(\"Alice\", 25), (\"Bob\", 30), (\"Charlie\", 35)]\n    people.iter().isSortedBy(key: { it.1 })  // true (sorted by age)\n\n    let words = [\"a\", \"bb\", \"ccc\"]\n    words.iter().isSortedBy(key: { it.count })  // true (sorted by length)",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isSortedDescending",
+              "anchor": "function-isSortedDescending",
+              "signature": "public consuming func isSortedDescending() -> Bool",
+              "doc": "Returns true if elements are sorted in descending order.\n\nExample:\n    [5, 4, 3, 2, 1].iter().isSortedDescending()  // true\n    [5, 3, 4, 2, 1].iter().isSortedDescending()  // false",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "last",
+              "anchor": "function-last",
+              "signature": "public consuming func last() -> Item?",
+              "doc": "Returns the last element, or None if empty.\n\nConsumes the entire iterator.\n\nExample:\n    [1, 2, 3].iter().last()  // Some(3)\n    [].iter().last()         // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "map",
+              "anchor": "function-map",
+              "signature": "public func map[U]((Item) -> U) -> MapIterator[Self, U]",
+              "doc": "Transforms each element using the given function.\n\nLazy - transformation happens as elements are consumed.\n\nExample:\n    [1, 2, 3].iter().map({ it * 2 }).collect()  // [2, 4, 6]\n    [\"hello\", \"world\"].iter().map({ it.count }).collect()  // [5, 5]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "max",
+              "anchor": "function-max",
+              "signature": "public consuming func max() -> Item?",
+              "doc": "Returns the maximum element, or None if empty.\n\nConsumes the entire iterator.\n\nExample:\n    [3, 1, 4, 1, 5].iter().max()  // Some(5)\n    [].iter().max()               // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "maxBy",
+              "anchor": "function-maxBy",
+              "signature": "public consuming func maxBy[K]((Item) -> K) -> Item? where K: Comparable",
+              "doc": "Returns the element with the maximum value of the key function.\n\nConsumes the entire iterator. Returns None if empty.\nIf multiple elements have the maximum key, returns the first.\n\nExample:\n    let people = [(\"Alice\", 30), (\"Bob\", 25), (\"Charlie\", 35)]\n    people.iter().maxBy(key: { it.1 })  // Some((\"Charlie\", 35))\n\n    let words = [\"hello\", \"hi\", \"hey\"]\n    words.iter().maxBy(key: { it.count })  // Some(\"hello\")\n\n    [].iter().maxBy(key: { it })  // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "min",
+              "anchor": "function-min",
+              "signature": "public consuming func min() -> Item?",
+              "doc": "Returns the minimum element, or None if empty.\n\nConsumes the entire iterator.\n\nExample:\n    [3, 1, 4, 1, 5].iter().min()  // Some(1)\n    [].iter().min()               // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "minBy",
+              "anchor": "function-minBy",
+              "signature": "public consuming func minBy[K]((Item) -> K) -> Item? where K: Comparable",
+              "doc": "Returns the element with the minimum value of the key function.\n\nConsumes the entire iterator. Returns None if empty.\nIf multiple elements have the minimum key, returns the first.\n\nExample:\n    let people = [(\"Alice\", 30), (\"Bob\", 25), (\"Charlie\", 35)]\n    people.iter().minBy(key: { it.1 })  // Some((\"Bob\", 25))\n\n    let words = [\"hello\", \"hi\", \"hey\"]\n    words.iter().minBy(key: { it.count })  // Some(\"hi\")\n\n    [].iter().minBy(key: { it })  // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "mutating func next() -> Item?",
+              "doc": "Returns the next element, or None if the sequence is exhausted.\n\nOnce None is returned, subsequent calls should continue to return None\n(though `fuse()` can enforce this guarantee).",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "nth",
+              "anchor": "function-nth",
+              "signature": "public mutating func nth(Int64) -> Item?",
+              "doc": "Returns the nth element (zero-indexed), or None if out of bounds.\n\nConsumes elements up to and including n.\n\nExample:\n    [10, 20, 30, 40].iter().nth(n: 2)  // Some(30)\n    [10, 20].iter().nth(n: 5)          // None\n    [10, 20, 30].iter().nth(n: 0)      // Some(10)",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "peekable",
+              "anchor": "function-peekable",
+              "signature": "public func peekable() -> PeekableIterator[Self]",
+              "doc": "Wraps this iterator to allow peeking at the next element without consuming it.\n\nExample:\n    var iter = [1, 2, 3].iter().peekable()\n    iter.peek()  // Some(1) - doesn't consume\n    iter.peek()  // Some(1) - still 1\n    iter.next()  // Some(1) - now consumed\n    iter.peek()  // Some(2)",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "position",
+              "anchor": "function-position",
+              "signature": "public mutating func position((Item) -> Bool) -> Int64?",
+              "doc": "Returns the position of the first element satisfying the predicate, or None.\n\nShort-circuits on first match.\n\nExample:\n    [\"a\", \"b\", \"c\"].iter().position({ it == \"b\" })  // Some(1)\n    [1, 2, 3].iter().position({ it > 10 })          // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "product",
+              "anchor": "function-product",
+              "signature": "public consuming func product() -> Item",
+              "doc": "Returns the product of all elements.\n\nConsumes the entire iterator. Returns the multiplicative identity (one)\nif the iterator is empty.\n\nExample:\n    [1, 2, 3, 4, 5].iter().product()  // 120\n    [2.0, 3.0, 4.0].iter().product()  // 24.0\n    [].iter().product()               // 1\n\n    // Factorial via range\n    (1..=5).iter().product()  // 120 (5!)",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "reduce",
+              "anchor": "function-reduce",
+              "signature": "public consuming func reduce(combine: (Item, Item) -> Item) -> Item?",
+              "doc": "Reduces elements using the first element as the initial accumulator.\n\nReturns None if the iterator is empty.\n\nExample:\n    [1, 2, 3, 4].iter().reduce(combine: |a, b| a + b)  // Some(10)\n    [5].iter().reduce(combine: |a, b| a + b)  // Some(5)\n    [].iter().reduce(combine: |a, b| a + b)  // None",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "scan",
+              "anchor": "function-scan",
+              "signature": "public func scan[Acc](Acc, (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]",
+              "doc": "Yields running accumulator values, like fold but with intermediate results.\n\nStarts with initial value, applies combine for each element, and yields\neach intermediate accumulator value. Useful for running totals, prefixes, etc.\n\nExample:\n    // Running sum\n    [1, 2, 3, 4].iter()\n        .scan(initial: 0, combine: |acc, x| acc + x)\n        .collect()  // [1, 3, 6, 10]\n\n    // Running product\n    [1, 2, 3, 4].iter()\n        .scan(initial: 1, combine: |acc, x| acc * x)\n        .collect()  // [1, 2, 6, 24]\n\n    // Track state while iterating\n    \"aabbc\".chars().iter()\n        .scan(initial: 0, combine: |count, c| if c == 'b' { count + 1 } else { count })\n        .collect()  // [0, 0, 1, 2, 2]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "skip",
+              "anchor": "function-skip",
+              "signature": "public func skip(Int64) -> SkipIterator[Self]",
+              "doc": "Skips the first count elements.\n\nExample:\n    [1, 2, 3, 4, 5].iter().skip(count: 2).collect()  // [3, 4, 5]\n    [1, 2].iter().skip(count: 10).collect()  // [] - all skipped",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "skipWhile",
+              "anchor": "function-skipWhile",
+              "signature": "public func skipWhile((Item) -> Bool) -> SkipWhileIterator[Self]",
+              "doc": "Skips elements while predicate returns true, then yields all remaining.\n\nOnce the predicate returns false, yields that element and all subsequent\nelements without further testing.\n\nExample:\n    [1, 2, 3, 4, 1, 2].iter()\n        .skipWhile({ it < 3 })\n        .collect()  // [3, 4, 1, 2] - note 1, 2 at end included",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "sorted",
+              "anchor": "function-sorted",
+              "signature": "public consuming func sorted() -> Array[Item]",
+              "doc": "Collects elements into a sorted array.\n\nConsumes the entire iterator.\n\nExample:\n    [3, 1, 4, 1, 5].iter().sorted()  // [1, 1, 3, 4, 5]\n    [3, 1, 2].iter().filter({ it > 1 }).sorted()  // [2, 3]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "stepBy",
+              "anchor": "function-stepBy",
+              "signature": "public func stepBy(Int64) -> StepByIterator[Self]",
+              "doc": "Yields every nth element, starting with the first.\n\nPanics if step is 0.\n\nExample:\n    [0, 1, 2, 3, 4, 5, 6].iter().stepBy(n: 2).collect()\n    // [0, 2, 4, 6]\n\n    [0, 1, 2, 3, 4].iter().stepBy(n: 3).collect()\n    // [0, 3]\n\n    // Useful for sampling\n    largeDataset.iter().stepBy(n: 100).collect()  // every 100th element",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "sum",
+              "anchor": "function-sum",
+              "signature": "public consuming func sum() -> Item",
+              "doc": "Returns the sum of all elements.\n\nConsumes the entire iterator. Returns the additive identity (zero)\nif the iterator is empty.\n\nExample:\n    [1, 2, 3, 4, 5].iter().sum()  // 15\n    [1.5, 2.5, 3.0].iter().sum()  // 7.0\n    [].iter().sum()               // 0\n\n    // With filtering\n    [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).sum()  // 6",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "take",
+              "anchor": "function-take",
+              "signature": "public func take(Int64) -> TakeIterator[Self]",
+              "doc": "Takes only the first count elements.\n\nStops iteration after yielding count elements, even if more are available.\n\nExample:\n    [1, 2, 3, 4, 5].iter().take(count: 3).collect()  // [1, 2, 3]\n    [1, 2].iter().take(count: 10).collect()  // [1, 2] - fewer available",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "takeWhile",
+              "anchor": "function-takeWhile",
+              "signature": "public func takeWhile((Item) -> Bool) -> TakeWhileIterator[Self]",
+              "doc": "Takes elements while predicate returns true, then stops.\n\nStops at the first element that doesn't satisfy the predicate.\nDoes not include that element.\n\nExample:\n    [1, 2, 3, 4, 1, 2].iter()\n        .takeWhile({ it < 4 })\n        .collect()  // [1, 2, 3] - stops at 4",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "tryFold",
+              "anchor": "function-tryFold",
+              "signature": "public mutating func tryFold[Acc, E](initial: Acc, combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]",
+              "doc": "Folds with early exit on error.\n\nLike `fold`, but the combine function returns a Result. If any call\nreturns Err, iteration stops immediately and that error is returned.\nIf all calls succeed, returns Ok with the final accumulator.\n\nExample:\n    // Parse and sum, stopping on first parse error\n    [\"1\", \"2\", \"3\"].iter()\n        .tryFold(initial: 0, combine: |acc, s| {\n            match Int64.parse(s) {\n                Some(n) => Ok(acc + n),\n                None => Err(\"parse error\")\n            }\n        })  // Ok(6)\n\n    [\"1\", \"bad\", \"3\"].iter()\n        .tryFold(initial: 0, combine: |acc, s| {\n            match Int64.parse(s) {\n                Some(n) => Ok(acc + n),\n                None => Err(\"parse error\")\n            }\n        })  // Err(\"parse error\") - stops at \"bad\"\n\n    // Early exit for performance\n    (1..1000000).iter()\n        .tryFold(initial: 0, combine: |acc, x| {\n            if acc > 100 { Err(acc) }  // stop early\n            else { Ok(acc + x) }\n        })",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "tryForEach",
+              "anchor": "function-tryForEach",
+              "signature": "public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]",
+              "doc": "Calls action on each element with early exit on error.\n\nLike `forEach`, but the action returns a Result. Stops on first Err.\n\nExample:\n    files.iter().tryForEach({ (path) in\n        File.delete(path)  // Returns Result[(), IoError]\n    })  // Stops on first deletion failure",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "unzip",
+              "anchor": "function-unzip",
+              "signature": "public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)",
+              "doc": "Splits an iterator of pairs into two arrays.\n\nTakes an iterator over pairs `(A, B)` and returns two arrays:\none containing all the first elements and one containing all the second elements.\n\nExample:\n    let pairs = [(1, \"a\"), (2, \"b\"), (3, \"c\")];\n    let (nums, strs) = pairs.iter().unzip();\n    // nums = [1, 2, 3], strs = [\"a\", \"b\", \"c\"]",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "zip",
+              "anchor": "function-zip",
+              "signature": "public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator",
+              "doc": "Pairs elements from this iterator with another.\n\nStops when either iterator is exhausted.\n\nExample:\n    let names = [\"Alice\", \"Bob\", \"Charlie\"]\n    let ages = [30, 25, 35]\n    names.iter().zip(other: ages.iter()).collect()\n    // [(\"Alice\", 30), (\"Bob\", 25), (\"Charlie\", 35)]\n\n    // Different lengths - stops at shorter\n    [1, 2, 3].iter().zip(other: [\"a\", \"b\"].iter()).collect()\n    // [(1, \"a\"), (2, \"b\")]",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item",
+              "doc": "The type of elements yielded by this iterator.",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Self.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = Self",
+              "doc": "",
+              "source_path": "lang/std/iter/iterator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "func iter() -> Self",
+              "doc": "Returns self, allowing an iterator to be used where an iterable is expected.",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "MapIterator",
+      "anchor": "struct-MapIterator",
+      "signature": "public struct MapIterator[I, U] where I: Iterator { /* private fields */ }",
+      "doc": "Transforms each element using a function.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, transform: (I.Item) -> U)",
+              "doc": "Creates a map iterator that applies transform to each element of inner.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "transform",
+              "anchor": "field-transform",
+              "signature": "internal var transform: (I.Item) -> U",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = U",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> U?",
+              "doc": "Returns the next transformed element, or None if exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OnceIterator",
+      "anchor": "struct-OnceIterator",
+      "signature": "public struct OnceIterator[T] { /* private fields */ }",
+      "doc": "An iterator that yields a single value.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(value: T)",
+              "doc": "Creates an iterator that yields value exactly once.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "value",
+              "anchor": "field-value",
+              "signature": "internal var value: T?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> T?",
+              "doc": "Returns the value on first call, None thereafter.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "PeekableIterator",
+      "anchor": "struct-PeekableIterator",
+      "signature": "public struct PeekableIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Allows peeking at the next element without consuming it.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I)",
+              "doc": "Creates a peekable iterator wrapping inner.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "peek",
+              "anchor": "function-peek",
+              "signature": "public mutating func peek() -> I.Item?",
+              "doc": "Returns the next element without consuming it.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "peeked",
+              "anchor": "field-peeked",
+              "signature": "internal var peeked: Optional[I.Item]?",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns and consumes the next element.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RepeatIterator",
+      "anchor": "struct-RepeatIterator",
+      "signature": "public struct RepeatIterator[T] { /* private fields */ }",
+      "doc": "An iterator that yields the same value forever.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(value: T)",
+              "doc": "Creates an iterator that yields value forever.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "value",
+              "anchor": "field-value",
+              "signature": "internal var value: T",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> T?",
+              "doc": "Returns a copy of the value.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RepeatNIterator",
+      "anchor": "struct-RepeatNIterator",
+      "signature": "public struct RepeatNIterator[T] { /* private fields */ }",
+      "doc": "An iterator that yields the same value n times.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(value: T, count: Int64)",
+              "doc": "Creates an iterator that yields value exactly count times.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "remaining",
+              "anchor": "field-remaining",
+              "signature": "internal var remaining: Int64",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "value",
+              "anchor": "field-value",
+              "signature": "internal var value: T",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> T?",
+              "doc": "Returns a copy of the value, or None after count iterations.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RevIterator",
+      "anchor": "struct-RevIterator",
+      "signature": "public struct RevIterator[I] where I: DoubleEndedIterator, I: Iterator { /* private fields */ }",
+      "doc": "Reverses a double-ended iterator.\n\nYields elements by calling `nextBack()` on the inner iterator.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I)",
+              "doc": "Creates an iterator that yields elements in reverse order.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element from the back of the inner iterator.",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "DoubleEndedIterator",
+          "source_path": "std.iter.DoubleEndedIterator",
+          "members": [
+            {
+              "kind": "function",
+              "name": "nextBack",
+              "anchor": "function-nextBack",
+              "signature": "public mutating func nextBack() -> I.Item?",
+              "doc": "Returns the next element from the front of the inner iterator.",
+              "source_path": "lang/std/iter/iterator.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ScanIterator",
+      "anchor": "struct-ScanIterator",
+      "signature": "public struct ScanIterator[I, Acc] where I: Iterator { /* private fields */ }",
+      "doc": "Yields running accumulator values during a fold.\n\nLike fold, but yields each intermediate accumulator value.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "combine",
+              "anchor": "field-combine",
+              "signature": "internal var combine: (Acc, I.Item) -> Acc",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, initial: Acc, combine: (Acc, I.Item) -> Acc)",
+              "doc": "Creates an iterator that yields running fold values.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "state",
+              "anchor": "field-state",
+              "signature": "internal var state: Acc",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Acc",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> Acc?",
+              "doc": "Returns the next accumulated value.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SkipIterator",
+      "anchor": "struct-SkipIterator",
+      "signature": "public struct SkipIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Skips the first n elements.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, count: Int64)",
+              "doc": "Creates an iterator that skips the first count elements.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "remaining",
+              "anchor": "field-remaining",
+              "signature": "internal var remaining: Int64",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element after skipping, or None if exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SkipWhileIterator",
+      "anchor": "struct-SkipWhileIterator",
+      "signature": "public struct SkipWhileIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Skips elements while predicate is true, then yields all remaining.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "doneSkipping",
+              "anchor": "field-doneSkipping",
+              "signature": "internal var doneSkipping: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, predicate: (I.Item) -> Bool)",
+              "doc": "Creates an iterator that skips elements until predicate returns false.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "predicate",
+              "anchor": "field-predicate",
+              "signature": "internal var predicate: (I.Item) -> Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element after skipping is complete, or None.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "StepByIterator",
+      "anchor": "struct-StepByIterator",
+      "signature": "public struct StepByIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Yields every nth element, starting with the first.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "first",
+              "anchor": "field-first",
+              "signature": "internal var first: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, step: Int64)",
+              "doc": "Creates an iterator that yields every `step` elements.\nPanics if step is 0.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "step",
+              "anchor": "field-step",
+              "signature": "internal var step: Int64",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns every nth element.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TakeIterator",
+      "anchor": "struct-TakeIterator",
+      "signature": "public struct TakeIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Takes only the first n elements.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, count: Int64)",
+              "doc": "Creates an iterator that yields at most count elements.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "remaining",
+              "anchor": "field-remaining",
+              "signature": "internal var remaining: Int64",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element if count not reached, or None.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TakeWhileIterator",
+      "anchor": "struct-TakeWhileIterator",
+      "signature": "public struct TakeWhileIterator[I] where I: Iterator { /* private fields */ }",
+      "doc": "Takes elements while predicate is true, then stops.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "done",
+              "anchor": "field-done",
+              "signature": "internal var done: Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(inner: I, predicate: (I.Item) -> Bool)",
+              "doc": "Creates an iterator that yields elements until predicate returns false.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "inner",
+              "anchor": "field-inner",
+              "signature": "internal var inner: I",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "predicate",
+              "anchor": "field-predicate",
+              "signature": "internal var predicate: (I.Item) -> Bool",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = I.Item",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> I.Item?",
+              "doc": "Returns the next element if predicate is still true, or None.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ZipIterator",
+      "anchor": "struct-ZipIterator",
+      "signature": "public struct ZipIterator[A, B] where A: Iterator, B: Iterator { /* private fields */ }",
+      "doc": "Pairs elements from two iterators.\nStops when either iterator is exhausted.",
+      "source_path": "lang/std/iter/adapters.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "first",
+              "anchor": "field-first",
+              "signature": "internal var first: A",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(first: A, second: B)",
+              "doc": "Creates an iterator that pairs elements from first and second.",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "field",
+              "name": "second",
+              "anchor": "field-second",
+              "signature": "internal var second: B",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = (A.Item, B.Item)",
+              "doc": "",
+              "source_path": "lang/std/iter/adapters.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> (A.Item, B.Item)?",
+              "doc": "Returns the next pair, or None if either iterator is exhausted.",
+              "source_path": "lang/std/iter/adapters.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "empty",
+      "anchor": "function-empty",
+      "signature": "public func empty[T]() -> EmptyIterator[T]",
+      "doc": "Creates an iterator that yields nothing.",
+      "source_path": "lang/std/iter/adapters.ks"
+    },
+    {
+      "kind": "function",
+      "name": "once",
+      "anchor": "function-once",
+      "signature": "public func once[T](T) -> OnceIterator[T]",
+      "doc": "Creates an iterator that yields value exactly once.",
+      "source_path": "lang/std/iter/adapters.ks"
+    },
+    {
+      "kind": "function",
+      "name": "repeatN",
+      "anchor": "function-repeatN",
+      "signature": "public func repeatN[T](T, Int64) -> RepeatNIterator[T]",
+      "doc": "Creates an iterator that yields value exactly count times.",
+      "source_path": "lang/std/iter/adapters.ks"
+    },
+    {
+      "kind": "function",
+      "name": "repeatValue",
+      "anchor": "function-repeatValue",
+      "signature": "public func repeatValue[T](T) -> RepeatIterator[T]",
+      "doc": "Creates an iterator that yields value forever.",
+      "source_path": "lang/std/iter/adapters.ks"
+    }
+  ]
+}

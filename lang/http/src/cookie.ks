@@ -25,19 +25,25 @@ public struct Cookie: Cloneable {
 
     /// Serializes this cookie into a Set-Cookie header value.
     public func toHeaderValue() -> String {
-        var result = self.name + "=" + self.value;
-        result = result + "; Path=" + self.path;
+        var result = String();
+        result.append(self.name);
+        result.append("=");
+        result.append(self.value);
+        result.append("; Path=");
+        result.append(self.path);
         if self.maxAge >= 0 {
-            result = result + "; Max-Age=" + self.maxAge.format()
+            result.append("; Max-Age=");
+            result.append(self.maxAge.format())
         }
         if self.httpOnly {
-            result = result + "; HttpOnly"
+            result.append("; HttpOnly")
         }
         if self.secure {
-            result = result + "; Secure"
+            result.append("; Secure")
         }
         if self.sameSite.byteCount > 0 {
-            result = result + "; SameSite=" + self.sameSite
+            result.append("; SameSite=");
+            result.append(self.sameSite)
         }
         result
     }

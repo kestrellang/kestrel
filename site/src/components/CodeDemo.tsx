@@ -1,4 +1,4 @@
-import { FileCode, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 interface CodeExample {
@@ -337,127 +337,89 @@ export default function CodeDemo() {
   return (
     <section
       ref={sectionRef}
-      className="scroll-section bg-[var(--color-slate)]">
-      {/* Subtle pattern */}
-      <div className="absolute inset-0 opacity-[0.15]">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`,
-            backgroundSize: "32px 32px",
-          }}
-        />
-      </div>
-
-      {/* Accent glow */}
-      <div className="absolute top-1/4 -right-32 w-96 h-96 bg-[var(--color-rust)] opacity-10 blur-3xl rounded-full" />
-      <div className="absolute bottom-1/4 -left-32 w-64 h-64 bg-[var(--color-forest)] opacity-10 blur-3xl rounded-full" />
-
-      <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-12 lg:px-24 py-20">
-        {/* Section header - left aligned */}
-        <div
-          className={`max-w-2xl mb-12 transition-all duration-1000 ${
-            isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          }`}>
-          <span className="font-mono text-[var(--color-rust-light)] text-sm uppercase tracking-widest">
-            See It In Action
-          </span>
-          <h2 className="font-serif text-5xl md:text-6xl lg:text-7xl font-black text-white mt-4 tracking-tight">
-            Expressive <span className="text-[var(--color-gold)]">by Default.</span>
-          </h2>
-          <p className="mt-4 text-xl text-white/60 font-mono">
-            Reads like pseudocode. Runs like C.
-          </p>
+      className="scroll-section bg-[#172536]">
+      <div className="relative z-10 min-h-full grid grid-cols-1 lg:grid-cols-12">
+        <div className="lg:col-span-5 min-h-[45vh] lg:min-h-screen flex items-center px-6 md:px-12 lg:px-16 xl:px-24 py-16 lg:py-0">
+          <div
+            className={`max-w-xl transition-all duration-1000 ${
+              isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+            }`}
+          >
+            <span className="font-mono text-[var(--color-rust-light)] text-sm uppercase tracking-widest">
+              Code Sample
+            </span>
+            <h2 className="font-serif text-5xl md:text-6xl lg:text-7xl font-black text-white mt-4 tracking-tight">
+              Source That <span className="text-[var(--color-gold)]">Stays Close</span>
+            </h2>
+            <p className="mt-4 text-xl text-white/60 font-mono">
+              Readable syntax, predictable output
+            </p>
+          </div>
         </div>
 
-        {/* IDE-style editor */}
-        <div
-          className={`bg-[#1a2a3a] rounded-2xl shadow-2xl overflow-hidden transition-all duration-1000 delay-200 max-w-5xl border border-[#0d1a24] ${
-            isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-          }`}>
-          <div className="flex flex-col">
-            {/* Tab bar */}
-            <div className="flex items-center justify-between pl-4 pr-3 py-2">
-              <div className="flex items-center gap-2">
-                {/* Traffic lights */}
-                <div className="flex gap-2 mr-3">
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff3b30] transition-colors cursor-pointer" />
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#febc2e] hover:bg-[#f5a623] transition-colors cursor-pointer" />
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#28c840] hover:bg-[#1db954] transition-colors cursor-pointer" />
-                </div>
-                {/* Tabs */}
+        <div className="lg:col-span-7 min-h-[55vh] lg:min-h-screen bg-[#101b28] flex items-stretch">
+          <div
+            className={`w-full flex flex-col px-6 md:px-12 lg:px-12 xl:px-16 py-10 lg:py-14 transition-all duration-1000 delay-200 ${
+              isVisible ? "opacity-100 translate-x-0" : "opacity-0 translate-x-10"
+            }`}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pr-4">
                 {codeExamples.map((ex, i) => (
                   <button
                     key={i}
                     onClick={() => handleExampleChange(i)}
-                    className={`flex items-center gap-2 px-3.5 py-2 rounded-lg font-mono text-xs transition-colors ${
+                    className={`shrink-0 rounded-md px-3 py-2 font-mono text-xs transition-colors ${
                       i === currentExample
-                        ? "bg-[#0d1a24] text-white"
-                        : "text-white/50 hover:text-white/80"
-                    }`}>
-                    <FileCode className="w-4 h-4 flex-shrink-0" />
-                    <span>{ex.filename}</span>
+                        ? "bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
+                        : "text-white/45 hover:bg-white/[0.06] hover:text-white/70"
+                    }`}
+                    title={ex.description}
+                  >
+                    {ex.filename}
                   </button>
                 ))}
               </div>
-              {/* Run button */}
               <button
                 onClick={runCode}
-                className="p-2.5 rounded-full text-white/80 hover:text-white hover:bg-[#0d1a24] transition-colors"
-                title="Run">
-                <Play className="w-4 h-4 fill-current" />
+                className="inline-flex items-center gap-2 rounded-md border border-[var(--color-gold)]/45 px-4 py-2 font-mono text-xs text-[var(--color-gold)] hover:bg-[var(--color-gold)]/10 hover:border-[var(--color-gold)] transition-colors"
+                title="Run"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                run
               </button>
             </div>
 
-            {/* Code area */}
-            <div className="flex-1 flex flex-col min-w-0">
-              {/* Code content */}
-              <div className="flex-1 p-6 font-mono text-sm leading-relaxed min-h-[380px] overflow-x-auto">
-                <pre className="text-gray-300 whitespace-pre-wrap">
-                  {tokenize(example.code)}
-                </pre>
-              </div>
+            <div className="flex-1 min-h-0 overflow-x-auto py-8">
+              <pre className="font-mono text-xs md:text-sm leading-relaxed text-gray-300 whitespace-pre-wrap">
+                {tokenize(example.code)}
+              </pre>
+            </div>
 
-              {/* Output */}
-              <div className="px-2 pb-2">
-                <div className="bg-[#0d1a24] rounded-xl p-3 min-h-[80px] font-mono text-white">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-white/50 text-[10px] font-semibold uppercase tracking-wider">Output</span>
-                  </div>
-                  {showOutput && (
-                    <div className="mt-2">
-                      {example.output.map((line, i) => (
-                        <div
-                          key={i}
-                          className="text-sm"
-                          style={{
-                            animation: `fadeIn 0.3s ease-out ${i * 0.1}s forwards`,
-                            opacity: 0,
-                          }}>
-                          {line}
-                        </div>
-                      ))}
+            <div className="border-t border-white/10 pt-4 font-mono text-white">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/35">
+                  Output
+                </span>
+                {!showOutput && (
+                  <span className="text-xs text-white/30">waiting for run</span>
+                )}
+              </div>
+              <div className="mt-3 min-h-[72px] text-sm text-white/85">
+                {showOutput &&
+                  example.output.map((line, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        animation: `fadeIn 0.3s ease-out ${i * 0.1}s forwards`,
+                        opacity: 0,
+                      }}
+                    >
+                      {line}
                     </div>
-                  )}
-                </div>
+                  ))}
               </div>
             </div>
-          </div>
-
-          {/* Mobile file selector */}
-          <div className="md:hidden border-t border-white/10 p-2 flex gap-2 overflow-x-auto bg-[#0d1a24]">
-            {codeExamples.map((ex, i) => (
-              <button
-                key={i}
-                onClick={() => handleExampleChange(i)}
-                className={`px-3 py-1.5 rounded-lg font-mono text-xs whitespace-nowrap transition-colors ${
-                  i === currentExample
-                    ? "bg-[var(--color-gold)] text-[var(--color-slate)]"
-                    : "bg-white/10 text-white/50"
-                }`}>
-                {ex.title}
-              </button>
-            ))}
           </div>
         </div>
       </div>

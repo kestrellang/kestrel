@@ -11,15 +11,26 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::{
-    ConformanceListData, ExtensionBodyItem, ExtensionDeclarationData, emit_extension_declaration,
-    function_declaration_parser_internal, initializer_declaration_parser_internal,
-    subscript_declaration_parser_internal, token,
+    ConformanceListData, InitializerDeclarationData, emit_initializer_declaration,
+    initializer_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::ty::ty_parser;
-use crate::type_alias::type_alias_declaration_parser_internal;
-use crate::type_param::{conformance_list_parser, where_clause_parser};
+use crate::function::{
+    FunctionDeclarationData, emit_function_declaration, function_declaration_parser_internal,
+};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
+use crate::subscript::{
+    SubscriptDeclarationData, emit_subscript_declaration, subscript_declaration_parser_internal,
+};
+use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
+use crate::type_alias::{
+    TypeAliasDeclarationData, emit_type_alias_declaration, type_alias_declaration_parser_internal,
+};
+use crate::type_param::{
+    WhereClauseData, conformance_list_parser, emit_conformance_list, emit_where_clause,
+    where_clause_parser,
+};
 
 /// Represents an extension declaration: extend Type: Protocol { ... }
 ///
@@ -84,6 +95,34 @@ impl ExtensionDeclaration {
     }
 }
 
+/// Raw parsed data for extension declaration internals
+///
+/// Extension syntax: `extend Type: Protocol { ... }`
+/// Extensions add methods and conformances to existing types.
+#[derive(Debug, Clone)]
+pub struct ExtensionDeclarationData {
+    pub extend_span: Span,
+    /// The type being extended (uses type expression, not type parameter list)
+    /// This allows Box[T, Int] where T references the struct's type parameter
+    pub target_type: TyVariant,
+    /// Optional conformances this extension adds
+    pub conformances: Option<ConformanceListData>,
+    /// Optional where clause for additional constraints
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<ExtensionBodyItem>,
+    pub rbrace_span: Span,
+}
+
+/// Items that can appear in an extension body
+#[derive(Debug, Clone)]
+pub enum ExtensionBodyItem {
+    Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
+    Initializer(InitializerDeclarationData),
+    TypeAlias(TypeAliasDeclarationData),
+}
+
 /// Internal parser for extension body items
 ///
 /// Extension bodies can contain: functions, subscripts, initializers, and associated types
@@ -143,6 +182,63 @@ pub fn extension_declaration_parser_internal<'tokens>()
         .boxed()
 }
 
+/// Emit events for an extension declaration.
+///
+/// Destructures `ExtensionDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
+pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarationData) {
+    let ExtensionDeclarationData {
+        extend_span,
+        target_type,
+        conformances,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
+    sink.start_node(SyntaxKind::ExtensionDeclaration);
+
+    sink.add_token(SyntaxKind::Extend, extend_span);
+
+    // Emit target type (e.g., Box[T, Int])
+    emit_ty_variant(sink, &target_type);
+
+    // Emit conformance list if present
+    if let Some(conf) = conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
+    // Emit where clause if present
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::ExtensionBody);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
+
+    for item in body {
+        match item {
+            ExtensionBodyItem::Function(d) => emit_function_declaration(sink, d),
+            ExtensionBodyItem::Subscript(d) => emit_subscript_declaration(sink, d),
+            ExtensionBodyItem::Initializer(d) => emit_initializer_declaration(sink, d),
+            ExtensionBodyItem::TypeAlias(d) => emit_type_alias_declaration(sink, d),
+        }
+    }
+
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
+    sink.finish_node(); // ExtensionBody
+
+    sink.finish_node(); // ExtensionDeclaration
+}
+
+impl crate::event::EmitSyntax for ExtensionDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_extension_declaration(sink, self);
+    }
+}
+
 /// Parse an extension declaration and emit events
 ///
 /// This is the primary event-driven parser function for extension declarations.
@@ -150,24 +246,13 @@ pub fn parse_extension_declaration<I>(source: &str, tokens: I, sink: &mut EventS
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::Parser;
-
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match extension_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_extension_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        extension_declaration_parser_internal(),
+        emit_extension_declaration
+    );
 }
 
 #[cfg(test)]

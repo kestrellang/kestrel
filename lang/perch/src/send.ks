@@ -16,35 +16,27 @@ public func sendResponse(response: Response, to fd: Int32) -> Result[(), Error] 
     resp.append(response.status.code.format());
     resp.append(" ");
     resp.append(response.status.text());
-    resp.appendByte(13);
-    resp.appendByte(10);
+    resp.append("\r\n");
 
-    // Headers
     var i: Int64 = 0;
     while i < response.headers.entries.count {
         let pair = response.headers.entries(unchecked: i);
         resp.append(pair.0);
         resp.append(": ");
         resp.append(pair.1);
-        resp.appendByte(13);
-        resp.appendByte(10);
+        resp.append("\r\n");
         i = i + 1
     }
 
     // Content-Length
     resp.append("Content-Length: ");
     resp.append(response.bodyContent.byteCount.format());
-    resp.appendByte(13);
-    resp.appendByte(10);
+    resp.append("\r\n");
 
-    // Connection: close
     resp.append("Connection: close");
-    resp.appendByte(13);
-    resp.appendByte(10);
+    resp.append("\r\n");
 
-    // End of headers
-    resp.appendByte(13);
-    resp.appendByte(10);
+    resp.append("\r\n");
 
     // Body
     resp.append(response.bodyContent);

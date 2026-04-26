@@ -8,9 +8,28 @@ import std.text.(String, FormatOptions, Formattable)
 import std.num.(UInt8, Int64)
 import std.memory.(Slice, Pointer)
 
-/// The boolean type with support for logical operations, equality, hashing, and formatting.
-/// Bool conforms to Equatable, Matchable, Formattable, Hash, And, Or, Not,
-/// ExpressibleByBoolLiteral, BooleanConditional, and FFISafe protocols.
+/// Two-state truth value with `true` and `false` as its only inhabitants.
+///
+/// `Bool` is the canonical conformer of every logical, conditional, and
+/// equality protocol in `std.core`: equality, matching, hashing, formatting,
+/// `and`/`or`/`not`, plus FFI compatibility for crossing the C boundary as
+/// a single byte. Custom types rarely need to wrap `Bool`; conform to the
+/// individual protocols (e.g. `BooleanConditional`) instead.
+///
+/// # Examples
+///
+/// ```
+/// let alive = true;
+/// if alive { greet() }
+///
+/// let votes = [true, false, true];
+/// let yesCount = votes.iter().filter({ |b| b }).count();   // 2
+/// ```
+///
+/// # Representation
+///
+/// Wraps a single `lang.i1`. The runtime promotes to a byte at FFI
+/// boundaries (`FFISafe` conformance).
 public struct Bool:
     Equatable,
     Matchable,
@@ -29,7 +48,8 @@ public struct Bool:
     // INITIALIZATION
     // ========================================================================
 
-    /// Creates a Bool from a boolean literal value.
+    /// @name Bool Literal
+    /// Builds a `Bool` from the primitive `lang.i1` produced by a literal.
     public init(boolLiteral value: lang.i1) {
         self.value = value
     }
@@ -38,14 +58,13 @@ public struct Bool:
     // EQUALITY AND MATCHING
     // ========================================================================
 
-    /// Compares this Bool with another for equality.
-    /// Returns true if both values are the same.
+    /// Returns `true` if both bits agree. Drives `==` for `Bool`.
     public func equals(other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
 
-    /// Matches this Bool against another in pattern matching contexts.
-    /// Returns true if both values are the same.
+    /// Pattern-match form of `equals`: `case true =>` and `case false =>`
+    /// dispatch through here.
     public func matches(other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
@@ -54,7 +73,8 @@ public struct Bool:
     // HASHING
     // ========================================================================
 
-    /// Hashes this Bool value into the given hasher.
+    /// Feeds a single `0` or `1` byte into `hasher`. Compatible with how the
+    /// stdlib hashes other primitives — equal `Bool`s always hash equal.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         if self.value {
             hasher.write(Slice(pointer: Pointer(to: UInt8(intLiteral: 1)), count: std.num.Int64(intLiteral: 1)))
@@ -72,19 +92,19 @@ public struct Bool:
     type Or.Output = Bool
     type Not.Output = Bool
 
-    /// Logical AND with short-circuit evaluation.
-    /// The closure is only evaluated if self is true.
+    /// Short-circuiting `and`: `other` runs only when `self` is `true`.
+    /// The closure form is what the `and` keyword lowers into; users
+    /// typically write `a and b` rather than calling this directly.
     public func logicalAnd(other: () -> Bool) -> Bool {
         if self.value { other() } else { Bool(boolLiteral: false) }
     }
 
-    /// Logical OR with short-circuit evaluation.
-    /// The closure is only evaluated if self is false.
+    /// Short-circuiting `or`: `other` runs only when `self` is `false`.
     public func logicalOr(other: () -> Bool) -> Bool {
         if self.value { Bool(boolLiteral: true) } else { other() }
     }
 
-    /// Logical NOT - returns the inverse of this boolean.
+    /// Bit-flip; `not true == false`.
     public func logicalNot() -> Bool {
         Bool(boolLiteral: lang.i1_not(self.value))
     }
@@ -93,7 +113,8 @@ public struct Bool:
     // CONDITIONAL SUPPORT
     // ========================================================================
 
-    /// Returns the underlying boolean value for use in conditionals.
+    /// Returns the wrapped `lang.i1` so `if`/`while` can branch on it
+    /// without a redundant `Bool` round-trip.
     public func boolValue() -> lang.i1 {
         self.value
     }
@@ -102,9 +123,15 @@ public struct Bool:
     // FORMATTING
     // ========================================================================
 
-    /// Formats this Bool as a string.
-    /// Default: "true" or "false".
-    /// Debug: "Bool(true)" or "Bool(false)".
+    /// Renders as `"true"` / `"false"`. With `options.debug`, wraps as
+    /// `"Bool(true)"` / `"Bool(false)"` for diagnostic dumps.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// true.format()                                       // "true"
+    /// false.format(FormatOptions.debug())                 // "Bool(false)"
+    /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         let value = if self.value { "true" } else { "false" };
         if options.debug { "Bool(" + value + ")" } else { value }

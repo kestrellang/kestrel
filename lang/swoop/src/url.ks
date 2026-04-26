@@ -31,7 +31,11 @@ public struct ClientUrl: Cloneable {
     /// Returns the full request path including query string (e.g. "/users?page=1").
     public func requestPath() -> String {
         if self.queryString.byteCount > 0 {
-            self.path + "?" + self.queryString
+            var full = String();
+            full.append(self.path);
+            full.append("?");
+            full.append(self.queryString);
+            full
         } else {
             self.path
         }
@@ -50,7 +54,11 @@ public struct ClientUrl: Cloneable {
         if self.port == httpDefault or self.port == httpsDefault {
             self.host
         } else {
-            self.host + ":" + Int64(from: self.port).format()
+            var hostHeader = String();
+            hostHeader.append(self.host);
+            hostHeader.append(":");
+            hostHeader.append(Int64(from: self.port).format());
+            hostHeader
         }
     }
 }

@@ -1,0 +1,21 @@
+[package]
+name = "kestrel-type-infer"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-debug = { path = "../kestrel-debug" }
+
+[dev-dependencies]
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
+codespan-reporting.workspace = true

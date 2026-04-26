@@ -1,6 +1,10 @@
 // libc bindings for I/O
 //
-// This module provides raw bindings to libc I/O functions via @extern(.C).
+// Thin `@extern(.C)` wrappers around the POSIX I/O syscalls plus the
+// platform constants the higher-level types in `std.io` need (open
+// flags, seek anchors, default mode bits). Prefer `File`, `Stdin`,
+// `Stdout`, `Stderr`, and the `read`/`write` helpers in `std.io` over
+// these raw bindings; reach for `libc.*` only for FFI interop.
 
 module std.io.libc
 
@@ -41,7 +45,48 @@ public func O_WRONLY() -> Int32 { 0x0001 }
 /// Open for reading and writing.
 public func O_RDWR() -> Int32 { 0x0002 }
 
-// O_CREAT, O_TRUNC, O_APPEND, O_EXCL are in libc.darwin.ks / libc.linux.ks
+// errno access
+@platform(.darwin)
+@extern(.C, mangleName: "__error")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+@platform(.linux)
+@extern(.C, mangleName: "__errno_location")
+func __errno_ptr() -> lang.ptr[lang.i32]
+
+// Open flags (platform-specific values)
+
+/// Create file if it doesn't exist.
+@platform(.darwin)
+public func O_CREAT() -> Int32 { 0x0200 }
+
+/// Create file if it doesn't exist.
+@platform(.linux)
+public func O_CREAT() -> Int32 { 0x0040 }
+
+/// Truncate file to zero length.
+@platform(.darwin)
+public func O_TRUNC() -> Int32 { 0x0400 }
+
+/// Truncate file to zero length.
+@platform(.linux)
+public func O_TRUNC() -> Int32 { 0x0200 }
+
+/// Append to end of file.
+@platform(.darwin)
+public func O_APPEND() -> Int32 { 0x0008 }
+
+/// Append to end of file.
+@platform(.linux)
+public func O_APPEND() -> Int32 { 0x0400 }
+
+/// Fail if file exists (with O_CREAT).
+@platform(.darwin)
+public func O_EXCL() -> Int32 { 0x0800 }
+
+/// Fail if file exists (with O_CREAT).
+@platform(.linux)
+public func O_EXCL() -> Int32 { 0x0080 }
 
 // ============================================================================
 // SEEK WHENCE CONSTANTS
@@ -82,7 +127,6 @@ func libc_write(fd: lang.i32, buf: lang.ptr[lang.i8], count: lang.i64) -> lang.i
 @extern(.C, mangleName: "lseek")
 func libc_lseek(fd: lang.i32, offset: lang.i64, whence: lang.i32) -> lang.i64
 
-// __errno_ptr() is in libc.darwin.ks / libc.linux.ks
 
 // ============================================================================
 // PUBLIC WRAPPERS
@@ -90,7 +134,7 @@ func libc_lseek(fd: lang.i32, offset: lang.i64, whence: lang.i32) -> lang.i64
 
 /// Opens a file. Returns file descriptor or -1 on error.
 public func open(path: Pointer[UInt8], flags: Int32, mode: Int32) -> Fd {
-    Int32(raw: libc_open(lang.cast_ptr[lang.i8](path.raw), flags.raw, mode.raw))
+    Int32(raw: libc_open(lang.cast_ptr[_, lang.i8](path.raw), flags.raw, mode.raw))
 }
 
 /// Closes a file descriptor. Returns 0 on success, -1 on error.
@@ -100,12 +144,12 @@ public func close(fd: Int32) -> Int32 {
 
 /// Reads from a file descriptor. Returns bytes read, 0 on EOF, -1 on error.
 public func read(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    Int64(raw: libc_read(fd.raw, lang.cast_ptr[lang.i8](buf.raw), count.raw))
+    Int64(raw: libc_read(fd.raw, lang.cast_ptr[_, lang.i8](buf.raw), count.raw))
 }
 
 /// Writes to a file descriptor. Returns bytes written or -1 on error.
 public func write(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    Int64(raw: libc_write(fd.raw, lang.cast_ptr[lang.i8](buf.raw), count.raw))
+    Int64(raw: libc_write(fd.raw, lang.cast_ptr[_, lang.i8](buf.raw), count.raw))
 }
 
 /// Seeks to a position in a file. Returns new position or -1 on error.

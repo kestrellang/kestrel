@@ -68,7 +68,7 @@ fi
     "$LANG_DIR/clutch/src/parser.ks" \
     "$LANG_DIR/clutch/src/help.ks" \
     "$LANG_DIR/clutch/src/command.ks" \
-    "$LANG_DIR/clutch/src/os.${PLATFORM}.ks" \
+    "$LANG_DIR/clutch/src/os.ks" \
     "$LANG_DIR/clutch/src/clutch.ks" \
     "$LANG_DIR/http/src/method.ks" \
     "$LANG_DIR/http/src/url.ks" \

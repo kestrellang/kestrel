@@ -3,13 +3,26 @@
 //! This module is the single source of truth for subscript declaration parsing.
 //! Subscripts support generics with type parameters and where clauses.
 
+use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{emit_subscript_declaration, subscript_declaration_parser_internal};
+use crate::attribute::attribute_list_parser;
+use crate::block::{CodeBlockData, code_block_parser, emit_code_block};
+use crate::common::{
+    AttributeData, ParameterData, emit_attribute_list, emit_parameter_list, emit_return_type,
+    emit_static_modifier, emit_visibility, parameter_list_parser, skip_trivia, static_parser,
+    token, visibility_parser_internal,
+};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
+use crate::ty::{TyVariant, ty_parser};
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, emit_type_parameter_list, emit_where_clause,
+    type_parameter_list_parser, where_clause_parser,
+};
 
 /// Represents a subscript declaration: (visibility)? (static)? subscript[T]?(params) -> Type (where ...)? { }
 ///
@@ -197,6 +210,300 @@ impl SubscriptDeclaration {
     }
 }
 
+/// Raw parsed data for subscript declaration internals
+///
+/// Subscript syntax: `(visibility)? (static)? subscript[T]?(params) -> Type (where ...)? { body }`
+/// Body can be shorthand `{ expr }`, explicit `{ get { } set { } }`, or protocol `{ get }` / `{ get set }`
+#[derive(Debug, Clone)]
+pub struct SubscriptDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub is_static: Option<Span>,
+    pub subscript_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub lparen: Span,
+    pub parameters: Vec<ParameterData>,
+    pub rparen: Span,
+    pub return_type: (Span, TyVariant), // (arrow_span, return_ty) - required for subscripts
+    pub where_clause: Option<WhereClauseData>,
+    pub body: SubscriptBodyData,
+}
+
+/// Body data for subscript declarations
+#[derive(Debug, Clone)]
+pub enum SubscriptBodyData {
+    /// Shorthand: `{ expr }` - just a code block with an expression
+    Shorthand(CodeBlockData),
+    /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
+    Accessors {
+        /// Span of the opening brace (for subscript body block)
+        lbrace: Span,
+        /// Span of the "get" keyword
+        get_span: Span,
+        getter: Option<CodeBlockData>, // None for protocol `{ get }`
+        /// Span of the "set" keyword (if present)
+        set_span: Option<Span>,
+        setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
+        /// Span of the closing brace (for subscript body block)
+        rbrace: Span,
+    },
+}
+
+/// Parser for subscript body
+///
+/// Handles three forms:
+/// 1. Shorthand: `{ expr }` - just a code block with an expression
+/// 2. Explicit accessors: `{ get { expr } }` or `{ get { expr } set { expr } }`
+/// 3. Protocol requirements: `{ get }` or `{ get set }` (no bodies, just keywords)
+fn subscript_body_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, SubscriptBodyData, ParserExtra<'tokens>> + Clone {
+    // Protocol requirement: { get } or { get set }
+    let protocol_requirement = skip_trivia()
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .or(empty().to(None)),
+        )
+        .then_ignore(skip_trivia())
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(|(((lbrace_span, get_span), set_span_opt), rbrace_span)| {
+            SubscriptBodyData::Accessors {
+                lbrace: lbrace_span,
+                get_span,
+                getter: None,
+                set_span: set_span_opt.clone(),
+                setter: if set_span_opt.is_some() {
+                    Some(CodeBlockData {
+                        lbrace: Span::new(0, 0..0),
+                        items: vec![],
+                        rbrace: Span::new(0, 0..0),
+                    })
+                } else {
+                    None
+                },
+                rbrace: rbrace_span,
+            }
+        });
+
+    // Explicit accessors: { get { body } set { body }? }
+    let explicit_accessors = skip_trivia()
+        .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .then_ignore(skip_trivia())
+        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(code_block_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(code_block_parser())
+                .or_not(),
+        )
+        .then_ignore(skip_trivia())
+        .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
+        .map(
+            |((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
+                let (set_span, setter_body) = match setter_opt {
+                    Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
+                    None => (None, None),
+                };
+                SubscriptBodyData::Accessors {
+                    lbrace: lbrace_span,
+                    get_span,
+                    getter: Some(getter_body),
+                    set_span,
+                    setter: setter_body,
+                    rbrace: rbrace_span,
+                }
+            },
+        );
+
+    let shorthand = code_block_parser().map(SubscriptBodyData::Shorthand);
+
+    protocol_requirement
+        .or(explicit_accessors)
+        .or(shorthand)
+        .boxed()
+}
+
+/// Parser for required return type: `-> Type`
+fn required_return_type_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, TyVariant), ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Arrow).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(ty_parser())
+        .boxed()
+}
+
+/// Parser for a subscript declaration
+///
+/// Syntax: `(@attr)* (visibility)? (static)? subscript[T, U]?(params) -> Type (where ...)? { body }`
+///
+/// This is the single source of truth for subscript declaration parsing.
+pub fn subscript_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, SubscriptDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(static_parser())
+        .then(token(Token::Subscript))
+        .then(type_parameter_list_parser().or_not())
+        .then(token(Token::LParen))
+        .then(parameter_list_parser())
+        .then(token(Token::RParen))
+        .then(required_return_type_parser())
+        .then(where_clause_parser().or_not())
+        .then(subscript_body_parser())
+        .map(
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (
+                                        (((attributes, visibility), is_static), subscript_span),
+                                        type_params,
+                                    ),
+                                    lparen,
+                                ),
+                                parameters,
+                            ),
+                            rparen,
+                        ),
+                        return_type,
+                    ),
+                    where_clause,
+                ),
+                body,
+            )| {
+                SubscriptDeclarationData {
+                    attributes,
+                    visibility,
+                    is_static,
+                    subscript_span,
+                    type_params,
+                    lparen,
+                    parameters,
+                    rparen,
+                    return_type,
+                    where_clause,
+                    body,
+                }
+            },
+        )
+        .boxed()
+}
+
+/// Emit events for subscript body
+fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
+    sink.start_node(SyntaxKind::SubscriptBody);
+
+    match body {
+        SubscriptBodyData::Shorthand(code_block) => {
+            emit_code_block(sink, code_block);
+        },
+        SubscriptBodyData::Accessors {
+            lbrace,
+            get_span,
+            getter,
+            set_span,
+            setter,
+            rbrace,
+        } => {
+            sink.start_node(SyntaxKind::PropertyAccessors);
+            // Emit the outer `{` so the event sink advances over it
+            // instead of leaving it as orphan source text. Without this
+            // the trivia between subscripts would land in the wrong
+            // declaration's leading-trivia slot, swallowing doc comments.
+            sink.add_token(SyntaxKind::LBrace, lbrace.clone());
+
+            if let Some(getter_body) = getter {
+                sink.start_node(SyntaxKind::GetterClause);
+                sink.add_token(SyntaxKind::Get, get_span.clone());
+                emit_code_block(sink, getter_body);
+                sink.finish_node();
+            } else {
+                sink.add_token(SyntaxKind::Get, get_span.clone());
+            }
+
+            if let Some(setter_body) = setter {
+                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
+                    if let Some(set_span) = set_span {
+                        sink.add_token(SyntaxKind::Set, set_span.clone());
+                    }
+                } else {
+                    sink.start_node(SyntaxKind::SetterClause);
+                    if let Some(set_span) = set_span {
+                        sink.add_token(SyntaxKind::Set, set_span.clone());
+                    }
+                    emit_code_block(sink, setter_body);
+                    sink.finish_node();
+                }
+            }
+
+            sink.add_token(SyntaxKind::RBrace, rbrace.clone());
+            sink.finish_node(); // PropertyAccessors
+        },
+    }
+
+    sink.finish_node(); // SubscriptBody
+}
+
+/// Emit events for a subscript declaration.
+///
+/// Destructures `SubscriptDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
+pub fn emit_subscript_declaration(sink: &mut EventSink, data: SubscriptDeclarationData) {
+    let SubscriptDeclarationData {
+        attributes,
+        visibility,
+        is_static,
+        subscript_span,
+        type_params,
+        lparen,
+        parameters,
+        rparen,
+        return_type,
+        where_clause,
+        body,
+    } = data;
+
+    sink.start_node(SyntaxKind::SubscriptDeclaration);
+
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    emit_static_modifier(sink, is_static);
+
+    sink.add_token(SyntaxKind::Subscript, subscript_span);
+
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    emit_parameter_list(sink, lparen, parameters, rparen);
+
+    let (arrow_span, return_ty) = return_type;
+    emit_return_type(sink, arrow_span, return_ty);
+
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    emit_subscript_body(sink, &body);
+
+    sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for SubscriptDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_subscript_declaration(sink, self);
+    }
+}
+
 /// Parse a subscript declaration and emit events
 ///
 /// This is the primary event-driven parser function for subscript declarations.
@@ -204,24 +511,13 @@ pub fn parse_subscript_declaration<I>(source: &str, tokens: I, sink: &mut EventS
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::Parser;
-
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match subscript_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_subscript_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        subscript_declaration_parser_internal(),
+        emit_subscript_declaration
+    );
 }
 
 #[cfg(test)]

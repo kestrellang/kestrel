@@ -1,0 +1,93 @@
+{
+  "name": "kestrel",
+  "displayName": "Kestrel",
+  "description": "Language support for the Kestrel programming language",
+  "version": "0.1.0",
+  "publisher": "kestrel",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jkpdino/kestrel.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:kestrel"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "kestrel",
+        "aliases": ["Kestrel"],
+        "extensions": [".ks"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kestrel",
+        "scopeName": "source.kestrel",
+        "path": "./syntaxes/kestrel.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "kestrel.restartServer",
+        "title": "Kestrel: Restart Server"
+      },
+      {
+        "command": "kestrel.runMain",
+        "title": "Kestrel: Run main"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Kestrel",
+      "properties": {
+        "kestrel.lsp.path": {
+          "type": "string",
+          "default": "kestrel-lsp",
+          "description": "Path to the kestrel-lsp binary. Defaults to discovering it on PATH."
+        },
+        "kestrel.lsp.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace LSP messages between VSCode and kestrel-lsp."
+        },
+        "kestrel.stdlibPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override the Kestrel stdlib search path. Leave empty to use the compiler's default."
+        },
+        "kestrel.flockCachePath": {
+          "type": "string",
+          "default": "",
+          "description": "Override flock's package cache directory. Leave empty to use ~/.kestrel/packages (flock's default)."
+        },
+        "kestrel.flockPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the flock binary used by the ▶ Run code lens. Leave empty to discover (PATH, then ./flock in the workspace)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "server:build": "bash scripts/stage-server.sh",
+    "package": "npm run compile && npm run server:build && vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

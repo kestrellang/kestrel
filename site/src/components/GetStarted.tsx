@@ -35,20 +35,84 @@ export default function GetStarted() {
     <section
       ref={sectionRef}
       id="get-started"
-      className="relative bg-[var(--color-forest)] overflow-hidden flex-grow">
-      {/* Subtle pattern - diagonal lines */}
-      <div className="absolute inset-0 opacity-25">
+      className="relative bg-[#16251f] overflow-hidden flex-grow">
+      {/* Technical pattern */}
+      <div className="absolute inset-0 opacity-[0.08]">
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: `repeating-linear-gradient(-45deg, transparent, transparent 24px, #1a3328 24px, #1a3328 27px)`,
+            backgroundImage: `
+              linear-gradient(rgba(244, 223, 180, 0.28) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(244, 223, 180, 0.28) 1px, transparent 1px),
+              radial-gradient(circle at 2px 2px, rgba(244, 223, 180, 0.45) 1px, transparent 0)
+            `,
+            backgroundSize: "96px 96px, 96px 96px, 32px 32px",
           }}
         />
       </div>
 
-      {/* Accent glow */}
-      <div className="absolute top-1/4 -right-32 w-96 h-96 bg-[var(--color-gold)] opacity-20 blur-3xl rounded-full" />
-      <div className="absolute bottom-1/4 -left-32 w-64 h-64 bg-[var(--color-cream)] opacity-10 blur-3xl rounded-full" />
+      {/* Watercolor flight arc — the closing "take flight" gesture */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="none"
+          aria-hidden="true">
+          <defs>
+            <filter id="getstarted-soften">
+              <feGaussianBlur stdDeviation="6" />
+            </filter>
+            <linearGradient id="getstarted-arc-gold" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stopColor="#d4a844" stopOpacity="0" />
+              <stop offset="55%" stopColor="#d4a844" stopOpacity="0.32" />
+              <stop offset="100%" stopColor="#f4dfb4" stopOpacity="0.05" />
+            </linearGradient>
+            <linearGradient id="getstarted-arc-olive" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stopColor="#6f7f5d" stopOpacity="0" />
+              <stop offset="50%" stopColor="#6f7f5d" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#6f7f5d" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="getstarted-horizon" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="#d4a844" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#d4a844" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          <g filter="url(#getstarted-soften)" opacity="0.85">
+            <path
+              d="M-220 820 C 320 700, 720 240, 1640 -60"
+              fill="none"
+              stroke="url(#getstarted-arc-gold)"
+              strokeWidth="56"
+              strokeLinecap="round"
+            />
+            <path
+              d="M-180 880 C 360 780, 760 420, 1620 140"
+              fill="none"
+              stroke="url(#getstarted-arc-olive)"
+              strokeWidth="42"
+              strokeLinecap="round"
+            />
+          </g>
+
+          <rect
+            x="0"
+            y="720"
+            width="1440"
+            height="180"
+            fill="url(#getstarted-horizon)"
+          />
+
+          <g
+            fill="none"
+            stroke="#f4dfb4"
+            strokeOpacity="0.18"
+            strokeWidth="1"
+            strokeDasharray="6 12">
+            <path d="M-40 760 C 360 620, 720 240, 1500 20" />
+          </g>
+        </svg>
+      </div>
 
       <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-12 lg:px-24 py-20">
         {/* Section header - left aligned */}
@@ -60,10 +124,10 @@ export default function GetStarted() {
             Get Started
           </span>
           <h2 className="font-serif text-5xl md:text-6xl lg:text-7xl font-black text-white mt-4 tracking-tight">
-            Take <span className="text-[var(--color-gold)]">Flight.</span>
+            Take <span className="text-[var(--color-gold)]">Flight</span>
           </h2>
           <p className="mt-4 text-xl text-white/70 font-serif">
-            One command to install. One command to run.
+            Install the toolchain and run your first Kestrel program
           </p>
         </div>
 
@@ -72,14 +136,15 @@ export default function GetStarted() {
           className={`max-w-4xl transition-all duration-1000 delay-100 ${
             isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           }`}>
-          <div className="relative bg-[var(--color-slate)] rounded-xl p-5 group/install">
+          <div className="relative bg-[#0f1b18] border border-[var(--color-gold)]/25 rounded-md p-5 pr-16">
             <pre className="font-mono text-sm md:text-base text-gray-300 overflow-x-auto">
               <span className="text-[var(--color-gold)]">$ </span>
               {installCommand}
             </pre>
             <button
               onClick={copyInstallCommand}
-              className="absolute top-1/2 -translate-y-1/2 right-4 p-2 bg-white/10 rounded-lg font-mono text-xs text-gray-400 hover:bg-white/20 hover:text-white transition-all opacity-0 group-hover/install:opacity-100">
+              aria-label={copiedInstall ? "Copied" : "Copy install command"}
+              className="absolute top-1/2 -translate-y-1/2 right-3 p-2 rounded-md text-gray-400 bg-white/5 hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:text-white transition-colors">
               {copiedInstall ? (
                 <Check className="w-4 h-4 text-[var(--color-gold)]" />
               ) : (
@@ -88,7 +153,13 @@ export default function GetStarted() {
             </button>
           </div>
           <p className="mt-3 text-white/50 font-mono text-xs">
-            Installs jessup (version manager) and the latest stable kestrel toolchain. Run kestrel --help to get started.
+            Installs Jessup, the Kestrel version manager, and the latest stable toolchain.{" "}
+            <a
+              href="/install.sh"
+              className="text-[var(--color-gold)]/80 hover:text-[var(--color-gold)] underline underline-offset-2">
+              View the script
+            </a>
+            .
           </p>
         </div>
 
@@ -99,13 +170,10 @@ export default function GetStarted() {
           }`}>
           <a
             href="https://github.com/jkpdino/kestrel"
-            className="inline-flex items-center gap-3 px-8 py-4 bg-[var(--color-gold)] text-[var(--color-slate)] font-serif text-lg font-bold rounded-xl hover:bg-[var(--color-cream)]">
-            <Github className="w-5 h-5" />
-            View on GitHub
+            className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-md border border-[var(--color-gold)]/45 text-[var(--color-gold)] bg-transparent font-mono text-sm hover:bg-[var(--color-gold)]/10 hover:border-[var(--color-gold)] transition-colors">
+            <Github className="w-4 h-4" />
+            Source on GitHub
           </a>
-          <p className="mt-4 text-white/60 font-mono text-sm">
-            Open source. MIT licensed. Contributions welcome.
-          </p>
         </div>
       </div>
     </section>

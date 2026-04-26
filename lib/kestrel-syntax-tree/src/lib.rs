@@ -318,11 +318,18 @@ pub enum SyntaxKind {
 
     // Trivia (whitespace and comments)
     Whitespace,
+    Newline,
     LineComment,
     BlockComment,
 
     // Special
     Error,
+    /// Wrapper node around a zero-width synthesized token, emitted by the
+    /// parser when a required token is absent (e.g. the identifier after
+    /// `foo.`). The single child token retains its intended `SyntaxKind` so
+    /// downstream consumers still pattern-match cleanly; the `Missing` parent
+    /// is what flags the absence.
+    Missing,
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
@@ -336,7 +343,7 @@ impl From<Token> for SyntaxKind {
         match token {
             // Trivia
             Token::Whitespace => SyntaxKind::Whitespace,
-            Token::Newline => SyntaxKind::Whitespace,
+            Token::Newline => SyntaxKind::Newline,
             Token::LineComment => SyntaxKind::LineComment,
             Token::BlockComment => SyntaxKind::BlockComment,
             // Literals
@@ -698,11 +705,13 @@ impl Language for KestrelLanguage {
         const GREATER: u16 = SyntaxKind::Greater as u16;
         const AT: u16 = SyntaxKind::At as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
+        const NEWLINE: u16 = SyntaxKind::Newline as u16;
         const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
         const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
         const DOT_DOT: u16 = SyntaxKind::DotDot as u16;
         const TY_OPTIONAL: u16 = SyntaxKind::TyOptional as u16;
         const ERROR: u16 = SyntaxKind::Error as u16;
+        const MISSING: u16 = SyntaxKind::Missing as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
@@ -950,9 +959,11 @@ impl Language for KestrelLanguage {
             GREATER => SyntaxKind::Greater,
             AT => SyntaxKind::At,
             WHITESPACE => SyntaxKind::Whitespace,
+            NEWLINE => SyntaxKind::Newline,
             LINE_COMMENT => SyntaxKind::LineComment,
             BLOCK_COMMENT => SyntaxKind::BlockComment,
             ERROR => SyntaxKind::Error,
+            MISSING => SyntaxKind::Missing,
             _ => SyntaxKind::Error,
         }
     }
@@ -984,7 +995,10 @@ mod tests {
             SyntaxKind::from(kestrel_lexer::Token::Identifier),
             SyntaxKind::Identifier
         );
-        assert_eq!(SyntaxKind::from(kestrel_lexer::Token::Dot), SyntaxKind::Dot);
+        assert_eq!(
+            SyntaxKind::from(kestrel_lexer::Token::Dot),
+            SyntaxKind::Dot
+        );
     }
 
     #[test]

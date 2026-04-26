@@ -238,7 +238,8 @@ pub fn pattern_parser<'tokens>()
                             .map_with(|_, e| (to_kestrel_span(e.span()), true)),
                     )
                     .or(skip_trivia().ignore_then(
-                        just(Token::DotDotLess).map_with(|_, e| (to_kestrel_span(e.span()), false)),
+                        just(Token::DotDotLess)
+                            .map_with(|_, e| (to_kestrel_span(e.span()), false)),
                     )),
             )
             .then(range_bound.clone())
@@ -266,21 +267,20 @@ pub fn pattern_parser<'tokens>()
             });
 
         // Range to: `..=end` or `..<end` (no start bound)
-        let range_to_pattern =
-            skip_trivia()
-                .ignore_then(
-                    just(Token::DotDotEquals)
-                        .map_with(|_, e| (to_kestrel_span(e.span()), true))
-                        .or(just(Token::DotDotLess)
-                            .map_with(|_, e| (to_kestrel_span(e.span()), false))),
-                )
-                .then(range_bound.clone())
-                .map(|((operator, inclusive), end)| PatternVariant::Range {
-                    start: None,
-                    operator,
-                    inclusive,
-                    end: Some(end),
-                });
+        let range_to_pattern = skip_trivia()
+            .ignore_then(
+                just(Token::DotDotEquals)
+                    .map_with(|_, e| (to_kestrel_span(e.span()), true))
+                    .or(just(Token::DotDotLess)
+                        .map_with(|_, e| (to_kestrel_span(e.span()), false))),
+            )
+            .then(range_bound.clone())
+            .map(|((operator, inclusive), end)| PatternVariant::Range {
+                start: None,
+                operator,
+                inclusive,
+                end: Some(end),
+            });
 
         // Combine all range patterns - order matters for parsing precedence
         // full_range must come before range_from to avoid `1..2` being parsed as `1..` followed by `2`
@@ -354,11 +354,9 @@ pub fn pattern_parser<'tokens>()
             .then(
                 pattern
                     .clone()
-                    .separated_by(
-                        skip_trivia().ignore_then(
-                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                        ),
-                    )
+                    .separated_by(skip_trivia().ignore_then(
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                    ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
@@ -465,11 +463,9 @@ pub fn pattern_parser<'tokens>()
             )
             .then(
                 struct_field_or_rest
-                    .separated_by(
-                        skip_trivia().ignore_then(
-                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                        ),
-                    )
+                    .separated_by(skip_trivia().ignore_then(
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                    ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )
@@ -517,11 +513,9 @@ pub fn pattern_parser<'tokens>()
                     .clone()
                     .map(|(dotdot, name)| (None, Some((dotdot, name))))
                     .or(pattern.clone().map(|p| (Some(p), None)))
-                    .separated_by(
-                        skip_trivia().ignore_then(
-                            just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
-                        ),
-                    )
+                    .separated_by(skip_trivia().ignore_then(
+                        just(Token::Comma).map_with(|_, e| to_kestrel_span(e.span())),
+                    ))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
             )

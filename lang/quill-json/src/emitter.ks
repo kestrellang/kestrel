@@ -19,7 +19,7 @@ public func emitJson(value: Value) -> String {
 public func emitJsonPretty(value: Value) -> String {
     var buf = String();
     emitPretty(value, buf, 0);
-    buf.appendByte(10); // trailing newline
+    buf.append("\n");
     buf
 }
 
@@ -41,31 +41,31 @@ func emitValue(value: Value, mutating buf: String) {
         .Float(f) => emitFloat(f, buf),
         .Str(s) => emitString(s, buf),
         .Arr(arr) => {
-            buf.appendByte(91); // '['
+            buf.append("[");
             var i: Int64 = 0;
             while i < arr.count {
                 if i > 0 {
-                    buf.appendByte(44) // ','
+                    buf.append(",")
                 }
                 emitValue(arr(unchecked: i), buf);
                 i = i + 1
             }
-            buf.appendByte(93) // ']'
+            buf.append("]")
         },
         .Obj(obj) => {
-            buf.appendByte(123); // '{'
+            buf.append("{");
             var first = true;
             for (key, val) in obj.iter() {
                 if first {
                     first = false
                 } else {
-                    buf.appendByte(44) // ','
+                    buf.append(",")
                 }
                 emitString(key, buf);
-                buf.appendByte(58); // ':'
+                buf.append(":");
                 emitValue(val, buf)
             }
-            buf.appendByte(125) // '}'
+            buf.append("}")
         }
     }
 }
@@ -91,47 +91,47 @@ func emitPretty(value: Value, mutating buf: String, indent: Int64) {
             if arr.isEmpty {
                 buf.append("[]")
             } else {
-                buf.appendByte(91); // '['
-                buf.appendByte(10); // '\n'
+                buf.append("[");
+                buf.append("\n");
                 let childIndent = indent + 2;
                 var i: Int64 = 0;
                 while i < arr.count {
                     if i > 0 {
-                        buf.appendByte(44); // ','
-                        buf.appendByte(10)  // '\n'
+                        buf.append(",");
+                        buf.append("\n")
                     }
                     writeIndent(buf, childIndent);
                     emitPretty(arr(unchecked: i), buf, childIndent);
                     i = i + 1
                 }
-                buf.appendByte(10); // '\n'
+                buf.append("\n");
                 writeIndent(buf, indent);
-                buf.appendByte(93) // ']'
+                buf.append("]")
             }
         },
         .Obj(obj) => {
             if obj.isEmpty {
                 buf.append("{}")
             } else {
-                buf.appendByte(123); // '{'
-                buf.appendByte(10);  // '\n'
+                buf.append("{");
+                buf.append("\n");
                 let childIndent = indent + 2;
                 var first = true;
                 for (key, val) in obj.iter() {
                     if first {
                         first = false
                     } else {
-                        buf.appendByte(44); // ','
-                        buf.appendByte(10)  // '\n'
+                        buf.append(",");
+                        buf.append("\n")
                     }
                     writeIndent(buf, childIndent);
                     emitString(key, buf);
                     buf.append(": ");
                     emitPretty(val, buf, childIndent)
                 }
-                buf.appendByte(10); // '\n'
+                buf.append("\n");
                 writeIndent(buf, indent);
-                buf.appendByte(125) // '}'
+                buf.append("}")
             }
         }
     }
@@ -140,7 +140,7 @@ func emitPretty(value: Value, mutating buf: String, indent: Int64) {
 func writeIndent(mutating buf: String, count: Int64) {
     var i: Int64 = 0;
     while i < count {
-        buf.appendByte(32); // space
+        buf.append(" ");
         i = i + 1
     }
 }
@@ -151,35 +151,28 @@ func writeIndent(mutating buf: String, count: Int64) {
 
 /// Emits a properly escaped JSON string including surrounding quotes.
 func emitString(s: String, mutating buf: String) {
-    buf.appendByte(34); // '"'
+    buf.append("\"");
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
         let b = s.byteAtUnchecked(i);
-        let n = Int64(from: b);
-        if n == 34 { // '"'
-            buf.appendByte(92); // '\'
-            buf.appendByte(34)
-        } else if n == 92 { // '\'
-            buf.appendByte(92);
-            buf.appendByte(92)
-        } else if n == 8 { // backspace
-            buf.appendByte(92);
-            buf.appendByte(98)
-        } else if n == 12 { // form feed
-            buf.appendByte(92);
-            buf.appendByte(102)
-        } else if n == 10 { // newline
-            buf.appendByte(92);
-            buf.appendByte(110)
-        } else if n == 13 { // carriage return
-            buf.appendByte(92);
-            buf.appendByte(114)
-        } else if n == 9 { // tab
-            buf.appendByte(92);
-            buf.appendByte(116)
-        } else if n < 32 { // other control characters
+        if b == 34 {
+            buf.append("\\\"")
+        } else if b == 92 {
+            buf.append("\\\\")
+        } else if b == 8 {
+            buf.append("\\b")
+        } else if b == 12 {
+            buf.append("\\f")
+        } else if b == 10 {
+            buf.append("\\n")
+        } else if b == 13 {
+            buf.append("\\r")
+        } else if b == 9 {
+            buf.append("\\t")
+        } else if b < 32 {
             buf.append("\\u00");
+            let n = Int64(from: b);
             buf.appendByte(hexChar(n / 16));
             buf.appendByte(hexChar(n % 16))
         } else {
@@ -187,7 +180,7 @@ func emitString(s: String, mutating buf: String) {
         }
         i = i + 1
     }
-    buf.appendByte(34) // '"'
+    buf.append("\"")
 }
 
 /// Returns the hex character for a value 0-15.
@@ -213,8 +206,8 @@ func emitFloat(f: Float64, mutating buf: String) {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = Int64(from: s.byteAtUnchecked(i));
-        if b == 46 or b == 101 or b == 69 { // '.' or 'e' or 'E'
+        let b = s.byteAtUnchecked(i);
+        if b == 46 or b == 101 or b == 69 {
             hasDot = true
         }
         i = i + 1

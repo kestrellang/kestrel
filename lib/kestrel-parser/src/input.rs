@@ -87,6 +87,33 @@ pub fn create_input(tokens: &[SpannedToken], source_len: usize) -> ParserInput<'
     tokens.split_token_span(end_span)
 }
 
+/// Run a Chumsky parser against `(source, tokens)` and dispatch the result to `sink`.
+///
+/// Both the output (if present) and any emitted errors are forwarded: on a
+/// partial recovery, Chumsky may produce output AND secondary errors at the
+/// same time. Always emit the output when it exists so recovered trees reach
+/// the tree builder, and always forward every error to the sink.
+///
+/// This factors out the repeated `prepare_tokens → create_input → match parse` pattern
+/// used by every `parse_*` entry point. Implemented as a macro because Chumsky parsers
+/// carry a lifetime tied to the prepared-token slice, which makes a function signature
+/// with HRTB noticeably more awkward than the mechanical body here.
+#[macro_export]
+macro_rules! parse_and_emit {
+    ($source:expr, $tokens:expr, $sink:expr, $parser:expr, $on_ok:expr) => {{
+        use ::chumsky::Parser as _;
+        let prepared = $crate::input::prepare_tokens($tokens);
+        let input = $crate::input::create_input(&prepared, $source.len());
+        let result = $parser.parse(input);
+        for error in result.errors() {
+            $sink.error_from_rich(error);
+        }
+        if let Some(data) = result.into_output() {
+            $on_ok($sink, data);
+        }
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

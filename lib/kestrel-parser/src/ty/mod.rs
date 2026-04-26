@@ -181,7 +181,9 @@ pub(crate) fn ty_parser<'tokens>()
                 .then(
                     // Empty parens case
                     skip_trivia()
-                        .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
+                        .ignore_then(
+                            just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                        )
                         .map(|rparen| (Vec::new(), false, rparen))
                         .or(
                             // At least one type
@@ -360,21 +362,15 @@ pub fn parse_ty<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use crate::input::{create_input, prepare_tokens};
+    use crate::parse_and_emit;
 
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match ty_parser().parse(input).into_result() {
-        Ok(variant) => {
-            emit_ty_variant(sink, &variant);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        ty_parser(),
+        |sink, variant: TyVariant| emit_ty_variant(sink, &variant)
+    );
 }
 
 /// Emit events for any type variant

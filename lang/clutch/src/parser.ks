@@ -53,7 +53,11 @@ public func parseCommand(
                     let value = rest.substringBytes(from: eqPos + 1, to: rest.byteCount);
                     let argDef = try findByLong(args, name);
                     if argDef.isFlag() {
-                        return .Err(ParseError.Message("flag --" + name + " does not accept a value"))
+                        var msg = String();
+                        msg.append("flag --");
+                        msg.append(name);
+                        msg.append(" does not accept a value");
+                        return .Err(ParseError.Message(msg))
                     }
                     matches.setValue(name: argDef.name, value: value)
                 },
@@ -65,7 +69,10 @@ public func parseCommand(
                         // Consume next token as value
                         pos = pos + 1;
                         if pos >= tokens.count {
-                            return .Err(ParseError.MissingValue("--" + rest))
+                            var msg = String();
+                            msg.append("--");
+                            msg.append(rest);
+                            return .Err(ParseError.MissingValue(msg))
                         }
                         matches.setValue(name: argDef.name, value: tokens(unchecked: pos))
                     }
@@ -97,7 +104,10 @@ public func parseCommand(
                         // -o Value: value is next token
                         pos = pos + 1;
                         if pos >= tokens.count {
-                            return .Err(ParseError.MissingValue("-" + flagChar))
+                            var msg = String();
+                            msg.append("-");
+                            msg.append(flagChar);
+                            return .Err(ParseError.MissingValue(msg))
                         }
                         matches.setValue(name: argDef.name, value: tokens(unchecked: pos));
                         charPos = token.byteCount
@@ -182,7 +192,10 @@ func findByLong(args: Array[Arg], name: String) -> Result[Arg, ParseError] {
         }
         i = i + 1
     }
-    .Err(ParseError.UnknownFlag("--" + name))
+    var msg = String();
+    msg.append("--");
+    msg.append(name);
+    .Err(ParseError.UnknownFlag(msg))
 }
 
 /// Finds an arg definition by its short flag character.
@@ -200,7 +213,10 @@ func findByShort(args: Array[Arg], flag: String) -> Result[Arg, ParseError] {
         }
         i = i + 1
     }
-    .Err(ParseError.UnknownFlag("-" + flag))
+    var msg = String();
+    msg.append("-");
+    msg.append(flag);
+    .Err(ParseError.UnknownFlag(msg))
 }
 
 /// Finds a subcommand by name.

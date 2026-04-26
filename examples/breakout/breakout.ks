@@ -57,7 +57,7 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles : Cloneable {
+struct Styles {
     static var border: Style { [.White, .Dim] }
     static var paddle: Style { [.White, .Bold] }
     static var ball: Style { [.Yellow, .Bold] }
@@ -67,8 +67,6 @@ struct Styles : Cloneable {
     static var gameOver: Style { [.Red, .Bold] }
     static var win: Style { [.Green, .Bold] }
     static var prompt: Style { [.Yellow] }
-
-    func clone() -> Styles { Styles() }
 }
 
 // ============================================
@@ -291,7 +289,6 @@ struct Game: Iterator {
                 self.render();
             },
             _ => {
-                print("Ended");
                 self.renderGameOver();
                 let action = self.handleGameOverInput();
                 match action {
@@ -576,13 +573,9 @@ func usleep(usec: UInt32) -> Int32
 func main() -> () throws Error {
     var game = Game();
 
-    while let .Some(x) = game.next() {
+    for _ in game {
         usleep(16667);
     }
-
-    //for _ in game {
-    //    usleep(16667);  // ~60 FPS
-    //}
 
     .Ok(())
 }

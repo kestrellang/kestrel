@@ -17,7 +17,7 @@ struct Ctx: Cloneable {
     var x: Int64
 
     func clone() -> Ctx {
-        Ctx(x: 0)
+        Ctx(x: self.x)
     }
 }
 
@@ -51,34 +51,15 @@ func counterHtml(count: Int64) -> String {
         + "</div>")
 }
 
-/// Parses an integer from a string, returning 0 on failure.
-func parseInt(s: String) -> Int64 {
-    let len = s.byteCount;
-    if len == 0 { return 0 }
-
-    var i: Int64 = 0;
-    var neg = false;
-    if s.byteAtUnchecked(0) == 45 {
-        neg = true;
-        i = 1
-    }
-    if i >= len { return 0 }
-
-    var result: Int64 = 0;
-    while i < len {
-        let b = Int64(from: s.byteAtUnchecked(i));
-        if b < 48 or b > 57 { return 0 }
-        result = result * 10 + (b - 48);
-        i = i + 1
-    }
-
-    if neg { 0 - result } else { result }
-}
-
 /// Gets the "n" query param as Int64.
 func getN(request: Request) -> Int64 {
     match request.query("n") {
-        .Some(val) => parseInt(val),
+        .Some(val) => {
+            match Int64.parse(val) {
+                .Some(n) => n,
+                .None => 0
+            }
+        },
         .None => 0
     }
 }

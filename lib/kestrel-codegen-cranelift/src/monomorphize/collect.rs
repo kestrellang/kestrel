@@ -1,747 +1,370 @@
-//! BFS collection of instantiations.
+//! BFS instantiation collection.
 //!
-//! This module implements the collection phase of monomorphization.
-//! It uses BFS to discover all concrete instantiations of generic
-//! functions, structs, and enums needed for compilation.
+//! Discovers all function instantiations needed for compilation by walking
+//! the call graph starting from non-generic entry points.
+//!
+//! Key differences from lib1:
+//! - Types are by-value (`MirTy`), no interning needed
+//! - Uses `substitute_type` from kestrel-codegen
+//! - Entity-based lookups via pre-built HashMap
 
 use super::error::MonomorphizeError;
-use super::instantiation::{
-    EnumInstantiation, FunctionInstantiation, MonomorphizationSet, StructInstantiation,
-};
-use super::substitute::{Substitution, build_substitution};
+use super::instantiation::{FunctionInstantiation, MonomorphizationSet};
 use super::witness;
-use kestrel_execution_graph::{
-    Callee, Function, Id, ImmediateKind, MirContext, MirTy, QualifiedName, Rvalue, StatementKind,
-    Ty, TypeParam, Value,
-};
+use crate::common;
+use kestrel_codegen::{substitute_type, substitute_type_with_self};
+use kestrel_debug::ktrace;
+use kestrel_hecs::Entity;
+use kestrel_mir::{Callee, FunctionId, FunctionKind, MirModule, MirTy, Rvalue, StatementKind};
 use std::collections::{HashMap, VecDeque};
 
-/// Collect all instantiations needed for compilation.
-///
-/// This runs BFS starting from non-generic functions, discovering
-/// all generic instantiations that need to be compiled. During collection,
-/// new types may be interned into the MirContext as substitutions are applied.
-///
-/// Returns a `MonomorphizationSet` containing all discovered instantiations,
-/// or a list of errors if collection fails.
-pub fn collect_all(mir: &mut MirContext) -> Result<MonomorphizationSet, Vec<MonomorphizeError>> {
-    let mut ctx = CollectionContext::new(mir);
-    ctx.collect()?;
-    Ok(ctx.result)
+/// Collect all function instantiations needed for compilation.
+pub fn collect_all(module: &MirModule) -> Result<MonomorphizationSet, Vec<MonomorphizeError>> {
+    let mut ctx = CollectionContext::new(module);
+    ctx.collect();
+
+    if ctx.errors.is_empty() {
+        Ok(ctx.result)
+    } else {
+        Err(ctx.errors)
+    }
 }
 
-/// Context for the collection phase.
 struct CollectionContext<'a> {
-    mir: &'a mut MirContext,
-    /// Index: function name -> function id
-    functions_by_name: HashMap<Id<QualifiedName>, Id<Function>>,
-    /// The result set of instantiations
+    module: &'a MirModule,
+    /// O(1) entity → FunctionId lookup
+    entity_to_func: HashMap<Entity, FunctionId>,
+    /// BFS queue of instantiations to process
+    queue: VecDeque<FunctionInstantiation>,
+    /// Accumulated result
     result: MonomorphizationSet,
-    /// Queue of function instantiations to process
-    pending: VecDeque<FunctionInstantiation>,
-    /// Accumulated errors
+    /// Collected errors
     errors: Vec<MonomorphizeError>,
+    /// Currently processing function (for debug)
+    processing_func_id: Option<FunctionId>,
 }
 
 impl<'a> CollectionContext<'a> {
-    fn new(mir: &'a mut MirContext) -> Self {
-        // Build function index
-        let mut functions_by_name = HashMap::new();
-        for (func_id, func_def) in mir.functions.iter() {
-            functions_by_name.insert(func_def.name, func_id);
-        }
-
-        Self {
-            mir,
-            functions_by_name,
-            result: MonomorphizationSet::new(),
-            pending: VecDeque::new(),
-            errors: Vec::new(),
-        }
-    }
-
-    /// Run the collection algorithm.
-    fn collect(&mut self) -> Result<(), Vec<MonomorphizeError>> {
-        // Seed with non-generic functions
-        self.seed_non_generic_functions();
-
-        // BFS loop
-        while let Some(inst) = self.pending.pop_front() {
-            self.process_function_instantiation(&inst);
-        }
-
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
-            Err(std::mem::take(&mut self.errors))
-        }
-    }
-
-    /// Seed the queue with non-generic functions.
-    fn seed_non_generic_functions(&mut self) {
-        // Collect non-generic function IDs first to avoid borrow issues
-        let non_generic_ids: Vec<_> = self
-            .mir
+    fn new(module: &'a MirModule) -> Self {
+        let entity_to_func: HashMap<Entity, FunctionId> = module
             .functions
             .iter()
-            .filter(|(_, def)| def.type_params.is_empty())
-            .map(|(id, _)| id)
+            .enumerate()
+            .map(|(i, f)| (f.entity, FunctionId::new(i)))
             .collect();
 
-        for func_id in non_generic_ids {
-            let func_def = &self.mir.functions[func_id];
+        Self {
+            module,
+            entity_to_func,
+            queue: VecDeque::new(),
+            result: MonomorphizationSet::new(),
+            errors: Vec::new(),
+            processing_func_id: None,
+        }
+    }
 
-            // Skip functions that need Self type - they'll be processed when called with concrete types
-            let needs_self_type = func_def.params.iter().any(|&param_id| {
-                let param = &self.mir.params[param_id];
-                self.type_needs_self(self.mir.ty(param.ty))
-            }) || self.type_needs_self(self.mir.ty(func_def.ret));
-
-            if needs_self_type {
+    fn collect(&mut self) {
+        // Seed: all non-generic, non-closure entry points
+        for (i, func) in self.module.functions.iter().enumerate() {
+            if !func.type_params.is_empty() {
                 continue;
             }
 
-            let inst = FunctionInstantiation::non_generic(func_id);
-            if self.result.add_function(inst.clone()) {
-                self.pending.push_back(inst);
+            // Check if function body references unresolved type params.
+            // This happens for functions that should have inherited parent type
+            // params but didn't (e.g., extension methods on generic types).
+            // These are discovered through properly-resolved call sites.
+
+            // Closures and thunks are always discovered through their parent
+            // (ApplyPartial or FunctionRef), never seeded directly
+            if matches!(
+                func.kind,
+                FunctionKind::ClosureCall { .. }
+                    | FunctionKind::Closure
+                    | FunctionKind::Thunk { .. }
+            ) {
+                continue;
             }
+
+            if !self.func_uses_self_type(func) {
+                // No SelfType — seed as concrete
+                let inst = FunctionInstantiation::concrete(FunctionId::new(i));
+                if self.result.functions.insert(inst.clone()) {
+                    self.queue.push_back(inst);
+                }
+            } else {
+                // Uses SelfType — for init/deinit/method of non-generic types,
+                // resolve SelfType to the parent struct/enum type
+                let parent = match &func.kind {
+                    FunctionKind::Initializer { parent }
+                    | FunctionKind::Deinit { parent }
+                    | FunctionKind::Method { parent, .. }
+                    | FunctionKind::StaticMethod { parent } => Some(*parent),
+                    _ => None,
+                };
+                if let Some(parent_entity) = parent {
+                    // Only seed if parent is a concrete type (struct/enum).
+                    // Protocol extension methods have parent = Extension entity
+                    // (not a type) — they're discovered through witness calls
+                    // with concrete self_types at call sites.
+                    let is_concrete_nongeneric_type = self
+                        .module
+                        .structs
+                        .iter()
+                        .any(|s| s.entity == parent_entity)
+                        || self.module.enums.iter().any(|e| e.entity == parent_entity);
+                    if !is_concrete_nongeneric_type {
+                        continue;
+                    }
+                    let self_ty = MirTy::Named {
+                        entity: parent_entity,
+                        type_args: Vec::new(),
+                    };
+                    let inst = FunctionInstantiation {
+                        func_id: FunctionId::new(i),
+                        type_args: Vec::new(),
+                        self_type: Some(self_ty),
+                    };
+                    if self.result.functions.insert(inst.clone()) {
+                        self.queue.push_back(inst);
+                    }
+                }
+            }
+        }
+
+        // BFS: process each instantiation
+        while let Some(inst) = self.queue.pop_front() {
+            self.process_instantiation(&inst);
         }
     }
 
-    /// Process a single function instantiation.
-    fn process_function_instantiation(&mut self, inst: &FunctionInstantiation) {
-        // Get function definition (need to clone type_params to avoid borrow conflict)
-        let func_def = &self.mir.functions[inst.func_id];
-        let func_name = self.mir.name(func_def.name).to_string();
-        let type_params = func_def.type_params.clone();
-        let blocks = func_def.blocks.clone();
-        let params = func_def.params.clone();
-        let locals = func_def.locals.clone();
-        let ret = func_def.ret;
+    fn process_instantiation(&mut self, inst: &FunctionInstantiation) {
+        self.processing_func_id = Some(inst.func_id);
+        let func = &self.module.functions[inst.func_id.index()];
 
-        // Build substitution. Some method instantiations rely on self_type and do not
-        // carry explicit type_args for owner generics (e.g. Buffer[T, A].deinit).
-        let mut effective_type_args = inst.type_args.clone();
-        if type_params.len() != effective_type_args.len()
-            && effective_type_args.is_empty()
-            && let Some(st) = inst.self_type
-            && let Some(inferred_args) =
-                Self::extract_named_type_args_from_self_type(self.mir, st, type_params.len())
-        {
-            effective_type_args = inferred_args;
+        // Boundary check: an instantiation reaching the monomorphizer must
+        // have exactly as many type args as the function declares. A mismatch
+        // here is a dispatch bug (some call site built a callee with wrong
+        // arity); silently truncating via `build_subst`'s `zip` would produce
+        // a subtly-wrong instantiation that fails cryptically later. Under-
+        // specification is still legitimately skipped below in `scan_callee`
+        // (phantom instantiations), so by the time we dequeue an inst, arity
+        // must match.
+        if func.type_params.len() != inst.type_args.len() {
+            self.errors.push(MonomorphizeError::TypeArgArityMismatch {
+                function: self.module.resolve_name(func.entity).to_string(),
+                expected: func.type_params.len(),
+                got: inst.type_args.len(),
+            });
+            return;
         }
 
-        if type_params.len() != effective_type_args.len() {
-            eprintln!("MISMATCH in function: {}", func_name);
-            eprintln!("  type_params: {:?}", type_params);
-            eprintln!("  type_args: {:?}", effective_type_args);
-        }
-        let mut subst = build_substitution(self.mir, &type_params, &effective_type_args);
+        // Build substitution map for this instantiation, including associated types
+        let mut subst = build_subst(func, &inst.type_args);
+        crate::function::resolve_assoc_type_substs(
+            self.module,
+            func,
+            &mut subst,
+            inst.self_type.as_ref(),
+        );
 
-        // Set self_type if this instantiation has one (protocol extension methods)
-        if let Some(st) = inst.self_type {
-            subst.set_self_type(st);
-        } else {
-            // Check if this function needs a self_type but doesn't have one
-            // This happens when protocol extension methods are seeded as non-generic
-            // We skip them here - they'll be processed later when called with concrete types
-            let needs_self_type = params.iter().any(|&param_id| {
-                let param = &self.mir.params[param_id];
-                self.type_needs_self(self.mir.ty(param.ty))
-            }) || self.type_needs_self(self.mir.ty(ret));
+        // Scan function body for callees
+        let Some(body) = &func.body else { return };
 
-            if needs_self_type {
-                // Skip this instantiation - it will be processed when called with a concrete type
-                return;
+        for block in &body.blocks {
+            for stmt in &block.stmts {
+                match &stmt.kind {
+                    StatementKind::Call {
+                        callee, args: _, ..
+                    } => {
+                        self.scan_callee(callee, &subst, &inst.self_type);
+                    },
+                    StatementKind::Assign { rvalue, .. } => {
+                        self.scan_rvalue(rvalue, &subst, &inst.self_type);
+                    },
+                    _ => {},
+                }
             }
-        }
 
-        // Scan return type
-        self.scan_type(ret, &subst);
-
-        // Scan parameter types
-        for &param_id in &params {
-            let param = &self.mir.params[param_id];
-            self.scan_type(param.ty, &subst);
-        }
-
-        // Scan local types
-        for &local_id in &locals {
-            let local = self.mir.local(local_id);
-            self.scan_type(local.ty, &subst);
-        }
-
-        // Scan blocks
-        for &block_id in &blocks {
-            self.scan_block(block_id, &subst);
+            // Scan terminator for values that might contain function refs
+            // (Return and Branch contain Values that could be immediate function refs)
         }
     }
 
-    fn extract_named_type_args_from_self_type(
-        mir: &MirContext,
-        self_ty: Id<kestrel_execution_graph::Ty>,
-        expected_len: usize,
-    ) -> Option<Vec<Id<kestrel_execution_graph::Ty>>> {
-        let mut current = self_ty;
-        loop {
-            match mir.ty(current) {
-                MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
-                    current = *inner;
-                },
-                MirTy::Named { type_args, .. } if type_args.len() == expected_len => {
-                    return Some(type_args.clone());
-                },
-                _ => return None,
-            }
-        }
-    }
-
-    fn infer_type_args_from_subst(
+    fn scan_callee(
         &mut self,
-        type_params: &[Id<TypeParam>],
-        subst: &Substitution,
-    ) -> Vec<Id<Ty>> {
-        type_params
-            .iter()
-            .map(|&tp| {
-                let tp_ty = self.mir.intern_type(MirTy::TypeParam(tp));
-                subst.apply_ty(self.mir, tp_ty)
-            })
-            .collect()
-    }
-
-    /// Scan a block for instantiations.
-    fn scan_block(&mut self, block_id: Id<kestrel_execution_graph::Block>, subst: &Substitution) {
-        let block = self.mir.block(block_id);
-        let statements = block.statements.clone();
-        let terminator = block.terminator.clone();
-
-        for &stmt_id in &statements {
-            let stmt = self.mir.statement(stmt_id);
-            let kind = stmt.kind.clone();
-            self.scan_statement(&kind, subst);
-        }
-
-        // Scan terminator if present
-        if let Some(ref term) = terminator {
-            self.scan_terminator(term, subst);
-        }
-    }
-
-    /// Scan a statement for instantiations.
-    fn scan_statement(&mut self, stmt: &StatementKind, subst: &Substitution) {
-        match stmt {
-            StatementKind::Assign { dest: _, rvalue } => {
-                self.scan_rvalue(rvalue, subst);
-            },
-            StatementKind::Call { callee, args } => {
-                // For protocol extension method calls, we need to track Self type.
-                // Check if this is a direct call to a function with Self-typed parameters.
-                let self_type = self.infer_self_type_from_call(callee, args, subst);
-                let mut call_subst = subst.clone();
-                if let Some(st) = self_type {
-                    call_subst.set_self_type(st);
-                }
-                self.scan_callee(callee, &call_subst);
-                for arg in args {
-                    self.scan_value(&arg.value, subst);
-                }
-            },
-            StatementKind::Deinit { place: _ } => {},
-            StatementKind::DeinitIf { place: _, flag: _ } => {},
-            StatementKind::SetDeinitFlag { flag: _, value: _ } => {},
-        }
-    }
-
-    /// Scan an rvalue for instantiations.
-    fn scan_rvalue(&mut self, rvalue: &Rvalue, subst: &Substitution) {
-        match rvalue {
-            Rvalue::Move(_) | Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) => {},
-
-            Rvalue::Use(imm) => {
-                self.scan_immediate(&imm.kind, subst);
-            },
-
-            Rvalue::BinaryOp { lhs, rhs, .. } => {
-                self.scan_value(lhs, subst);
-                self.scan_value(rhs, subst);
-            },
-
-            Rvalue::UnaryOp { operand, .. } => {
-                self.scan_value(operand, subst);
-            },
-
-            Rvalue::Construct { ty, fields } => {
-                self.scan_type(*ty, subst);
-                for (_, value) in fields {
-                    self.scan_value(value, subst);
-                }
-            },
-
-            Rvalue::Tuple(elements) => {
-                for elem in elements {
-                    self.scan_value(elem, subst);
-                }
-            },
-
-            Rvalue::StackAlloc { element_ty, count } => {
-                self.scan_type(*element_ty, subst);
-                self.scan_value(count, subst);
-            },
-
-            Rvalue::EnumVariant {
-                enum_ty, payload, ..
-            } => {
-                self.scan_type(*enum_ty, subst);
-                for val in payload {
-                    self.scan_value(val, subst);
-                }
-            },
-
-            Rvalue::Call { callee, args } => {
-                // For protocol extension method calls, we need to track Self type.
-                // Check if this is a direct call to a function with Self-typed parameters.
-                let self_type = self.infer_self_type_from_call(callee, args, subst);
-                let mut call_subst = subst.clone();
-                if let Some(st) = self_type {
-                    call_subst.set_self_type(st);
-                }
-                self.scan_callee(callee, &call_subst);
-                for arg in args {
-                    self.scan_value(&arg.value, subst);
-                }
-            },
-
-            Rvalue::Cast {
-                operand, target, ..
-            } => {
-                self.scan_value(operand, subst);
-                self.scan_type(*target, subst);
-            },
-
-            Rvalue::StrPtr(v)
-            | Rvalue::StrLen(v)
-            | Rvalue::IntToString(v)
-            | Rvalue::PtrToRef(v)
-            | Rvalue::PtrToRefMut(v)
-            | Rvalue::RefToPtr(v) => {
-                self.scan_value(v, subst);
-            },
-
-            Rvalue::StrFromParts { ptr, len } => {
-                self.scan_value(ptr, subst);
-                self.scan_value(len, subst);
-            },
-
-            Rvalue::PtrOffset { ptr, offset } => {
-                self.scan_value(ptr, subst);
-                self.scan_value(offset, subst);
-            },
-
-            Rvalue::FuncToEscaping(name) => {
-                // Non-generic function reference
-                if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let func_def = &self.mir.functions[func_id];
-                    if !func_def.type_params.is_empty() {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *name,
-                                reason: "generic function requires type arguments".to_string(),
-                            });
-                        return;
-                    }
-                    let needs_self = func_def.params.iter().any(|&param_id| {
-                        let param = &self.mir.params[param_id];
-                        self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(func_def.ret));
-                    if needs_self {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *name,
-                                reason: "function reference requires Self type".to_string(),
-                            });
-                        return;
-                    }
-                    let inst = FunctionInstantiation::non_generic(func_id);
-                    if self.result.add_function(inst.clone()) {
-                        self.pending.push_back(inst);
-                    }
-                }
-            },
-
-            Rvalue::ApplyPartial { func, captures } => {
-                // Function reference (closure or partial application)
-                if let Some(&func_id) = self.functions_by_name.get(func) {
-                    // Clone the data we need to avoid borrow conflicts
-                    let func_def = &self.mir.functions[func_id];
-                    let type_params = func_def.type_params.clone();
-                    let params = func_def.params.clone();
-                    let ret = func_def.ret;
-
-                    // Closures inherit type parameters from their parent function.
-                    // When we see ApplyPartial for a closure inside a generic function,
-                    // the closure will have type_params matching the parent's.
-                    // We need to instantiate the closure with the same type args
-                    // that the parent was instantiated with (from the current substitution).
-                    let inst = if !type_params.is_empty() {
-                        // Get type args by applying current substitution to the closure's type params
-                        let type_args: Vec<_> = type_params
-                            .iter()
-                            .map(|&tp| {
-                                // The closure's type param should be the same MIR ID as the parent's.
-                                // Look it up in the substitution to get the concrete type.
-                                let tp_ty = self.mir.intern_type(MirTy::TypeParam(tp));
-                                subst.apply_ty(self.mir, tp_ty)
-                            })
-                            .collect();
-
-                        // Check if closure needs self_type
-                        let needs_self = params.iter().any(|&param_id| {
-                            let param = &self.mir.params[param_id];
-                            self.type_needs_self(self.mir.ty(param.ty))
-                        }) || self.type_needs_self(self.mir.ty(ret));
-
-                        if needs_self {
-                            if let Some(st) = subst.get_self_type() {
-                                FunctionInstantiation::with_self_type(func_id, type_args, st)
-                            } else {
-                                // Skip - will be processed later when called with concrete type
-                                for cap in captures {
-                                    self.scan_value(cap, subst);
-                                }
-                                return;
-                            }
-                        } else {
-                            FunctionInstantiation::new(func_id, type_args)
-                        }
-                    } else {
-                        // Non-generic function
-                        let needs_self = params.iter().any(|&param_id| {
-                            let param = &self.mir.params[param_id];
-                            self.type_needs_self(self.mir.ty(param.ty))
-                        }) || self.type_needs_self(self.mir.ty(ret));
-
-                        if needs_self {
-                            // Non-generic closures can still need Self type if they're defined in
-                            // a protocol extension method. Try to use self_type from substitution.
-                            if let Some(st) = subst.get_self_type() {
-                                FunctionInstantiation::with_self_type(func_id, Vec::new(), st)
-                            } else {
-                                self.errors
-                                    .push(MonomorphizeError::UnsupportedFunctionReference {
-                                        name: *func,
-                                        reason: "function reference requires Self type".to_string(),
-                                    });
-                                return;
-                            }
-                        } else {
-                            FunctionInstantiation::non_generic(func_id)
-                        }
-                    };
-
-                    if self.result.add_function(inst.clone()) {
-                        self.pending.push_back(inst);
-                    }
-                }
-                for cap in captures {
-                    self.scan_value(cap, subst);
-                }
-            },
-
-            // Float intrinsics
-            Rvalue::FloatConst { .. } => {},
-
-            Rvalue::FloatPred { operand, .. } => {
-                self.scan_value(operand, subst);
-            },
-
-            Rvalue::FloatMath { operand, .. } => {
-                self.scan_value(operand, subst);
-            },
-
-            Rvalue::FloatFma { a, b, c, .. } => {
-                self.scan_value(a, subst);
-                self.scan_value(b, subst);
-                self.scan_value(c, subst);
-            },
-
-            Rvalue::FloatCopysign {
-                magnitude,
-                sign_source,
-                ..
-            } => {
-                self.scan_value(magnitude, subst);
-                self.scan_value(sign_source, subst);
-            },
-
-            // Pointer intrinsics
-            Rvalue::PtrNull { ty } | Rvalue::SizeOf { ty } | Rvalue::AlignOf { ty } => {
-                self.scan_type(*ty, subst);
-            },
-            Rvalue::PtrFromAddress { ty, address } => {
-                self.scan_type(*ty, subst);
-                self.scan_value(address, subst);
-            },
-            Rvalue::PtrToAddress { ptr } | Rvalue::PtrIsNull { ptr } => {
-                self.scan_value(ptr, subst);
-            },
-            Rvalue::PtrRead { ptr, ty } => {
-                self.scan_value(ptr, subst);
-                self.scan_type(*ty, subst);
-            },
-            Rvalue::PtrWrite { ptr, value } => {
-                self.scan_value(ptr, subst);
-                self.scan_value(value, subst);
-            },
-            Rvalue::PtrCast { ptr, target_ty } => {
-                self.scan_value(ptr, subst);
-                self.scan_type(*target_ty, subst);
-            },
-
-            // Boolean (i1) intrinsics
-            Rvalue::I1Eq { lhs, rhs } | Rvalue::I1And { lhs, rhs } | Rvalue::I1Or { lhs, rhs } => {
-                self.scan_value(lhs, subst);
-                self.scan_value(rhs, subst);
-            },
-            Rvalue::I1Not { operand } => {
-                self.scan_value(operand, subst);
-            },
-
-            // Atomic intrinsics
-            Rvalue::AtomicAdd { ptr, delta } | Rvalue::AtomicSub { ptr, delta } => {
-                self.scan_value(ptr, subst);
-                self.scan_value(delta, subst);
-            },
-
-            // String concatenation
-            Rvalue::StrConcat { parts } => {
-                for part in parts {
-                    self.scan_value(part, subst);
-                }
-            },
-        }
-    }
-
-    /// Scan a callee for instantiations.
-    fn scan_callee(&mut self, callee: &Callee, subst: &Substitution) {
+        callee: &Callee,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: &Option<MirTy>,
+    ) {
         match callee {
-            Callee::Direct { name, type_args } => {
-                // Apply substitution to type args
-                let mut concrete_args: Vec<_> = type_args
-                    .iter()
-                    .map(|ty| subst.apply_ty(self.mir, *ty))
-                    .collect();
+            Callee::Direct {
+                func,
+                type_args,
+                self_type,
+            } => {
+                let Some(&func_id) = self.entity_to_func.get(func) else {
+                    return;
+                };
 
-                // Record function instantiation (only include self_type if callee needs it)
-                if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let (callee_type_params, callee_params, callee_ret) = {
-                        let callee_def = &self.mir.functions[func_id];
-                        (
-                            callee_def.type_params.clone(),
-                            callee_def.params.clone(),
-                            callee_def.ret,
-                        )
-                    };
+                // Substitute type args using the current instantiation's substitution
+                let concrete_type_args = common::substitute_type_args(
+                    type_args,
+                    subst,
+                    parent_self.as_ref(),
+                    self.module,
+                );
 
-                    // Check if the callee actually uses Self in its signature
-                    if concrete_args.is_empty() && !callee_type_params.is_empty() {
-                        concrete_args = self.infer_type_args_from_subst(&callee_type_params, subst);
-                        let unresolved = concrete_args
-                            .iter()
-                            .any(|&ty| matches!(self.mir.ty(ty), MirTy::TypeParam(_)));
-                        if unresolved
-                            && let Some(st) = subst.get_self_type()
-                            && let Some(from_self) = Self::extract_named_type_args_from_self_type(
-                                self.mir,
-                                st,
-                                callee_type_params.len(),
-                            )
-                        {
-                            concrete_args = from_self;
-                        }
-                    }
-                    let callee_needs_self = callee_params.iter().any(|&param_id| {
-                        let param = &self.mir.params[param_id];
-                        self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(callee_ret));
-
-                    let inst = if callee_needs_self {
-                        let st = if let Some(st) = subst.get_self_type() {
-                            st
-                        } else if let Some(st) = self.infer_self_type_from_method_name(*name) {
-                            // Try to infer Self from the method's containing type
-                            // e.g., Test.Widget.create -> Self = Test.Widget
-                            st
+                // Resolve self type: only inherit parent's self_type if the callee
+                // actually uses SelfType in its signature. Static methods on other types
+                // (e.g., Pointer[T].nullPointer() called from a TcpListener method)
+                // should NOT inherit the caller's self_type.
+                //
+                // Closures/thunks are lexically nested in the parent's Self scope
+                // even when their signatures don't syntactically reference
+                // SelfType — their bodies can still mention protocol associated
+                // types (e.g. `Iterator.Item`) that need the parent's self_type
+                // to resolve via the witness table.
+                let callee_func = &self.module.functions[func_id.index()];
+                let callee_is_nested = matches!(
+                    callee_func.kind,
+                    FunctionKind::Closure
+                        | FunctionKind::ClosureCall { .. }
+                        | FunctionKind::Thunk { .. }
+                );
+                let concrete_self = self_type
+                    .as_ref()
+                    .map(|st| {
+                        substitute_type_with_self(st, subst, parent_self.as_ref(), self.module)
+                    })
+                    .or_else(|| {
+                        if self.func_uses_self_type(callee_func) || callee_is_nested {
+                            parent_self.clone()
                         } else {
-                            // Callee needs Self but we can't infer it - skip for now,
-                            // will be processed later when called with concrete type
-                            return;
-                        };
-                        FunctionInstantiation::with_self_type(func_id, concrete_args, st)
-                    } else {
-                        FunctionInstantiation::new(func_id, concrete_args)
-                    };
-                    if self.result.add_function(inst.clone()) {
-                        self.pending.push_back(inst);
-                    }
-                } else {
-                    self.errors
-                        .push(MonomorphizeError::FunctionNotFound { name: *name });
-                }
-            },
+                            None
+                        }
+                    });
 
-            Callee::Thin(_) | Callee::Thick(_) => {
-                // Function pointer calls - we can't statically know what's being called
+                // Skip phantom instantiations:
+                // 1. Unresolved TypeParams in type_args or self_type
+                // 2. Insufficient type_args for the callee's type_params (missing
+                //    inherited struct type_args — correctly-resolved versions are
+                //    discovered through call paths that propagate full type info)
+                //
+                // MirTy::Error is caught earlier by MIR-lower's validate pass
+                // (which short-circuits `compile_inner`), so we don't re-check
+                // for it here.
+                if concrete_type_args.iter().any(|a| has_type_param(a)) {
+                    return;
+                }
+                if let Some(ref st) = concrete_self {
+                    if has_type_param(st) {
+                        return;
+                    }
+                }
+                if concrete_type_args.len() < callee_func.type_params.len() {
+                    return;
+                }
+
+                let inst = FunctionInstantiation {
+                    func_id,
+                    type_args: concrete_type_args.clone(),
+                    self_type: concrete_self,
+                };
+
+                if self.result.functions.insert(inst.clone()) {
+                    self.queue.push_back(inst);
+                }
             },
 
             Callee::Witness {
                 protocol,
                 method,
-                for_type,
+                self_type,
                 method_type_args,
             } => {
-                // Apply substitution to for_type
-                let concrete_for_type = subst.apply_ty(self.mir, *for_type);
+                // Substitute type params AND SelfType using parent's self_type
+                let mut concrete_self =
+                    substitute_type_with_self(self_type, subst, parent_self.as_ref(), self.module);
+                // Resolve associated types (e.g., Iterator.Item → concrete type)
+                // via witness table. Search all protocols for the owning one,
+                // not just the protocol being called (handles cross-protocol
+                // cases like Iterable.Iter used as self_type for Iterator.next)
+                if let MirTy::Named {
+                    entity,
+                    ref type_args,
+                } = concrete_self
+                {
+                    if type_args.is_empty() {
+                        let assoc_name = self.module.resolve_name(entity);
+                        let short = common::short_name(&assoc_name);
 
-                // Apply substitution to method_type_args (the method's own type parameters)
-                let concrete_method_type_args: Vec<_> = method_type_args
-                    .iter()
-                    .map(|ty| subst.apply_ty(self.mir, *ty))
-                    .collect();
-
-                // Resolve the witness to find the actual implementation
-                match witness::resolve_witness(self.mir, *protocol, method, concrete_for_type) {
-                    Ok((impl_name, mut impl_type_args)) => {
-                        // Append the method's own type arguments (e.g., H in hash[H])
-                        // to the witness type args (e.g., K, V from Dictionary[K, V, H])
-                        impl_type_args.extend(concrete_method_type_args);
-
-                        // Record the implementation function instantiation
-                        // For protocol extension methods, set self_type to concrete_for_type
-                        // so that MirTy::SelfType gets properly substituted.
-                        if let Some(&func_id) = self.functions_by_name.get(&impl_name) {
-                            let inst = FunctionInstantiation::with_self_type(
-                                func_id,
-                                impl_type_args,
-                                concrete_for_type,
-                            );
-                            if self.result.add_function(inst.clone()) {
-                                self.pending.push_back(inst);
-                            }
-                        } else {
-                            let _name_str = self.mir.name(impl_name);
-                            self.errors
-                                .push(MonomorphizeError::FunctionNotFound { name: impl_name });
-                        }
-                    },
-                    Err(e) => {
-                        self.errors.push(e);
-                    },
-                }
-            },
-        }
-    }
-
-    /// Scan an immediate for instantiations.
-    fn scan_immediate(&mut self, imm: &ImmediateKind, subst: &Substitution) {
-        match imm {
-            ImmediateKind::FunctionRef { name, type_args } => {
-                // Apply substitution to type args
-                let mut concrete_args: Vec<_> = type_args
-                    .iter()
-                    .map(|ty| subst.apply_ty(self.mir, *ty))
-                    .collect();
-
-                // Record function instantiation
-                if let Some(&func_id) = self.functions_by_name.get(name) {
-                    let (func_type_params, func_params, func_ret) = {
-                        let func_def = &self.mir.functions[func_id];
-                        (
-                            func_def.type_params.clone(),
-                            func_def.params.clone(),
-                            func_def.ret,
-                        )
-                    };
-
-                    if concrete_args.is_empty() && !func_type_params.is_empty() {
-                        concrete_args = self.infer_type_args_from_subst(&func_type_params, subst);
-                        let unresolved = concrete_args
+                        // Find which protocol owns this associated type
+                        let owning_protocol = self
+                            .module
+                            .protocols
                             .iter()
-                            .any(|&ty| matches!(self.mir.ty(ty), MirTy::TypeParam(_)));
-                        if unresolved
-                            && let Some(st) = subst.get_self_type()
-                            && let Some(from_self) = Self::extract_named_type_args_from_self_type(
-                                self.mir,
-                                st,
-                                func_type_params.len(),
-                            )
-                        {
-                            concrete_args = from_self;
+                            .find(|p| p.associated_type_by_name(short).is_some())
+                            .map(|p| p.entity);
+
+                        if let Some(owner_proto) = owning_protocol {
+                            // Try parent_self first, then search the subst map for a
+                            // concrete type that implements the owning protocol
+                            let candidates: Vec<&MirTy> = if let Some(ps) = parent_self {
+                                vec![ps]
+                            } else {
+                                vec![]
+                            };
+                            // Also try all concrete types from the substitution map
+                            let subst_values: Vec<&MirTy> = subst.values().collect();
+                            for candidate in candidates.iter().chain(subst_values.iter()) {
+                                if let Ok(resolved) = witness::resolve_associated_type(
+                                    self.module,
+                                    owner_proto,
+                                    candidate,
+                                    short,
+                                ) {
+                                    concrete_self = resolved;
+                                    break;
+                                }
+                            }
                         }
                     }
-                    if !func_type_params.is_empty() && func_type_params.len() != concrete_args.len()
-                    {
-                        self.errors
-                            .push(MonomorphizeError::UnsupportedFunctionReference {
-                                name: *name,
-                                reason: "missing or mismatched type arguments".to_string(),
-                            });
-                        return;
-                    }
+                }
+                let concrete_method_args: Vec<MirTy> = method_type_args
+                    .iter()
+                    .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref(), self.module))
+                    .collect();
 
-                    let callee_needs_self = func_params.iter().any(|&param_id| {
-                        let param = &self.mir.params[param_id];
-                        self.type_needs_self(self.mir.ty(param.ty))
-                    }) || self.type_needs_self(self.mir.ty(func_ret));
+                match witness::resolve_witness_call(
+                    self.module,
+                    *protocol,
+                    method,
+                    &concrete_self,
+                    &concrete_method_args,
+                ) {
+                    Ok(resolved) => {
+                        let Some(&func_id) = self.entity_to_func.get(&resolved.func_entity) else {
+                            ktrace!(
+                                "codegen",
+                                "monomorphize: witness resolved to unknown entity {:?}",
+                                resolved.func_entity
+                            );
+                            return;
+                        };
 
-                    let inst = if callee_needs_self {
-                        if let Some(st) = subst.get_self_type() {
-                            FunctionInstantiation::with_self_type(func_id, concrete_args, st)
-                        } else {
-                            self.errors
-                                .push(MonomorphizeError::UnsupportedFunctionReference {
-                                    name: *name,
-                                    reason: "missing Self type for function reference".to_string(),
-                                });
+                        if resolved.type_args.iter().any(|a| has_type_param(a)) {
                             return;
                         }
-                    } else {
-                        FunctionInstantiation::new(func_id, concrete_args)
-                    };
-                    if self.result.add_function(inst.clone()) {
-                        self.pending.push_back(inst);
-                    }
-                } else {
-                    self.errors
-                        .push(MonomorphizeError::FunctionNotFound { name: *name });
-                }
-            },
 
-            ImmediateKind::WitnessMethod {
-                protocol,
-                method,
-                for_type,
-            } => {
-                // Apply substitution to for_type
-                let concrete_for_type = subst.apply_ty(self.mir, *for_type);
+                        let inst = FunctionInstantiation {
+                            func_id,
+                            type_args: resolved.type_args,
+                            self_type: resolved.self_type,
+                        };
 
-                // Resolve the witness
-                match witness::resolve_witness(self.mir, *protocol, method, concrete_for_type) {
-                    Ok((impl_name, impl_type_args)) => {
-                        // For protocol extension methods, set self_type to concrete_for_type
-                        if let Some(&func_id) = self.functions_by_name.get(&impl_name) {
-                            let inst = FunctionInstantiation::with_self_type(
-                                func_id,
-                                impl_type_args,
-                                concrete_for_type,
-                            );
-                            if self.result.add_function(inst.clone()) {
-                                self.pending.push_back(inst);
-                            }
-                        } else {
-                            let _name_str = self.mir.name(impl_name);
-                            self.errors
-                                .push(MonomorphizeError::FunctionNotFound { name: impl_name });
+                        if self.result.functions.insert(inst.clone()) {
+                            self.queue.push_back(inst);
                         }
                     },
                     Err(e) => {
@@ -750,407 +373,168 @@ impl<'a> CollectionContext<'a> {
                 }
             },
 
-            ImmediateKind::NullPtr(ty) => {
-                self.scan_type(*ty, subst);
-            },
-
-            // Literals don't contain instantiations
-            ImmediateKind::IntLiteral { .. }
-            | ImmediateKind::FloatLiteral { .. }
-            | ImmediateKind::BoolLiteral(_)
-            | ImmediateKind::StringLiteral(_)
-            | ImmediateKind::StringPointer(_)
-            | ImmediateKind::Unit
-            | ImmediateKind::Error => {},
+            // Thin/Thick indirect calls don't introduce new instantiations
+            Callee::Thin(_) | Callee::Thick(_) => {},
         }
     }
 
-    /// Scan a value for instantiations.
-    fn scan_value(&mut self, value: &Value, subst: &Substitution) {
-        match value {
-            Value::Place(_) => {},
-            Value::Immediate(imm) => {
-                self.scan_immediate(&imm.kind, subst);
-            },
-            Value::Unreachable => {},
-        }
-    }
-
-    /// Scan a type for struct/enum instantiations.
-    fn scan_type(&mut self, ty: Id<kestrel_execution_graph::Ty>, subst: &Substitution) {
-        // Apply substitution first
-        let concrete_ty = subst.apply_ty(self.mir, ty);
-
-        // Now scan the concrete type
-        let mir_ty = self.mir.ty(concrete_ty).clone();
-        match mir_ty {
-            MirTy::Named { name, type_args } => {
-                // Collect struct field info before mutating (to avoid borrow issues)
-                let struct_field_info: Option<(Vec<Id<TypeParam>>, Vec<Id<Ty>>)> =
-                    if !type_args.is_empty() {
-                        // This is a generic instantiation - determine if it's a struct or enum
-                        // Check structs first
-                        let mut field_info = None;
-                        for (struct_id, struct_def) in self.mir.structs.iter() {
-                            if struct_def.name == name {
-                                let inst = StructInstantiation::new(struct_id, type_args.clone());
-                                self.result.add_struct(inst);
-                                // Collect field types and type params for later scanning
-                                if !struct_def.type_params.is_empty() {
-                                    let type_params = struct_def.type_params.clone();
-                                    let field_types: Vec<_> = struct_def
-                                        .fields
-                                        .iter()
-                                        .map(|&fid| self.mir.fields[fid].ty)
-                                        .collect();
-                                    field_info = Some((type_params, field_types));
-                                }
-                                break;
-                            }
-                        }
-
-                        // Check enums
-                        for (enum_id, enum_def) in self.mir.enums.iter() {
-                            if enum_def.name == name {
-                                let inst = EnumInstantiation::new(enum_id, type_args.clone());
-                                self.result.add_enum(inst);
-                                break;
-                            }
-                        }
-                        field_info
-                    } else {
-                        None
-                    };
-
-                // Scan struct field types with substitution (after loop to avoid borrow issues)
-                if let Some((type_params, field_types)) = struct_field_info {
-                    let field_subst = build_substitution(self.mir, &type_params, &type_args);
-                    for field_ty in field_types {
-                        self.scan_type(field_ty, &field_subst);
-                    }
-                }
-
-                // Recurse into type args
-                for arg in &type_args {
-                    self.scan_type(*arg, &Substitution::new());
-                }
-            },
-
-            MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-                // Pass through the substitution so nested types get properly substituted
-                self.scan_type(inner, subst);
-            },
-
-            MirTy::Tuple(elems) => {
-                for elem in elems {
-                    self.scan_type(elem, subst);
-                }
-            },
-
-            MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-                for param in params {
-                    self.scan_type(param, subst);
-                }
-                self.scan_type(ret, subst);
-            },
-
-            MirTy::AssociatedTypeProjection { base, .. } => {
-                self.scan_type(base, subst);
-            },
-
-            // Primitives and type params don't contain nested instantiations
-            MirTy::I8
-            | MirTy::I16
-            | MirTy::I32
-            | MirTy::I64
-            | MirTy::F16
-            | MirTy::F32
-            | MirTy::F64
-            | MirTy::Bool
-            | MirTy::Unit
-            | MirTy::Never
-            | MirTy::Str
-            | MirTy::TypeParam(_)
-            | MirTy::SelfType
-            | MirTy::Error => {},
-        }
-    }
-
-    /// Scan a terminator for instantiations.
-    fn scan_terminator(
+    fn scan_rvalue(
         &mut self,
-        term: &kestrel_execution_graph::Terminator,
-        subst: &Substitution,
+        rvalue: &Rvalue,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: &Option<MirTy>,
     ) {
-        use kestrel_execution_graph::TerminatorKind;
+        match rvalue {
+            // ApplyPartial introduces the target function as an instantiation
+            Rvalue::ApplyPartial { func, captures: _ } => {
+                if let Some((original_func_id, callable_func_id)) = self
+                    .entity_to_func
+                    .get(func)
+                    .map(|id| (*id, self.apply_partial_callable_for(*func)))
+                {
+                    // Infer type args from the parent's substitution
+                    let target = &self.module.functions[original_func_id.index()];
+                    let type_args: Vec<MirTy> = target
+                        .type_params
+                        .iter()
+                        .filter_map(|tp| subst.get(&tp.entity).cloned())
+                        .collect();
 
-        match &term.kind {
-            TerminatorKind::Return(value) => {
-                self.scan_value(value, subst);
-            },
-            TerminatorKind::Jump(_) => {},
-            TerminatorKind::Branch { condition, .. } => {
-                self.scan_value(condition, subst);
-            },
-            TerminatorKind::Switch { .. } => {},
-            TerminatorKind::Panic(_) => {},
-            TerminatorKind::Unreachable => {},
-        }
-    }
+                    // Always propagate parent's self_type: closures created
+                    // inside an extension method inherit the enclosing Self
+                    // scope, which is needed to resolve protocol associated
+                    // types (e.g. `Item` in `extend Iterator where Item: ...`)
+                    // against the concrete receiver via the witness table.
+                    let inst = FunctionInstantiation {
+                        func_id: callable_func_id,
+                        type_args,
+                        self_type: parent_self.clone(),
+                    };
 
-    /// Infer the Self type from a call's arguments.
-    ///
-    /// For protocol extension methods, the first parameter is often `self: &Self` or similar.
-    /// We need to extract the concrete type from the actual argument to substitute Self.
-    fn infer_self_type_from_call(
-        &self,
-        callee: &Callee,
-        args: &[kestrel_execution_graph::CallArg],
-        subst: &Substitution,
-    ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        match callee {
-            Callee::Direct { name, .. } => {
-                let func_id = self.functions_by_name.get(name).copied()?;
-                self.infer_self_type_from_direct_call(func_id, args, subst)
-            },
-            Callee::Witness {
-                for_type,
-                protocol: _,
-                method: _,
-                ..
-            } => {
-                // For witness calls where for_type is SelfType, prefer existing self_type from subst
-                let ty = self.mir.ty(*for_type);
-                if matches!(ty, MirTy::SelfType) {
-                    // If we already have a self_type in the substitution, use it
-                    // (this happens when processing protocol extension methods)
-                    if let Some(existing_st) = subst.get_self_type() {
-                        return Some(existing_st);
+                    if self.result.functions.insert(inst.clone()) {
+                        self.queue.push_back(inst);
                     }
-                    // Otherwise try to extract from the first argument
-                    if let Some(first_arg) = args.first() {
-                        let arg_ty = self.get_value_type(&first_arg.value, subst);
-                        if let Some(ty_id) = arg_ty {
-                            // Apply substitution first to resolve any SelfType in the argument's type
-                            if let Ok(substituted_ty) = subst.apply_ty_readonly(self.mir, ty_id) {
-                                return self.extract_concrete_type_from_arg(substituted_ty);
-                            }
-                            return None;
+                }
+            },
+
+            // Const with FunctionRef introduces the referenced function
+            Rvalue::Const(imm) => {
+                if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind {
+                    if let Some(&func_id) = self.entity_to_func.get(func) {
+                        let concrete_type_args = common::substitute_type_args(
+                            type_args,
+                            subst,
+                            parent_self.as_ref(),
+                            self.module,
+                        );
+
+                        let inst = FunctionInstantiation {
+                            func_id,
+                            type_args: concrete_type_args,
+                            self_type: parent_self.clone(),
+                        };
+
+                        if self.result.functions.insert(inst.clone()) {
+                            self.queue.push_back(inst);
                         }
                     }
                 }
-                None
             },
-            _ => None,
+
+            _ => {},
         }
     }
 
-    /// Infer Self type from a direct call
-    fn infer_self_type_from_direct_call(
-        &self,
-        func_id: Id<Function>,
-        args: &[kestrel_execution_graph::CallArg],
-        subst: &Substitution,
-    ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        // Get the function definition
-        let func_def = &self.mir.functions[func_id];
-
-        // Check if the function has any parameters with Self type
-        if func_def.params.is_empty() || args.is_empty() {
-            return None;
-        }
-
-        // Get the first parameter's type
-        let first_param = &self.mir.params[func_def.params[0]];
-        let param_ty = self.mir.ty(first_param.ty);
-
-        // Check if the parameter type involves Self (could be &Self, &mut Self, Self, etc.)
-        let needs_self = self.type_contains_self(param_ty);
-
-        if !needs_self {
-            return None;
-        }
-
-        // If we're already in a Self-typed context, reuse it.
-        if let Some(existing_st) = subst.get_self_type() {
-            return Some(existing_st);
-        }
-
-        // Extract the concrete type from the first argument
-        let first_arg = &args[0];
-        let arg_ty = self.get_value_type(&first_arg.value, subst)?;
-
-        // Apply substitution to resolve any SelfType in the argument's type
-        if let Ok(substituted_ty) = subst.apply_ty_readonly(self.mir, arg_ty) {
-            return self.extract_concrete_type_from_arg(substituted_ty);
-        }
-        None
-    }
-
-    /// Check if a type contains Self or is a Named type that's a protocol (stands for Self in protocol extensions)
-    fn type_contains_self(&self, ty: &MirTy) -> bool {
-        match ty {
-            MirTy::SelfType => true,
-            // Named types that are protocols are used for Self in protocol extension methods
-            // We detect this by checking if the name ends with a protocol marker or looks like a protocol
-            // For now, we'll be conservative and check if the function has Self-typed params at all
-            MirTy::Named { .. } => {
-                // Named types could be protocols in protocol extension methods
-                // We need to check if this is actually a protocol acting as Self
-                // For now, return true for Named types to be conservative
-                // TODO: Add proper protocol detection
-                true
-            },
-            MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
-                self.type_contains_self(self.mir.ty(*inner))
-            },
-            MirTy::AssociatedTypeProjection { base, .. } => {
-                self.type_contains_self(self.mir.ty(*base))
-            },
-            _ => false,
-        }
-    }
-
-    /// Try to infer the Self type from a method's qualified name.
-    ///
-    /// For a function like `Test.Widget.create`, this returns the type `Test.Widget`
-    /// by looking up the parent name in structs and enums.
-    fn infer_self_type_from_method_name(
-        &self,
-        func_name: Id<QualifiedName>,
-    ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        let name_data = self.mir.name(func_name);
-        let parent = name_data.parent()?;
-
-        // Try to find a struct with this name
-        for (_, struct_def) in self.mir.structs.iter() {
-            if self.mir.name(struct_def.name) == &parent {
-                // Only works for non-generic types
-                if struct_def.type_params.is_empty() {
-                    let mir_ty = MirTy::Named {
-                        name: struct_def.name,
-                        type_args: vec![],
-                    };
-                    return self.mir.lookup_type(&mir_ty);
-                }
+    /// Check if a function's signature uses SelfType anywhere.
+    fn func_uses_self_type(&self, func: &kestrel_mir::FunctionDef) -> bool {
+        for param in &func.params {
+            if type_uses_self(&param.ty) {
+                return true;
             }
         }
-
-        // Try to find an enum with this name
-        for (_, enum_def) in self.mir.enums.iter() {
-            if self.mir.name(enum_def.name) == &parent && enum_def.type_params.is_empty() {
-                let mir_ty = MirTy::Named {
-                    name: enum_def.name,
-                    type_args: vec![],
-                };
-                return self.mir.lookup_type(&mir_ty);
-            }
-        }
-
-        None
+        type_uses_self(&func.ret)
     }
 
-    /// Check if a type directly uses SelfType (not just any Named type)
-    /// This is stricter than type_contains_self and is used to detect protocol extension methods
-    fn type_needs_self(&self, ty: &MirTy) -> bool {
-        match ty {
-            MirTy::SelfType => true,
-            MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
-                self.type_needs_self(self.mir.ty(*inner))
-            },
-            MirTy::Tuple(elems) => elems.iter().any(|e| self.type_needs_self(self.mir.ty(*e))),
-            MirTy::Named { type_args, .. } => type_args
-                .iter()
-                .any(|a| self.type_needs_self(self.mir.ty(*a))),
-            MirTy::AssociatedTypeProjection { base, .. } => {
-                self.type_needs_self(self.mir.ty(*base))
-            },
-            MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-                params.iter().any(|p| self.type_needs_self(self.mir.ty(*p)))
-                    || self.type_needs_self(self.mir.ty(*ret))
-            },
-            _ => false,
+    fn apply_partial_callable_for(&self, original: Entity) -> FunctionId {
+        self.module
+            .functions
+            .iter()
+            .enumerate()
+            .find_map(|(i, func)| match &func.kind {
+                FunctionKind::Thunk {
+                    original: thunk_target,
+                } if *thunk_target == original => Some(FunctionId::new(i)),
+                _ => None,
+            })
+            .or_else(|| self.entity_to_func.get(&original).copied())
+            .expect("ApplyPartial target must resolve to a function")
+    }
+}
+
+/// Build a substitution map from a function's type params and concrete type args.
+fn build_subst(func: &kestrel_mir::FunctionDef, type_args: &[MirTy]) -> HashMap<Entity, MirTy> {
+    func.type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(tp, arg)| (tp.entity, arg.clone()))
+        .collect()
+}
+
+/// Check if a type contains SelfType anywhere in its structure.
+fn type_uses_self(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::SelfType => true,
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => type_uses_self(inner),
+        MirTy::Tuple(elems) => elems.iter().any(type_uses_self),
+        MirTy::Named { type_args, .. } => type_args.iter().any(type_uses_self),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(type_uses_self) || type_uses_self(ret)
+        },
+        MirTy::AssociatedProjection { base, .. } => type_uses_self(base),
+        _ => false,
+    }
+}
+
+/// Check if a function's body references any TypeParam types that aren't
+/// covered by the function's own type_params. This detects functions that
+/// should be generic but aren't (missing inherited type params).
+fn func_body_has_type_params(func: &kestrel_mir::FunctionDef) -> bool {
+    let Some(body) = &func.body else { return false };
+    // Check locals for TypeParam references
+    for local in &body.locals {
+        if has_type_param(&local.ty) {
+            return true;
         }
     }
-
-    /// Get the type of a value
-    fn get_value_type(
-        &self,
-        value: &Value,
-        subst: &Substitution,
-    ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        match value {
-            Value::Place(place) => self.get_place_type(place, subst),
-            Value::Immediate(_) => None,
-            Value::Unreachable => None,
-        }
-    }
-
-    /// Get the type of a place
-    #[allow(clippy::only_used_in_recursion)]
-    fn get_place_type(
-        &self,
-        place: &kestrel_execution_graph::Place,
-        subst: &Substitution,
-    ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        use kestrel_execution_graph::PlaceKind;
-
-        match &place.kind {
-            PlaceKind::Local(local_id) => {
-                let local = self.mir.local(*local_id);
-                Some(local.ty)
-            },
-            PlaceKind::Global(name_id) => {
-                // Find the static definition to get its type
-                self.mir
-                    .statics
-                    .iter()
-                    .find(|(_, def)| def.name == *name_id)
-                    .map(|(_, def)| def.ty)
-            },
-            PlaceKind::Deref(inner) => {
-                // For deref, get the inner place's type and unwrap the pointer/ref
-                let inner_ty_id = self.get_place_type(inner, subst)?;
-                let inner_ty = self.mir.ty(inner_ty_id);
-                match inner_ty {
-                    MirTy::Ref(pointee) | MirTy::RefMut(pointee) | MirTy::Pointer(pointee) => {
-                        Some(*pointee)
+    // Check call type_args for TypeParam references
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let kestrel_mir::StatementKind::Call { callee, .. } = &stmt.kind {
+                match callee {
+                    kestrel_mir::Callee::Direct { type_args, .. } => {
+                        if type_args.iter().any(has_type_param) {
+                            return true;
+                        }
                     },
-                    _ => Some(inner_ty_id), // Unexpected, return as-is
+                    _ => {},
                 }
-            },
-            PlaceKind::Field { parent: _, .. } => {
-                // For field access, we'd need to look up the struct definition
-                // For now, return None as this is complex
-                None
-            },
-            PlaceKind::Index { parent: _, .. } => {
-                // For index access, we'd need to look up element type
-                None
-            },
-            PlaceKind::Downcast { parent, .. } => {
-                // For enum downcast, return parent type (the enum)
-                self.get_place_type(parent, subst)
-            },
+            }
         }
     }
+    false
+}
 
-    /// Extract the concrete type from an argument type (unwrap refs)
-    fn extract_concrete_type_from_arg(
-        &self,
-        ty: Id<kestrel_execution_graph::Ty>,
-    ) -> Option<Id<kestrel_execution_graph::Ty>> {
-        let mir_ty = self.mir.ty(ty);
-        match mir_ty {
-            MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-                // Recursively unwrap
-                self.extract_concrete_type_from_arg(*inner)
-            },
-            MirTy::SelfType | MirTy::TypeParam(_) => {
-                // Can't extract concrete type from abstract type
-                None
-            },
-            _ => Some(ty),
-        }
+/// Check if a type contains any unresolved TypeParam or Error.
+fn has_type_param(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_) | MirTy::Error => true,
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => has_type_param(inner),
+        MirTy::Tuple(elems) => elems.iter().any(has_type_param),
+        MirTy::Named { type_args, .. } => type_args.iter().any(has_type_param),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(has_type_param) || has_type_param(ret)
+        },
+        MirTy::AssociatedProjection { base, .. } => has_type_param(base),
+        _ => false,
     }
 }

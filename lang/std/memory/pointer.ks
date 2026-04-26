@@ -9,141 +9,264 @@ import std.memory.(Slice)
 import std.result.(Optional)
 import std.iter.(Iterator)
 
-/// An untyped (void) pointer to raw memory.
-/// FFI-safe and can be cast to typed pointers.
+/// Untyped pointer to raw memory — `void*` in C terms.
+///
+/// Used at FFI boundaries and as an intermediate when casting between
+/// typed pointers. `RawPointer` deliberately exposes no read/write methods
+/// of its own; cast to `Pointer[T]` first via `cast[T]()`. Equality and
+/// hashing are address-based.
+///
+/// # Examples
+///
+/// ```
+/// let p = RawPointer.nilPointer();
+/// p.isNull                                // true
+/// let typed: Pointer[Int64] = p.cast[Int64]()
+/// ```
+///
+/// # Representation
+///
+/// One `lang.ptr[lang.i8]`. FFI-safe — passes as a single machine pointer.
 public struct RawPointer: Equatable, FFISafe, Hash {
-    /// The underlying raw pointer.
+    /// The wrapped primitive `i8*`.
     public var raw: lang.ptr[lang.i8]
 
-    /// Creates a raw pointer from the underlying representation.
+    /// @name From Raw
+    /// Wraps an existing primitive pointer.
     public init(raw raw: lang.ptr[lang.i8]) {
         self.raw = raw;
     }
 
-    /// Creates a raw pointer from an address.
+    /// @name From Address
+    /// Reconstructs a pointer from a numeric address. Useful for
+    /// platform-specific encodings (handles, MMIO addresses); incorrect
+    /// addresses produce a pointer that dereferences to undefined memory.
     public init(address address: UInt64) {
         self.raw = lang.ptr_from_address(address.raw)
     }
 
-    /// Returns a null raw pointer.
+    /// Returns the canonical null pointer.
     public static func nilPointer() -> RawPointer {
         RawPointer(raw: lang.ptr_null())
     }
 
-    /// The memory address as an unsigned integer.
+    /// Numeric address of the pointee. Round-trips through
+    /// `RawPointer(address:)`.
     public var address: UInt64 {
         UInt64(intLiteral: lang.ptr_to_address(self.raw))
     }
 
-    /// Returns true if this is a null pointer.
+    /// Convenience for `address == 0`.
     public var isNull: Bool {
         Bool(boolLiteral: lang.ptr_is_null(self.raw))
     }
 
-    /// Casts this raw pointer to a typed pointer.
+    /// Reinterprets the address as a `Pointer[T]`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the address holds a valid `T` (correct size,
+    /// alignment, and initialised contents) before reading through the
+    /// returned pointer.
     public func cast[T]() -> Pointer[T] {
-        Pointer(raw: lang.cast_ptr[T](self.raw))
+        Pointer(raw: lang.cast_ptr[_, T](self.raw))
     }
 
-    /// Offsets the pointer by the given number of bytes.
+    /// Adds `bytes` to the address (no element-size scaling — this is
+    /// raw byte arithmetic). Use `Pointer[T].offset` for element-typed
+    /// strides.
     public func offset(by bytes: Int64) -> RawPointer {
         RawPointer(raw: lang.ptr_offset(self.raw, bytes.raw))
     }
 
-    /// Compares two raw pointers for equality by address.
+    /// Address-based equality. Two `RawPointer`s pointing into different
+    /// allocations are equal iff their addresses coincide.
     public func equals(other: RawPointer) -> Bool {
         self.address == other.address
     }
 
-    /// Hashes this pointer's address.
+    /// Hashes the underlying address.
+    ///
+    /// Heap allocations cluster on alignment boundaries, so the raw
+    /// address has predictable low bits. We run the address through
+    /// Murmur3's `fmix64` finalizer (two rounds of `xor-shift /
+    /// multiply`) before hashing so every input bit avalanches across
+    /// the 64-bit output. Without this, pointer-keyed maps see
+    /// collision clustering driven by the allocator's stride.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let addr = self.address;
-        hasher.write(Slice(pointer: Pointer(to: addr).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
+        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        var x = self.address;
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m1);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m2);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
     }
 }
 
-/// A typed pointer to a single value of type T.
+/// Typed pointer to a single value of `T`.
+///
+/// Element-typed counterpart to `RawPointer`: `offset(by:)` strides in
+/// units of `sizeof[T]`, and `pointee` reads/writes through the address.
+/// `Pointer[T]` is FFI-safe when `T` is.
+///
+/// # Examples
+///
+/// ```
+/// var x = 42;
+/// let p = Pointer(to: x);
+/// p.read()                       // 42
+/// p.write(100)                   // x is now 100
+/// p.pointee = 7                  // x is now 7
+/// ```
+///
+/// # Representation
+///
+/// One `lang.ptr[T]`. The wrapping struct is purely a typing convenience —
+/// it lowers to a bare machine pointer.
+///
+/// # Memory Model
+///
+/// Non-owning. The pointee's lifetime is the caller's responsibility; the
+/// pointer does not increment any refcount, register with any GC, or
+/// trigger a deinit.
 public struct Pointer[T]: Equatable, Hash {
     private var _raw: lang.ptr[T]
 
-    /// The underlying raw pointer.
+    /// The wrapped primitive pointer.
     public var raw: lang.ptr[T] { self._raw }
 
-    /// Creates a pointer from the underlying representation.
+    /// @name From Raw
+    /// Wraps an existing primitive pointer.
     public init(raw raw: lang.ptr[T]) {
         self._raw = raw;
     }
 
-    /// Creates a pointer to a value (takes address of the value).
+    /// @name To Value
+    /// Takes the address of `value`. Equivalent to `&value` in C — the
+    /// caller must ensure `value` outlives any use of the resulting
+    /// pointer.
     public init(to value: T) {
         self._raw = lang.ptr_to(value)
     }
 
-    /// Returns a null typed pointer.
+    /// Returns a typed null pointer.
     public static func nullPointer() -> Pointer[T] {
         Pointer(raw: lang.ptr_null[T]())
     }
 
-    /// The value at this pointer location.
-    /// Supports both get and set operations.
+    /// Live view of the value at the address. `get` reads through the
+    /// pointer; `set` writes. Both are unchecked — see `# Safety`.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be non-null and the storage must hold a valid
+    /// initialised `T`. Reading past the end of an allocation, after
+    /// the pointee has been freed, or through a dangling pointer is
+    /// undefined behavior.
     public var pointee: T {
         get { lang.ptr_read(self._raw) }
         set { lang.ptr_write(self._raw, newValue) }
     }
 
-    /// The memory address as an unsigned integer.
+    /// Numeric address — same value as `asRaw().address`.
     public var address: UInt64 {
-        UInt64(intLiteral: lang.ptr_to_address(lang.cast_ptr[lang.i8](self._raw)))
+        UInt64(intLiteral: lang.ptr_to_address(lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
-    /// Returns true if this is a null pointer.
+    /// Convenience for `address == 0`.
     public var isNull: Bool {
-        Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[lang.i8](self._raw)))
+        Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
-    /// Reads the value at this pointer location.
+    /// Reads `T` from the address. Same safety preconditions as `pointee.get`.
     public func read() -> T {
         lang.ptr_read(self._raw)
     }
 
-    /// Writes a value to this pointer location.
+    /// Writes `value` through the pointer. Same safety preconditions as
+    /// `pointee.set`.
     public func write(value: T) {
         lang.ptr_write(self._raw, value)
     }
 
-    /// Offsets the pointer by n elements (not bytes).
+    /// Strides the pointer by `n` *elements* (multiplied by `sizeof[T]`).
+    /// Compare with `RawPointer.offset`, which strides by raw bytes.
     public func offset(by n: Int64) -> Pointer[T] {
         let byteOffset = n * Int64(intLiteral: lang.sizeof[T]());
         Pointer[T](raw: lang.ptr_offset[T](self._raw, byteOffset.raw))
     }
 
-    /// Converts to an untyped raw pointer.
+    /// Drops the type tag, returning a `RawPointer` to the same address.
     public func asRaw() -> RawPointer {
-        RawPointer(raw: lang.cast_ptr[lang.i8](self._raw))
+        RawPointer(raw: lang.cast_ptr[_, lang.i8](self._raw))
     }
 
-    /// Casts this pointer to a pointer of a different type.
+    /// Reinterprets the address as a `Pointer[U]`.
+    ///
+    /// # Safety
+    ///
+    /// Same caveats as `RawPointer.cast` — the storage must be valid for
+    /// `U` (size, alignment, contents) at the moment of the read/write.
     public func cast[U]() -> Pointer[U] {
-        Pointer(raw: lang.cast_ptr[U](lang.cast_ptr[lang.i8](self._raw)))
+        Pointer(raw: lang.cast_ptr[_, U](lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
-    /// Compares two pointers for equality by address.
+    /// Address-based equality.
     public func equals(other: Pointer[T]) -> Bool {
         self.address == other.address
     }
 
-    /// Hashes this pointer's address.
+    /// Hashes the underlying address.
+    ///
+    /// Heap allocations cluster on alignment boundaries, so the raw
+    /// address has predictable low bits. We run the address through
+    /// Murmur3's `fmix64` finalizer (two rounds of `xor-shift /
+    /// multiply`) before hashing so every input bit avalanches across
+    /// the 64-bit output. Without this, pointer-keyed maps see
+    /// collision clustering driven by the allocator's stride.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let addr = self.address;
-        hasher.write(Slice(pointer: Pointer(to: addr).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
+        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        var x = self.address;
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m1);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m2);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
     }
 }
 
-/// Pointer[T] is FFI-safe when T is FFI-safe.
+/// `Pointer[T]` is FFI-safe whenever its element type is.
 extend Pointer: FFISafe where T: FFISafe {}
 
-/// A non-owning view into contiguous memory.
-/// Does not manage lifetime - the underlying memory must outlive the slice.
+/// Non-owning view over a contiguous run of `T` values.
+///
+/// `Slice` is the standard "borrow" type for arrays, buffers, and any
+/// other contiguous storage: it stores a pointer + length and provides
+/// safe and unchecked indexing, sub-slicing, iteration, and pattern
+/// matching. The slice does **not** track or extend the lifetime of the
+/// underlying storage — keeping a slice past the end of its source is a
+/// use-after-free.
+///
+/// # Examples
+///
+/// ```
+/// let arr = [1, 2, 3, 4];
+/// let s = arr.asSlice();
+/// s[safe: 0]                    // .Some(1)
+/// s[safe: 99]                   // .None
+/// for x in s.iter() { print(x) }
+/// ```
+///
+/// # Memory Model
+///
+/// Non-owning. Drop the source (`Array`, `Buffer`, literal scope) and the
+/// slice becomes dangling. Slices freely copy — they're just `(ptr, len)`
+/// pairs.
 @builtin(.SliceStruct)
 public struct Slice[T]: Equatable {
     // type Item = T
@@ -152,22 +275,27 @@ public struct Slice[T]: Equatable {
     private var ptr: Pointer[T]
     private var len: Int64
 
-    /// Creates a slice from a pointer and element count.
+    /// @name From Pointer
+    /// Builds a slice from an existing pointer and element count. The
+    /// caller is responsible for ensuring `count` elements live at `pointer`.
     public init(pointer pointer: Pointer[T], count count: Int64) {
         self.ptr = pointer;
         self.len = count;
     }
 
-    /// The number of elements in the slice.
+    /// Element count.
     public var count: Int64 { self.len }
 
-    /// Returns true if the slice contains no elements.
+    /// `true` when `count == 0`.
     public var isEmpty: Bool { self.len == 0 }
 
-    /// A pointer to the first element.
+    /// Pointer to the first element. `pointer.offset(by: i)` reaches
+    /// element `i` (0-indexed).
     public var pointer: Pointer[T] { self.ptr }
 
-    // Safe access
+    /// @name Checked Index
+    /// Returns the element at `index`, or `.None` if out of bounds.
+    /// Always prefer this over `[unchecked:]` for untrusted indices.
     public subscript(safe index: Int64) -> Optional[T] {
         get {
             if index >= 0 and index < self.len {
@@ -178,13 +306,21 @@ public struct Slice[T]: Equatable {
         }
     }
 
-    // Unchecked access
+    /// @name Unchecked Index
+    /// Reads or writes element `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// `index` must satisfy `0 <= index < count`. Out-of-range access is
+    /// undefined behavior; use the `safe:` form when in doubt.
     public subscript(unchecked index: Int64) -> T {
         get { self.ptr.offset(by: index).read() }
         set { self.ptr.offset(by: index).write(newValue) }
     }
 
-    // Slicing
+    /// Returns the sub-slice `[start, end)`, or `.None` when the bounds
+    /// fall outside the receiver. Sub-slices share storage with the
+    /// receiver — don't outlive it.
     public func slice(from start: Int64, to end: Int64) -> Optional[Slice[T]] {
         if start >= 0 and end <= self.len and start <= end {
             .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
@@ -193,12 +329,12 @@ public struct Slice[T]: Equatable {
         }
     }
 
-    // Iteration
+    /// Forward iterator over the elements.
     public func iter() -> SliceIterator[T] {
         SliceIterator(ptr: self.ptr, remaining: self.len)
     }
 
-    // First and last - require Optional (Phase 11)
+    /// First element, or `.None` for an empty slice.
     public func first() -> Optional[T] {
         if self.len > 0 {
             .Some(self.ptr.read())
@@ -207,6 +343,7 @@ public struct Slice[T]: Equatable {
         }
     }
 
+    /// Last element, or `.None` for an empty slice.
     public func last() -> Optional[T] {
         if self.len > 0 {
             .Some(self.ptr.offset(by: self.len - 1).read())
@@ -215,7 +352,9 @@ public struct Slice[T]: Equatable {
         }
     }
 
-    /// Compares two slices for equality.
+    /// Length-only equality (TODO: deepen to element-wise once an
+    /// iterator-based comparison is wired up). Not a true structural
+    /// equality yet — handle with care in tests.
     public func equals(other: Slice[T]) -> Bool {
         if self.len != other.len {
             return false
@@ -226,39 +365,50 @@ public struct Slice[T]: Equatable {
     }
 }
 
-/// ArrayMatchable extension for Slice pattern matching.
-/// Enables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]` on Slice values.
+/// `ArrayMatchable` conformance so `Slice` can appear in array patterns
+/// (`[a, b]`, `[a, ..rest]`, `[a, .., z]`). The `match*` methods skip
+/// bounds checks because the compiler has already verified them.
 extend Slice[T]: ArrayMatchable {
     type Element = T
 
-    /// Returns the number of elements in the slice.
+    /// Element count, exposed to the pattern matcher.
     public func matchLength() -> Int64 {
         self.count
     }
 
-    /// Returns the element at the given index (unchecked).
+    /// Compiler-driven element read; safe to skip the bounds check
+    /// because the matcher emits `index < matchLength()` first.
     public func matchGet(index: Int64) -> T {
         self.pointer.offset(by: index).read()
     }
 
-    /// Returns a sub-slice from `from` (inclusive) to `to` (exclusive).
+    /// Sub-slice for rest-pattern bindings (`..rest`). As above, the
+    /// matcher guarantees `0 <= from <= to <= matchLength()`.
     public func matchSlice(from: Int64, to: Int64) -> Slice[T] {
         Slice(pointer: self.pointer.offset(by: from), count: to - from)
     }
 }
 
-/// Iterator over the elements of a Slice.
+/// Forward iterator over a `Slice[T]`. Holds a moving pointer and a
+/// remaining count; advancing reads through the pointer.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
 public struct SliceIterator[T]: Iterator {
     type Item = T
 
     private var ptr: Pointer[T]
     private var remaining: Int64
 
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
     public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
         self.ptr = ptr;
         self.remaining = remaining;
     }
 
+    /// Yields the next element, or `.None` when the count reaches zero.
     public mutating func next() -> Optional[T] {
         if self.remaining > 0 {
             let value = self.ptr.read();

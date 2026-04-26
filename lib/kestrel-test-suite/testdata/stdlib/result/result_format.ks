@@ -1,0 +1,19 @@
+// test: execution
+// stdlib: true
+
+module Test
+
+        func main() -> lang.i64 {
+            let ok: std.result.Result[std.num.Int64, std.num.Int64] = .Ok(42);
+            let err: std.result.Result[std.num.Int64, std.num.Int64] = .Err(99);
+
+            // Format Ok
+            let okStr = ok.format();
+            if okStr.equals("Ok(42)") == false { return 1 }
+
+            // Format Err
+            let errStr = err.format();
+            if errStr.equals("Err(99)") == false { return 2 }
+
+            0
+        }

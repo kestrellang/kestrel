@@ -6,16 +6,31 @@
 //! Note: The actual parsing is delegated to the unified type_decl module to handle
 //! mutual recursion between structs and enums efficiently.
 
+use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{StructDeclarationData, emit_struct_declaration};
+use crate::attribute::attribute_list_parser;
+use crate::common::{
+    AttributeData, ConformanceListData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
+    emit_attribute_list, emit_name, emit_type_declaration_body_item, emit_visibility, identifier,
+    initializer_declaration_parser_internal, token, visibility_parser_internal,
+};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::type_decl::struct_declaration_parser_unified;
-
-use chumsky::prelude::*;
+use crate::field::field_declaration_parser_internal;
+use crate::function::function_declaration_parser_internal;
+use crate::import::import_declaration_parser_internal;
+use crate::input::{ParserExtra, ParserInput};
+use crate::module::module_declaration_parser_internal;
+use crate::parse_and_emit;
+use crate::subscript::subscript_declaration_parser_internal;
+use crate::type_alias::type_alias_declaration_parser_internal;
+use crate::type_decl::{TypeDeclarationData, struct_declaration_parser_unified};
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, conformance_list_parser, emit_conformance_list,
+    emit_type_parameter_list, emit_where_clause, type_parameter_list_parser, where_clause_parser,
+};
 
 /// Represents a struct declaration: (visibility)? struct Name[T]? (where ...)? { ... }
 ///
@@ -96,11 +111,197 @@ impl StructDeclaration {
 
 /// Internal Chumsky parser for struct declaration
 ///
+/// Raw parsed data for struct declaration internals
+#[derive(Debug, Clone)]
+pub struct StructDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub struct_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub conformances: Option<ConformanceListData>,
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<TypeDeclarationBodyItem>,
+    pub rbrace_span: Span,
+}
+
 /// This delegates to the unified type_decl parser which handles both struct and enum
 /// in a single recursive context to avoid stack overflow on deeply nested types.
 pub fn struct_declaration_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone {
     struct_declaration_parser_unified()
+}
+
+/// Parser for a single struct-body item. Takes the shared `type_parser` handle
+/// so nested type declarations (struct or enum) can be parsed inside the body
+/// without creating a separate recursive context.
+pub(crate) fn struct_body_item_parser<'tokens, P>(
+    type_parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, TypeDeclarationBodyItem, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
+        + Clone
+        + 'tokens,
+{
+    let module_parser = module_declaration_parser_internal()
+        .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
+
+    let import_parser =
+        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
+            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
+        });
+
+    let nested_type_parser = type_parser.map(|data| match data {
+        TypeDeclarationData::Struct(s) => TypeDeclarationBodyItem::Struct(Box::new(s)),
+        TypeDeclarationData::Enum(e) => TypeDeclarationBodyItem::Enum(Box::new(e)),
+    });
+
+    let initializer_parser =
+        initializer_declaration_parser_internal().map(TypeDeclarationBodyItem::Initializer);
+    let deinit_parser = deinit_declaration_parser_internal().map(TypeDeclarationBodyItem::Deinit);
+    let function_parser =
+        function_declaration_parser_internal().map(TypeDeclarationBodyItem::Function);
+    let subscript_parser =
+        subscript_declaration_parser_internal().map(TypeDeclarationBodyItem::Subscript);
+    let type_alias_parser =
+        type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
+    let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
+
+    module_parser
+        .or(import_parser)
+        .or(nested_type_parser)
+        .or(initializer_parser)
+        .or(deinit_parser)
+        .or(type_alias_parser)
+        .or(function_parser)
+        .or(subscript_parser)
+        .or(field_parser)
+        .boxed()
+}
+
+/// Parser for a full struct declaration, taking the shared `type_parser`
+/// handle so nested type declarations are parsed through the same recursive
+/// context.
+///
+/// Returns `StructDeclarationData`. The unified `type_declaration_parser_internal`
+/// wraps this in `TypeDeclarationData::Struct`.
+pub(crate) fn struct_parser_with_recursion<'tokens, P>(
+    type_parser: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, StructDeclarationData, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, TypeDeclarationData, ParserExtra<'tokens>>
+        + Clone
+        + 'tokens,
+{
+    let struct_body_parser = struct_body_item_parser(type_parser)
+        .repeated()
+        .collect::<Vec<_>>()
+        .boxed();
+
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(token(Token::Struct))
+        .then(identifier())
+        .then(type_parameter_list_parser().or_not())
+        .then(conformance_list_parser().or_not())
+        .then(where_clause_parser().or_not())
+        .then(token(Token::LBrace))
+        .then(struct_body_parser)
+        .then(token(Token::RBrace))
+        .map(
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (((attributes, visibility), struct_span), name_span),
+                                    type_params,
+                                ),
+                                conformances,
+                            ),
+                            where_clause,
+                        ),
+                        lbrace_span,
+                    ),
+                    body,
+                ),
+                rbrace_span,
+            )| StructDeclarationData {
+                attributes,
+                visibility,
+                struct_span,
+                name_span,
+                type_params,
+                conformances: conformances.map(|(colon_span, items)| ConformanceListData {
+                    colon_span,
+                    conformances: items,
+                }),
+                where_clause,
+                lbrace_span,
+                body,
+                rbrace_span,
+            },
+        )
+        .boxed()
+}
+
+/// Emit events for a struct declaration.
+///
+/// Destructures `StructDeclarationData` without a `..` rest pattern: adding a
+/// field forces this function to stop compiling until the new field is
+/// handled in emission (see the `EmitSyntax` trait docs).
+pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData) {
+    let StructDeclarationData {
+        attributes,
+        visibility,
+        struct_span,
+        name_span,
+        type_params,
+        conformances,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
+    sink.start_node(SyntaxKind::StructDeclaration);
+
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Struct, struct_span);
+    emit_name(sink, name_span);
+
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(conf) = conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::StructBody);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
+
+    for item in body {
+        emit_type_declaration_body_item(sink, item);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
+    sink.finish_node(); // StructBody
+
+    sink.finish_node(); // StructDeclaration
+}
+
+impl crate::event::EmitSyntax for StructDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_struct_declaration(sink, self);
+    }
 }
 
 /// Parse a struct declaration and emit events
@@ -110,21 +311,50 @@ pub fn parse_struct_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        struct_declaration_parser_internal(),
+        emit_struct_declaration
+    );
+}
 
-    match struct_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_struct_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
+#[cfg(test)]
+mod emit_syntax_trait_tests {
+    use super::*;
+    use crate::event::{EmitSyntax, EventSink, TreeBuilder};
+    use kestrel_lexer::lex;
+
+    /// Calling `.emit(sink)` on a parsed `StructDeclarationData` must produce
+    /// the same tree as calling `emit_struct_declaration(sink, data)`. This
+    /// smoke-tests the EmitSyntax trait and locks in its contract.
+    #[test]
+    fn emit_syntax_impl_matches_free_function() {
+        let source = "struct Foo { }";
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|s| (s.value, s.span))
+            .collect();
+
+        let mut sink_fn = EventSink::new(0);
+        parse_struct_declaration(source, tokens.clone().into_iter(), &mut sink_fn);
+        let tree_fn = TreeBuilder::new(source, sink_fn.into_events()).build();
+
+        // Build the same tree by calling `.emit(sink)` through the trait.
+        use chumsky::Parser;
+        use crate::input::{create_input, prepare_tokens};
+        let prepared = prepare_tokens(tokens.into_iter());
+        let input = create_input(&prepared, source.len());
+        let data = struct_declaration_parser_internal()
+            .parse(input)
+            .into_output()
+            .expect("struct should parse");
+        let mut sink_trait = EventSink::new(0);
+        data.emit(&mut sink_trait);
+        let tree_trait = TreeBuilder::new(source, sink_trait.into_events()).build();
+
+        assert_eq!(tree_fn.text().to_string(), tree_trait.text().to_string());
     }
 }
 

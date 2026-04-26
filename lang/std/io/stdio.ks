@@ -9,7 +9,7 @@ import std.collections.(Array)
 import std.text.(String, Formattable)
 import std.core.(Bool)
 import std.io.libc
-import std.io.error.(Error)
+import std.io.error.(IoError)
 import std.io.read.(Read)
 import std.io.write.(Write, writeStr, writeByte, writeLine)
 
@@ -17,16 +17,26 @@ import std.io.write.(Write, writeStr, writeByte, writeLine)
 // STANDARD INPUT
 // ============================================================================
 
-/// Standard input stream.
+/// `Read` over the process's standard input (file descriptor `0`).
+///
+/// Construct via `Stdin()` or the `stdin()` accessor. Stateless — every
+/// instance shares the same descriptor; concurrent readers race on the
+/// same pipe.
+///
+/// # Representation
+///
+/// Zero-sized — operations dispatch directly on `libc.STDIN()`.
 public struct Stdin: Read {
-    /// Creates a stdin handle.
+    /// @name Default
+    /// Builds a stdin handle.
     public init() {}
 
-    /// Reads bytes from standard input.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Calls `read(2)` on `STDIN_FILENO`. Returns `0` on EOF (e.g. after
+    /// the user types Ctrl-D in a terminal).
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
@@ -36,22 +46,31 @@ public struct Stdin: Read {
 // STANDARD OUTPUT
 // ============================================================================
 
-/// Standard output stream.
+/// `Write` over the process's standard output (file descriptor `1`).
+///
+/// As with `Stdin`, stateless — `flush` is a no-op because writes go
+/// straight to libc; line buffering / TTY behaviour is handled by libc
+/// or the terminal.
+///
+/// # Representation
+///
+/// Zero-sized.
 public struct Stdout: Write {
-    /// Creates a stdout handle.
+    /// @name Default
+    /// Builds a stdout handle.
     public init() {}
 
-    /// Writes bytes to standard output.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Calls `write(2)` on `STDOUT_FILENO`.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
 
-    /// Flushes standard output.
-    public mutating func flush() -> Result[(), Error] {
+    /// No-op; stdout does no internal buffering at this layer.
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 }
@@ -60,22 +79,31 @@ public struct Stdout: Write {
 // STANDARD ERROR
 // ============================================================================
 
-/// Standard error stream.
+/// `Write` over the process's standard error (file descriptor `2`).
+///
+/// Mirrors `Stdout` but writes to `STDERR_FILENO`. Conventionally used
+/// for diagnostics, log lines, and anything that should not be captured
+/// by a downstream pipe consuming `stdout`.
+///
+/// # Representation
+///
+/// Zero-sized.
 public struct Stderr: Write {
-    /// Creates a stderr handle.
+    /// @name Default
+    /// Builds a stderr handle.
     public init() {}
 
-    /// Writes bytes to standard error.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Calls `write(2)` on `STDERR_FILENO`.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
 
-    /// Flushes standard error.
-    public mutating func flush() -> Result[(), Error] {
+    /// No-op; stderr is unbuffered at this layer.
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 }
@@ -84,17 +112,17 @@ public struct Stderr: Write {
 // HANDLE ACCESSORS
 // ============================================================================
 
-/// Returns a handle to standard input.
+/// Convenience constructor — equivalent to `Stdin()`.
 public func stdin() -> Stdin {
     Stdin()
 }
 
-/// Returns a handle to standard output.
+/// Convenience constructor — equivalent to `Stdout()`.
 public func stdout() -> Stdout {
     Stdout()
 }
 
-/// Returns a handle to standard error.
+/// Convenience constructor — equivalent to `Stderr()`.
 public func stderr() -> Stderr {
     Stderr()
 }
@@ -103,32 +131,41 @@ public func stderr() -> Stderr {
 // PRINT FUNCTIONS
 // ============================================================================
 
-/// Prints a value to stdout (no newline).
-public func print[F](value: F) -> Result[(), Error] where F: Formattable {
+/// Formats `value` with its default `FormatOptions` and writes the
+/// result to stdout. No trailing newline.
+///
+/// # Examples
+///
+/// ```
+/// try print("count: ");
+/// try println(42);
+/// ```
+public func print[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
     writeStr(out, value.format())
 }
 
-/// Prints a value to stdout with a newline.
-public func println[F](value: F) -> Result[(), Error] where F: Formattable {
+/// Like `print`, plus a trailing `\n`.
+public func println[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
     writeLine(out, value.format())
 }
 
-/// Prints an empty line to stdout.
-public func printlnEmpty() -> Result[(), Error] {
+/// Writes a single newline to stdout — the no-argument form of `println`.
+public func printlnEmpty() -> Result[(), IoError] {
     var out = stdout();
     writeByte(out, 10)
 }
 
-/// Prints a value to stderr (no newline).
-public func eprint[F](value: F) -> Result[(), Error] where F: Formattable {
+/// Stderr counterpart to `print`. Useful for diagnostics that must not
+/// pollute a piped stdout.
+public func eprint[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
     writeStr(err, value.format())
 }
 
-/// Prints a value to stderr with a newline.
-public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
+/// Stderr counterpart to `println`.
+public func eprintln[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
     writeLine(err, value.format())
 }
@@ -137,8 +174,14 @@ public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
 // INPUT FUNCTIONS
 // ============================================================================
 
-/// Reads a line from stdin (without the newline).
-public func readLine() -> Result[String, Error] {
+/// Reads a single line from stdin, stripping the trailing `\n` (and
+/// `\r` if present, for tolerance with Windows-style line endings).
+/// Returns an empty string on immediate EOF.
+///
+/// TODO: the trailing-bytes are collected but the returned `String` is
+/// currently empty — see the comment in the body about
+/// `String.fromUtf8Bytes`.
+public func readLine() -> Result[String, IoError] {
     var input = stdin();
     var bytes = Array[UInt8]();
 
@@ -172,8 +215,17 @@ public func readLine() -> Result[String, Error] {
     .Ok(result)
 }
 
-/// Prints a prompt message and reads a line from stdin.
-public func prompt(message: String) -> Result[String, Error] {
+/// Writes `message` to stdout, flushes, then reads a line from stdin.
+/// The flush matters for line-buffered terminals — without it the
+/// prompt would appear after the user's keystrokes.
+///
+/// # Examples
+///
+/// ```
+/// let name = try prompt("Name: ");
+/// try println("Hello, " + name);
+/// ```
+public func prompt(message: String) -> Result[String, IoError] {
     var out = stdout();
     try writeStr(out, message);
     try out.flush();

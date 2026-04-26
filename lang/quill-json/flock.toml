@@ -7,4 +7,4 @@ license = "MIT"
 repository = "https://github.com/jkpdino/kestrel"
 
 [dependencies]
-"kestrel/quill" = "0.1.0"
+quill = { path = "../quill" }

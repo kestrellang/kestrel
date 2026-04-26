@@ -1,6 +1,5 @@
-//! Kestrel Language Server entry point.
-//!
-//! Starts the LSP server on stdin/stdout.
+//! Stdio entry point. The VSCode extension spawns this binary and pipes
+//! LSP JSON-RPC over stdin/stdout.
 
 use kestrel_lsp::Backend;
 use tower_lsp::{LspService, Server};

@@ -8,15 +8,15 @@
 - [ ] Remove old parser
 
 ### Flock Package Registry
-- [ ] Implement `RegistrySource` (conforming to `PackageSource` protocol)
-- [ ] Add registry URL config to flock.toml manifest
-- [ ] Integrate Swoop HTTP client for registry communication
-- [ ] Define registry API format (JSON endpoints for search, metadata, download)
-- [ ] Add local package cache (~/.kestrel/registry or similar)
-- [ ] Implement version resolution for registry deps (constraint solver for transitive deps)
-- [ ] Add lock file (flock.lock) for reproducible builds
-- [ ] Add `flock publish` command
-- [ ] Authentication (API tokens for publish)
+- [x] Implement `RegistrySource` (conforming to `PackageSource` protocol)
+- [x] Add registry URL config to flock.toml manifest
+- [x] Integrate Swoop HTTP client for registry communication
+- [x] Define registry API format (JSON endpoints for search, metadata, download)
+- [x] Add local package cache (~/.kestrel/registry or similar)
+- [x] Implement version resolution for registry deps (constraint solver for transitive deps)
+- [x] Add lock file (flock.lock) for reproducible builds
+- [x] Add `flock publish` command
+- [x] Authentication (API tokens for publish)
 
 ### Incremental Compilation
 - [ ] File-level dependency tracking
@@ -25,8 +25,8 @@
 > Note: Stage-based early exit already works. True incremental is a bigger effort — consider post-announcement.
 
 ### Jessup Version Manager
-- [ ] Design and implement (not started)
-> Note: Not critical for announcement. Users can manage versions manually.
+- [x] Design and implement
+> Implemented as a Kestrel binary in `lang/jessup/`
 
 ### LSP Polish
 - [ ] Surface doc comments in hover tooltips
@@ -34,8 +34,8 @@
 
 ## Announcement Checklist
 - [ ] All critical Phase 15 items done
-- [ ] Flock registry at least MVP-functional
+- [x] Flock registry at least MVP-functional
 - [ ] LSP stable with doc comment support
-- [ ] README / landing page / docs site
+- [x] README / landing page / docs site
 - [ ] Example projects
 - [ ] Getting started guide

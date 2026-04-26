@@ -1,6 +1,5 @@
 //! Error types for code generation.
 
-use crate::monomorphize::MonomorphizeError;
 use std::fmt;
 
 /// Errors that can occur during code generation.
@@ -8,87 +7,76 @@ use std::fmt;
 pub enum CodegenError {
     /// Failed to create the Cranelift module.
     ModuleCreation(String),
-    /// Failed to compile a function.
-    FunctionCompilation { name: String, error: String },
-    /// Failed to define a function in the module.
-    FunctionDefinition { name: String, error: String },
-    /// Failed to finish the module.
+    /// Failed to compile a function body.
+    FunctionCompilation {
+        name: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    /// Failed to define a compiled function in the module.
+    FunctionDefinition {
+        name: String,
+        source: cranelift_module::ModuleError,
+    },
+    /// Failed to finish the object module.
     ModuleFinish(String),
-    /// Entry point (main) not found.
+    /// No entry point (main function) found.
     NoEntryPoint,
-    /// Invalid entry point signature.
+    /// The entry point is invalid (e.g., wrong signature).
     InvalidEntryPoint(String),
-    /// Linker error.
+    /// Linker invocation failed.
     LinkerError(String),
-    /// I/O error.
-    IoError(String),
-    /// Unsupported feature.
+    /// I/O error (e.g., writing object file).
+    IoError(std::io::Error),
+    /// Feature not yet supported.
     Unsupported(String),
-    /// Failed to create data section entry.
+    /// Error in the data section (statics, string literals).
     DataSection(String),
-    /// Monomorphization error.
-    Monomorphization(MonomorphizeError),
-    /// Multiple monomorphization errors.
-    MonomorphizationErrors(Vec<MonomorphizeError>),
+    /// Error during monomorphization.
+    Monomorphization(String),
+    /// MIR lowering produced one or more `MirTy::Error` locations. Codegen
+    /// is not safe to run; see accumulated diagnostics for details.
+    MirLoweringErrors(usize),
 }
 
 impl fmt::Display for CodegenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CodegenError::ModuleCreation(e) => {
-                write!(f, "failed to create module: {}", e)
+            Self::ModuleCreation(msg) => write!(f, "module creation failed: {msg}"),
+            Self::FunctionCompilation { name, source } => {
+                write!(f, "failed to compile function '{name}': {source}")
             },
-            CodegenError::FunctionCompilation { name, error } => {
-                write!(f, "failed to compile function '{}': {}", name, error)
+            Self::FunctionDefinition { name, source } => {
+                write!(f, "failed to define function '{name}': {source}")
             },
-            CodegenError::FunctionDefinition { name, error } => {
-                write!(f, "failed to define function '{}': {}", name, error)
-            },
-            CodegenError::ModuleFinish(e) => {
-                write!(f, "failed to finish module: {}", e)
-            },
-            CodegenError::NoEntryPoint => {
-                write!(f, "no entry point 'main' found")
-            },
-            CodegenError::InvalidEntryPoint(msg) => {
-                write!(f, "invalid entry point: {}", msg)
-            },
-            CodegenError::LinkerError(e) => {
-                write!(f, "linker error: {}", e)
-            },
-            CodegenError::IoError(e) => {
-                write!(f, "I/O error: {}", e)
-            },
-            CodegenError::Unsupported(msg) => {
-                write!(f, "unsupported: {}", msg)
-            },
-            CodegenError::DataSection(msg) => {
-                write!(f, "data section error: {}", msg)
-            },
-            CodegenError::Monomorphization(e) => {
-                write!(f, "monomorphization error: {}", e)
-            },
-            CodegenError::MonomorphizationErrors(errors) => {
-                writeln!(f, "monomorphization errors:")?;
-                for e in errors {
-                    writeln!(f, "  - {}", e)?;
-                }
-                Ok(())
-            },
+            Self::ModuleFinish(msg) => write!(f, "module finish failed: {msg}"),
+            Self::NoEntryPoint => write!(f, "no entry point (main function) found"),
+            Self::InvalidEntryPoint(msg) => write!(f, "invalid entry point: {msg}"),
+            Self::LinkerError(msg) => write!(f, "linker error: {msg}"),
+            Self::IoError(err) => write!(f, "I/O error: {err}"),
+            Self::Unsupported(msg) => write!(f, "unsupported: {msg}"),
+            Self::DataSection(msg) => write!(f, "data section error: {msg}"),
+            Self::Monomorphization(msg) => write!(f, "monomorphization error: {msg}"),
+            Self::MirLoweringErrors(n) => write!(
+                f,
+                "MIR lowering produced {n} unresolved-type error(s); see diagnostics"
+            ),
         }
     }
 }
 
-impl From<MonomorphizeError> for CodegenError {
-    fn from(e: MonomorphizeError) -> Self {
-        CodegenError::Monomorphization(e)
+impl std::error::Error for CodegenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::FunctionCompilation { source, .. } => Some(source.as_ref()),
+            Self::FunctionDefinition { source, .. } => Some(source),
+            Self::IoError(err) => Some(err),
+            _ => None,
+        }
     }
 }
 
-impl From<Vec<MonomorphizeError>> for CodegenError {
-    fn from(errors: Vec<MonomorphizeError>) -> Self {
-        CodegenError::MonomorphizationErrors(errors)
+impl From<std::io::Error> for CodegenError {
+    fn from(err: std::io::Error) -> Self {
+        Self::IoError(err)
     }
 }
-
-impl std::error::Error for CodegenError {}

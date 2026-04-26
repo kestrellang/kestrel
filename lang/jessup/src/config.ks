@@ -20,7 +20,12 @@ public func jessupHome() -> Result[String, JessupError] {
         .Some(home) => .Ok(home),
         .None => {
             match getenv("HOME") {
-                .Some(home) => .Ok(home + "/.jessup"),
+                .Some(home) => {
+                    var s = String();
+                    s.append(home);
+                    s.append("/.jessup");
+                    .Ok(s)
+                },
                 .None => .Err(JessupError.ConfigError("HOME environment variable not set"))
             }
         }
@@ -30,7 +35,12 @@ public func jessupHome() -> Result[String, JessupError] {
 /// Returns the path to the bin directory (~/.jessup/bin/).
 public func binDir() -> Result[String, JessupError] {
     match jessupHome() {
-        .Ok(home) => .Ok(home + "/bin"),
+        .Ok(home) => {
+            var s = String();
+            s.append(home);
+            s.append("/bin");
+            .Ok(s)
+        },
         .Err(e) => .Err(e)
     }
 }
@@ -38,7 +48,12 @@ public func binDir() -> Result[String, JessupError] {
 /// Returns the path to the toolchains directory (~/.jessup/toolchains/).
 public func toolchainsDir() -> Result[String, JessupError] {
     match jessupHome() {
-        .Ok(home) => .Ok(home + "/toolchains"),
+        .Ok(home) => {
+            var s = String();
+            s.append(home);
+            s.append("/toolchains");
+            .Ok(s)
+        },
         .Err(e) => .Err(e)
     }
 }
@@ -46,7 +61,12 @@ public func toolchainsDir() -> Result[String, JessupError] {
 /// Returns the path to config.toml (~/.jessup/config.toml).
 public func configPath() -> Result[String, JessupError] {
     match jessupHome() {
-        .Ok(home) => .Ok(home + "/config.toml"),
+        .Ok(home) => {
+            var s = String();
+            s.append(home);
+            s.append("/config.toml");
+            .Ok(s)
+        },
         .Err(e) => .Err(e)
     }
 }
@@ -100,14 +120,25 @@ public func writeConfig(config config: JessupConfig) -> Result[(), JessupError] 
             match jessupHome() {
                 .Err(e) => return .Err(e),
                 .Ok(home) => {
-                    let _ = spawn("mkdir -p " + home);
+                    var mkdirCmd = String();
+                    mkdirCmd.append("mkdir -p ");
+                    mkdirCmd.append(home);
+                    let _ = spawn(mkdirCmd);
                 }
             }
 
-            let content = "[config]\ndefault_channel = \"" + config.defaultChannel + "\"\n";
+            var content = String();
+            content.append("[config]\ndefault_channel = \"");
+            content.append(config.defaultChannel);
+            content.append("\"\n");
             match writeFileString(path, content) {
                 .Ok(_) => .Ok(()),
-                .Err(_) => .Err(JessupError.IoError("failed to write config: " + path))
+                .Err(_) => {
+                    var ioMsg = String();
+                    ioMsg.append("failed to write config: ");
+                    ioMsg.append(path);
+                    .Err(JessupError.IoError(ioMsg))
+                }
             }
         }
     }
@@ -122,8 +153,16 @@ public func ensureDirectories() -> Result[(), JessupError] {
     match jessupHome() {
         .Err(e) => .Err(e),
         .Ok(home) => {
-            let _ = spawn("mkdir -p " + home + "/bin");
-            let _ = spawn("mkdir -p " + home + "/toolchains");
+            var mkBinCmd = String();
+            mkBinCmd.append("mkdir -p ");
+            mkBinCmd.append(home);
+            mkBinCmd.append("/bin");
+            let _ = spawn(mkBinCmd);
+            var mkTcCmd = String();
+            mkTcCmd.append("mkdir -p ");
+            mkTcCmd.append(home);
+            mkTcCmd.append("/toolchains");
+            let _ = spawn(mkTcCmd);
             .Ok(())
         }
     }

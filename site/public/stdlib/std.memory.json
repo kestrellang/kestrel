@@ -1,0 +1,951 @@
+{
+  "path": "std.memory",
+  "name": "memory",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "protocol",
+      "name": "Allocator",
+      "anchor": "protocol-Allocator",
+      "signature": "public protocol Allocator",
+      "doc": "Protocol defining the memory allocation interface.\nAllocators manage raw memory allocation, deallocation, and reallocation.",
+      "source_path": "lang/std/memory/allocator.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "allocate",
+              "anchor": "function-allocate",
+              "signature": "mutating func allocate(Layout) -> RawPointer?",
+              "doc": "Allocates memory matching the given layout.\nReturns None on allocation failure.",
+              "source_path": "lang/std/memory/allocator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "deallocate",
+              "anchor": "function-deallocate",
+              "signature": "mutating func deallocate(RawPointer, Layout)",
+              "doc": "Deallocates memory previously allocated with this allocator.\nThe layout must match the layout used for allocation.",
+              "source_path": "lang/std/memory/allocator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "reallocate",
+              "anchor": "function-reallocate",
+              "signature": "mutating func reallocate(RawPointer, Layout, Layout) -> RawPointer?",
+              "doc": "Reallocates memory to a new size.\nReturns None on reallocation failure (original memory unchanged).",
+              "source_path": "lang/std/memory/allocator.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Buffer",
+      "anchor": "struct-Buffer",
+      "signature": "public struct Buffer[T, A] where A: Allocator { /* private fields */ }",
+      "doc": "A contiguous memory region that owns its allocation.\nNot copyable to ensure unique ownership of the underlying memory.\nUsed as a building block for higher-level collections.",
+      "source_path": "lang/std/memory/buffer.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "asSlice",
+              "anchor": "function-asSlice",
+              "signature": "public func asSlice() -> Slice[T]",
+              "doc": "Returns a slice view of the entire buffer.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "capacity",
+              "anchor": "field-capacity",
+              "signature": "public var capacity: Int64 { get }",
+              "doc": "The number of elements this buffer can hold.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Int64, A)",
+              "doc": "Allocates a buffer with the specified capacity using the provided allocator.\nPanics if allocation fails.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "pointer",
+              "anchor": "field-pointer",
+              "signature": "public var pointer: Pointer[T] { get }",
+              "doc": "A pointer to the buffer's element storage.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public func read(unchecked: Int64) -> T",
+              "doc": "Reads the element at the given index without bounds checking.\nUndefined behavior if index is out of bounds.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public func read(at: Int64) -> T?",
+              "doc": "Reads the element at the given index with bounds checking.\nReturns None if index is out of bounds.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "resize",
+              "anchor": "function-resize",
+              "signature": "public mutating func resize(to: Int64)",
+              "doc": "Resizes the buffer to the new capacity.\nPanics if reallocation fails.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "slice",
+              "anchor": "function-slice",
+              "signature": "public func slice(from: Int64, to: Int64) -> Slice[T]?",
+              "doc": "Returns a slice view of a portion of the buffer.\nReturns None if the range is out of bounds.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "write",
+              "anchor": "function-write",
+              "signature": "public func write(unchecked: Int64, T)",
+              "doc": "Writes a value at the given index without bounds checking.\nUndefined behavior if index is out of bounds.",
+              "source_path": "lang/std/memory/buffer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "write",
+              "anchor": "function-write",
+              "signature": "public func write(at: Int64, T) -> Bool",
+              "doc": "Writes a value at the given index with bounds checking.\nReturns true on success, false if index is out of bounds.",
+              "source_path": "lang/std/memory/buffer.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "typealias",
+      "name": "GlobalAllocator",
+      "anchor": "typealias-GlobalAllocator",
+      "signature": "public type GlobalAllocator = SystemAllocator",
+      "doc": "Type alias for the global allocator.\nCan be customized per project for different allocation strategies.",
+      "source_path": "lang/std/memory/allocator.ks"
+    },
+    {
+      "kind": "struct",
+      "name": "Layout",
+      "anchor": "struct-Layout",
+      "signature": "public struct Layout { /* private fields */ }",
+      "doc": "Describes the memory layout requirements for a type.\nContains size and alignment information used for allocation.",
+      "source_path": "lang/std/memory/layout.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "alignment",
+              "anchor": "field-alignment",
+              "signature": "public var alignment: Int64",
+              "doc": "The required alignment in bytes.",
+              "source_path": "lang/std/memory/layout.ks"
+            },
+            {
+              "kind": "function",
+              "name": "array",
+              "anchor": "function-array",
+              "signature": "public static func array[T](Int64) -> Layout",
+              "doc": "Returns the layout for an array of count elements of type T.",
+              "source_path": "lang/std/memory/layout.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(size: Int64, alignment: Int64)",
+              "doc": "Creates a layout with the specified size and alignment.",
+              "source_path": "lang/std/memory/layout.ks"
+            },
+            {
+              "kind": "function",
+              "name": "merge",
+              "anchor": "function-merge",
+              "signature": "public func merge(with: Layout) -> (Layout, Int64)",
+              "doc": "Extends this layout to include another layout for struct field layout.\nReturns the combined layout and the offset where the other layout begins.",
+              "source_path": "lang/std/memory/layout.ks"
+            },
+            {
+              "kind": "function",
+              "name": "of",
+              "anchor": "function-of",
+              "signature": "public static func of[T]() -> Layout",
+              "doc": "Returns the layout for a single value of type T.",
+              "source_path": "lang/std/memory/layout.ks"
+            },
+            {
+              "kind": "function",
+              "name": "padToAlign",
+              "anchor": "function-padToAlign",
+              "signature": "public func padToAlign() -> Layout",
+              "doc": "Returns a layout with size padded to the alignment boundary.",
+              "source_path": "lang/std/memory/layout.ks"
+            },
+            {
+              "kind": "field",
+              "name": "size",
+              "anchor": "field-size",
+              "signature": "public var size: Int64",
+              "doc": "The size in bytes.",
+              "source_path": "lang/std/memory/layout.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Layout) -> Bool",
+              "doc": "Compares two layouts for equality.",
+              "source_path": "lang/std/memory/layout.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "LiteralSlice",
+      "anchor": "struct-LiteralSlice",
+      "signature": "public struct LiteralSlice[T] { /* private fields */ }",
+      "doc": "A read-only view over compiler-generated array literal data.\nUsed internally to initialize arrays from literal syntax like [1, 2, 3].\nProvides safe, iterable access to the literal elements.",
+      "source_path": "lang/std/memory/literal_slice.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "count",
+              "anchor": "function-count",
+              "signature": "public func count() -> Int64",
+              "doc": "Returns the number of elements.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(pointer: lang.ptr[T], count: lang.i64)",
+              "doc": "Creates a literal slice from a pointer and count.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isEmpty",
+              "anchor": "function-isEmpty",
+              "signature": "public func isEmpty() -> Bool",
+              "doc": "Returns true if the slice contains no elements.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "subscript",
+              "anchor": "subscript-subscript",
+              "signature": "public subscript(unchecked: Int64) -> T { get }",
+              "doc": "Unchecked element access by index. No bounds checking.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = LiteralSliceIterator[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> LiteralSliceIterator[T]",
+              "doc": "Returns an iterator over the elements.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "LiteralSliceIterator",
+      "anchor": "struct-LiteralSliceIterator",
+      "signature": "public struct LiteralSliceIterator[T] { /* private fields */ }",
+      "doc": "Iterator for LiteralSlice.",
+      "source_path": "lang/std/memory/literal_slice.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[T], remaining: lang.i64)",
+              "doc": "Creates an iterator from a raw pointer and count.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> T?",
+              "doc": "Returns the next element, or None if exhausted.",
+              "source_path": "lang/std/memory/literal_slice.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Pointer",
+      "anchor": "struct-Pointer",
+      "signature": "public struct Pointer[T] { /* private fields */ }",
+      "doc": "A typed pointer to a single value of type T.",
+      "source_path": "lang/std/memory/pointer.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "address",
+              "anchor": "field-address",
+              "signature": "public var address: UInt64 { get }",
+              "doc": "The memory address as an unsigned integer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "asRaw",
+              "anchor": "function-asRaw",
+              "signature": "public func asRaw() -> RawPointer",
+              "doc": "Converts to an untyped raw pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "cast",
+              "anchor": "function-cast",
+              "signature": "public func cast[U]() -> Pointer[U]",
+              "doc": "Casts this pointer to a pointer of a different type.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(raw: lang.ptr[T])",
+              "doc": "Creates a pointer from the underlying representation.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(to: T)",
+              "doc": "Creates a pointer to a value (takes address of the value).",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "isNull",
+              "anchor": "field-isNull",
+              "signature": "public var isNull: Bool { get }",
+              "doc": "Returns true if this is a null pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "nullPointer",
+              "anchor": "function-nullPointer",
+              "signature": "public static func nullPointer() -> Pointer[T]",
+              "doc": "Returns a null typed pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "offset",
+              "anchor": "function-offset",
+              "signature": "public func offset(by: Int64) -> Pointer[T]",
+              "doc": "Offsets the pointer by n elements (not bytes).",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "pointee",
+              "anchor": "field-pointee",
+              "signature": "public var pointee: T { get set }",
+              "doc": "The value at this pointer location.\nSupports both get and set operations.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "raw",
+              "anchor": "field-raw",
+              "signature": "public var raw: lang.ptr[T] { get }",
+              "doc": "The underlying raw pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public func read() -> T",
+              "doc": "Reads the value at this pointer location.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "write",
+              "anchor": "function-write",
+              "signature": "public func write(T)",
+              "doc": "Writes a value to this pointer location.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Pointer[T]) -> Bool",
+              "doc": "Compares two pointers for equality by address.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Hash",
+          "source_path": "std.core.Hash",
+          "members": [
+            {
+              "kind": "function",
+              "name": "hash",
+              "anchor": "function-hash",
+              "signature": "public func hash[H](into: mutating H) where H: Hasher",
+              "doc": "Hashes this pointer's address.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RawPointer",
+      "anchor": "struct-RawPointer",
+      "signature": "public struct RawPointer { /* private fields */ }",
+      "doc": "An untyped (void) pointer to raw memory.\nFFI-safe and can be cast to typed pointers.",
+      "source_path": "lang/std/memory/pointer.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "address",
+              "anchor": "field-address",
+              "signature": "public var address: UInt64 { get }",
+              "doc": "The memory address as an unsigned integer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "cast",
+              "anchor": "function-cast",
+              "signature": "public func cast[T]() -> Pointer[T]",
+              "doc": "Casts this raw pointer to a typed pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(raw: lang.ptr[lang.i8])",
+              "doc": "Creates a raw pointer from the underlying representation.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(address: UInt64)",
+              "doc": "Creates a raw pointer from an address.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "isNull",
+              "anchor": "field-isNull",
+              "signature": "public var isNull: Bool { get }",
+              "doc": "Returns true if this is a null pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "nilPointer",
+              "anchor": "function-nilPointer",
+              "signature": "public static func nilPointer() -> RawPointer",
+              "doc": "Returns a null raw pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "offset",
+              "anchor": "function-offset",
+              "signature": "public func offset(by: Int64) -> RawPointer",
+              "doc": "Offsets the pointer by the given number of bytes.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "raw",
+              "anchor": "field-raw",
+              "signature": "public var raw: lang.ptr[lang.i8]",
+              "doc": "The underlying raw pointer.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(RawPointer) -> Bool",
+              "doc": "Compares two raw pointers for equality by address.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Hash",
+          "source_path": "std.core.Hash",
+          "members": [
+            {
+              "kind": "function",
+              "name": "hash",
+              "anchor": "function-hash",
+              "signature": "public func hash[H](into: mutating H) where H: Hasher",
+              "doc": "Hashes this pointer's address.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RcBox",
+      "anchor": "struct-RcBox",
+      "signature": "public struct RcBox[T] { /* private fields */ }",
+      "doc": "A reference-counted heap allocation for implementing copy-on-write semantics.\nUsed internally by types like String, Array, and Dictionary to enable\nefficient copies that share storage until mutation occurs.",
+      "source_path": "lang/std/memory/rcbox.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "clone",
+              "anchor": "function-clone",
+              "signature": "public func clone() -> RcBox[T]",
+              "doc": "Creates a shallow clone that shares storage.\nIncrements the reference count without copying the value.",
+              "source_path": "lang/std/memory/rcbox.ks"
+            },
+            {
+              "kind": "function",
+              "name": "deepClone",
+              "anchor": "function-deepClone",
+              "signature": "public func deepClone() -> RcBox[T]",
+              "doc": "Creates a deep clone with new storage and a copied value.\nUsed when mutation is needed on shared storage.",
+              "source_path": "lang/std/memory/rcbox.ks"
+            },
+            {
+              "kind": "function",
+              "name": "getValue",
+              "anchor": "function-getValue",
+              "signature": "public func getValue() -> T",
+              "doc": "Returns the stored value.",
+              "source_path": "lang/std/memory/rcbox.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(T)",
+              "doc": "Creates a new RcBox containing the given value.\nAllocates heap storage with an initial reference count of 1.",
+              "source_path": "lang/std/memory/rcbox.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isUnique",
+              "anchor": "function-isUnique",
+              "signature": "public func isUnique() -> Bool",
+              "doc": "Returns true if this is the only reference to the storage.\nUsed to determine if mutation requires copying.",
+              "source_path": "lang/std/memory/rcbox.ks"
+            },
+            {
+              "kind": "function",
+              "name": "refCount",
+              "anchor": "function-refCount",
+              "signature": "public func refCount() -> Int64",
+              "doc": "Returns the current reference count.",
+              "source_path": "lang/std/memory/rcbox.ks"
+            },
+            {
+              "kind": "function",
+              "name": "setValue",
+              "anchor": "function-setValue",
+              "signature": "public func setValue(T)",
+              "doc": "Sets the stored value (for in-place mutation when unique).",
+              "source_path": "lang/std/memory/rcbox.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Slice",
+      "anchor": "struct-Slice",
+      "signature": "public struct Slice[T] { /* private fields */ }",
+      "doc": "A non-owning view into contiguous memory.\nDoes not manage lifetime - the underlying memory must outlive the slice.",
+      "source_path": "lang/std/memory/pointer.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "count",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
+              "doc": "The number of elements in the slice.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "first",
+              "anchor": "function-first",
+              "signature": "public func first() -> Optional[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(pointer: Pointer[T], count: Int64)",
+              "doc": "Creates a slice from a pointer and element count.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "isEmpty",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
+              "doc": "Returns true if the slice contains no elements.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> SliceIterator[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "last",
+              "anchor": "function-last",
+              "signature": "public func last() -> Optional[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "field",
+              "name": "pointer",
+              "anchor": "field-pointer",
+              "signature": "public var pointer: Pointer[T] { get }",
+              "doc": "A pointer to the first element.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "slice",
+              "anchor": "function-slice",
+              "signature": "public func slice(from: Int64, to: Int64) -> Optional[Slice[T]]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "subscript",
+              "anchor": "subscript-subscript",
+              "signature": "public subscript(safe: Int64) -> Optional[T] { get }",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "subscript",
+              "anchor": "subscript-subscript",
+              "signature": "public subscript(unchecked: Int64) -> T { get set }",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Slice[T]) -> Bool",
+              "doc": "Compares two slices for equality.",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayMatchable",
+          "source_path": "std.core.ArrayMatchable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Element",
+              "anchor": "typealias-Element",
+              "signature": "type Element = T",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "matchGet",
+              "anchor": "function-matchGet",
+              "signature": "public func matchGet(Int64) -> T",
+              "doc": "Returns the element at the given index (unchecked).",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "matchLength",
+              "anchor": "function-matchLength",
+              "signature": "public func matchLength() -> Int64",
+              "doc": "Returns the number of elements in the slice.",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "matchSlice",
+              "anchor": "function-matchSlice",
+              "signature": "public func matchSlice(Int64, Int64) -> Slice[T]",
+              "doc": "Returns a sub-slice from `from` (inclusive) to `to` (exclusive).",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SliceIterator",
+      "anchor": "struct-SliceIterator",
+      "signature": "public struct SliceIterator[T] { /* private fields */ }",
+      "doc": "Iterator over the elements of a Slice.",
+      "source_path": "lang/std/memory/pointer.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: Pointer[T], remaining: Int64)",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = T",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> Optional[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SystemAllocator",
+      "anchor": "struct-SystemAllocator",
+      "signature": "public struct SystemAllocator { /* private fields */ }",
+      "doc": "System allocator that wraps malloc/free from libc.\nThis is the default allocator used throughout the standard library.",
+      "source_path": "lang/std/memory/allocator.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates a new system allocator instance.",
+              "source_path": "lang/std/memory/allocator.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Allocator",
+          "source_path": "std.memory.Allocator",
+          "members": [
+            {
+              "kind": "function",
+              "name": "allocate",
+              "anchor": "function-allocate",
+              "signature": "public mutating func allocate(Layout) -> RawPointer?",
+              "doc": "Allocates memory using malloc.\nNote: Alignment beyond natural alignment is not guaranteed.",
+              "source_path": "lang/std/memory/allocator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "deallocate",
+              "anchor": "function-deallocate",
+              "signature": "public mutating func deallocate(RawPointer, Layout)",
+              "doc": "Deallocates memory using free.",
+              "source_path": "lang/std/memory/allocator.ks"
+            },
+            {
+              "kind": "function",
+              "name": "reallocate",
+              "anchor": "function-reallocate",
+              "signature": "public mutating func reallocate(RawPointer, Layout, Layout) -> RawPointer?",
+              "doc": "Reallocates memory using realloc.",
+              "source_path": "lang/std/memory/allocator.ks"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

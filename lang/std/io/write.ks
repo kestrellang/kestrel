@@ -8,100 +8,67 @@ import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
-import std.io.error.(Error, brokenPipe)
+import std.io.error.(IoError, brokenPipe)
 
 // ============================================================================
 // WRITE PROTOCOL
 // ============================================================================
 
-/// Protocol for types that can be written to as a sink for bytes.
+/// Protocol for byte-sink streams.
 ///
-/// Implementors provide `write` and `flush` methods. Writers may buffer
-/// data internally; call `flush` to ensure all data reaches its destination.
+/// Conformers expose a single-shot `write(from:)` and a `flush()` for
+/// buffered implementations. As with `Read`, a single `write` may move
+/// fewer bytes than supplied — this is not an error; use `writeAll` to
+/// loop until the whole slice is consumed.
 ///
-/// Example implementation:
-///     struct MyWriter: Write {
-///         var buffer: [UInt8] = []
+/// # Examples
 ///
-///         mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
-///             buffer.append(contentsOf: buf)
-///             return .Ok(buf.count)
-///         }
-///
-///         mutating func flush() -> Result[(), Error] {
-///             // send buffer to destination
-///             buffer.clear()
-///             return .Ok(())
-///         }
+/// ```
+/// public struct CountingSink: Write {
+///     var written: Int64 = 0
+///     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+///         self.written = self.written + buf.count;
+///         .Ok(buf.count)
 ///     }
+///     public mutating func flush() -> Result[(), IoError] { .Ok(()) }
+/// }
+/// ```
 public protocol Write {
-    /// Writes bytes from the buffer, returning the number of bytes written.
-    ///
-    /// Behavior:
-    /// - Returns Ok(n) where n > 0: successfully wrote n bytes from buf[0..n]
-    /// - Returns Ok(0): no bytes written (may indicate full buffer or would block)
-    /// - Returns Err: an error occurred
-    ///
-    /// A write may write fewer bytes than provided. This is not an error -
-    /// use writeAll() to ensure all bytes are written, or retry with the
-    /// remaining bytes.
-    ///
-    /// Example:
-    ///     let data: [UInt8] = [1, 2, 3, 4, 5]
-    ///     let n = try writer.write(from: data.asSlice())
-    ///     // n bytes written, may be less than 5
-    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]
+    /// Writes up to `buf.count` bytes; returns how many actually moved.
+    /// `.Ok(0)` indicates the sink could accept no more right now (full
+    /// buffer / would-block); other amounts are partial successes that
+    /// the caller may retry.
+    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError]
 
-    /// Flushes any buffered data to the underlying destination.
-    ///
-    /// Call flush to ensure all previously written data has been transmitted.
-    /// For unbuffered writers, this may be a no-op.
-    ///
-    /// Returns Err if flushing fails (e.g., disk full, broken pipe).
-    ///
-    /// Example:
-    ///     try writer.write(from: data.asSlice())
-    ///     try writer.flush()  // ensure data is committed
-    mutating func flush() -> Result[(), Error]
+    /// Pushes any internally buffered bytes to the underlying destination.
+    /// Unbuffered writers may implement this as a no-op. Errors here can
+    /// surface conditions deferred from earlier `write` calls (broken
+    /// pipe, disk full).
+    mutating func flush() -> Result[(), IoError]
 }
 
 // ============================================================================
 // SINK
 // ============================================================================
 
-/// A writer that discards all bytes written to it.
+/// `Write` that swallows everything — analogous to `/dev/null`. Useful
+/// for tests, benchmarks, and code paths where output is suppressed.
 ///
-/// Useful for testing, benchmarking, or suppressing output.
-/// Analogous to /dev/null.
+/// # Representation
 ///
-/// Example:
-///     var sink = Sink()
-///     try sink.write(from: hugeData.asSlice())  // instantly "succeeds"
-///     // data is discarded, nothing stored
+/// Zero-sized — no fields.
 public struct Sink: Write {
-    /// Creates a sink writer that discards all data.
-    ///
-    /// Example:
-    ///     let devNull = Sink()
+    /// @name Default
+    /// Builds the discarding sink.
     public init() {}
 
-    /// Discards all bytes and returns Ok with the buffer length.
-    ///
-    /// Always succeeds, always reports all bytes as "written".
-    ///
-    /// Example:
-    ///     var sink = Sink()
-    ///     let n = try sink.write(from: data.asSlice())  // n == data.count
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Returns `.Ok(buf.count)` without storing the bytes.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         .Ok(buf.count)
     }
 
-    /// No-op flush, always succeeds.
-    ///
-    /// Example:
-    ///     var sink = Sink()
-    ///     try sink.flush()  // Ok(())
-    public mutating func flush() -> Result[(), Error] {
+    /// No-op; always succeeds.
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 }
@@ -110,48 +77,49 @@ public struct Sink: Write {
 // BUFFER
 // ============================================================================
 
-/// A writer that accumulates bytes in a growable in-memory buffer.
+/// `Write` that appends bytes to a growable `Array[UInt8]` — the in-memory
+/// counterpart to writing to a file. Useful for capturing output, building
+/// byte sequences before flushing to a real sink, or testing formatters.
 ///
-/// Useful for building byte sequences, capturing output, or testing.
-/// Access the accumulated data via `asSlice()` or `toArray()`.
+/// `Buffer` clones share the underlying COW array.
 ///
-/// Example:
-///     var buf = Buffer()
-///     try writeStr(writer: buf, s: "Hello, ")
-///     try writeStr(writer: buf, s: "World!")
-///     let result = buf.toString()  // "Hello, World!"
-public struct Buffer: Write {
+/// # Examples
+///
+/// ```
+/// var b = Buffer();
+/// try writeStr(b, "Hello, ");
+/// try writeStr(b, "World!");
+/// b.toString()       // "Hello, World!"
+/// ```
+///
+/// # Representation
+///
+/// One `Array[UInt8]` field; capacity grows on demand.
+public struct Buffer: Write, Cloneable {
     var data: Array[UInt8]
 
-    /// Creates an empty buffer writer.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
+    /// @name Default
+    /// Builds an empty buffer.
     public init() {
         self.data = Array[UInt8]()
     }
 
-    /// Creates a buffer writer with the specified initial capacity.
-    ///
-    /// Pre-allocating capacity avoids reallocations when the approximate
-    /// final size is known.
-    ///
-    /// Example:
-    ///     var buf = Buffer(capacity: 4096)
+    /// Deep-clones the underlying byte array.
+    public func clone() -> Buffer {
+        var b = Buffer();
+        b.data = self.data.clone();
+        b
+    }
+
+    /// @name With Capacity
+    /// Builds an empty buffer pre-sized to `capacity` bytes. Use when the
+    /// approximate final size is known to skip intermediate growth.
     public init(capacity: Int64) {
         self.data = Array(capacity: capacity)
     }
 
-    /// Appends bytes to the internal buffer.
-    ///
-    /// Always succeeds and writes all bytes. Returns Ok(buf.count).
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     let data: [UInt8] = [1, 2, 3]
-    ///     try buf.write(from: data.asSlice())
-    ///     buf.count()  // 3
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    /// Appends every byte from `buf`. Always succeeds with `.Ok(buf.count)`.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         var i: Int64 = 0;
         while i < buf.count {
             self.data.append(buf.pointer.offset(by: i).read());
@@ -160,14 +128,8 @@ public struct Buffer: Write {
         .Ok(buf.count)
     }
 
-    /// No-op flush, always succeeds.
-    ///
-    /// Buffer keeps data in memory, so flush has no effect.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     try buf.flush()  // Ok(())
-    public mutating func flush() -> Result[(), Error] {
+    /// No-op; bytes are already "in" the buffer.
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 
@@ -175,69 +137,36 @@ public struct Buffer: Write {
     // BUFFER-SPECIFIC METHODS
     // ========================================================================
 
-    /// Returns the number of bytes in the buffer.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     try buf.write(from: [1, 2, 3].asSlice())
-    ///     buf.count()  // 3
+    /// Bytes currently held.
     public func count() -> Int64 {
         self.data.count
     }
 
-    /// Returns true if the buffer is empty.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     buf.isEmpty()  // true
-    ///     try buf.write(from: [1].asSlice())
-    ///     buf.isEmpty()  // false
+    /// `true` when no bytes have been written.
     public func isEmpty() -> Bool {
         self.data.count == 0
     }
 
-    /// Clears all bytes from the buffer.
-    ///
-    /// Capacity is retained for reuse.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     try buf.write(from: data.asSlice())
-    ///     buf.clear()
-    ///     buf.count()  // 0
+    /// Drops every byte but keeps the allocated capacity for reuse.
     public mutating func clear() {
         self.data.clear()
     }
 
-    /// Returns a slice view of the buffer contents.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     try buf.write(from: [1, 2, 3].asSlice())
-    ///     let slice = buf.asSlice()  // view of [1, 2, 3]
+    /// Returns a non-owning slice view over the buffered bytes. The slice
+    /// dangles once the buffer is mutated again — copy via `toArray` if
+    /// you need to outlive the next write.
     public func asSlice() -> Slice[UInt8] {
         self.data.asSlice()
     }
 
-    /// Returns the buffer contents as an owned array.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     try buf.write(from: [1, 2, 3].asSlice())
-    ///     let arr = buf.toArray()  // [1, 2, 3]
+    /// Returns an owned copy of the buffered bytes.
     public func toArray() -> Array[UInt8] {
         self.data.clone()
     }
 
-    /// Interprets the buffer contents as a UTF-8 string.
-    ///
-    /// Assumes the buffer contains valid UTF-8. Behavior is undefined
-    /// if the buffer contains invalid UTF-8 sequences.
-    ///
-    /// Example:
-    ///     var buf = Buffer()
-    ///     try writeStr(writer: buf, s: "Hello")
-    ///     buf.toString()  // "Hello"
+    /// Interprets the buffered bytes as UTF-8 and returns the resulting
+    /// `String`. Behaviour for invalid UTF-8 is currently undefined —
+    /// validate upstream if untrusted bytes are involved.
     public func toString() -> String {
         var result = String();
         var i: Int64 = 0;
@@ -254,16 +183,18 @@ public struct Buffer: Write {
 // HELPER FUNCTIONS
 // ============================================================================
 
-/// Writes all bytes from a slice to a writer.
+/// Writes every byte in `buf`, looping until the full slice has been
+/// consumed. Returns `.Err(brokenPipe())` if the writer reports `0` bytes
+/// written before the slice is exhausted (matches Rust's
+/// `WriteAll`/`ErrorKind::WriteZero`).
 ///
-/// Retries partial writes until all bytes are written or an error occurs.
-/// Use this when you need to ensure the entire slice is written.
+/// # Examples
 ///
-/// Example:
-///     var file = try File.create(path: "output.bin")
-///     try writeAll(writer: file, from: data.asSlice())
-///     // all bytes guaranteed written (or error)
-public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
+/// ```
+/// var file = try File.create("output.bin");
+/// try writeAll(file, from: data.asSlice());
+/// ```
+public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), IoError] where W: Write {
     var written: Int64 = 0;
     while written < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
@@ -276,24 +207,19 @@ public func writeAll[W](writer: W, from buf: Slice[UInt8]) -> Result[(), Error] 
     .Ok(())
 }
 
-/// Writes a single byte to a writer.
-///
-/// Example:
-///     var file = try File.create(path: "output.bin")
-///     try writeByte(writer: file, byte: 0xFF)
-public func writeByte[W](writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
+/// Writes a single byte, looping internally until it lands.
+public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Write {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
     let slice = Slice(pointer: buf.asPointer(), count: 1);
     writeAll(writer, from: slice)
 }
 
-/// Writes a string as UTF-8 bytes to a writer.
-///
-/// Example:
-///     var file = try File.create(path: "greeting.txt")
-///     try writeStr(writer: file, s: "Hello, World!")
-public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Write {
+/// Writes the UTF-8 encoding of `s`. Empty strings short-circuit. Currently
+/// emits one byte per call into the writer — fine for buffered sinks like
+/// `Buffer`, expensive for raw `File`/`Stdout` (TODO: collect into a slice
+/// first).
+public func writeStr[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Write {
     // Get the byte count and pointer from string
     let byteCount = s.byteCount;
     if byteCount == 0 {
@@ -310,15 +236,9 @@ public func writeStr[W](writer: W, s: String) -> Result[(), Error] where W: Writ
     .Ok(())
 }
 
-/// Writes a string followed by a newline to a writer.
-///
-/// Appends a single '\n' character after the string.
-///
-/// Example:
-///     var file = try File.create(path: "lines.txt")
-///     try writeLine(writer: file, s: "First line")
-///     try writeLine(writer: file, s: "Second line")
-public func writeLine[W](writer: W, s: String) -> Result[(), Error] where W: Write {
+/// Writes `s` followed by a single `\n`. Does not append `\r` on any
+/// platform — Kestrel writes Unix line endings everywhere by default.
+public func writeLine[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Write {
     try writeStr(writer, s);
     writeByte(writer, 10)  // '\n'
 }

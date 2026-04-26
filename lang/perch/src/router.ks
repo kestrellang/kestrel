@@ -263,12 +263,8 @@ public struct Router[T]: Cloneable {
     /// Finds a matching route for the given method and path segments.
     func findRoute(method: HttpMethod, segments: Array[String]) -> MatchResult[T]? {
         // Check group routes first
-        var gi: Int64 = 0;
-        while gi < self.groups.count {
-            let group = self.groups(unchecked: gi);
-            var ri: Int64 = 0;
-            while ri < group.routes.count {
-                let route = group.routes(unchecked: ri);
+        for group in self.groups {
+            for route in group.routes {
                 if methodMatches(route.method, method) {
                     match matchPath(segments, route.patternSegments) {
                         .Some(params) => {
@@ -282,15 +278,11 @@ public struct Router[T]: Cloneable {
                         .None => {}
                     }
                 }
-                ri = ri + 1
             }
-            gi = gi + 1
         }
 
         // Check standalone routes
-        var si: Int64 = 0;
-        while si < self.routes.count {
-            let route = self.routes(unchecked: si);
+        for route in self.routes {
             if methodMatches(route.method, method) {
                 match matchPath(segments, route.patternSegments) {
                     .Some(params) => {
@@ -304,7 +296,6 @@ public struct Router[T]: Cloneable {
                     .None => {}
                 }
             }
-            si = si + 1
         }
 
         .None

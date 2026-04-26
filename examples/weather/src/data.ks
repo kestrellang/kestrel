@@ -113,11 +113,6 @@ public func weatherDescription(code: Int64) -> String {
     "Thunderstorm with hail"
 }
 
-public func dayName(dateStr: String) -> String {
-    // Just return the date as-is for simplicity
-    dateStr
-}
-
 // ============================================================================
 // WEATHER THEMING
 // ============================================================================

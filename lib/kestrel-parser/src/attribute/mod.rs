@@ -26,7 +26,8 @@ fn string_literal_parser<'tokens>()
 fn integer_literal_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
     skip_trivia().ignore_then(
-        just(Token::Integer).map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
+        just(Token::Integer)
+            .map_with(|_, e| AttributeArgValue::Integer(to_kestrel_span(e.span()))),
     )
 }
 

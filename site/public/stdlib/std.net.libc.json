@@ -1,0 +1,167 @@
+{
+  "path": "std.net.libc",
+  "name": "libc",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "function",
+      "name": "AF_INET",
+      "anchor": "function-AF-INET",
+      "signature": "public func AF_INET() -> Int32",
+      "doc": "IPv4 protocol family.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "INADDR_ANY",
+      "anchor": "function-INADDR-ANY",
+      "signature": "public func INADDR_ANY() -> Int32",
+      "doc": "Bind to all interfaces.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "IPPROTO_TCP",
+      "anchor": "function-IPPROTO-TCP",
+      "signature": "public func IPPROTO_TCP() -> Int32",
+      "doc": "TCP protocol number.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SOCKADDR_IN_SIZE",
+      "anchor": "function-SOCKADDR-IN-SIZE",
+      "signature": "public func SOCKADDR_IN_SIZE() -> Int32",
+      "doc": "Size of sockaddr_in struct.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SOCK_STREAM",
+      "anchor": "function-SOCK-STREAM",
+      "signature": "public func SOCK_STREAM() -> Int32",
+      "doc": "Stream socket (TCP).",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SOL_SOCKET",
+      "anchor": "function-SOL-SOCKET",
+      "signature": "public func SOL_SOCKET() -> Int32",
+      "doc": "",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "SO_REUSEADDR",
+      "anchor": "function-SO-REUSEADDR",
+      "signature": "public func SO_REUSEADDR() -> Int32",
+      "doc": "Allow address reuse.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "accept",
+      "anchor": "function-accept",
+      "signature": "public func accept(Int32, Pointer[UInt8], Pointer[Int32]) -> Int32",
+      "doc": "Accepts a connection. Returns new fd or -1 on error.\nPass null pointers to ignore client address.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "bind",
+      "anchor": "function-bind",
+      "signature": "public func bind(Int32, Pointer[UInt8], Int32) -> Int32",
+      "doc": "Binds a socket to an address. Returns 0 on success, -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "close",
+      "anchor": "function-close",
+      "signature": "public func close(Int32) -> Int32",
+      "doc": "Closes a file descriptor. Returns 0 on success, -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "connect",
+      "anchor": "function-connect",
+      "signature": "public func connect(Int32, Pointer[UInt8], Int32) -> Int32",
+      "doc": "Connects a socket to a remote address. Returns 0 on success, -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "errno",
+      "anchor": "function-errno",
+      "signature": "public func errno() -> Int32",
+      "doc": "Returns the current errno value.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "freeaddrinfo",
+      "anchor": "function-freeaddrinfo",
+      "signature": "public func freeaddrinfo(Pointer[UInt8])",
+      "doc": "Frees the addrinfo linked list returned by getaddrinfo().",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "getaddrinfo",
+      "anchor": "function-getaddrinfo",
+      "signature": "public func getaddrinfo(Pointer[UInt8], Pointer[UInt8], Pointer[UInt8], Pointer[Pointer[UInt8]]) -> Int32",
+      "doc": "Resolves a hostname to socket addresses.\nReturns 0 on success, non-zero error code on failure.\nThe result pointer must be freed with freeaddrinfo().\n\naddrinfo struct layout (macOS, 48 bytes):\n  offset 0:  ai_flags    (i32)\n  offset 4:  ai_family   (i32)\n  offset 8:  ai_socktype (i32)\n  offset 12: ai_protocol (i32)\n  offset 16: ai_addrlen  (u32)\n  offset 20: padding     (4 bytes on macOS, differs from Linux)\n  offset 24: ai_canonname (ptr)\n  offset 32: ai_addr     (ptr)\n  offset 40: ai_next     (ptr)",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "htons",
+      "anchor": "function-htons",
+      "signature": "public func htons(UInt16) -> UInt16",
+      "doc": "Converts host byte order to network byte order (16-bit).",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "listen",
+      "anchor": "function-listen",
+      "signature": "public func listen(Int32, Int32) -> Int32",
+      "doc": "Listens for connections. Returns 0 on success, -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "recv",
+      "anchor": "function-recv",
+      "signature": "public func recv(Int32, Pointer[UInt8], Int64, Int32) -> Int64",
+      "doc": "Receives data from a socket. Returns bytes read, 0 on close, -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "send",
+      "anchor": "function-send",
+      "signature": "public func send(Int32, Pointer[UInt8], Int64, Int32) -> Int64",
+      "doc": "Sends data on a socket. Returns bytes sent or -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "setsockopt",
+      "anchor": "function-setsockopt",
+      "signature": "public func setsockopt(Int32, Int32, Int32, Pointer[UInt8], Int32) -> Int32",
+      "doc": "Sets a socket option. Returns 0 on success, -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "socket",
+      "anchor": "function-socket",
+      "signature": "public func socket(Int32, Int32, Int32) -> Int32",
+      "doc": "Creates a socket. Returns fd or -1 on error.",
+      "source_path": "lang/std/net/libc.ks"
+    }
+  ]
+}

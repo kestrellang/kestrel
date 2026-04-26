@@ -33,11 +33,26 @@ func libc_exit(code: lang.i32)
 // PUBLIC API
 // ============================================================================
 
-/// Runs a shell command and returns the exit code.
-/// The command's stdout/stderr go directly to the terminal.
+/// Runs `command` through the system shell and returns its exit code.
+///
+/// Wraps `libc::system`, which on POSIX runs `/bin/sh -c <command>`
+/// and returns a packed status word; this function shifts off the
+/// signal/coredump bits and returns just the exit code (0–255 in
+/// normal cases). The child's stdout and stderr are inherited from
+/// the parent process — they go straight to the terminal. For
+/// captured output, use `captureOutput`.
+///
+/// # Examples
+///
+/// ```
+/// let code = spawn(command: "ls -la");
+/// if code != Int32(intLiteral: 0) {
+///     print("ls failed");
+/// }
+/// ```
 public func spawn(command: String) -> Int32 {
     let ccmd = command.toCString();
-    let rawStatus = libc_system(lang.cast_ptr[lang.i8](ccmd.raw.raw));
+    let rawStatus = libc_system(lang.cast_ptr[_, lang.i8](ccmd.raw.raw));
     ccmd.free();
     // system() returns the exit status in the upper bits on POSIX
     // Shift right by 8 to get the actual exit code
@@ -45,14 +60,26 @@ public func spawn(command: String) -> Int32 {
     status >> 8
 }
 
-/// Runs a shell command and captures its stdout as a string.
-/// Returns the trimmed output, or an empty string if the command fails.
+/// Runs `command` through the system shell and returns its captured stdout.
+///
+/// Reads from `popen(command, "r")` 1 KiB at a time until EOF, then
+/// trims a single run of trailing ASCII whitespace (space, tab, LF,
+/// CR) so callers don't have to chomp the newline themselves. Stderr
+/// is **not** captured — it goes to the parent's stderr. Returns the
+/// empty string if `popen` fails.
+///
+/// # Examples
+///
+/// ```
+/// let branch = captureOutput(command: "git rev-parse --abbrev-ref HEAD");
+/// // "main"
+/// ```
 public func captureOutput(command: String) -> String {
     let ccmd = command.toCString();
     let modeStr = "r".toCString();
     let stream = libc_popen(
-        lang.cast_ptr[lang.i8](ccmd.raw.raw),
-        lang.cast_ptr[lang.i8](modeStr.raw.raw)
+        lang.cast_ptr[_, lang.i8](ccmd.raw.raw),
+        lang.cast_ptr[_, lang.i8](modeStr.raw.raw)
     );
     ccmd.free();
     modeStr.free();
@@ -70,7 +97,7 @@ public func captureOutput(command: String) -> String {
         if Bool(boolLiteral: lang.ptr_is_null(line)) {
             break
         }
-        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[UInt8](buf)));
+        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](buf)));
         output = output + String(from: cstr)
     }
 
@@ -80,12 +107,29 @@ public func captureOutput(command: String) -> String {
     trimEnd(output)
 }
 
-/// Terminates the process with the given exit code.
+/// Terminates the calling process immediately with the given exit code.
+///
+/// Wraps `libc::exit`. Runs `atexit` handlers and flushes stdio
+/// buffers; does **not** unwind Kestrel's stack or run deinits on
+/// values still in scope. Conventionally `0` means success and any
+/// non-zero value means failure; a few codes have specific meanings
+/// (`2` is shells' "misuse of builtins", `126`/`127` are `exec`
+/// errors, `>128` typically encodes a fatal signal).
+///
+/// # Examples
+///
+/// ```
+/// exit(code: Int32(intLiteral: 0));   // success — does not return
+/// ```
 public func exit(code: Int32) {
     libc_exit(code.raw)
 }
 
-/// Removes trailing whitespace characters from a string.
+/// Strips a trailing run of ASCII whitespace (space, tab, LF, CR) from `s`.
+///
+/// Used by `captureOutput` to chomp the trailing newline before
+/// returning. Local helper rather than a `String.trimmedEnd`
+/// dependency to keep `std.os.proc` light.
 func trimEnd(s: String) -> String {
     var end = s.byteCount;
     while end > 0 {

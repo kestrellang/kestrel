@@ -6,9 +6,12 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{emit_module_path, module_declaration_parser_internal};
+use crate::common::{emit_module_path, module_path_parser_internal, token};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
+
+use chumsky::prelude::*;
 
 /// Represents a module declaration: module A.B.C
 ///
@@ -56,29 +59,37 @@ pub fn parse_module_declaration<I>(source: &str, tokens: I, sink: &mut EventSink
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::prelude::*;
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        module_declaration_parser_internal(),
+        |sink, (module_span, path_segments): (Span, Vec<Span>)| emit_module_declaration(
+            sink,
+            module_span,
+            &path_segments
+        )
+    );
+}
 
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match module_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok((module_span, path_segments)) => {
-            emit_module_declaration(sink, module_span, &path_segments);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+/// Internal Chumsky parser for module declarations.
+pub(crate) fn module_declaration_parser_internal<'tokens>() -> impl Parser<
+    'tokens,
+    ParserInput<'tokens>,
+    (Span, Vec<Span>),
+    ParserExtra<'tokens>,
+> + Clone {
+    token(Token::Module)
+        .then(module_path_parser_internal())
+        .boxed()
 }
 
 /// Emit events for a module declaration
-/// Internal helper function
-fn emit_module_declaration(sink: &mut EventSink, module_span: Span, path_segments: &[Span]) {
+pub(crate) fn emit_module_declaration(
+    sink: &mut EventSink,
+    module_span: Span,
+    path_segments: &[Span],
+) {
     sink.start_node(SyntaxKind::ModuleDeclaration);
     sink.add_token(SyntaxKind::Module, module_span);
     emit_module_path(sink, path_segments);

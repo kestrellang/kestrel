@@ -9,20 +9,24 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    AssociatedTypeBoundsData, AssociatedTypeTargetData, AttributeArgData, AttributeArgValue,
-    AttributeArgsData, AttributeData, ComputedBodyData, DeinitDeclarationData,
-    EnumCaseDeclarationData, EnumDeclarationData, ExtensionBodyItem, ExtensionDeclarationData,
-    FieldDeclarationData, FunctionBodyData, FunctionDeclarationData, InitializerDeclarationData,
-    ParameterAccessMode, ParameterData, ProtocolBodyItem, ProtocolDeclarationData,
-    ReceiverModifier, StructDeclarationData, SubscriptBodyData, SubscriptDeclarationData,
-    TypeAliasDeclarationData, TypeDeclarationBodyItem,
+    AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
+    FunctionBodyData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
+use crate::enum_decl::{emit_enum_case, emit_enum_declaration};
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
+use crate::field::emit_field_declaration;
+use crate::function::emit_function_declaration;
+use crate::import::emit_import_declaration;
+use crate::module::emit_module_declaration;
 use crate::pattern::emit_pattern_variant;
+use crate::r#struct::emit_struct_declaration;
+use crate::subscript::emit_subscript_declaration;
 use crate::ty::emit_ty_variant;
-use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
+use crate::type_alias::emit_type_alias_declaration;
+use crate::type_param::{emit_type_parameter_list, emit_where_clause};
 
 // =============================================================================
 // Module and Import Emitters
@@ -43,94 +47,6 @@ pub fn emit_module_path(sink: &mut EventSink, segments: &[Span]) {
         }
         sink.add_token(SyntaxKind::Identifier, span.clone());
     }
-    sink.finish_node();
-}
-
-/// Emit events for a module declaration
-pub fn emit_module_declaration(sink: &mut EventSink, module_span: Span, path_segments: &[Span]) {
-    sink.start_node(SyntaxKind::ModuleDeclaration);
-    sink.add_token(SyntaxKind::Module, module_span);
-    emit_module_path(sink, path_segments);
-    sink.finish_node();
-}
-
-/// Emit events for an import declaration
-pub fn emit_import_declaration(
-    sink: &mut EventSink,
-    import_span: Span,
-    path_segments: &[Span],
-    alias: Option<Span>,
-    items: Option<Vec<(Span, Option<Span>)>>,
-) {
-    sink.start_node(SyntaxKind::ImportDeclaration);
-    sink.add_token(SyntaxKind::Import, import_span);
-
-    emit_module_path(sink, path_segments);
-
-    if let Some(items_list) = &items {
-        let last_segment = path_segments.last().unwrap();
-        let last_segment_end = last_segment.end;
-        let path_file_id = last_segment.file_id;
-        sink.add_token(
-            SyntaxKind::Dot,
-            Span::new(path_file_id, last_segment_end..last_segment_end + 1),
-        );
-        sink.add_token(
-            SyntaxKind::LParen,
-            Span::new(path_file_id, last_segment_end + 1..last_segment_end + 2),
-        );
-
-        for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
-            if i > 0 {
-                let prev_span = if let Some(alias_s) =
-                    items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref())
-                {
-                    alias_s
-                } else {
-                    &items_list.get(i - 1).unwrap().0
-                };
-                let prev_end = prev_span.end;
-                sink.add_token(
-                    SyntaxKind::Comma,
-                    Span::new(prev_span.file_id, prev_end..prev_end + 1),
-                );
-            }
-
-            sink.start_node(SyntaxKind::ImportItem);
-            sink.add_token(SyntaxKind::Identifier, name_span.clone());
-
-            if let Some(alias_s) = alias_span {
-                let as_start = name_span.end + 1;
-                sink.add_token(
-                    SyntaxKind::As,
-                    Span::new(name_span.file_id, as_start..as_start + 2),
-                );
-                sink.add_token(SyntaxKind::Identifier, alias_s.clone());
-            }
-            sink.finish_node();
-        }
-
-        let last_item = items_list.last().unwrap();
-        let last_item_span = if let Some(alias_s) = &last_item.1 {
-            alias_s
-        } else {
-            &last_item.0
-        };
-        let last_item_end = last_item_span.end;
-        sink.add_token(
-            SyntaxKind::RParen,
-            Span::new(last_item_span.file_id, last_item_end..last_item_end + 1),
-        );
-    } else if let Some(alias_span) = alias {
-        let last_segment = path_segments.last().unwrap();
-        let as_start = last_segment.end + 1;
-        sink.add_token(
-            SyntaxKind::As,
-            Span::new(last_segment.file_id, as_start..as_start + 2),
-        );
-        sink.add_token(SyntaxKind::Identifier, alias_span);
-    }
-
     sink.finish_node();
 }
 
@@ -352,216 +268,77 @@ pub fn emit_function_body(sink: &mut EventSink, body: &FunctionBodyData) {
 // Declaration Emitters - Single Source of Truth
 // =============================================================================
 
-/// Emit events for a function declaration
+/// Emit events for an initializer declaration.
 ///
-/// This is the single source of truth for function declaration emission.
-pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclarationData) {
-    sink.start_node(SyntaxKind::FunctionDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
-
-    // Emit receiver modifier (mutating/consuming) if present
-    if let Some((modifier, span)) = data.receiver_modifier {
-        let kind = match modifier {
-            ReceiverModifier::Mutating => SyntaxKind::Mutating,
-            ReceiverModifier::Consuming => SyntaxKind::Consuming,
-        };
-        sink.add_token(kind, span);
-    }
-
-    sink.add_token(SyntaxKind::Func, data.fn_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
-
-    if let Some((arrow_span, return_ty)) = data.return_type {
-        emit_return_type(sink, arrow_span, return_ty);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    if let Some(ref body) = data.body {
-        emit_function_body(sink, body);
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for a field declaration
-///
-/// This is the single source of truth for field declaration emission.
-pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) {
-    sink.start_node(SyntaxKind::FieldDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
-
-    if data.is_mutable {
-        sink.add_token(SyntaxKind::Var, data.mutability_span);
-    } else {
-        sink.add_token(SyntaxKind::Let, data.mutability_span);
-    }
-
-    emit_name(sink, data.name_span);
-    sink.add_token(SyntaxKind::Colon, data.colon_span);
-    emit_ty_variant(sink, &data.ty);
-
-    // Emit computed property body if present
-    if let Some(computed_body) = &data.computed_body {
-        emit_property_accessors(sink, computed_body);
-    }
-
-    // Emit initializer if present
-    if let Some((equals_span, initializer_expr)) = data.initializer {
-        sink.add_token(SyntaxKind::Equals, equals_span);
-        emit_expr_variant(sink, &initializer_expr);
-    }
-
-    // Emit optional trailing semicolon
-    if let Some(semicolon_span) = data.semicolon {
-        sink.add_token(SyntaxKind::Semicolon, semicolon_span);
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for property accessors (computed property body)
-fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyData) {
-    sink.start_node(SyntaxKind::PropertyAccessors);
-
-    match computed_body {
-        ComputedBodyData::Shorthand(body) => {
-            // Shorthand: just emit the code block directly
-            emit_code_block(sink, body);
-        },
-        ComputedBodyData::Accessors {
-            lbrace: _,
-            get_span,
-            getter,
-            set_span,
-            setter,
-            rbrace: _,
-        } => {
-            // Emit getter
-            if let Some(getter_body) = getter {
-                // Full getter with body: emit GetterClause containing Get token and code block
-                sink.start_node(SyntaxKind::GetterClause);
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-                emit_code_block(sink, getter_body);
-                sink.finish_node();
-            } else {
-                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-            }
-
-            // Emit setter
-            if let Some(setter_body) = setter {
-                // Check if this is a real setter body or a placeholder for protocol requirement
-                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: emit Set token without body
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                } else {
-                    // Full setter with body: emit SetterClause containing Set token and code block
-                    sink.start_node(SyntaxKind::SetterClause);
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                    emit_code_block(sink, setter_body);
-                    sink.finish_node();
-                }
-            }
-        },
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for an initializer declaration
-///
-/// This is the single source of truth for initializer declaration emission.
+/// Destructures `InitializerDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
 pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDeclarationData) {
+    let InitializerDeclarationData {
+        attributes,
+        visibility,
+        init_span,
+        type_params,
+        lparen,
+        parameters,
+        rparen,
+        where_clause,
+        body,
+    } = data;
+
     sink.start_node(SyntaxKind::InitializerDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Init, data.init_span);
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Init, init_span);
 
-    if let Some((lbracket, params, rbracket)) = data.type_params {
+    if let Some((lbracket, params, rbracket)) = type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+    emit_parameter_list(sink, lparen, parameters, rparen);
 
-    if let Some(wc) = data.where_clause {
+    if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);
     }
 
-    if let Some(ref block) = data.body {
-        emit_function_body(sink, &FunctionBodyData::Block(block.clone()));
+    if let Some(block) = body {
+        emit_function_body(sink, &FunctionBodyData::Block(block));
     }
 
     sink.finish_node();
 }
 
-/// Emit events for a deinitializer declaration
+impl crate::event::EmitSyntax for InitializerDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_initializer_declaration(sink, self);
+    }
+}
+
+/// Emit events for a deinitializer declaration.
 ///
-/// This is the single source of truth for deinit declaration emission.
+/// Destructures `DeinitDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
 pub fn emit_deinit_declaration(sink: &mut EventSink, data: DeinitDeclarationData) {
+    let DeinitDeclarationData { deinit_span, body } = data;
     sink.start_node(SyntaxKind::DeinitDeclaration);
-    sink.add_token(SyntaxKind::Deinit, data.deinit_span);
-    emit_function_body(sink, &FunctionBodyData::Block(data.body));
+    sink.add_token(SyntaxKind::Deinit, deinit_span);
+    emit_function_body(sink, &FunctionBodyData::Block(body));
     sink.finish_node();
 }
 
-/// Emit events for a struct declaration
-///
-/// This is the single source of truth for struct declaration emission.
-pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData) {
-    sink.start_node(SyntaxKind::StructDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Struct, data.struct_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
+impl crate::event::EmitSyntax for DeinitDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_deinit_declaration(sink, self);
     }
-
-    if let Some(conf) = data.conformances {
-        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::StructBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        emit_type_declaration_body_item(sink, item);
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // StructBody
-
-    sink.finish_node(); // StructDeclaration
 }
 
 /// Emit events for a type declaration body item (struct or enum body item)
-fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBodyItem) {
+pub(crate) fn emit_type_declaration_body_item(
+    sink: &mut EventSink,
+    item: TypeDeclarationBodyItem,
+) {
     match item {
         TypeDeclarationBodyItem::Field(data) => emit_field_declaration(sink, data),
         TypeDeclarationBodyItem::Function(data) => emit_function_declaration(sink, data),
@@ -581,374 +358,4 @@ fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBo
     }
 }
 
-/// Emit events for a protocol declaration
-///
-/// This is the single source of truth for protocol declaration emission.
-pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclarationData) {
-    sink.start_node(SyntaxKind::ProtocolDeclaration);
 
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Protocol, data.protocol_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    if let Some(inherited) = data.inherited {
-        emit_conformance_list(sink, inherited.colon_span, &inherited.conformances);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::ProtocolBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        match item {
-            ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
-            ProtocolBodyItem::Subscript(subscript_data) => {
-                emit_subscript_declaration(sink, subscript_data)
-            },
-            ProtocolBodyItem::AssociatedType(type_data) => {
-                emit_type_alias_declaration(sink, type_data)
-            },
-            ProtocolBodyItem::Initializer(init_data) => {
-                emit_initializer_declaration(sink, init_data)
-            },
-            ProtocolBodyItem::Field(field_data) => emit_field_declaration(sink, field_data),
-        }
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // ProtocolBody
-
-    sink.finish_node(); // ProtocolDeclaration
-}
-
-/// Emit events for an associated type target
-///
-/// Handles both simple names and qualified paths (e.g., `Iterator.Item`, `Add[Int].Output`).
-fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTargetData) {
-    match target {
-        AssociatedTypeTargetData::Simple(name_span) => {
-            emit_name(sink, name_span.clone());
-        },
-        AssociatedTypeTargetData::Qualified {
-            protocol_path,
-            dot_span,
-            name_span,
-        } => {
-            sink.start_node(SyntaxKind::AssociatedTypeTarget);
-            emit_ty_variant(sink, protocol_path);
-            sink.add_token(SyntaxKind::Dot, dot_span.clone());
-            emit_name(sink, name_span.clone());
-            sink.finish_node();
-        },
-    }
-}
-
-/// Emit events for associated type bounds (: Equatable, Hashable)
-fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoundsData) {
-    sink.add_token(SyntaxKind::Colon, bounds.colon_span.clone());
-    for (i, bound) in bounds.bounds.iter().enumerate() {
-        if i > 0 {
-            // Emit comma between bounds (approximated span)
-            let prev_end = if i > 0 {
-                // This is approximate - we don't track comma positions
-                bounds.colon_span.end + i
-            } else {
-                bounds.colon_span.end
-            };
-            sink.add_token(
-                SyntaxKind::Comma,
-                Span::new(bounds.colon_span.file_id, prev_end..prev_end + 1),
-            );
-        }
-        emit_ty_variant(sink, bound);
-    }
-}
-
-/// Emit events for a type alias declaration
-///
-/// This is the single source of truth for type alias declaration emission.
-/// Handles:
-/// - Regular type aliases: `type Alias = Type;`
-/// - Associated types: `type Item;`, `type Item: Bound;`, `type Item = Default;`
-/// - Qualified bindings: `type Iterator.Item = Int;`
-pub fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarationData) {
-    sink.start_node(SyntaxKind::TypeAliasDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    sink.add_token(SyntaxKind::Type, data.type_span);
-
-    emit_associated_type_target(sink, &data.target);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    // Emit bounds if present (for associated types)
-    if let Some(ref bounds) = data.bounds {
-        emit_associated_type_bounds(sink, bounds);
-    }
-
-    // Emit where clause if present (for associated types with constraints)
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    // Emit aliased type if present (optional for abstract associated types)
-    if let Some((equals_span, ref aliased_type)) = data.aliased {
-        sink.add_token(SyntaxKind::Equals, equals_span);
-        sink.start_node(SyntaxKind::AliasedType);
-        emit_ty_variant(sink, aliased_type);
-        sink.finish_node(); // AliasedType
-    }
-
-    if let Some(semicolon_span) = data.semicolon_span {
-        sink.add_token(SyntaxKind::Semicolon, semicolon_span);
-    }
-
-    sink.finish_node(); // TypeAliasDeclaration
-}
-
-/// Emit events for an extension declaration
-///
-/// This is the single source of truth for extension declaration emission.
-pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarationData) {
-    sink.start_node(SyntaxKind::ExtensionDeclaration);
-
-    sink.add_token(SyntaxKind::Extend, data.extend_span);
-
-    // Emit target type (e.g., Box[T, Int])
-    emit_ty_variant(sink, &data.target_type);
-
-    // Emit conformance list if present
-    if let Some(conf) = data.conformances {
-        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
-    }
-
-    // Emit where clause if present
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::ExtensionBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        emit_extension_body_item(sink, item);
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // ExtensionBody
-
-    sink.finish_node(); // ExtensionDeclaration
-}
-
-/// Emit events for an extension body item
-fn emit_extension_body_item(sink: &mut EventSink, item: ExtensionBodyItem) {
-    match item {
-        ExtensionBodyItem::Function(data) => emit_function_declaration(sink, data),
-        ExtensionBodyItem::Subscript(data) => emit_subscript_declaration(sink, data),
-        ExtensionBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
-        ExtensionBodyItem::TypeAlias(data) => emit_type_alias_declaration(sink, data),
-    }
-}
-
-// =============================================================================
-// Enum Emitters
-// =============================================================================
-
-/// Emit events for an indirect modifier
-pub fn emit_indirect_modifier(sink: &mut EventSink, indirect_span: Span) {
-    sink.start_node(SyntaxKind::IndirectModifier);
-    sink.add_token(SyntaxKind::Indirect, indirect_span);
-    sink.finish_node();
-}
-
-/// Emit events for an enum case parameter
-///
-/// Supports both named (`label: Type`) and unnamed (`Type`) forms.
-pub fn emit_enum_case_parameter(sink: &mut EventSink, data: &super::data::EnumCaseParameterData) {
-    sink.start_node(SyntaxKind::EnumCaseParameter);
-    // Emit label and colon if present (named parameter)
-    if let (Some(label), Some(colon)) = (&data.label, &data.colon) {
-        emit_name(sink, label.clone());
-        sink.add_token(SyntaxKind::Colon, colon.clone());
-    }
-    // Always emit the type
-    emit_ty_variant(sink, &data.ty);
-    sink.finish_node();
-}
-
-/// Emit events for an enum case parameter list
-pub fn emit_enum_case_parameter_list(
-    sink: &mut EventSink,
-    lparen: Span,
-    parameters: &[super::data::EnumCaseParameterData],
-    rparen: Span,
-) {
-    sink.start_node(SyntaxKind::EnumCaseParameterList);
-    sink.add_token(SyntaxKind::LParen, lparen);
-    for param in parameters {
-        emit_enum_case_parameter(sink, param);
-    }
-    sink.add_token(SyntaxKind::RParen, rparen);
-    sink.finish_node();
-}
-
-/// Emit events for an enum case declaration
-///
-/// This is the single source of truth for enum case declaration emission.
-pub fn emit_enum_case(sink: &mut EventSink, data: EnumCaseDeclarationData) {
-    sink.start_node(SyntaxKind::EnumCaseDeclaration);
-    emit_attribute_list(sink, &data.attributes);
-    sink.add_token(SyntaxKind::Case, data.case_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lparen, ref params, rparen)) = data.parameters {
-        emit_enum_case_parameter_list(sink, lparen, params, rparen);
-    }
-
-    sink.finish_node();
-}
-
-/// Emit events for an enum declaration
-///
-/// This is the single source of truth for enum declaration emission.
-pub fn emit_enum_declaration(sink: &mut EventSink, data: EnumDeclarationData) {
-    sink.start_node(SyntaxKind::EnumDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-
-    if let Some(indirect_span) = data.indirect {
-        emit_indirect_modifier(sink, indirect_span);
-    }
-
-    sink.add_token(SyntaxKind::Enum, data.enum_span);
-    emit_name(sink, data.name_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    if let Some(conf) = data.conformances {
-        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
-    }
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    sink.start_node(SyntaxKind::EnumBody);
-    sink.add_token(SyntaxKind::LBrace, data.lbrace_span);
-
-    for item in data.body {
-        emit_type_declaration_body_item(sink, item);
-    }
-
-    sink.add_token(SyntaxKind::RBrace, data.rbrace_span);
-    sink.finish_node(); // EnumBody
-
-    sink.finish_node(); // EnumDeclaration
-}
-
-// =============================================================================
-// Subscript Emitters
-// =============================================================================
-
-/// Emit events for subscript body
-fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
-    sink.start_node(SyntaxKind::SubscriptBody);
-
-    match body {
-        SubscriptBodyData::Shorthand(code_block) => {
-            // Shorthand: just emit the code block directly
-            emit_code_block(sink, code_block);
-        },
-        SubscriptBodyData::Accessors {
-            lbrace: _,
-            get_span,
-            getter,
-            set_span,
-            setter,
-            rbrace: _,
-        } => {
-            // Wrap accessors in PropertyAccessors node
-            sink.start_node(SyntaxKind::PropertyAccessors);
-
-            // Emit getter
-            if let Some(getter_body) = getter {
-                // Full getter with body: emit GetterClause containing Get token and code block
-                sink.start_node(SyntaxKind::GetterClause);
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-                emit_code_block(sink, getter_body);
-                sink.finish_node();
-            } else {
-                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-            }
-
-            // Emit setter
-            if let Some(setter_body) = setter {
-                // Check if this is a real setter body or a placeholder for protocol requirement
-                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: emit Set token without body
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                } else {
-                    // Full setter with body: emit SetterClause containing Set token and code block
-                    sink.start_node(SyntaxKind::SetterClause);
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                    emit_code_block(sink, setter_body);
-                    sink.finish_node();
-                }
-            }
-
-            sink.finish_node(); // PropertyAccessors
-        },
-    }
-
-    sink.finish_node(); // SubscriptBody
-}
-
-/// Emit events for a subscript declaration
-///
-/// This is the single source of truth for subscript declaration emission.
-pub fn emit_subscript_declaration(sink: &mut EventSink, data: SubscriptDeclarationData) {
-    sink.start_node(SyntaxKind::SubscriptDeclaration);
-
-    emit_attribute_list(sink, &data.attributes);
-    emit_visibility(sink, data.visibility);
-    emit_static_modifier(sink, data.is_static);
-
-    sink.add_token(SyntaxKind::Subscript, data.subscript_span);
-
-    if let Some((lbracket, params, rbracket)) = data.type_params {
-        emit_type_parameter_list(sink, lbracket, params, rbracket);
-    }
-
-    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
-
-    // Return type is required for subscripts
-    let (arrow_span, return_ty) = data.return_type;
-    emit_return_type(sink, arrow_span, return_ty);
-
-    if let Some(wc) = data.where_clause {
-        emit_where_clause(sink, wc);
-    }
-
-    emit_subscript_body(sink, &data.body);
-
-    sink.finish_node(); // SubscriptDeclaration
-}

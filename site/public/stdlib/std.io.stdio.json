@@ -1,0 +1,223 @@
+{
+  "path": "std.io.stdio",
+  "name": "stdio",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "Stderr",
+      "anchor": "struct-Stderr",
+      "signature": "public struct Stderr { /* private fields */ }",
+      "doc": "Standard error stream.",
+      "source_path": "lang/std/io/stdio.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates a stderr handle.",
+              "source_path": "lang/std/io/stdio.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Write",
+          "source_path": "std.io.write.Write",
+          "members": [
+            {
+              "kind": "function",
+              "name": "flush",
+              "anchor": "function-flush",
+              "signature": "public mutating func flush() -> Result[(), Error]",
+              "doc": "Flushes standard error.",
+              "source_path": "lang/std/io/stdio.ks"
+            },
+            {
+              "kind": "function",
+              "name": "write",
+              "anchor": "function-write",
+              "signature": "public mutating func write(from: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Writes bytes to standard error.",
+              "source_path": "lang/std/io/stdio.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Stdin",
+      "anchor": "struct-Stdin",
+      "signature": "public struct Stdin { /* private fields */ }",
+      "doc": "Standard input stream.",
+      "source_path": "lang/std/io/stdio.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates a stdin handle.",
+              "source_path": "lang/std/io/stdio.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Read",
+          "source_path": "std.io.read.Read",
+          "members": [
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Reads bytes from standard input.",
+              "source_path": "lang/std/io/stdio.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Stdout",
+      "anchor": "struct-Stdout",
+      "signature": "public struct Stdout { /* private fields */ }",
+      "doc": "Standard output stream.",
+      "source_path": "lang/std/io/stdio.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates a stdout handle.",
+              "source_path": "lang/std/io/stdio.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Write",
+          "source_path": "std.io.write.Write",
+          "members": [
+            {
+              "kind": "function",
+              "name": "flush",
+              "anchor": "function-flush",
+              "signature": "public mutating func flush() -> Result[(), Error]",
+              "doc": "Flushes standard output.",
+              "source_path": "lang/std/io/stdio.ks"
+            },
+            {
+              "kind": "function",
+              "name": "write",
+              "anchor": "function-write",
+              "signature": "public mutating func write(from: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Writes bytes to standard output.",
+              "source_path": "lang/std/io/stdio.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "eprint",
+      "anchor": "function-eprint",
+      "signature": "public func eprint[F](F) -> Result[(), Error] where F: Formattable",
+      "doc": "Prints a value to stderr (no newline).",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "eprintln",
+      "anchor": "function-eprintln",
+      "signature": "public func eprintln[F](F) -> Result[(), Error] where F: Formattable",
+      "doc": "Prints a value to stderr with a newline.",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "print",
+      "anchor": "function-print",
+      "signature": "public func print[F](F) -> Result[(), Error] where F: Formattable",
+      "doc": "Prints a value to stdout (no newline).",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "println",
+      "anchor": "function-println",
+      "signature": "public func println[F](F) -> Result[(), Error] where F: Formattable",
+      "doc": "Prints a value to stdout with a newline.",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "printlnEmpty",
+      "anchor": "function-printlnEmpty",
+      "signature": "public func printlnEmpty() -> Result[(), Error]",
+      "doc": "Prints an empty line to stdout.",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "prompt",
+      "anchor": "function-prompt",
+      "signature": "public func prompt(String) -> Result[String, Error]",
+      "doc": "Prints a prompt message and reads a line from stdin.",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "readLine",
+      "anchor": "function-readLine",
+      "signature": "public func readLine() -> Result[String, Error]",
+      "doc": "Reads a line from stdin (without the newline).",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "stderr",
+      "anchor": "function-stderr",
+      "signature": "public func stderr() -> Stderr",
+      "doc": "Returns a handle to standard error.",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "stdin",
+      "anchor": "function-stdin",
+      "signature": "public func stdin() -> Stdin",
+      "doc": "Returns a handle to standard input.",
+      "source_path": "lang/std/io/stdio.ks"
+    },
+    {
+      "kind": "function",
+      "name": "stdout",
+      "anchor": "function-stdout",
+      "signature": "public func stdout() -> Stdout",
+      "doc": "Returns a handle to standard output.",
+      "source_path": "lang/std/io/stdio.ks"
+    }
+  ]
+}

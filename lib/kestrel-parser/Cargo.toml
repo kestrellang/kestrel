@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 chumsky = { workspace = true }
-stacker = "0.1"
+stacker = { workspace = true }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

@@ -6,3 +6,7 @@
 *.c.o
 flock.lock
 /registry/
+
+# Built binaries from Kestrel packages
+lang/flock/flock
+lang/jessup/jessup

@@ -99,9 +99,13 @@ func handleBuild() {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); },
         .Ok(info) => {
-            let _ = println("Building " + info.name + "...");
+            var msg = String(); msg.append("Building "); msg.append(info.name); msg.append("...");
+            let _ = println(msg);
             match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks) {
-                .Ok(_) => { let _ = println("Built " + info.name + " successfully"); },
+                .Ok(_) => {
+                    var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(info.name); doneMsg.append(" successfully");
+                    let _ = println(doneMsg);
+                },
                 .Err(e) => { let _ = eprintln(e.description()); }
             }
         }
@@ -124,7 +128,8 @@ func handleCheck() {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); },
         .Ok(info) => {
-            let _ = println("Checking " + info.name + "...");
+            var msg = String(); msg.append("Checking "); msg.append(info.name); msg.append("...");
+            let _ = println(msg);
             match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String]()) {
                 .Ok(_) => { let _ = println("Check passed"); },
                 .Err(e) => { let _ = eprintln(e.description()); }
@@ -145,7 +150,8 @@ func handleInit() {
     // Extract directory name as default package name
     let dirName = lastPathComponent(cwd);
 
-    let content = "[package]\nname = \"" + dirName + "\"\nversion = \"0.1.0\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n";
+    var content = String();
+    content.append("[package]\nname = \""); content.append(dirName); content.append("\"\nversion = \"0.1.0\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
 
     match writeFileString(manifestPath, content) {
         .Ok(_) => { let _ = println("Created flock.toml"); },
@@ -158,7 +164,8 @@ func handleInit() {
     // Create src/ directory
     let srcDir = joinPath(base: cwd, rel: "src");
     if not isDirectory( srcDir) {
-        let _ = spawn( "mkdir -p " + srcDir);
+        var mkdirCmd = String(); mkdirCmd.append("mkdir -p "); mkdirCmd.append(srcDir);
+        let _ = spawn(mkdirCmd);
         let _ = println("Created src/");
     }
 }
@@ -241,8 +248,8 @@ func handlePublish() {
     let regUrl = resolveRegistryUrl(projectUrl: manifest.registryUrl);
 
     // Create archive
-    let archivePath = "/tmp/flock-publish-" + name + "-" + version + ".tar.gz";
-    let tarCmd = "tar czf " + archivePath + " -C " + quoteArg(cwd) + " .";
+    var archivePath = String(); archivePath.append("/tmp/flock-publish-"); archivePath.append(name); archivePath.append("-"); archivePath.append(version); archivePath.append(".tar.gz");
+    var tarCmd = String(); tarCmd.append("tar czf "); tarCmd.append(archivePath); tarCmd.append(" -C "); tarCmd.append(quoteArg(cwd)); tarCmd.append(" .");
     let tarExit = spawn(tarCmd);
     if tarExit != 0 {
         let _ = eprintln("failed to create archive");
@@ -250,15 +257,17 @@ func handlePublish() {
     }
 
     // Upload via curl
-    let url = regUrl + "/api/v1/packages/" + org + "/" + name + "/" + version;
-    let curlCmd = "curl -s -X PUT " + quoteArg(url) + " -H \"Authorization: Bearer " + token + "\" -H \"Content-Type: application/gzip\" --data-binary @" + archivePath;
-    let _ = println("Publishing " + org + "/" + name + "@" + version + " to " + regUrl + "...");
+    var url = String(); url.append(regUrl); url.append("/api/v1/packages/"); url.append(org); url.append("/"); url.append(name); url.append("/"); url.append(version);
+    var curlCmd = String(); curlCmd.append("curl -s -X PUT "); curlCmd.append(quoteArg(url)); curlCmd.append(" -H \"Authorization: Bearer "); curlCmd.append(token); curlCmd.append("\" -H \"Content-Type: application/gzip\" --data-binary @"); curlCmd.append(archivePath);
+    var pubMsg = String(); pubMsg.append("Publishing "); pubMsg.append(org); pubMsg.append("/"); pubMsg.append(name); pubMsg.append("@"); pubMsg.append(version); pubMsg.append(" to "); pubMsg.append(regUrl); pubMsg.append("...");
+    let _ = println(pubMsg);
 
     let output = captureOutput(curlCmd);
     let _ = println(output);
 
     // Clean up
-    let _ = spawn("rm -f " + archivePath);
+    var rmCmd = String(); rmCmd.append("rm -f "); rmCmd.append(archivePath);
+    let _ = spawn(rmCmd);
 }
 
 func handleUpdate() {
@@ -267,7 +276,8 @@ func handleUpdate() {
 
     // Delete existing lock file to force re-resolution
     if fileExists(lockPath) {
-        let _ = spawn("rm " + lockPath);
+        var rmCmd = String(); rmCmd.append("rm "); rmCmd.append(lockPath);
+        let _ = spawn(rmCmd);
         let _ = println("Removed flock.lock");
     }
 
@@ -275,7 +285,8 @@ func handleUpdate() {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); },
         .Ok(info) => {
-            let _ = println("Dependencies updated for " + info.name);
+            var msg = String(); msg.append("Dependencies updated for "); msg.append(info.name);
+            let _ = println(msg);
         }
     }
 }
@@ -331,7 +342,10 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
     );
 
     match readFileString(manifestPath) {
-        .Err(e) => return .Err(FlockError.IoError("cannot read " + manifestPath)),
+        .Err(e) => {
+            var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
+            return .Err(FlockError.IoError(msg))
+        },
         .Ok(source) => {
             match parseManifest(source: source) {
                 .Err(e) => return .Err(e),
@@ -412,16 +426,17 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         while j < build.cSources.count {
             let cSource = build.cSources(unchecked: j);
             let cPath = joinPath(base: node.rootDir, rel: cSource);
-            let oPath = cPath + ".o";
+            var oPath = String(); oPath.append(cPath); oPath.append(".o");
 
             // Build cc command: cc -c <cFlags> <source> -o <output>
-            var ccCmd = "cc -c";
+            var ccCmd = String();
+            ccCmd.append("cc -c");
             var k: Int64 = 0;
             while k < cFlags.count {
-                ccCmd = ccCmd + " " + cFlags(unchecked: k);
+                ccCmd.append(" "); ccCmd.append(cFlags(unchecked: k));
                 k = k + 1
             }
-            ccCmd = ccCmd + " " + quoteArg(cPath) + " -o " + quoteArg(oPath);
+            ccCmd.append(" "); ccCmd.append(quoteArg(cPath)); ccCmd.append(" -o "); ccCmd.append(quoteArg(oPath));
 
             let exitCode = spawn( ccCmd);
             if exitCode != 0 {
@@ -429,7 +444,8 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
             }
 
             // Add the object file as a link library (: prefix for literal path)
-            allLinkLibs.append(":" + oPath);
+            var libPath = String(); libPath.append(":"); libPath.append(oPath);
+            allLinkLibs.append(libPath);
             j = j + 1
         }
 
@@ -529,7 +545,7 @@ func splitWhitespace(s: String) -> Array[String] {
 
     while i < len {
         let b = s.byteAtUnchecked(i);
-        let isSpace = b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13);
+        let isSpace = b == 32 or b == 9 or b == 10 or b == 13;
         if isSpace {
             if start >= 0 {
                 result.append(s.substringBytes(from: start, to: i));
@@ -554,8 +570,9 @@ func splitWhitespace(s: String) -> Array[String] {
 func quoteArg(s: String) -> String {
     var i: Int64 = 0;
     while i < s.byteCount {
-        if s.byteAtUnchecked(i) == UInt8(intLiteral: 32) {
-            return "\"" + s + "\""
+        if s.byteAtUnchecked(i) == 32 {
+            var q = String(); q.append("\""); q.append(s); q.append("\"");
+            return q
         }
         i = i + 1
     }
@@ -572,14 +589,14 @@ func lastPathComponent(path: String) -> String {
     let len = path.byteCount;
     // Skip trailing slash
     var end = len;
-    if end > 0 and path.byteAtUnchecked(end - 1) == UInt8(intLiteral: 47) {
+    if end > 0 and path.byteAtUnchecked(end - 1) == 47 {
         end = end - 1
     }
 
     // Find last slash
     var i = end - 1;
     while i >= 0 {
-        if path.byteAtUnchecked(i) == UInt8(intLiteral: 47) { // '/'
+        if path.byteAtUnchecked(i) == 47 { // '/'
             return path.substringBytes(from: i + 1, to: end)
         }
         i = i - 1
@@ -594,7 +611,7 @@ func trimWhitespace(s: String) -> String {
     var start: Int64 = 0;
     while start < len {
         let b = s.byteAtUnchecked(start);
-        if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
+        if b == 32 or b == 9 or b == 10 or b == 13 {
             start = start + 1
         } else {
             break
@@ -603,7 +620,7 @@ func trimWhitespace(s: String) -> String {
     var end = len;
     while end > start {
         let b = s.byteAtUnchecked(end - 1);
-        if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
+        if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {
             break

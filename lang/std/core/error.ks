@@ -3,48 +3,72 @@
 
 module std.core
 
-/// The fundamental type for early return semantics.
-/// Used internally by the try operator and error propagation.
-/// Continue indicates normal flow with the contained value.
-/// Break indicates early return/error with the contained value.
+/// The two-state result of a `tryExtract()` call: keep going with a value, or
+/// short-circuit out of the current function with an early-return payload.
+///
+/// Conceptually `Either`-shaped, but the names are deliberately
+/// control-flow flavoured because that is what the compiler does with
+/// them — `Continue` flows to the next instruction, `Break` lowers into a
+/// branch back to the function's epilogue via `FromResidual`.
 @builtin(.ControlFlowEnum)
 public enum ControlFlow[C, B] {
+    /// Normal flow — carries the value to use as the operator result.
     case Continue(C)
+    /// Early-return flow — carries the residual to propagate via `FromResidual`.
     case Break(B)
 }
 
-/// Protocol that enables the `try expr` syntax.
-/// Types conforming to Tryable can be used with the try operator,
-/// which extracts the success value or propagates the error.
+/// Protocol enabling the `try expr` operator.
+///
+/// `Output` is the success value the operator yields; `Early` is the
+/// "residual" — typically an `Err` variant, a `None`, or a typed error —
+/// that gets propagated. The compiler lowers `try x` to roughly
+/// `match x.tryExtract() { .Continue(v) => v, .Break(r) => return Self.fromResidual(r) }`,
+/// which is why the enclosing function's return type must conform to
+/// `FromResidual[Early]`.
+///
+/// # Examples
+///
+/// ```
+/// // Optional and Result both conform; `try` chains them seamlessly.
+/// func parseAndDouble(s: String) -> Int64? {
+///     let n = try Int64.parse(s);    // .None short-circuits the whole function
+///     .Some(n * 2)
+/// }
+/// ```
 @builtin(.TryableProtocol)
 public protocol Tryable {
-    /// The type produced on success.
+    /// The value produced by `try expr` on success.
     type Output
-    /// The type propagated on failure.
+    /// The residual carried out of `try expr` on failure.
     type Early
 
-    /// Extracts the value or signals early return.
-    /// Returns Continue(value) on success or Break(early) on failure.
+    /// Splits `self` into the success value or the early-return residual.
     @builtin(.TryExtractMethod)
     func tryExtract() -> ControlFlow[Output, Early]
 }
 
-/// Protocol that enables early return propagation.
-/// Types conforming to FromResidual can be constructed from an early return value,
-/// allowing error types to propagate through function boundaries.
+/// Protocol that lets a return type absorb a `try`-propagated residual.
+///
+/// Implement when your error/optional type should be reachable via `try`
+/// from another type with a different residual. For example, `Result[T, E]`
+/// implements `FromResidual[E]` so that `try someResult` inside a function
+/// returning `Result[T, E]` rebuilds the failure.
 @builtin(.FromResidualProtocol)
 public protocol FromResidual[Early] {
-    /// Creates an instance from an early return/error value.
+    /// Builds an instance carrying `residual` as its failure payload.
     @builtin(.FromResidualMethod)
     static func fromResidual(residual: Early) -> Self
 }
 
-/// Protocol that enables value promotion.
-/// Types conforming to FromValue can be constructed from a success value,
-/// allowing implicit promotion from T to T? or T throws E.
+/// Protocol enabling implicit promotion of a bare value into a wrapping type.
+///
+/// Used by the compiler so a function returning `T?` can `return v` and have
+/// the value lifted into `.Some(v)`, etc. Not part of the public API; the
+/// stdlib wires it up for `Optional` and `Result`.
 @builtin(.FromValueProtocol)
 protocol FromValue[Output] {
-    /// Creates an instance from a success value.
+    /// Lifts `value` into an instance of the conforming type.
     @builtin(.FromValueMethod)
     static func from(value: Output) -> Self
 }

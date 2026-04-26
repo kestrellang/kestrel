@@ -26,7 +26,7 @@ public struct Version: Cloneable {
 
     /// Returns "major.minor.patch" string representation.
     public func toString() -> String {
-        self.major.format() + "." + self.minor.format() + "." + self.patch.format()
+        var s = String(); s.append(self.major.format()); s.append("."); s.append(self.minor.format()); s.append("."); s.append(self.patch.format()); s
     }
 
     /// Returns true if this version equals another.
@@ -176,7 +176,7 @@ func splitOnDot(s: String) -> Array[String] {
 
     while i < len {
         let byte = s.byteAtUnchecked(i);
-        if byte == UInt8(intLiteral: 46) { // '.'
+        if byte == 46 { // '.'
             result.append(s.substringBytes(from: start, to: i));
             start = i + 1
         }
@@ -193,22 +193,10 @@ func splitOnDot(s: String) -> Array[String] {
 
 /// Parses a non-negative integer from a string. Returns None on failure.
 func parseInt(s: String) -> Optional[Int64] {
-    let len = s.byteCount;
-    if len == 0 {
-        return .None
+    match Int64.parse(s) {
+        .Some(n) => {
+            if n >= 0 { .Some(n) } else { .None }
+        },
+        .None => .None
     }
-
-    var result: Int64 = 0;
-    var i: Int64 = 0;
-    while i < len {
-        let byte = s.byteAtUnchecked(i);
-        // '0' = 48, '9' = 57
-        if byte < UInt8(intLiteral: 48) or byte > UInt8(intLiteral: 57) {
-            return .None
-        }
-        let digit = Int64(from: byte) - 48;
-        result = result * 10 + digit;
-        i = i + 1
-    }
-    .Some(result)
 }

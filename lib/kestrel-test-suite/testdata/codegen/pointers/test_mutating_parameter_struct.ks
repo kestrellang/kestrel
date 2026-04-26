@@ -1,0 +1,21 @@
+// test: execution
+// stdlib: true
+
+module Test
+
+struct Point {
+    var x: std.num.Int64
+    var y: std.num.Int64
+}
+
+func reset(mutating p: Point) {
+    p.x = 42;
+    p.y = 0;
+}
+
+func main() -> lang.i64 {
+    var pt = Point(x: 0, y: 0);
+    reset(pt);
+    if pt.x != 42 { return 1 }
+    0
+}

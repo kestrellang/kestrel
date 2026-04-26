@@ -29,6 +29,7 @@ public func cachePath(org org: String, pkg pkg: String, version version: Version
         .Ok(root) => {
             let orgDir = joinPath(base: root, rel: org);
             let pkgDir = joinPath(base: orgDir, rel: pkg);
+
             let versionDir = joinPath(base: pkgDir, rel: version.toString());
             .Ok(versionDir)
         }
@@ -59,7 +60,10 @@ public func ensureCacheDir(org org: String, pkg pkg: String, version version: Ve
         .Ok(path) => {
             match mkdirAll(path) {
                 .Ok(_) => .Ok(path),
-                .Err(_) => .Err(FlockError.CacheError("cannot create cache directory: " + path))
+                .Err(_) => {
+                    var msg = String(); msg.append("cannot create cache directory: "); msg.append(path);
+                    .Err(FlockError.CacheError(msg))
+                }
             }
         }
     }
@@ -71,20 +75,22 @@ public func ensureCacheDir(org org: String, pkg pkg: String, version version: Ve
 
 /// Downloads a file from a URL to a local path using curl.
 public func downloadFile(url url: String, outputPath outputPath: String) -> Result[(), FlockError] {
-    let cmd = "curl -sL -o " + outputPath + " " + url;
+    var cmd = String(); cmd.append("curl -sL -o "); cmd.append(outputPath); cmd.append(" "); cmd.append(url);
     let exitCode = spawn(cmd);
     if exitCode != 0 {
-        return .Err(FlockError.RegistryError("download failed: " + url))
+        var msg = String(); msg.append("download failed: "); msg.append(url);
+        return .Err(FlockError.RegistryError(msg))
     }
     .Ok(())
 }
 
 /// Extracts a .tar.gz archive into the target directory.
 public func extractArchive(archivePath archivePath: String, targetDir targetDir: String) -> Result[(), FlockError] {
-    let cmd = "tar xzf " + archivePath + " -C " + targetDir;
+    var cmd = String(); cmd.append("tar xzf "); cmd.append(archivePath); cmd.append(" -C "); cmd.append(targetDir);
     let exitCode = spawn(cmd);
     if exitCode != 0 {
-        return .Err(FlockError.CacheError("failed to extract archive: " + archivePath))
+        var msg = String(); msg.append("failed to extract archive: "); msg.append(archivePath);
+        return .Err(FlockError.CacheError(msg))
     }
     .Ok(())
 }

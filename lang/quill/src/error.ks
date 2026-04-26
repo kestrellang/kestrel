@@ -38,8 +38,18 @@ public struct SerializeError: Cloneable {
     /// Returns a human-readable description of the error.
     public func description() -> String {
         match self.kind {
-            .UnsupportedValue(msg) => "serialize error: unsupported value: " + msg,
-            .Custom(msg) => "serialize error: " + msg
+            .UnsupportedValue(msg) => {
+                var s = String();
+                s.append("serialize error: unsupported value: ");
+                s.append(msg);
+                s
+            },
+            .Custom(msg) => {
+                var s = String();
+                s.append("serialize error: ");
+                s.append(msg);
+                s
+            }
         }
     }
 
@@ -99,24 +109,49 @@ public struct DeserializeError: Cloneable {
     /// Returns a human-readable description of the error.
     public func description() -> String {
         let msg = match self.kind {
-            .TypeMismatch(expected, got) => "type mismatch: expected " + expected + ", got " + got,
-            .MissingKey(key) => "missing key: " + key,
-            .InvalidValue(msg) => "invalid value: " + msg,
+            .TypeMismatch(expected, got) => {
+                var s = String();
+                s.append("type mismatch: expected ");
+                s.append(expected);
+                s.append(", got ");
+                s.append(got);
+                s
+            },
+            .MissingKey(key) => {
+                var s = String();
+                s.append("missing key: ");
+                s.append(key);
+                s
+            },
+            .InvalidValue(msg) => {
+                var s = String();
+                s.append("invalid value: ");
+                s.append(msg);
+                s
+            },
             .Custom(msg) => msg
         };
         if self.path.isEmpty {
-            "deserialize error: " + msg
+            var s = String();
+            s.append("deserialize error: ");
+            s.append(msg);
+            s
         } else {
-            var pathStr = "";
+            var pathStr = String();
             var i: Int64 = 0;
             while i < self.path.count {
                 if i > 0 {
-                    pathStr = pathStr + "."
+                    pathStr.append(".")
                 }
-                pathStr = pathStr + self.path(unchecked: i);
+                pathStr.append(self.path(unchecked: i));
                 i = i + 1
             }
-            "deserialize error at " + pathStr + ": " + msg
+            var s = String();
+            s.append("deserialize error at ");
+            s.append(pathStr);
+            s.append(": ");
+            s.append(msg);
+            s
         }
     }
 

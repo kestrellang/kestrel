@@ -1,0 +1,2673 @@
+{
+  "path": "std.text",
+  "name": "text",
+  "submodules": [
+    "std.text.unicode"
+  ],
+  "items": [
+    {
+      "kind": "enum",
+      "name": "Alignment",
+      "anchor": "enum-Alignment",
+      "signature": "public enum Alignment",
+      "doc": "Text alignment for formatted output.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "case",
+              "name": "Center",
+              "anchor": "case-Center",
+              "signature": "case Center",
+              "doc": "Center the text.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Left",
+              "anchor": "case-Left",
+              "signature": "case Left",
+              "doc": "Align text to the left.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Right",
+              "anchor": "case-Right",
+              "signature": "case Right",
+              "doc": "Align text to the right.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Alignment) -> Bool",
+              "doc": "Compares for equality.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Matchable",
+          "source_path": "std.core.Matchable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "matches",
+              "anchor": "function-matches",
+              "signature": "public func matches(Alignment) -> Bool",
+              "doc": "Matches for pattern matching.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "AsciiChars",
+      "anchor": "struct-AsciiChars",
+      "signature": "public struct AsciiChars { /* private fields */ }",
+      "doc": "Common ASCII characters as constants.",
+      "source_path": "lang/std/text/char.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "apostrophe",
+              "anchor": "function-apostrophe",
+              "signature": "public static func apostrophe() -> Char",
+              "doc": "Single quote/apostrophe ('\\'').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "backslash",
+              "anchor": "function-backslash",
+              "signature": "public static func backslash() -> Char",
+              "doc": "Backslash ('\\\\').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "carriageReturn",
+              "anchor": "function-carriageReturn",
+              "signature": "public static func carriageReturn() -> Char",
+              "doc": "Carriage return character ('\\r').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "colon",
+              "anchor": "function-colon",
+              "signature": "public static func colon() -> Char",
+              "doc": "Colon (':').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "comma",
+              "anchor": "function-comma",
+              "signature": "public static func comma() -> Char",
+              "doc": "Comma (',').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "dot",
+              "anchor": "function-dot",
+              "signature": "public static func dot() -> Char",
+              "doc": "Period ('.').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "newline",
+              "anchor": "function-newline",
+              "signature": "public static func newline() -> Char",
+              "doc": "Newline character ('\\n').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "nul",
+              "anchor": "function-nul",
+              "signature": "public static func nul() -> Char",
+              "doc": "Null character ('\\0').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "quote",
+              "anchor": "function-quote",
+              "signature": "public static func quote() -> Char",
+              "doc": "Double quote ('\"').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "semicolon",
+              "anchor": "function-semicolon",
+              "signature": "public static func semicolon() -> Char",
+              "doc": "Semicolon (';').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "slash",
+              "anchor": "function-slash",
+              "signature": "public static func slash() -> Char",
+              "doc": "Forward slash ('/').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "space",
+              "anchor": "function-space",
+              "signature": "public static func space() -> Char",
+              "doc": "Space character (' ').",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "tab",
+              "anchor": "function-tab",
+              "signature": "public static func tab() -> Char",
+              "doc": "Tab character ('\\t').",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "typealias",
+      "name": "Byte",
+      "anchor": "typealias-Byte",
+      "signature": "public type Byte = UInt8",
+      "doc": "Alias for UInt8, representing a single UTF-8 byte.",
+      "source_path": "lang/std/text/char.ks"
+    },
+    {
+      "kind": "struct",
+      "name": "ByteIndex",
+      "anchor": "struct-ByteIndex",
+      "signature": "public struct ByteIndex { /* private fields */ }",
+      "doc": "An index into a string by byte position.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Int64)",
+              "doc": "Creates a byte index.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "field",
+              "name": "value",
+              "anchor": "field-value",
+              "signature": "public var value: Int64",
+              "doc": "The byte offset value.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(ByteIndex) -> Bool",
+              "doc": "Compares two byte indices for equality.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Comparable",
+          "source_path": "std.core.Comparable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "compare",
+              "anchor": "function-compare",
+              "signature": "public func compare(ByteIndex) -> Ordering",
+              "doc": "Compares two byte indices for ordering.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "BytesIterator",
+      "anchor": "struct-BytesIterator",
+      "signature": "public struct BytesIterator { /* private fields */ }",
+      "doc": "Iterator over raw UTF-8 bytes.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, index: Int64)",
+              "doc": "Creates a bytes iterator.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = UInt8",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> UInt8?",
+              "doc": "Returns the next byte, or None if exhausted.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "BytesView",
+      "anchor": "struct-BytesView",
+      "signature": "public struct BytesView { /* private fields */ }",
+      "doc": "A view over the raw UTF-8 bytes of a string.\n\nProvides O(1) indexing by byte position.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "asRaw",
+              "anchor": "function-asRaw",
+              "signature": "public func asRaw() -> lang.ptr[lang.i8]",
+              "doc": "Returns the raw pointer to the bytes.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "byteAt",
+              "anchor": "function-byteAt",
+              "signature": "public func byteAt(Int64) -> UInt8?",
+              "doc": "Returns the byte at the given index, or None if out of bounds.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "byteAtUnchecked",
+              "anchor": "function-byteAtUnchecked",
+              "signature": "public func byteAtUnchecked(Int64) -> UInt8",
+              "doc": "Returns the byte at the given index without bounds checking.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "count",
+              "anchor": "function-count",
+              "signature": "public func count() -> Int64",
+              "doc": "Returns the number of bytes.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
+              "doc": "Creates a bytes view.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isEmpty",
+              "anchor": "function-isEmpty",
+              "signature": "public func isEmpty() -> Bool",
+              "doc": "Returns true if the view is empty.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring(from: Int64, to: Int64) -> String",
+              "doc": "Returns a substring by byte indices. Panics if out of bounds or invalid UTF-8 boundary.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring(checked: Int64, to: Int64) -> String?",
+              "doc": "Returns a substring by byte indices, or None if out of bounds or invalid UTF-8 boundary.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = UInt8",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = BytesIterator",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> BytesIterator",
+              "doc": "Returns an iterator over the bytes.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Char",
+      "anchor": "struct-Char",
+      "signature": "public struct Char { /* private fields */ }",
+      "doc": "A Unicode code point (scalar value from 0 to 0x10FFFF).\n\nSupports character literal syntax: 'a', '\\n', '\\u{1F600}'.",
+      "source_path": "lang/std/text/char.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "digitValue",
+              "anchor": "function-digitValue",
+              "signature": "public func digitValue() -> UInt32?",
+              "doc": "Returns the digit value (0-9) if this is a digit, otherwise None.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromDigit",
+              "anchor": "function-fromDigit",
+              "signature": "public static func fromDigit(UInt32) -> Char?",
+              "doc": "Creates a Char from a digit value (0-9).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "hasLowercaseExpansion",
+              "anchor": "function-hasLowercaseExpansion",
+              "signature": "public func hasLowercaseExpansion() -> Bool",
+              "doc": "Returns true if this character has a multi-char lowercase expansion.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "hasTitlecaseExpansion",
+              "anchor": "function-hasTitlecaseExpansion",
+              "signature": "public func hasTitlecaseExpansion() -> Bool",
+              "doc": "Returns true if this character has a multi-char titlecase expansion.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "hasUppercaseExpansion",
+              "anchor": "function-hasUppercaseExpansion",
+              "signature": "public func hasUppercaseExpansion() -> Bool",
+              "doc": "Returns true if this character has a multi-char uppercase expansion.\nFor example, German ß uppercases to \"SS\" (two characters).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(UInt32)",
+              "doc": "Creates a Char from a Unicode code point value.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(charLiteral: lang.i32)",
+              "doc": "Creates a Char from a character literal.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isAlphabetic",
+              "anchor": "function-isAlphabetic",
+              "signature": "public func isAlphabetic() -> Bool",
+              "doc": "Returns true if this is an alphabetic character (a-z, A-Z).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isAlphanumeric",
+              "anchor": "function-isAlphanumeric",
+              "signature": "public func isAlphanumeric() -> Bool",
+              "doc": "Returns true if this is alphanumeric.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isAscii",
+              "anchor": "function-isAscii",
+              "signature": "public func isAscii() -> Bool",
+              "doc": "Returns true if this is an ASCII character (< 128).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isControl",
+              "anchor": "function-isControl",
+              "signature": "public func isControl() -> Bool",
+              "doc": "Returns true if this is a control character.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isDigit",
+              "anchor": "function-isDigit",
+              "signature": "public func isDigit() -> Bool",
+              "doc": "Returns true if this is a digit (0-9).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isLowercase",
+              "anchor": "function-isLowercase",
+              "signature": "public func isLowercase() -> Bool",
+              "doc": "Returns true if this is a lowercase letter (a-z).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isUppercase",
+              "anchor": "function-isUppercase",
+              "signature": "public func isUppercase() -> Bool",
+              "doc": "Returns true if this is an uppercase letter (A-Z).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isWhitespace",
+              "anchor": "function-isWhitespace",
+              "signature": "public func isWhitespace() -> Bool",
+              "doc": "Returns true if this is whitespace (space, tab, newline, etc.).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "lowercaseExpansion",
+              "anchor": "function-lowercaseExpansion",
+              "signature": "public func lowercaseExpansion() -> String",
+              "doc": "Returns the multi-character lowercase expansion for this character.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "titlecaseExpansion",
+              "anchor": "function-titlecaseExpansion",
+              "signature": "public func titlecaseExpansion() -> String",
+              "doc": "Returns the multi-character titlecase expansion for this character.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toLowercase",
+              "anchor": "function-toLowercase",
+              "signature": "public func toLowercase() -> Char",
+              "doc": "Returns the lowercase version of this character.\nUses full Unicode case mapping tables.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toTitlecase",
+              "anchor": "function-toTitlecase",
+              "signature": "public func toTitlecase() -> Char",
+              "doc": "Returns the titlecase version of this character.\nTitlecase differs from uppercase for some characters (e.g., ligatures).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toUppercase",
+              "anchor": "function-toUppercase",
+              "signature": "public func toUppercase() -> Char",
+              "doc": "Returns the uppercase version of this character.\nUses full Unicode case mapping tables.\nFor characters with multi-char expansions (e.g., ß → SS), returns the first char.\nUse hasUppercaseExpansion() and uppercaseExpansion() for full support.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "uppercaseExpansion",
+              "anchor": "function-uppercaseExpansion",
+              "signature": "public func uppercaseExpansion() -> String",
+              "doc": "Returns the multi-character uppercase expansion for this character.\nReturns empty string if no expansion exists.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "utf8Length",
+              "anchor": "function-utf8Length",
+              "signature": "public func utf8Length() -> Int64",
+              "doc": "Returns the number of bytes needed to encode this char in UTF-8 (1-4).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "value",
+              "anchor": "function-value",
+              "signature": "public func value() -> UInt32",
+              "doc": "Returns the Unicode code point value.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Char) -> Bool",
+              "doc": "Compares two characters for equality.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Comparable",
+          "source_path": "std.core.Comparable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "compare",
+              "anchor": "function-compare",
+              "signature": "public func compare(Char) -> Ordering",
+              "doc": "Compares two characters for ordering.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Matchable",
+          "source_path": "std.core.Matchable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "matches",
+              "anchor": "function-matches",
+              "signature": "public func matches(Char) -> Bool",
+              "doc": "Matches two characters for pattern matching.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ExpressibleByCharLiteral",
+          "source_path": "std.core.ExpressibleByCharLiteral",
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(charLiteral: lang.i32)",
+              "doc": "Creates an instance from a character literal.",
+              "source_path": "lang/std/core/literals.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Hash",
+          "source_path": "std.core.Hash",
+          "members": [
+            {
+              "kind": "function",
+              "name": "hash",
+              "anchor": "function-hash",
+              "signature": "public func hash[H](into: mutating H) where H: Hasher",
+              "doc": "Hashes this character.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "RangeMatchable",
+          "source_path": "std.core.RangeMatchable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "isAtLeast",
+              "anchor": "function-isAtLeast",
+              "signature": "public func isAtLeast(Char) -> Bool",
+              "doc": "Returns true if self >= bound (for range pattern matching).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isAtMost",
+              "anchor": "function-isAtMost",
+              "signature": "public func isAtMost(Char) -> Bool",
+              "doc": "Returns true if self <= bound (for range pattern matching).",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isBelow",
+              "anchor": "function-isBelow",
+              "signature": "public func isBelow(Char) -> Bool",
+              "doc": "Returns true if self < bound (for range pattern matching).",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "CharIndex",
+      "anchor": "struct-CharIndex",
+      "signature": "public struct CharIndex { /* private fields */ }",
+      "doc": "An index into a string by character position.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "byteOffset",
+              "anchor": "field-byteOffset",
+              "signature": "public var byteOffset: Int64",
+              "doc": "The byte offset of this character.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Int64)",
+              "doc": "Creates a char index.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(CharIndex) -> Bool",
+              "doc": "Compares two char indices for equality.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "CharsIterator",
+      "anchor": "struct-CharsIterator",
+      "signature": "public struct CharsIterator { /* private fields */ }",
+      "doc": "Iterator over Unicode code points.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64)",
+              "doc": "Creates a chars iterator.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Char",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> Char?",
+              "doc": "Returns the next character, or None if exhausted.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "CharsView",
+      "anchor": "struct-CharsView",
+      "signature": "public struct CharsView { /* private fields */ }",
+      "doc": "A view over the Unicode code points in a string.\n\nIteration is O(1) per character, but indexing is O(n).",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "count",
+              "anchor": "function-count",
+              "signature": "public func count() -> Int64",
+              "doc": "Returns the number of characters (O(n) - must decode all).",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
+              "doc": "Creates a chars view.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring(from: Int64, to: Int64) -> String",
+              "doc": "Returns a substring by character indices (O(n)). Panics if out of bounds.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring(checked: Int64, to: Int64) -> String?",
+              "doc": "Returns a substring by character indices (O(n)), or None if out of bounds.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Char",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = CharsIterator",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> CharsIterator",
+              "doc": "Returns an iterator over the characters.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "DefaultStringInterpolation",
+      "anchor": "struct-DefaultStringInterpolation",
+      "signature": "public struct DefaultStringInterpolation { /* private fields */ }",
+      "doc": "Default implementation of StringInterpolationProtocol for String.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "build",
+              "anchor": "function-build",
+              "signature": "public func build() -> String",
+              "doc": "Build the final string by concatenating all parts.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Int64, Int64)",
+              "doc": "",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "StringInterpolationProtocol",
+          "source_path": "std.text.StringInterpolationProtocol",
+          "members": [
+            {
+              "kind": "function",
+              "name": "appendInterpolation",
+              "anchor": "function-appendInterpolation",
+              "signature": "public mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable",
+              "doc": "Append a formatted value with options.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "function",
+              "name": "appendLiteral",
+              "anchor": "function-appendLiteral",
+              "signature": "public mutating func appendLiteral(String)",
+              "doc": "Append a literal string segment.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(Int64, Int64)",
+              "doc": "Initialize with capacity hints for optimization.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Cloneable",
+          "source_path": "std.core.Cloneable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "clone",
+              "anchor": "function-clone",
+              "signature": "public func clone() -> DefaultStringInterpolation",
+              "doc": "",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "ExpressibleByStringInterpolation",
+      "anchor": "protocol-ExpressibleByStringInterpolation",
+      "signature": "public protocol ExpressibleByStringInterpolation",
+      "doc": "Protocol for types that can be created from string interpolation.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Interpolation",
+              "anchor": "typealias-Interpolation",
+              "signature": "type Interpolation",
+              "doc": "The type used to accumulate interpolation parts.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(Interpolation)",
+              "doc": "Create from a completed interpolation.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ExpressibleByStringLiteral",
+          "source_path": "std.core.ExpressibleByStringLiteral",
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(stringLiteral: lang.str)",
+              "doc": "Creates an instance from a string literal.",
+              "source_path": "lang/std/core/literals.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "enum",
+      "name": "FloatStyle",
+      "anchor": "enum-FloatStyle",
+      "signature": "public enum FloatStyle",
+      "doc": "Float display style.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "case",
+              "name": "Auto",
+              "anchor": "case-Auto",
+              "signature": "case Auto",
+              "doc": "Default: use shortest representation.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Fixed",
+              "anchor": "case-Fixed",
+              "signature": "case Fixed",
+              "doc": "Fixed-point notation (e.g., \"3.14\").",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Percent",
+              "anchor": "case-Percent",
+              "signature": "case Percent",
+              "doc": "Percentage (multiplies by 100, adds '%').",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Scientific",
+              "anchor": "case-Scientific",
+              "signature": "case Scientific",
+              "doc": "Scientific notation with lowercase 'e' (e.g., \"3.14e0\").",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "ScientificUpper",
+              "anchor": "case-ScientificUpper",
+              "signature": "case ScientificUpper",
+              "doc": "Scientific notation with uppercase 'E' (e.g., \"3.14E0\").",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(FloatStyle) -> Bool",
+              "doc": "Compares for equality.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Matchable",
+          "source_path": "std.core.Matchable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "matches",
+              "anchor": "function-matches",
+              "signature": "public func matches(FloatStyle) -> Bool",
+              "doc": "Matches for pattern matching.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "FormatOptions",
+      "anchor": "struct-FormatOptions",
+      "signature": "public struct FormatOptions { /* private fields */ }",
+      "doc": "Options for controlling formatted output.\nUsed by Formattable and string interpolation syntax: \"\\{expr:spec}\"\n\nFormat spec mini-language:\n  [[fill]align][sign][#][0][width][.precision][type]\n\nWhere type is one of:\n  Integers: 'b' (binary), 'o' (octal), 'x' (hex lower), 'X' (hex upper)\n  Floats:   'f' (fixed), 'e' (scientific), 'E' (scientific upper), '%' (percent)\n  Any:      '?' (debug)\n\nExamples:\n  \"\\{n:>8}\"      right-align, width 8\n  \"\\{n:08x}\"     zero-pad, width 8, hex\n  \"\\{n:#X}\"      hex upper with 0x prefix\n  \"\\{pi:.2}\"     precision 2 decimal places\n  \"\\{pi:.2e}\"    scientific with 2 decimal places\n  \"\\{ratio:%}\"   as percentage (0.5 -> \"50%\")\n  \"\\{name:^10}\"  center, width 10\n  \"\\{value:?}\"   debug format",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "alignment",
+              "anchor": "field-alignment",
+              "signature": "public var alignment: Alignment",
+              "doc": "Text alignment within the field width.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "alternate",
+              "anchor": "field-alternate",
+              "signature": "public var alternate: Bool",
+              "doc": "Alternate form: show 0x/0b/0o prefix for non-decimal radix.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "debug",
+              "anchor": "field-debug",
+              "signature": "public var debug: Bool",
+              "doc": "Debug mode: show structural representation.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "function",
+              "name": "default",
+              "anchor": "function-default",
+              "signature": "public static func default() -> FormatOptions",
+              "doc": "Default format options.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "fill",
+              "anchor": "field-fill",
+              "signature": "public var fill: Char",
+              "doc": "Character used for padding (default: ' ').",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "floatStyle",
+              "anchor": "field-floatStyle",
+              "signature": "public var floatStyle: FloatStyle",
+              "doc": "Float display style (fixed, scientific, percent).",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates default format options.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "precision",
+              "anchor": "field-precision",
+              "signature": "public var precision: Int64?",
+              "doc": "For floats: decimal places. For strings: max characters.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "radix",
+              "anchor": "field-radix",
+              "signature": "public var radix: Int64",
+              "doc": "Numeric base: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "sign",
+              "anchor": "field-sign",
+              "signature": "public var sign: Sign",
+              "doc": "How to display the sign for numbers.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "uppercase",
+              "anchor": "field-uppercase",
+              "signature": "public var uppercase: Bool",
+              "doc": "Use uppercase for hex digits (A-F vs a-f).",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "field",
+              "name": "width",
+              "anchor": "field-width",
+              "signature": "public var width: Int64?",
+              "doc": "Minimum field width.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(FormatOptions) -> Bool",
+              "doc": "Compares two format options for equality.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "Formattable",
+      "anchor": "protocol-Formattable",
+      "signature": "public protocol Formattable",
+      "doc": "Protocol for types that can be formatted as a string.\nUsed by print functions and string interpolation.\n\nString interpolation syntax:\n  \"\\{expr}\"        uses default formatting\n  \"\\{expr:spec}\"   uses format spec (parsed into FormatOptions)\n\nExamples:\n  \"\\{name}\"        \"Alice\"\n  \"\\{name:>10}\"    \"     Alice\"\n  \"\\{n:08x}\"       \"0000002a\"\n  \"\\{pi:.2}\"       \"3.14\"\n  \"\\{value:?}\"     debug representation",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "format",
+              "anchor": "function-format",
+              "signature": "func format(FormatOptions) -> String",
+              "doc": "Returns this value formatted as a string with the given options.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Grapheme",
+      "anchor": "struct-Grapheme",
+      "signature": "public struct Grapheme { /* private fields */ }",
+      "doc": "An extended grapheme cluster (user-perceived character).\n\nMay consist of multiple code points (e.g., emoji sequences).",
+      "source_path": "lang/std/text/char.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "charCount",
+              "anchor": "function-charCount",
+              "signature": "public func charCount() -> Int64",
+              "doc": "Returns the number of code points.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "chars",
+              "anchor": "function-chars",
+              "signature": "public func chars() -> Array[Char]",
+              "doc": "Returns the code points in this grapheme.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "firstChar",
+              "anchor": "function-firstChar",
+              "signature": "public func firstChar() -> Char?",
+              "doc": "Returns the first code point, or None if empty.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(char: Char)",
+              "doc": "Creates a Grapheme from a single Char.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(chars: Array[Char])",
+              "doc": "Creates a Grapheme from multiple Chars.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "isAscii",
+              "anchor": "function-isAscii",
+              "signature": "public func isAscii() -> Bool",
+              "doc": "Returns true if this is a single ASCII character.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "utf8Length",
+              "anchor": "function-utf8Length",
+              "signature": "public func utf8Length() -> Int64",
+              "doc": "Returns the byte length when encoded as UTF-8.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Grapheme) -> Bool",
+              "doc": "Compares two graphemes for equality.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Cloneable",
+          "source_path": "std.core.Cloneable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "clone",
+              "anchor": "function-clone",
+              "signature": "public func clone() -> Grapheme",
+              "doc": "",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "GraphemeIndex",
+      "anchor": "struct-GraphemeIndex",
+      "signature": "public struct GraphemeIndex { /* private fields */ }",
+      "doc": "An index into a string by grapheme cluster position.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "byteOffset",
+              "anchor": "field-byteOffset",
+              "signature": "public var byteOffset: Int64",
+              "doc": "The byte offset of this grapheme.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Int64)",
+              "doc": "Creates a grapheme index.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(GraphemeIndex) -> Bool",
+              "doc": "Compares two grapheme indices for equality.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "GraphemesIterator",
+      "anchor": "struct-GraphemesIterator",
+      "signature": "public struct GraphemesIterator { /* private fields */ }",
+      "doc": "Iterator over grapheme clusters using UAX #29 segmentation.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(CharsIterator)",
+              "doc": "Creates a graphemes iterator.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Grapheme",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> Grapheme?",
+              "doc": "Returns the next grapheme cluster, or None if exhausted.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "GraphemesView",
+      "anchor": "struct-GraphemesView",
+      "signature": "public struct GraphemesView { /* private fields */ }",
+      "doc": "A view over the extended grapheme clusters in a string.\nUses UAX #29 grapheme cluster segmentation.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "count",
+              "anchor": "function-count",
+              "signature": "public func count() -> Int64",
+              "doc": "Returns the number of grapheme clusters (O(n)).",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
+              "doc": "Creates a graphemes view.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Grapheme",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = GraphemesIterator",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> GraphemesIterator",
+              "doc": "Returns an iterator over the grapheme clusters.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "LinesIterator",
+      "anchor": "struct-LinesIterator",
+      "signature": "public struct LinesIterator { /* private fields */ }",
+      "doc": "Iterator over lines in a string.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64, done: Bool)",
+              "doc": "Creates a lines iterator.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> String?",
+              "doc": "Returns the next line, or None if exhausted.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "LinesView",
+      "anchor": "struct-LinesView",
+      "signature": "public struct LinesView { /* private fields */ }",
+      "doc": "A view that iterates over lines in a string.\n\nHandles both \\n and \\r\\n line endings.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
+              "doc": "Creates a lines view.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = LinesIterator",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> LinesIterator",
+              "doc": "Returns an iterator over the lines.",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "enum",
+      "name": "Sign",
+      "anchor": "enum-Sign",
+      "signature": "public enum Sign",
+      "doc": "Sign display mode for numeric formatting.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "case",
+              "name": "Always",
+              "anchor": "case-Always",
+              "signature": "case Always",
+              "doc": "Always show sign (+ or -).",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Negative",
+              "anchor": "case-Negative",
+              "signature": "case Negative",
+              "doc": "Only show sign for negative numbers (default).",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Space",
+              "anchor": "case-Space",
+              "signature": "case Space",
+              "doc": "Show space for positive, minus for negative.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(Sign) -> Bool",
+              "doc": "Compares for equality.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Matchable",
+          "source_path": "std.core.Matchable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "matches",
+              "anchor": "function-matches",
+              "signature": "public func matches(Sign) -> Bool",
+              "doc": "Matches for pattern matching.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SplitIterator",
+      "anchor": "struct-SplitIterator",
+      "signature": "public struct SplitIterator { /* private fields */ }",
+      "doc": "Iterator that splits a string on a separator.",
+      "source_path": "lang/std/text/string.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: Pointer[UInt8], length: Int64, sepPtr: Pointer[UInt8], sepLen: Int64)",
+              "doc": "Creates a split iterator.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = String",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> String?",
+              "doc": "Returns the next split segment, or None if exhausted.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SplitWhereIterator",
+      "anchor": "struct-SplitWhereIterator",
+      "signature": "public struct SplitWhereIterator { /* private fields */ }",
+      "doc": "Iterator that splits a string where a predicate returns true.",
+      "source_path": "lang/std/text/string.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: Pointer[UInt8], length: Int64, predicate: (Char) -> Bool)",
+              "doc": "Creates a split-where iterator.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = String",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> String?",
+              "doc": "Returns the next split segment, or None if exhausted.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "String",
+      "anchor": "struct-String",
+      "signature": "public struct String { /* private fields */ }",
+      "doc": "A UTF-8 encoded, dynamically sized string with copy-on-write semantics.\n\nStrings are immutable by default; mutations create a new copy if shared.",
+      "source_path": "lang/std/text/string.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "append",
+              "anchor": "function-append",
+              "signature": "public mutating func append(String)",
+              "doc": "Appends another string to this one.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "appendByte",
+              "anchor": "function-appendByte",
+              "signature": "public mutating func appendByte(UInt8)",
+              "doc": "Appends a raw byte (caller must ensure valid UTF-8).",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "appendChar",
+              "anchor": "function-appendChar",
+              "signature": "public mutating func appendChar(Char)",
+              "doc": "Appends a character to this string.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "byteAt",
+              "anchor": "function-byteAt",
+              "signature": "public func byteAt(Int64) -> UInt8?",
+              "doc": "Returns the byte at the given index, or None if out of bounds.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "byteAtUnchecked",
+              "anchor": "function-byteAtUnchecked",
+              "signature": "public func byteAtUnchecked(Int64) -> UInt8",
+              "doc": "Returns the byte at the given index without bounds checking.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "byteCount",
+              "anchor": "field-byteCount",
+              "signature": "public var byteCount: Int64 { get }",
+              "doc": "The number of bytes (not characters).",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "bytes",
+              "anchor": "field-bytes",
+              "signature": "public var bytes: BytesView { get }",
+              "doc": "A view over the raw UTF-8 bytes.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "capacity",
+              "anchor": "field-capacity",
+              "signature": "public var capacity: Int64 { get }",
+              "doc": "The allocated capacity in bytes.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "char",
+              "anchor": "function-char",
+              "signature": "public func char(at: Int64) -> Char",
+              "doc": "Returns the character at the given index. Panics if out of bounds.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "char",
+              "anchor": "function-char",
+              "signature": "public func char(checked: Int64) -> Char?",
+              "doc": "Returns the character at the given index, or None if out of bounds.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "char",
+              "anchor": "function-char",
+              "signature": "public func char(unchecked: Int64) -> Char",
+              "doc": "Returns the character at the given index without bounds checking.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "char",
+              "anchor": "function-char",
+              "signature": "public func char(wrapping: Int64) -> Char",
+              "doc": "Returns the character at the given index, wrapping around (-1 = last).",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "char",
+              "anchor": "function-char",
+              "signature": "public func char(clamping: Int64) -> Char",
+              "doc": "Returns the character at the given index, clamped to valid range.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "chars",
+              "anchor": "field-chars",
+              "signature": "public var chars: CharsView { get }",
+              "doc": "A view over the Unicode code points.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "clear",
+              "anchor": "function-clear",
+              "signature": "public mutating func clear()",
+              "doc": "Removes all characters from the string.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "contains",
+              "anchor": "function-contains",
+              "signature": "public func contains(String) -> Bool",
+              "doc": "Returns true if the string contains the substring.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "contains",
+              "anchor": "function-contains",
+              "signature": "public func contains(matching: (Char) -> Bool) -> Bool",
+              "doc": "Returns true if any character matches the predicate.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "count",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
+              "doc": "The number of Unicode code points (O(n)).",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "ends",
+              "anchor": "function-ends",
+              "signature": "public func ends(with: String) -> Bool",
+              "doc": "Returns true if the string ends with the suffix.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "equalsCaseInsensitive",
+              "anchor": "function-equalsCaseInsensitive",
+              "signature": "public func equalsCaseInsensitive(String) -> Bool",
+              "doc": "Compares two strings for equality, ignoring case.\nUses Unicode case folding for locale-independent comparison.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "find",
+              "anchor": "function-find",
+              "signature": "public func find(String) -> Int64?",
+              "doc": "Returns the byte index of the first occurrence of substring, or None.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "find",
+              "anchor": "function-find",
+              "signature": "public func find(matching: (Char) -> Bool) -> Int64?",
+              "doc": "Returns the byte index of the first character matching the predicate, or None.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "first",
+              "anchor": "function-first",
+              "signature": "public func first() -> Char?",
+              "doc": "Returns the first character, or None if empty.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesUnchecked",
+              "anchor": "function-fromBytesUnchecked",
+              "signature": "static func fromBytesUnchecked(Pointer[UInt8], Int64) -> String",
+              "doc": "Internal: create from bytes without validation (for split).",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "graphemes",
+              "anchor": "field-graphemes",
+              "signature": "public var graphemes: GraphemesView { get }",
+              "doc": "A view over the extended grapheme clusters.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates an empty string.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(capacity: Int64)",
+              "doc": "Creates an empty string with the specified capacity.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(stringLiteral: lang.ptr[lang.i8], lang.i64)",
+              "doc": "Creates a string from a string literal.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(from: CString)",
+              "doc": "Creates a String from a CString by copying the bytes.\n\nThis copies the null-terminated bytes from the CString into a new\nKestrel String (excluding the null terminator).\n\nExample:\n  let cstr = CString(raw: somePtr, length: Int64(intLiteral: 5))\n  let s = String(from: cstr)",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "field",
+              "name": "isEmpty",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
+              "doc": "True if the string is empty.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "last",
+              "anchor": "function-last",
+              "signature": "public func last() -> Char?",
+              "doc": "Returns the last character, or None if empty.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "lines",
+              "anchor": "field-lines",
+              "signature": "public var lines: LinesView { get }",
+              "doc": "A view over the lines in the string.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "lowercase",
+              "anchor": "function-lowercase",
+              "signature": "public mutating func lowercase()",
+              "doc": "Converts all characters to lowercase using Unicode case mapping in place.\nHandles locale-independent case folding including multi-character expansions.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "lowercaseAscii",
+              "anchor": "function-lowercaseAscii",
+              "signature": "public mutating func lowercaseAscii()",
+              "doc": "Converts ASCII characters to lowercase in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "lowercased",
+              "anchor": "function-lowercased",
+              "signature": "public func lowercased() -> String",
+              "doc": "Returns a string with all characters converted to lowercase using Unicode case mapping.\nHandles locale-independent case folding including multi-character expansions.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "lowercasedAscii",
+              "anchor": "function-lowercasedAscii",
+              "signature": "public func lowercasedAscii() -> String",
+              "doc": "Returns a string with ASCII characters converted to lowercase.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "pad",
+              "anchor": "function-pad",
+              "signature": "public func pad(start: Int64, with: Char) -> String",
+              "doc": "Returns a string padded at the start to the specified length.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "pad",
+              "anchor": "function-pad",
+              "signature": "public func pad(end: Int64, with: Char) -> String",
+              "doc": "Returns a string padded at the end to the specified length.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "repeated",
+              "anchor": "function-repeated",
+              "signature": "public func repeated(Int64) -> String",
+              "doc": "Returns the string repeated the specified number of times.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "replace",
+              "anchor": "function-replace",
+              "signature": "public mutating func replace(String, with: String)",
+              "doc": "Replaces all occurrences of pattern with replacement in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "replaced",
+              "anchor": "function-replaced",
+              "signature": "public func replaced(String, with: String) -> String",
+              "doc": "Returns a string with all occurrences of pattern replaced.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "reverseFind",
+              "anchor": "function-reverseFind",
+              "signature": "public func reverseFind(String) -> Int64?",
+              "doc": "Returns the byte index of the last occurrence of substring, or None.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "split",
+              "anchor": "function-split",
+              "signature": "public func split(String) -> SplitIterator",
+              "doc": "Returns an iterator that splits the string on the separator.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "split",
+              "anchor": "function-split",
+              "signature": "public func split(matching: (Char) -> Bool) -> SplitWhereIterator",
+              "doc": "Returns an iterator that splits the string where the predicate returns true.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "starts",
+              "anchor": "function-starts",
+              "signature": "public func starts(with: String) -> Bool",
+              "doc": "Returns true if the string starts with the prefix.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substringBytes",
+              "anchor": "function-substringBytes",
+              "signature": "public func substringBytes(from: Int64, to: Int64) -> String",
+              "doc": "Returns a substring by byte indices.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "titlecased",
+              "anchor": "function-titlecased",
+              "signature": "public func titlecased() -> String",
+              "doc": "Returns a string with all characters converted to titlecase using Unicode case mapping.\nTitlecase converts the first character of each word to titlecase and the rest to lowercase.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toCString",
+              "anchor": "function-toCString",
+              "signature": "public func toCString() -> CString",
+              "doc": "Creates a CString with a null-terminated copy of this string.\nCaller must free the memory: cstr.free()",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trim",
+              "anchor": "function-trim",
+              "signature": "public mutating func trim()",
+              "doc": "Removes leading and trailing whitespace in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trim",
+              "anchor": "function-trim",
+              "signature": "public mutating func trim(matching: (Char) -> Bool)",
+              "doc": "Removes leading and trailing characters matching the predicate in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimEnd",
+              "anchor": "function-trimEnd",
+              "signature": "public mutating func trimEnd()",
+              "doc": "Removes trailing whitespace in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimEnd",
+              "anchor": "function-trimEnd",
+              "signature": "public mutating func trimEnd(matching: (Char) -> Bool)",
+              "doc": "Removes trailing characters matching the predicate in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimStart",
+              "anchor": "function-trimStart",
+              "signature": "public mutating func trimStart()",
+              "doc": "Removes leading whitespace in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimStart",
+              "anchor": "function-trimStart",
+              "signature": "public mutating func trimStart(matching: (Char) -> Bool)",
+              "doc": "Removes leading characters matching the predicate in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimmed",
+              "anchor": "function-trimmed",
+              "signature": "public func trimmed() -> String",
+              "doc": "Returns a string with leading and trailing whitespace removed.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimmed",
+              "anchor": "function-trimmed",
+              "signature": "public func trimmed(matching: (Char) -> Bool) -> String",
+              "doc": "Returns a string with leading and trailing characters matching the predicate removed.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimmedEnd",
+              "anchor": "function-trimmedEnd",
+              "signature": "public func trimmedEnd() -> String",
+              "doc": "Returns a string with trailing whitespace removed.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimmedEnd",
+              "anchor": "function-trimmedEnd",
+              "signature": "public func trimmedEnd(matching: (Char) -> Bool) -> String",
+              "doc": "Returns a string with trailing characters matching the predicate removed.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimmedStart",
+              "anchor": "function-trimmedStart",
+              "signature": "public func trimmedStart() -> String",
+              "doc": "Returns a string with leading whitespace removed.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "trimmedStart",
+              "anchor": "function-trimmedStart",
+              "signature": "public func trimmedStart(matching: (Char) -> Bool) -> String",
+              "doc": "Returns a string with leading characters matching the predicate removed.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "uppercase",
+              "anchor": "function-uppercase",
+              "signature": "public mutating func uppercase()",
+              "doc": "Converts all characters to uppercase using Unicode case mapping in place.\nHandles locale-independent case folding including multi-character expansions\n(e.g., German 'ß' uppercase becomes \"SS\").",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "uppercaseAscii",
+              "anchor": "function-uppercaseAscii",
+              "signature": "public mutating func uppercaseAscii()",
+              "doc": "Converts ASCII characters to uppercase in place.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "uppercased",
+              "anchor": "function-uppercased",
+              "signature": "public func uppercased() -> String",
+              "doc": "Returns a string with all characters converted to uppercase using Unicode case mapping.\nHandles locale-independent case folding including multi-character expansions.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "uppercasedAscii",
+              "anchor": "function-uppercasedAscii",
+              "signature": "public func uppercasedAscii() -> String",
+              "doc": "Returns a string with ASCII characters converted to uppercase.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterable",
+          "source_path": "std.iter.Iterable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Char",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Iter",
+              "anchor": "typealias-Iter",
+              "signature": "type Iter = StringIterator",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "iter",
+              "anchor": "function-iter",
+              "signature": "public func iter() -> StringIterator",
+              "doc": "Returns an iterator over the Unicode code points.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(String) -> Bool",
+              "doc": "Compares two strings for equality.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Comparable",
+          "source_path": "std.core.Comparable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "compare",
+              "anchor": "function-compare",
+              "signature": "public func compare(String) -> Ordering",
+              "doc": "Compares two strings lexicographically.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Cloneable",
+          "source_path": "std.core.Cloneable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "clone",
+              "anchor": "function-clone",
+              "signature": "public func clone() -> String",
+              "doc": "Creates a shallow clone (COW - copy deferred until mutation).",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Formattable",
+          "source_path": "std.text.Formattable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "format",
+              "anchor": "function-format",
+              "signature": "public func format(FormatOptions) -> String",
+              "doc": "Returns the string formatted with the given options.\n\nSupports width and alignment formatting.\n\nExample:\n    \"test\".format(options: .{width: .Some(10), alignment: .Left})   // \"test      \"\n    \"test\".format(options: .{width: .Some(10), alignment: .Right})  // \"      test\"\n    \"test\".format(options: .{width: .Some(10), alignment: .Center}) // \"   test   \"",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Addable",
+          "source_path": "std.core.Addable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Output",
+              "anchor": "typealias-Output",
+              "signature": "type Output = String",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "add",
+              "anchor": "function-add",
+              "signature": "public func add(String) -> String",
+              "doc": "Concatenates two strings.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "field",
+              "name": "zero",
+              "anchor": "field-zero",
+              "signature": "public static var zero: String { get }",
+              "doc": "The additive identity for strings (empty string).",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ExpressibleByStringLiteral",
+          "source_path": "std.core.ExpressibleByStringLiteral",
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(stringLiteral: lang.str)",
+              "doc": "Creates an instance from a string literal.",
+              "source_path": "lang/std/core/literals.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Hash",
+          "source_path": "std.core.Hash",
+          "members": [
+            {
+              "kind": "function",
+              "name": "hash",
+              "anchor": "function-hash",
+              "signature": "public func hash[H](into: mutating H) where H: Hasher",
+              "doc": "Hashes the string's bytes.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Defaultable",
+          "source_path": "std.core.Defaultable",
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init()",
+              "doc": "Creates an instance with the default value.",
+              "source_path": "lang/std/core/protocols.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Convertible",
+          "source_path": "std.core.Convertible",
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(from: From)",
+              "doc": "Creates an instance of this type from a value of another type.",
+              "source_path": "lang/std/core/convertible.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "StringInterpolationProtocol",
+      "anchor": "protocol-StringInterpolationProtocol",
+      "signature": "public protocol StringInterpolationProtocol",
+      "doc": "Protocol for types that accumulate string interpolation parts.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "appendInterpolation",
+              "anchor": "function-appendInterpolation",
+              "signature": "mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable",
+              "doc": "Append a formatted value with options.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "function",
+              "name": "appendLiteral",
+              "anchor": "function-appendLiteral",
+              "signature": "mutating func appendLiteral(String)",
+              "doc": "Append a literal string segment.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "init(Int64, Int64)",
+              "doc": "Initialize with capacity hints for optimization.",
+              "source_path": "lang/std/text/format.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "StringIterator",
+      "anchor": "struct-StringIterator",
+      "signature": "public struct StringIterator { /* private fields */ }",
+      "doc": "Iterator over the Unicode code points (Char) in a string.",
+      "source_path": "lang/std/text/string.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(ptr: Pointer[UInt8], length: Int64)",
+              "doc": "Creates a string iterator from a pointer and length.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Iterator",
+          "source_path": "std.iter.Iterator",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "Item",
+              "anchor": "typealias-Item",
+              "signature": "type Item = Char",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "next",
+              "anchor": "function-next",
+              "signature": "public mutating func next() -> Char?",
+              "doc": "Returns the next character, or None if exhausted.",
+              "source_path": "lang/std/text/string.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Utf8DecodeResult",
+      "anchor": "struct-Utf8DecodeResult",
+      "signature": "public struct Utf8DecodeResult { /* private fields */ }",
+      "doc": "Result of decoding a UTF-8 character.",
+      "source_path": "lang/std/text/char.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "bytesConsumed",
+              "anchor": "field-bytesConsumed",
+              "signature": "public var bytesConsumed: Int64",
+              "doc": "Number of bytes consumed from the input.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "field",
+              "name": "char",
+              "anchor": "field-char",
+              "signature": "public var char: Char",
+              "doc": "The decoded character.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(char: Char, bytesConsumed: Int64)",
+              "doc": "Creates a decode result.",
+              "source_path": "lang/std/text/char.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "decodeUtf8",
+      "anchor": "function-decodeUtf8",
+      "signature": "public func decodeUtf8(lang.ptr[lang.i8], Int64, at: Int64) -> Utf8DecodeResult?",
+      "doc": "Decodes a single UTF-8 character from raw bytes.\n\nReturns None if the encoding is invalid.",
+      "source_path": "lang/std/text/char.ks"
+    },
+    {
+      "kind": "function",
+      "name": "encodeUtf8",
+      "anchor": "function-encodeUtf8",
+      "signature": "public func encodeUtf8(Char, lang.ptr[lang.i8], at: Int64) -> Int64",
+      "doc": "Encodes a character to UTF-8, writing to a buffer.\n\nReturns the number of bytes written (1-4).",
+      "source_path": "lang/std/text/char.ks"
+    }
+  ]
+}

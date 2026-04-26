@@ -2,49 +2,60 @@
 
 module std.result
 
-import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce)
+import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
 import std.text.(String, FormatOptions, Formattable)
 import std.result.(Result)
 import std.num.(Int64, UInt8)
 import std.memory.(Slice, Pointer)
 import std.iter.(Iterator)
 
-/// Represents an optional value: either `Some(value)` or `None`.
+/// A type-safe stand-in for nullable references — either `Some(value)` or
+/// `None`.
 ///
-/// Used for values that may be absent, providing a type-safe alternative to
-/// null pointers. The compiler enforces handling of the None case.
+/// `T?` desugars to `Optional[T]`, and the `null` literal constructs
+/// `.None` for any optional type. The compiler refuses to let you read the
+/// inner value without handling the `None` case, which is the whole point
+/// — there is no implicit unwrap. The `try` operator (and the `??`
+/// coalescing operator) propagate `None` through call chains so you can
+/// write linear code without nested `match` blocks.
 ///
-/// Syntactic sugar:
-///     T?           desugars to  Optional[T]
-///     null         creates      Optional.None
+/// # Examples
 ///
-/// Example:
-///     func find(id: Int64) -> User? {
-///         if let user = users.get(id) {
-///             return user
-///         }
-///         return null
-///     }
+/// ```
+/// func find(id: Int64) -> User? {
+///     if let user = users.get(id) { return user };
+///     null
+/// }
 ///
-///     let user = find(id: 42)
-///     match user {
-///         case .Some(let u) => print(u.name)
-///         case .None => print("Not found")
-///     }
+/// match find(id: 42) {
+///     .Some(let u) => print(u.name),
+///     .None        => print("Not found")
+/// }
+/// ```
 ///
-/// The `try` operator extracts values, returning early on None:
-///     func process() -> Result? {
-///         let a = try getA()  // returns None if getA() is None
-///         let b = try getB()
-///         return transform(a, b)
-///     }
+/// ```
+/// // `try` short-circuits on None
+/// func combine() -> Int64? {
+///     let a = try getA();   // returns None early if getA() is None
+///     let b = try getB();
+///     a + b
+/// }
+/// ```
+///
+/// # Representation
+///
+/// A two-case tagged union — one byte (or whatever the backend picks) of
+/// discriminant plus the payload of `T`. The compiler will use a niche
+/// when one is available (e.g. a non-zero pointer), so `Optional[Pointer]`
+/// is the same size as `Pointer`.
 @builtin(.OptionalEnum)
 public enum Optional[T] {
-    /// Contains a value.
+    /// Wraps a present value of `T`.
     @builtin(.OptionalSomeCase)
     case Some(T)
 
-    /// Contains no value.
+    /// The absent state — same shape as a null reference, but checked at
+    /// the type level.
     @builtin(.OptionalNoneCase)
     case None
 
@@ -52,25 +63,29 @@ public enum Optional[T] {
     // CONSTRUCTORS
     // ========================================================================
 
-    /// Creates a Some containing the value.
+    /// Wraps `value` in `.Some`. Rarely needed in practice — bare values
+    /// are promoted via `FromValue`, and `let x: Int64? = 42` does the
+    /// right thing.
     ///
-    /// Typically not needed - just return the value directly and it will
-    /// be wrapped automatically.
+    /// # Examples
     ///
-    /// Example:
-    ///     let opt = Optional.some(value: 42)  // Some(42)
-    ///     let opt: Int64? = 42                // Same, preferred
+    /// ```
+    /// let opt = Optional.some(value: 42);   // Some(42)
+    /// let opt: Int64? = 42;                 // identical, preferred
+    /// ```
     public static func some(value: T) -> Optional[T] {
         .Some(value)
     }
 
-    /// Creates a None.
+    /// Returns `.None`. Prefer the `null` literal — it works in any
+    /// optional context without naming the type parameter.
     ///
-    /// Typically not needed - use `null` literal instead.
+    /// # Examples
     ///
-    /// Example:
-    ///     let opt = Optional[Int64].none()  // None
-    ///     let opt: Int64? = null            // Same, preferred
+    /// ```
+    /// let a = Optional[Int64].none();   // None
+    /// let b: Int64? = null;             // identical, preferred
+    /// ```
     public static func none() -> Optional[T] {
         .None
     }
@@ -79,11 +94,14 @@ public enum Optional[T] {
     // QUERY METHODS
     // ========================================================================
 
-    /// Returns true if this is Some.
+    /// True when this is `.Some`. Cheap discriminator-only check.
     ///
-    /// Example:
-    ///     Some(42).isSome()  // true
-    ///     None.isSome()      // false
+    /// # Examples
+    ///
+    /// ```
+    /// Some(42).isSome();   // true
+    /// None.isSome();       // false
+    /// ```
     public func isSome() -> Bool {
         match self {
             .Some(_) => true,
@@ -91,11 +109,7 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns true if this is None.
-    ///
-    /// Example:
-    ///     Some(42).isNone()  // false
-    ///     None.isNone()      // true
+    /// True when this is `.None`. The complement of `isSome`.
     public func isNone() -> Bool {
         match self {
             .Some(_) => false,
@@ -103,12 +117,16 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns true if this is Some and the value satisfies the predicate.
+    /// True when `.Some(value)` and `predicate(value)` returns `true`.
+    /// `None` always answers `false` without invoking the predicate.
     ///
-    /// Example:
-    ///     Some(42).isSomeAnd({ it > 0 })   // true
-    ///     Some(-1).isSomeAnd({ it > 0 })   // false
-    ///     None.isSomeAnd({ it > 0 })       // false
+    /// # Examples
+    ///
+    /// ```
+    /// Some(42).isSomeAnd({ it > 0 });    // true
+    /// Some(-1).isSomeAnd({ it > 0 });    // false
+    /// None.isSomeAnd({ it > 0 });        // false
+    /// ```
     public func isSomeAnd(predicate: (T) -> Bool) -> Bool {
         match self {
             .Some(value) => predicate(value),
@@ -120,14 +138,20 @@ public enum Optional[T] {
     // UNWRAPPING
     // ========================================================================
 
-    /// Returns the contained value, panicking if None.
+    /// Returns the wrapped value, panicking if `None`. Reach for
+    /// `unwrapOr`, `unwrap(orElse:)`, the `??` operator, or pattern
+    /// matching unless you can prove the value is `Some`.
     ///
-    /// WARNING: Only use when you are certain the value is Some.
-    /// Prefer `unwrapOr`, `unwrap(orElse:)`, or pattern matching.
+    /// # Errors
     ///
-    /// Example:
-    ///     Some(42).unwrap()  // 42
-    ///     None.unwrap()      // PANIC: called unwrap on None
+    /// Panics with `"called unwrap() on None"` when invoked on `.None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Some(42).unwrap();   // 42
+    /// None.unwrap();       // PANIC
+    /// ```
     public func unwrap() -> T {
         match self {
             .Some(value) => value,
@@ -135,28 +159,36 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns the contained value, panicking with a custom message if None.
+    /// Like `unwrap`, but the panic carries `message` instead of the
+    /// generic text. Use this where the absence of a value should crash
+    /// loudly with context.
     ///
-    /// Use this for better error messages when a None is unexpected.
+    /// # Errors
     ///
-    /// Example:
-    ///     let config = loadConfig().expect(message: "Config file required")
-    ///     None.expect(message: "Should never happen")  // PANIC: Should never happen
+    /// Panics with `message` on `.None` via `fatalError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cfg = loadConfig().expect(message: "Config file required");
+    /// ```
     public func expect(message: String) -> T {
         match self {
             .Some(value) => value,
-            .None => lang.panic(message)
+            .None => fatalError(message)
         }
     }
 
-    /// Returns the contained value or the default if None.
+    /// Returns the wrapped value or `default` when `None`. `default` is
+    /// always evaluated — use `unwrap(orElse:)` if computing it is
+    /// expensive.
     ///
-    /// Note: The default is eagerly evaluated. Use `unwrap(orElse:)` for
-    /// lazy evaluation when the default is expensive to compute.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(42).unwrapOr(default: 0)  // 42
-    ///     None.unwrapOr(default: 0)      // 0
+    /// ```
+    /// Some(42).unwrapOr(default: 0);   // 42
+    /// None.unwrapOr(default: 0);       // 0
+    /// ```
     public func unwrapOr(default: T) -> T {
         match self {
             .Some(value) => value,
@@ -164,13 +196,15 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns the contained value or calls the function if None.
+    /// Like `unwrapOr`, but `defaultFn` is only called on `None`. Use this
+    /// when the default is expensive to compute or has side effects.
     ///
-    /// The function is only called if the Optional is None.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(42).unwrap(orElse: || expensiveDefault())  // 42, no call
-    ///     None.unwrap(orElse: || expensiveDefault())      // calls function
+    /// ```
+    /// Some(42).unwrap(orElse: || expensiveDefault());   // 42, no call
+    /// None.unwrap(orElse: || expensiveDefault());       // calls fn
+    /// ```
     public func unwrap(orElse defaultFn: () -> T) -> T {
         match self {
             .Some(value) => value,
@@ -182,15 +216,16 @@ public enum Optional[T] {
     // TRANSFORMATIONS
     // ========================================================================
 
-    /// Transforms the contained value using the function.
+    /// Functor map — applies `transform` to the wrapped value, leaving
+    /// `None` untouched.
     ///
-    /// Returns None if this is None, otherwise applies the function to the
-    /// contained value and wraps the result in Some.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(2).map({ it * 2 })        // Some(4)
-    ///     None.map({ it * 2 })           // None
-    ///     Some("hello").map({ it.len })  // Some(5)
+    /// ```
+    /// Some(2).map({ it * 2 });           // Some(4)
+    /// None.map({ it * 2 });              // None
+    /// Some("hello").map({ it.len });     // Some(5)
+    /// ```
     public func map[U](transform: (T) -> U) -> Optional[U] {
         match self {
             .Some(value) => .Some(transform(value)),
@@ -198,17 +233,18 @@ public enum Optional[T] {
         }
     }
 
-    /// Transforms the contained value, flattening the result.
+    /// Monadic bind — apply a transform that itself returns an
+    /// `Optional`, without nesting. Equivalent to `map(...).flatten()`.
     ///
-    /// Use when your transform function returns an Optional.
-    /// Equivalent to `map` followed by `flatten`.
+    /// # Examples
     ///
-    /// Example:
-    ///     func parse(s: String) -> Int64? { ... }
+    /// ```
+    /// func parse(s: String) -> Int64? { ... }
     ///
-    ///     Some("42").flatMap(parse)   // Some(42)
-    ///     Some("abc").flatMap(parse)  // None (parse failed)
-    ///     None.flatMap(parse)         // None
+    /// Some("42").flatMap(parse);    // Some(42)
+    /// Some("abc").flatMap(parse);   // None  (parse failed)
+    /// None.flatMap(parse);          // None
+    /// ```
     public func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U] {
         match self {
             .Some(value) => transform(value),
@@ -216,14 +252,16 @@ public enum Optional[T] {
         }
     }
 
-    /// Flattens a nested Optional.
+    /// Collapses an `Optional[Optional[T]]` one level. Available only
+    /// when `T` is itself an `Optional`.
     ///
-    /// Converts `Optional[Optional[T]]` to `Optional[T]`.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(Some(42)).flatten()  // Some(42)
-    ///     Some(None).flatten()      // None
-    ///     None.flatten()            // None
+    /// ```
+    /// Some(Some(42)).flatten();   // Some(42)
+    /// Some(None).flatten();       // None
+    /// None.flatten();             // None
+    /// ```
     public func flatten[U]() -> Optional[U] where T = Optional[U] {
         match self {
             .Some(inner) => inner,
@@ -231,12 +269,16 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns Some if predicate returns true, otherwise None.
+    /// Returns `Some(value)` when the predicate accepts the value, `None`
+    /// otherwise.
     ///
-    /// Example:
-    ///     Some(4).filter({ it % 2 == 0 })  // Some(4)
-    ///     Some(3).filter({ it % 2 == 0 })  // None
-    ///     None.filter({ it % 2 == 0 })     // None
+    /// # Examples
+    ///
+    /// ```
+    /// Some(4).filter({ it % 2 == 0 });   // Some(4)
+    /// Some(3).filter({ it % 2 == 0 });   // None
+    /// None.filter({ it % 2 == 0 });      // None
+    /// ```
     public func filter(predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
@@ -250,14 +292,17 @@ public enum Optional[T] {
         }
     }
 
-    /// Calls the function with the contained value for side effects.
+    /// Side-effecting tap — runs `fn` on the wrapped value (if any) and
+    /// returns `self` unchanged. Useful for logging or assertions inside
+    /// a chain.
     ///
-    /// Returns self unchanged. Useful for logging or debugging in a chain.
+    /// # Examples
     ///
-    /// Example:
-    ///     getUser(id)
-    ///         .inspect({ print("Found: \{it.name}") })
-    ///         .map({ it.email })
+    /// ```
+    /// getUser(id)
+    ///     .inspect({ print("Found: \{it.name}") })
+    ///     .map({ it.email });
+    /// ```
     public func inspect(fn: (T) -> ()) -> Optional[T] {
         match self {
             .Some(value) => {
@@ -272,14 +317,16 @@ public enum Optional[T] {
     // COMBINATORS
     // ========================================================================
 
-    /// Returns other if this is Some, otherwise None.
+    /// Returns `other` when `self` is `Some`, otherwise `None`. `other` is
+    /// evaluated eagerly — use `flatMap` for lazy chaining.
     ///
-    /// Note: `other` is eagerly evaluated. Use `flatMap` for lazy evaluation.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(1).then(other: Some("a"))  // Some("a")
-    ///     Some(1).then(other: None)       // None
-    ///     None.then(other: Some("a"))     // None
+    /// ```
+    /// Some(1).then(other: Some("a"));    // Some("a")
+    /// Some(1).then(other: None);         // None
+    /// None.then(other: Some("a"));       // None
+    /// ```
     public func then[U](other: Optional[U]) -> Optional[U] {
         match self {
             .Some(_) => other,
@@ -287,18 +334,20 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns this if Some, otherwise calls alternative.
+    /// Returns `self` when `Some`, otherwise the result of `alternative()`.
+    /// For "use a default scalar" prefer the `??` operator; reach for
+    /// `orElse` when the fallback itself is an `Optional`.
     ///
-    /// For the common case of providing a default value, prefer the `??` operator.
-    /// Use `orElse` when you need to return another Optional (not unwrap).
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(1).orElse(|| Some(2))        // Some(1), no call
-    ///     None.orElse(|| Some(2))           // Some(2)
-    ///     None.orElse(|| loadFromCache())   // calls function
+    /// ```
+    /// Some(1).orElse(|| Some(2));        // Some(1), fn not called
+    /// None.orElse(|| Some(2));           // Some(2)
+    /// None.orElse(|| loadFromCache());   // calls fn
     ///
-    ///     // For unwrapping with a default, prefer ??:
-    ///     let value = optionalInt ?? 0
+    /// // For unwrapping with a default, prefer ??:
+    /// let value = optionalInt ?? 0;
+    /// ```
     public func orElse(alternative: () -> Optional[T]) -> Optional[T] {
         match self {
             .Some(value) => .Some(value),
@@ -306,13 +355,17 @@ public enum Optional[T] {
         }
     }
 
-    /// Returns Some if exactly one of this or other is Some.
+    /// Exclusive-or of presence — returns the unique `Some` when exactly
+    /// one of `self`/`other` is set, else `None`.
     ///
-    /// Example:
-    ///     Some(1).xor(other: None)     // Some(1)
-    ///     None.xor(other: Some(2))     // Some(2)
-    ///     Some(1).xor(other: Some(2))  // None
-    ///     None.xor(other: None)        // None
+    /// # Examples
+    ///
+    /// ```
+    /// Some(1).xor(other: None);       // Some(1)
+    /// None.xor(other: Some(2));       // Some(2)
+    /// Some(1).xor(other: Some(2));    // None
+    /// None.xor(other: None);          // None
+    /// ```
     public func xor(other: Optional[T]) -> Optional[T] {
         match (self, other) {
             (.Some(value), .None) => .Some(value),
@@ -321,14 +374,16 @@ public enum Optional[T] {
         }
     }
 
-    /// Combines two Optionals into an Optional of a tuple.
+    /// Pairs two optionals into an optional tuple. `Some` only when both
+    /// inputs are `Some`.
     ///
-    /// Returns Some only if both are Some.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(1).zip(with: Some("a"))  // Some((1, "a"))
-    ///     Some(1).zip(with: None)       // None
-    ///     None.zip(with: Some("a"))     // None
+    /// ```
+    /// Some(1).zip(with: Some("a"));   // Some((1, "a"))
+    /// Some(1).zip(with: None);        // None
+    /// None.zip(with: Some("a"));      // None
+    /// ```
     public func zip[U](with other: Optional[U]) -> Optional[(T, U)] {
         match (self, other) {
             (.Some(a), .Some(b)) => .Some((a, b)),
@@ -340,13 +395,15 @@ public enum Optional[T] {
     // CONVERSION TO RESULT
     // ========================================================================
 
-    /// Converts to Result, using the provided error if None.
+    /// Promotes to `Result`, supplying `error` for the `None` branch.
+    /// `error` is eagerly evaluated — use `okOrElse` to defer it.
     ///
-    /// Note: The error is eagerly evaluated. Use `okOrElse` for lazy evaluation.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(42).okOr(error: "missing")  // Ok(42)
-    ///     None.okOr(error: "missing")      // Err("missing")
+    /// ```
+    /// Some(42).okOr(error: "missing");   // Ok(42)
+    /// None.okOr(error: "missing");       // Err("missing")
+    /// ```
     public func okOr[E](error: E) -> Result[T, E] {
         match self {
             .Some(value) => .Ok(value),
@@ -354,11 +411,14 @@ public enum Optional[T] {
         }
     }
 
-    /// Converts to Result, calling the function to create an error if None.
+    /// Like `okOr`, but `error()` is only invoked on `None`.
     ///
-    /// Example:
-    ///     Some(42).okOrElse(|| NotFoundError())  // Ok(42), no call
-    ///     None.okOrElse(|| NotFoundError())      // Err(NotFoundError())
+    /// # Examples
+    ///
+    /// ```
+    /// Some(42).okOrElse(|| NotFoundError());   // Ok(42), fn not called
+    /// None.okOrElse(|| NotFoundError());       // Err(NotFoundError())
+    /// ```
     public func okOrElse[E](error: () -> E) -> Result[T, E] {
         match self {
             .Some(value) => .Ok(value),
@@ -370,45 +430,53 @@ public enum Optional[T] {
     // MUTATING OPERATIONS
     // ========================================================================
 
-    /// Takes the value out, leaving None in its place.
+    /// Removes and returns the current value, leaving `self` as `None`.
+    /// Idiomatic for "consume once" optional fields.
     ///
-    /// Returns the original value (Some or None).
+    /// # Examples
     ///
-    /// Example:
-    ///     var opt = Some(42)
-    ///     opt.take()  // Some(42), opt is now None
-    ///     opt.take()  // None, opt is still None
+    /// ```
+    /// var opt = Some(42);
+    /// opt.take();   // Some(42); opt is now None
+    /// opt.take();   // None;     opt is still None
+    /// ```
     public mutating func take() -> Optional[T] {
         let result = self;
         self = .None;
         result
     }
 
-    /// Replaces the value, returning the old value.
+    /// Stores `value` and returns whatever was there before. Mirror of
+    /// `take` for the assignment direction.
     ///
-    /// Example:
-    ///     var opt = Some(1)
-    ///     opt.replace(value: 2)  // Some(1), opt is now Some(2)
+    /// # Examples
     ///
-    ///     var none: Int64? = null
-    ///     none.replace(value: 1)  // None, none is now Some(1)
+    /// ```
+    /// var opt = Some(1);
+    /// opt.replace(value: 2);    // Some(1); opt is now Some(2)
+    ///
+    /// var none: Int64? = null;
+    /// none.replace(value: 1);   // None;    none is now Some(1)
+    /// ```
     public mutating func replace(value: T) -> Optional[T] {
         let old = self;
         self = .Some(value);
         old
     }
 
-    /// Takes the value if the predicate is satisfied.
+    /// Conditional `take` — empties `self` and returns the value only when
+    /// `predicate(value)` accepts it. Otherwise leaves `self` untouched
+    /// and returns `None`.
     ///
-    /// If Some and predicate returns true, takes the value leaving None.
-    /// Otherwise returns None and leaves self unchanged.
+    /// # Examples
     ///
-    /// Example:
-    ///     var opt = Some(42)
-    ///     opt.takeIf({ it > 0 })   // Some(42), opt is now None
+    /// ```
+    /// var opt = Some(42);
+    /// opt.takeIf({ it > 0 });    // Some(42); opt is now None
     ///
-    ///     var opt2 = Some(42)
-    ///     opt2.takeIf({ it < 0 })  // None, opt2 is still Some(42)
+    /// var opt2 = Some(42);
+    /// opt2.takeIf({ it < 0 });   // None;     opt2 is still Some(42)
+    /// ```
     public mutating func takeIf(predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
@@ -427,18 +495,21 @@ public enum Optional[T] {
     // ITERATION
     // ========================================================================
 
-    /// Returns an iterator over the contained value (0 or 1 elements).
+    /// Returns an `OptionalIterator` that yields one element if `Some` or
+    /// zero elements if `None`. Lets an optional plug into any `for-in`
+    /// or iterator-combinator pipeline.
     ///
-    /// Useful for integrating with iterator-based APIs.
+    /// # Examples
     ///
-    /// Example:
-    ///     for value in Some(42).iter() {
-    ///         print(value)  // prints 42
-    ///     }
+    /// ```
+    /// for value in Some(42).iter() {
+    ///     print(value)   // prints 42
+    /// };
     ///
-    ///     for value in None.iter() {
-    ///         print(value)  // never executes
-    ///     }
+    /// for value in None.iter() {
+    ///     print(value)   // never executes
+    /// };
+    /// ```
     public func iter() -> OptionalIterator[T] {
         OptionalIterator(self)
     }
@@ -448,19 +519,21 @@ public enum Optional[T] {
 // CONDITIONAL EXTENSIONS - EQUATABLE
 // ============================================================================
 
-/// Extension for Optionals with equatable values.
+/// Equatable when the inner type is — `None == None` is true, `Some(a) ==
+/// Some(b)` defers to `T.equals`, and a present value is never equal to
+/// `None`.
 extend Optional[T]: Equatable where T: Equatable {
 
-    /// Compares two Optionals for equality.
+    /// Structural equality on the optional. Backs `==`.
     ///
-    /// Two Optionals are equal if both are None, or both are Some with
-    /// equal values.
+    /// # Examples
     ///
-    /// Example:
-    ///     Some(1) == Some(1)  // true
-    ///     Some(1) == Some(2)  // false
-    ///     Some(1) == None     // false
-    ///     None == None        // true
+    /// ```
+    /// Some(1) == Some(1);   // true
+    /// Some(1) == Some(2);   // false
+    /// Some(1) == None;      // false
+    /// None == None;         // true
+    /// ```
     public func equals(other: Optional[T]) -> Bool {
         match (self, other) {
             (.Some(a), .Some(b)) => a == b,
@@ -469,12 +542,17 @@ extend Optional[T]: Equatable where T: Equatable {
         }
     }
 
-    /// Returns true if this is Some containing the given value.
+    /// True when `self` is `Some` and the wrapped value equals `value`.
+    /// Slightly cheaper than `== Some(value)` when you already have the
+    /// bare value.
     ///
-    /// Example:
-    ///     Some(42).contains(value: 42)  // true
-    ///     Some(42).contains(value: 0)   // false
-    ///     None.contains(value: 42)      // false
+    /// # Examples
+    ///
+    /// ```
+    /// Some(42).contains(value: 42);   // true
+    /// Some(42).contains(value: 0);    // false
+    /// None.contains(value: 42);       // false
+    /// ```
     public func contains(value: T) -> Bool {
         match self {
             .Some(inner) => inner == value,
@@ -487,20 +565,21 @@ extend Optional[T]: Equatable where T: Equatable {
 // CONDITIONAL EXTENSIONS - COMPARABLE
 // ============================================================================
 
-/// Extension for Optionals with comparable values.
-///
-/// None is considered less than any Some value.
+/// Comparable when the inner type is. The total order treats `None` as
+/// less than every `Some`, so sorting `[Some(2), None, Some(1)]` gives
+/// `[None, Some(1), Some(2)]`.
 extend Optional[T]: Comparable where T: Comparable {
 
-    /// Compares two Optionals.
+    /// Three-way compare. `None < Some(_)`; two `Some`s defer to the
+    /// inner `compare`.
     ///
-    /// Ordering: None < Some(x) for any x.
-    /// When both are Some, compares the contained values.
+    /// # Examples
     ///
-    /// Example:
-    ///     None < Some(1)      // true
-    ///     Some(1) < Some(2)   // true
-    ///     Some(2) < Some(1)   // false
+    /// ```
+    /// None < Some(1);     // true
+    /// Some(1) < Some(2);  // true
+    /// Some(2) < Some(1);  // false
+    /// ```
     public func compare(other: Optional[T]) -> Ordering {
         match (self, other) {
             (.None, .None) => .Equal,
@@ -515,12 +594,12 @@ extend Optional[T]: Comparable where T: Comparable {
 // CONDITIONAL EXTENSIONS - HASH
 // ============================================================================
 
-/// Extension for Optionals with hashable values.
+/// Hashable when the inner type is. The discriminant is mixed in first so
+/// `None` and `Some(0)` hash to different values.
 extend Optional[T]: Hash where T: Hash {
 
-    /// Hashes this Optional into the given hasher.
-    ///
-    /// None has a distinct hash from any Some value.
+    /// Mixes a one-byte tag (`0` for `None`, `1` for `Some`) into the
+    /// hasher, then defers to `T.hash` for the payload.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         match self {
             .Some(value) => {
@@ -542,14 +621,20 @@ extend Optional[T]: Hash where T: Hash {
 // EXTENSIONS - CLONE
 // ============================================================================
 
-/// Clone-like helper available for all Optionals.
+/// Clone helper available for every `Optional[T]` (the inner clone falls
+/// out of value-semantics on `T`).
 extend Optional[T] {
 
-    /// Creates a deep clone of the Optional.
+    /// Returns an independent copy. For value types this is a shallow
+    /// copy of the payload; for COW types, the underlying buffer is
+    /// shared until first mutation.
     ///
-    /// Example:
-    ///     let opt = Some([1, 2, 3])
-    ///     let copy = opt.clone()  // independent copy
+    /// # Examples
+    ///
+    /// ```
+    /// let opt = Some([1, 2, 3]);
+    /// let copy = opt.clone();   // independent copy
+    /// ```
     public func clone() -> Optional[T] {
         match self {
             .Some(value) => .Some(value),
@@ -562,21 +647,23 @@ extend Optional[T] {
 // PROTOCOL CONFORMANCES
 // ============================================================================
 
-/// Tryable extension enabling `try` on Optional values.
+/// `Tryable` conformance — lets `try someOptional` extract the inner
+/// value or short-circuit the enclosing function with `None`.
 ///
-/// When used with the `try` operator, extracts the value from Some or
-/// causes early return with None.
+/// # Examples
 ///
-/// Example:
-///     func process() -> Int64? {
-///         let a = try getA()  // returns None early if None
-///         let b = try getB()
-///         return a + b
-///     }
+/// ```
+/// func process() -> Int64? {
+///     let a = try getA();   // returns None early if getA() is None
+///     let b = try getB();
+///     a + b
+/// }
+/// ```
 extend Optional[T]: Tryable {
     type Output = T
     type Early = ()
 
+    /// Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
     public func tryExtract() -> ControlFlow[T, ()] {
         match self {
             .Some(value) => .Continue(value),
@@ -585,33 +672,40 @@ extend Optional[T]: Tryable {
     }
 }
 
-/// FromResidual extension enabling early return propagation.
+/// `FromResidual[()]` — turns a `try`-propagated `()` residual back into
+/// `.None` so chains of `try` returning optionals compose.
 extend Optional[T]: FromResidual[()] {
+    /// Builds `.None` from the residual produced by a `try` short-circuit.
     public static func fromResidual(residual: ()) -> Optional[T] {
         .None
     }
 }
 
-/// FromValue extension enabling value promotion.
-/// Allows: let x: Int? = 5
+/// `FromValue[T]` — promotes a bare `T` to `Optional[T]` so
+/// `let x: Int? = 5` works without explicit `.Some`.
 extend Optional[T]: FromValue[T] {
+    /// Wraps `value` in `.Some`. Called by the compiler at the promotion
+    /// site, not usually by user code.
     public static func from(value: T) -> Optional[T] {
         .Some(value)
     }
 }
 
-/// Formattable extension when T is Formattable.
+/// `Formattable` when `T` is. Default rendering is `Some(value)` /
+/// `None`; the debug specifier `:?` (handled by the formatter) prepends
+/// `Optional.`.
 ///
-/// Example:
-///     "\{Some(42)}"    // "Some(42)"
-///     "\{None}"        // "None"
-///     "\{Some(42):?}"  // "Optional.Some(42)"
+/// # Examples
+///
+/// ```
+/// "\{Some(42)}";     // "Some(42)"
+/// "\{None}";         // "None"
+/// "\{Some(42):?}";   // "Optional.Some(42)"
+/// ```
 extend Optional[T]: Formattable where T: Formattable {
 
-    /// Formats this optional.
-    ///
-    /// Default format: "Some(value)" or "None".
-    /// Debug format: "Optional.Some(value)" or "Optional.None".
+    /// Renders `Some(...)` or `None`, forwarding `options` to the inner
+    /// `format` for the payload.
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         match self {
             .Some(value) => "Some(" + value.format(options) + ")",
@@ -620,28 +714,38 @@ extend Optional[T]: Formattable where T: Formattable {
     }
 }
 
-/// ExpressibleByNullLiteral - allows `null` to create Optional.None.
+/// `ExpressibleByNullLiteral` — makes the `null` literal yield `.None`
+/// in any optional context.
 ///
-/// Example:
-///     let opt: Int64? = null  // None
-///     if condition { return null }
+/// # Examples
+///
+/// ```
+/// let opt: Int64? = null;            // None
+/// if condition { return null };
+/// ```
 extend Optional[T]: ExpressibleByNullLiteral {
+    /// @name Null Literal
+    /// Compiler-emitted bridge for the `null` literal. Always constructs
+    /// `.None`.
     public init() {
         self = .None
     }
 }
 
-/// Coalesce extension enabling the ?? operator.
+/// `Coalesce` — backs the `??` operator with lazy default evaluation.
 ///
-/// Example:
-///     let value = optionalInt ?? 0
-///     let name = user?.name ?? "Anonymous"
+/// # Examples
+///
+/// ```
+/// let value = optionalInt ?? 0;
+/// let name  = user?.name   ?? "Anonymous";
+/// ```
 extend Optional[T]: Coalesce[T] {
     type Coalesce.Output = T
 
-    /// Returns the contained value or evaluates the default.
-    ///
-    /// The default expression is only evaluated if this is None.
+    /// Returns the wrapped value or evaluates `default()`. The default is
+    /// only invoked on `None`, which is what makes `??` cheap on the
+    /// happy path.
     public func coalesce(default: () -> T) -> T {
         match self {
             .Some(value) => value,
@@ -654,23 +758,33 @@ extend Optional[T]: Coalesce[T] {
 // OPTIONAL ITERATOR
 // ============================================================================
 
-/// Iterator for Optional that yields 0 or 1 elements.
+/// Single-shot iterator yielding zero or one elements. Returned by
+/// `Optional.iter()`.
 ///
-/// Obtained by calling `iter()` on an Optional.
+/// # Examples
 ///
-/// Example:
-///     let items: [Int64] = Some(42).iter().collect()  // [42]
-///     let empty: [Int64] = None.iter().collect()      // []
+/// ```
+/// let items: [Int64] = Some(42).iter().collect();   // [42]
+/// let empty: [Int64] = None.iter().collect();       // []
+/// ```
+///
+/// # Representation
+///
+/// One `Optional[T]` field. `next()` empties it on first call.
 public struct OptionalIterator[T]: Iterator {
     type Item = T
 
     private var value: Optional[T]
 
+    /// @name From Optional
+    /// Builds an iterator that will yield the contents of `value` on its
+    /// first `next()` call (or terminate immediately if `value` is `None`).
     public init(value: Optional[T]) {
         self.value = value;
     }
 
-    /// Returns the next element, or None if exhausted.
+    /// Returns and clears the stored value, then returns `None` forever.
+    /// `O(1)` and allocation-free.
     public mutating func next() -> Optional[T] {
         let result = self.value;
         self.value = .None;
@@ -682,13 +796,16 @@ public struct OptionalIterator[T]: Iterator {
 // TYPE OPERATOR
 // ============================================================================
 
-/// Type operator alias: T? desugars to Optional[T].
+/// Compiler hook — `T?` desugars to `Optional[T]` via this alias. End
+/// users should write the sugar; this declaration exists so the operator
+/// can resolve to a concrete type.
 ///
-/// This provides convenient syntax for optional types.
+/// # Examples
 ///
-/// Example:
-///     var name: String? = null       // same as Optional[String]
-///     func find(id: Int64) -> User?  // returns Optional[User]
-///     let nested: Int64?? = null     // Optional[Optional[Int64]]
+/// ```
+/// var name: String? = null;            // same as Optional[String]
+/// func find(id: Int64) -> User?;       // returns Optional[User]
+/// let nested: Int64?? = null;          // Optional[Optional[Int64]]
+/// ```
 @builtin(.OptionalTypeOperator)
 public type OptionalTypeOperator[T] = Optional[T];

@@ -1,0 +1,11 @@
+// test: diagnostics
+// stdlib: true
+
+module Main
+import std.io.stdio.println
+
+func main() -> std.num.Int64 {
+    let val = 255;
+    let _ = println("hex:\(val:x) HEX:\(val:#X) bin:\(val:#b) pad:\(val:08x)");
+    0
+}

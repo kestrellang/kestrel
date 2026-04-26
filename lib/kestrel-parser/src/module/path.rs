@@ -4,7 +4,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::common::module_path_parser_internal;
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens};
+use crate::parse_and_emit;
 
 /// Represents a module path like A.B.C
 ///
@@ -80,19 +80,11 @@ pub fn parse_module_path<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::prelude::*;
-
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match module_path_parser_internal().parse(input).into_result() {
-        Ok(segments) => {
-            crate::common::emit_module_path(sink, &segments);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        module_path_parser_internal(),
+        |sink, segments: Vec<Span>| crate::common::emit_module_path(sink, &segments)
+    );
 }

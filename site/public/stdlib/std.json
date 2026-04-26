@@ -1,0 +1,18 @@
+{
+  "path": "std",
+  "name": "std",
+  "submodules": [
+    "std.collections",
+    "std.core",
+    "std.ffi",
+    "std.io",
+    "std.iter",
+    "std.memory",
+    "std.net",
+    "std.num",
+    "std.os",
+    "std.result",
+    "std.text"
+  ],
+  "items": []
+}

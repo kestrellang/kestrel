@@ -1,0 +1,10 @@
+[package]
+name = "kestrel-ast"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-span = { path = "../kestrel-span" }

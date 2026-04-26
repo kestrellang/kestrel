@@ -4,6 +4,35 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Stdlib reference: collapsible <details> rows for member definitions.
+   Hide the default disclosure triangle and rotate our own chevron when
+   the row is open. */
+.member-row > summary::-webkit-details-marker { display: none; }
+.member-row[open] > summary > .member-chevron { transform: rotate(90deg); }
+
+/* Slim, low-contrast scrollbar for the stdlib sidebar drawer. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 98, 116, 0.35) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar { width: 4px !important; }
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(74, 98, 116, 0.35) !important;
+  border-radius: 2px !important;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(74, 98, 116, 0.6) !important;
+}
+.dark .sidebar-scroll {
+  scrollbar-color: rgba(184, 176, 168, 0.25) transparent;
+}
+.dark .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(184, 176, 168, 0.25) !important;
+}
+.dark .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(184, 176, 168, 0.45) !important;
+}
+
 :root {
   --font-serif: "Fraunces", Georgia, serif;
   --font-mono: "Fira Code", monospace;

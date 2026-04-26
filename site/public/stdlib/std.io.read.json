@@ -1,0 +1,231 @@
+{
+  "path": "std.io.read",
+  "name": "read",
+  "submodules": [],
+  "items": [
+    {
+      "kind": "struct",
+      "name": "Cursor",
+      "anchor": "struct-Cursor",
+      "signature": "public struct Cursor { /* private fields */ }",
+      "doc": "A reader that reads from a byte array with a movable position.",
+      "source_path": "lang/std/io/read.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "data",
+              "anchor": "field-data",
+              "signature": "var data: Array[UInt8]",
+              "doc": "",
+              "source_path": "lang/std/io/read.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Array[UInt8])",
+              "doc": "Creates a cursor that reads from the given data.",
+              "source_path": "lang/std/io/read.ks"
+            },
+            {
+              "kind": "field",
+              "name": "pos",
+              "anchor": "field-pos",
+              "signature": "var pos: Int64",
+              "doc": "",
+              "source_path": "lang/std/io/read.ks"
+            },
+            {
+              "kind": "function",
+              "name": "position",
+              "anchor": "function-position",
+              "signature": "public func position() -> Int64",
+              "doc": "Returns the current position.",
+              "source_path": "lang/std/io/read.ks"
+            },
+            {
+              "kind": "function",
+              "name": "setPosition",
+              "anchor": "function-setPosition",
+              "signature": "public mutating func setPosition(to: Int64)",
+              "doc": "Sets the position, clamping to valid range.",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Read",
+          "source_path": "std.io.read.Read",
+          "members": [
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Reads bytes from the current position.",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Cloneable",
+          "source_path": "std.core.Cloneable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "clone",
+              "anchor": "function-clone",
+              "signature": "public func clone() -> Cursor",
+              "doc": "",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Empty",
+      "anchor": "struct-Empty",
+      "signature": "public struct Empty { /* private fields */ }",
+      "doc": "A reader that always returns EOF immediately.",
+      "source_path": "lang/std/io/read.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init()",
+              "doc": "Creates an empty reader.",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Read",
+          "source_path": "std.io.read.Read",
+          "members": [
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Always returns 0 (EOF).",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "Read",
+      "anchor": "protocol-Read",
+      "signature": "public protocol Read",
+      "doc": "Protocol for types that can be read from.\n\nImplementors provide a source of bytes that can be read into a buffer.",
+      "source_path": "lang/std/io/read.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Reads bytes into the buffer.\n\nReturns the number of bytes read, or 0 on EOF.",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Repeat",
+      "anchor": "struct-Repeat",
+      "signature": "public struct Repeat { /* private fields */ }",
+      "doc": "A reader that produces an infinite stream of a single byte.",
+      "source_path": "lang/std/io/read.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "byte",
+              "anchor": "field-byte",
+              "signature": "var byte: UInt8",
+              "doc": "",
+              "source_path": "lang/std/io/read.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(UInt8)",
+              "doc": "Creates a repeat reader that yields the given byte forever.",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "Read",
+          "source_path": "std.io.read.Read",
+          "members": [
+            {
+              "kind": "function",
+              "name": "read",
+              "anchor": "function-read",
+              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
+              "doc": "Fills the entire buffer with the repeated byte.",
+              "source_path": "lang/std/io/read.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "readAll",
+      "anchor": "function-readAll",
+      "signature": "public func readAll[R](mutating R, into: mutating Array[UInt8]) -> Result[Int64, Error] where R: Read",
+      "doc": "Reads all bytes from a reader into an array.\n\nReturns the total number of bytes read.",
+      "source_path": "lang/std/io/read.ks"
+    },
+    {
+      "kind": "function",
+      "name": "readByte",
+      "anchor": "function-readByte",
+      "signature": "public func readByte[R](mutating R) -> Result[Optional[UInt8], Error] where R: Read",
+      "doc": "Reads a single byte from a reader.\n\nReturns None on EOF.",
+      "source_path": "lang/std/io/read.ks"
+    },
+    {
+      "kind": "function",
+      "name": "readExact",
+      "anchor": "function-readExact",
+      "signature": "public func readExact[R](mutating R, into: Slice[UInt8]) -> Result[(), Error] where R: Read",
+      "doc": "Reads exactly count bytes from a reader.\n\nReturns Err if EOF is reached before count bytes are read.\nUse when you need a specific number of bytes and a short read is an error.\n\nExample:\n    var file = try File.open(path: \"header.bin\")\n    var header = Array[UInt8](repeating: 0, count: 16)\n    try readExact(reader: file, into: header.asSlice())  // must read 16 bytes",
+      "source_path": "lang/std/io/read.ks"
+    }
+  ]
+}

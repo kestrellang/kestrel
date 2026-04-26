@@ -66,7 +66,10 @@ public struct PathSource: PackageSource {
                 }
 
                 match readFileString(manifestPath) {
-                    .Err(e) => return .Err(FlockError.IoError("cannot read " + manifestPath)),
+                    .Err(e) => {
+                        var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
+                        return .Err(FlockError.IoError(msg))
+                    },
                     .Ok(source) => {
                         match parseManifest(source: source) {
                             .Err(e) => return .Err(e),
@@ -83,9 +86,8 @@ public struct PathSource: PackageSource {
                 }
             },
             .Registry(_) => {
-                .Err(FlockError.DependencyNotFound(
-                    name + " (registry dependencies not yet supported)"
-                ))
+                var msg = String(); msg.append(name); msg.append(" (registry dependencies not yet supported)");
+                .Err(FlockError.DependencyNotFound(msg))
             }
         }
     }
@@ -141,9 +143,9 @@ public func joinPath(base base: String, rel rel: String) -> String {
     i = 0;
     while i < parts.count {
         if i > 0 or base.starts(with: "/") {
-            result = result + "/"
+            result.append("/")
         }
-        result = result + parts(unchecked: i);
+        result.append(parts(unchecked: i));
         i = i + 1
     }
 
@@ -159,7 +161,7 @@ func splitOnSlash(s: String) -> Array[String] {
 
     while i < len {
         let byte = s.byteAtUnchecked(i);
-        if byte == UInt8(intLiteral: 47) { // '/'
+        if byte == 47 { // '/'
             if i > start {
                 result.append(s.substringBytes(from: start, to: i))
             }

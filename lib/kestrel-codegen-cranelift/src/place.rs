@@ -1,1000 +1,624 @@
-//! Place (memory location) compilation.
+//! Place compilation — reading from and writing to memory locations.
+//!
+//! Uses `common::get_place_type`, `common::get_field_info`, and
+//! `common::copy_aggregate` as shared helpers (eliminating lib1's duplication).
 
+use crate::common::{self, get_enum_payload_offset, get_field_info, is_aggregate};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::monomorphize::{Substitution, build_substitution};
-use crate::types::translate_type_with_subst;
-
-use kestrel_codegen::Layout;
-
-use kestrel_execution_graph::{Id, Local, MirTy, Place, PlaceKind, Ty};
-
-use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
-use cranelift_frontend::{FunctionBuilder, Variable};
+use crate::function::FunctionState;
+use crate::types;
+use cranelift_codegen::ir::immediates::Offset32;
+use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
+use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
+use kestrel_codegen::{LayoutCache, NamedKind, substitute_type};
+use kestrel_hecs::Entity;
+use kestrel_mir::{MirTy, Place};
+use std::collections::HashMap;
 
-use std::collections::{HashMap, HashSet};
-
-/// Read a value from a place.
-pub fn compile_place_read(
-    ctx: &mut CodegenContext<'_>,
-    place: &Place,
-    builder: &mut FunctionBuilder<'_>,
-    local_map: &HashMap<Id<Local>, Variable>,
-    subst: &Substitution,
-    stack_locals: &HashSet<Id<Local>>,
-) -> Result<CraneliftValue, CodegenError> {
-    match &place.kind {
-        PlaceKind::Local(local_id) => {
-            let var = local_map
-                .get(local_id)
-                .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
-            let local_def = ctx.mir.local(*local_id);
-            if stack_locals.contains(local_id) {
-                let addr = builder.use_var(*var);
-                let cl_type = translate_type_with_subst(ctx.mir, local_def.ty, ctx.target, subst);
-                Ok(builder.ins().load(cl_type, MemFlags::new(), addr, 0))
-            } else {
-                // Both aggregate and non-aggregate types use the variable directly
-                Ok(builder.use_var(*var))
-            }
-        },
-
-        PlaceKind::Global(name_id) => {
-            // Global/static variable access
-            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
-
-            // Look up the global symbol
-            let global_ref = ctx
-                .module
-                .declare_data(
-                    &mangled_name,
-                    cranelift_module::Linkage::Import,
-                    false,
-                    false,
-                )
-                .map_err(|e| {
-                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
-                })?;
-
-            // Get the global address
-            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
-
-            // Find the static definition to get its type
-            let static_def = ctx
-                .mir
-                .statics
-                .iter()
-                .find(|(_, def)| def.name == *name_id)
-                .map(|(_, def)| def)
-                .ok_or_else(|| {
-                    CodegenError::Unsupported(format!(
-                        "static variable not found: {}",
-                        mangled_name
-                    ))
-                })?;
-
-            let static_ty = static_def.ty;
-            let concrete_ty = subst
-                .apply_ty_readonly(ctx.mir, static_ty)
-                .unwrap_or(static_ty);
-
-            // Compute pointer type
-            let ptr_type = if ctx.target.is_64bit() {
-                cl_types::I64
-            } else {
-                cl_types::I32
-            };
-
-            // Get pointer to the global
-            let ptr = builder.ins().global_value(ptr_type, global_addr);
-
-            // For aggregate types, return the pointer (like stack-allocated locals)
-            // For scalar types, load the value
-            if is_aggregate_type(ctx, concrete_ty) {
-                Ok(ptr)
-            } else {
-                let cl_type = translate_type_with_subst(ctx.mir, static_ty, ctx.target, subst);
-                Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
-            }
-        },
-
-        PlaceKind::Field { parent, name } => {
-            // Get the struct pointer from the parent place
-            let struct_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-
-            // Get the type of the parent to find field offset
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (field_offset, field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
-
-            // Compute pointer type
-            let _ptr_type = if ctx.target.is_64bit() {
-                cl_types::I64
-            } else {
-                cl_types::I32
-            };
-
-            // Load the field value from struct_ptr + offset
-            let field_cl_ty = translate_type_with_subst(ctx.mir, field_ty, ctx.target, subst);
-
-            // Apply substitution to get the concrete field type
-            // This is important for generic structs where field types might be type parameters
-            let concrete_field_ty = subst
-                .apply_ty_readonly(ctx.mir, field_ty)
-                .unwrap_or(field_ty);
-
-            // Check if the field is an aggregate type - keep it as a pointer
-            if is_aggregate_type(ctx, concrete_field_ty) {
-                // For struct fields, return a pointer to the nested struct
-                if field_offset == 0 {
-                    Ok(struct_ptr)
-                } else {
-                    Ok(builder.ins().iadd_imm(struct_ptr, field_offset as i64))
-                }
-            } else {
-                // For primitive fields, load the value
-                Ok(builder.ins().load(
-                    field_cl_ty,
-                    MemFlags::new(),
-                    struct_ptr,
-                    field_offset as i32,
-                ))
-            }
-        },
-
-        PlaceKind::Index { parent, index } => {
-            // Index access is used for:
-            // 1. Tuple field access (tuple.0, tuple.1, etc.)
-            // 2. Enum payload field access after downcast (enum.SomeCase.0, etc.)
-            //
-            // The parent could be a struct/tuple or a downcast result.
-            // We need to get the pointer and add the offset for the indexed field.
-            let parent_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-
-            // Get the parent type to find the field at this index
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-
-            // Find the field offset for this index
-            let (field_offset, field_ty) =
-                get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
-
-            // Compute pointer type
-            let _ptr_type = if ctx.target.is_64bit() {
-                cl_types::I64
-            } else {
-                cl_types::I32
-            };
-
-            // Load the field value from parent_ptr + offset
-            let field_cl_ty = translate_type_with_subst(ctx.mir, field_ty, ctx.target, subst);
-
-            // Apply substitution to get the concrete field type
-            // This is important for generic tuples/structs where field types might be type parameters
-            let concrete_field_ty = subst
-                .apply_ty_readonly(ctx.mir, field_ty)
-                .unwrap_or(field_ty);
-
-            // Check if the field is an aggregate type - keep it as a pointer
-            if is_aggregate_type(ctx, concrete_field_ty) {
-                // For compound fields, return a pointer to the nested struct/tuple
-                if field_offset == 0 {
-                    Ok(parent_ptr)
-                } else {
-                    Ok(builder.ins().iadd_imm(parent_ptr, field_offset as i64))
-                }
-            } else {
-                // For primitive fields, load the value
-                Ok(builder.ins().load(
-                    field_cl_ty,
-                    MemFlags::new(),
-                    parent_ptr,
-                    field_offset as i32,
-                ))
-            }
-        },
-
-        PlaceKind::Downcast { parent, variant } => {
-            // Downcast is used after a switch to access the variant's payload.
-            // The enum layout is: [discriminant: i32][padding][payload...]
-            // After downcast, we return a pointer to the payload area.
-            let enum_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-            let enum_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant, subst)?;
-
-            // Compute pointer type
-            let _ptr_type = if ctx.target.is_64bit() {
-                cl_types::I64
-            } else {
-                cl_types::I32
-            };
-
-            // Return a pointer to the payload area
-            Ok(builder.ins().iadd_imm(enum_ptr, payload_offset as i64))
-        },
-
-        PlaceKind::Deref(inner) => {
-            // Get the pointer value from the inner place
-            let ptr = compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)?;
-
-            // Get the type of the inner (which should be a pointer/ref type)
-            let inner_ty = get_place_type(ctx, inner, local_map, subst)?;
-            let pointee_ty = get_pointee_type(ctx, inner_ty)?;
-
-            // Apply substitution to get the concrete pointee type
-            // This is critical for generic functions where the pointee might be a type parameter
-            let concrete_pointee_ty = subst
-                .apply_ty_readonly(ctx.mir, pointee_ty)
-                .unwrap_or(pointee_ty);
-
-            // Check if the pointee is an aggregate type - keep it as a pointer
-            if is_aggregate_type(ctx, concrete_pointee_ty) {
-                // For struct types, the "value" is the pointer itself
-                // (structs are always passed by pointer)
-                Ok(ptr)
-            } else {
-                // For primitive types, load the value from memory
-                let cl_type = translate_type_with_subst(ctx.mir, pointee_ty, ctx.target, subst);
-                Ok(builder.ins().load(cl_type, MemFlags::new(), ptr, 0))
-            }
-        },
-    }
-}
-
-/// Get the pointee type of a pointer/reference type.
-fn get_pointee_type(ctx: &CodegenContext<'_>, ptr_ty: Id<Ty>) -> Result<Id<Ty>, CodegenError> {
-    match ctx.mir.ty(ptr_ty) {
-        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => Ok(*inner),
-        _ => Err(CodegenError::Unsupported(format!(
-            "not a pointer/reference type: {:?}",
-            ctx.mir.ty(ptr_ty)
-        ))),
-    }
-}
-
-pub(crate) fn get_enum_payload_offset(
-    ctx: &mut CodegenContext<'_>,
-    enum_ty: Id<Ty>,
-    _variant: &str,
-    subst: &Substitution,
-) -> Result<usize, CodegenError> {
-    let mir_ty = ctx.mir.ty(enum_ty);
-    let (enum_id, type_args) = match mir_ty {
-        MirTy::Named { name, type_args } => {
-            let name_data = ctx.mir.name(*name);
-            // Apply substitution to type_args to replace any type parameters with concrete types
-            let type_args: Vec<_> = type_args
-                .iter()
-                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
-                .collect();
-            let mut found = None;
-            for (id, def) in ctx.mir.enums.iter() {
-                if ctx.mir.name(def.name) == name_data {
-                    found = Some(id);
-                    break;
-                }
-            }
-            let enum_id = found.ok_or_else(|| {
-                CodegenError::Unsupported(format!("enum not found for type: {}", name_data))
-            })?;
-            (enum_id, type_args)
-        },
-        _ => {
-            return Err(CodegenError::Unsupported(format!(
-                "downcast on non-enum type: {:?}",
-                mir_ty
-            )));
-        },
-    };
-
-    let enum_def = ctx.mir.enum_def(enum_id);
-
-    // We need to compute the payload offset based on the maximum payload alignment
-    // across ALL cases, not just the specific case we're accessing. This ensures
-    // all cases have a consistent payload offset.
-    let case_ids: Vec<_> = enum_def.cases.clone();
-    let mut max_payload_layout = Layout::zero(1);
-
-    for case_id in &case_ids {
-        let case_def = &ctx.mir.enum_cases[*case_id];
-        if let Some(struct_id) = case_def.struct_def {
-            let payload_layout = ctx.layouts.struct_layout(struct_id, &type_args, None);
-            // Track the maximum alignment and size
-            if payload_layout.layout.align > max_payload_layout.align
-                || (payload_layout.layout.align == max_payload_layout.align
-                    && payload_layout.layout.size > max_payload_layout.size)
-            {
-                max_payload_layout = payload_layout.layout;
-            }
-        }
-    }
-
-    let discriminant_layout = Layout::new(4, 4);
-    let (payload_offset, _) = discriminant_layout.append(max_payload_layout);
-    Ok(payload_offset)
-}
-
-/// Check if a type is a struct type.
-#[allow(dead_code)]
-pub fn is_struct_type_public(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
-    is_struct_type(ctx, ty)
-}
-
-/// Check if a type is represented as an aggregate behind a pointer.
-fn is_aggregate_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
-    matches!(
-        ctx.mir.ty(ty),
-        MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
-    )
-}
-
-/// Check if a type is a struct type.
-#[allow(dead_code)]
-fn is_struct_type(ctx: &CodegenContext<'_>, ty: Id<Ty>) -> bool {
-    let mir_ty = ctx.mir.ty(ty);
-    if let MirTy::Named { name, .. } = mir_ty {
-        let name_data = ctx.mir.name(*name);
-        for (_, def) in ctx.mir.structs.iter() {
-            if ctx.mir.name(def.name) == name_data {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Get the type of a place expression.
-#[allow(clippy::only_used_in_recursion)]
-fn get_place_type(
-    ctx: &mut CodegenContext<'_>,
-    place: &Place,
-    local_map: &HashMap<Id<Local>, Variable>,
-    subst: &Substitution,
-) -> Result<Id<Ty>, CodegenError> {
-    match &place.kind {
-        PlaceKind::Local(local_id) => {
-            let local_def = ctx.mir.local(*local_id);
-            Ok(local_def.ty)
-        },
-
-        PlaceKind::Global(name_id) => {
-            // Find the static definition to get its type
-            let static_def = ctx
-                .mir
-                .statics
-                .iter()
-                .find(|(_, def)| def.name == *name_id)
-                .map(|(_, def)| def)
-                .ok_or_else(|| {
-                    let global_name = ctx.mir.name(*name_id);
-                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
-                })?;
-            Ok(static_def.ty)
-        },
-
-        PlaceKind::Field { parent, name } => {
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (_, field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
-            Ok(field_ty)
-        },
-
-        PlaceKind::Index { parent, index } => {
-            // Get the type of the indexed field
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (_, field_ty) = get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
-            Ok(field_ty)
-        },
-
-        PlaceKind::Downcast { parent, .. } => {
-            // Downcast doesn't change the type for our purposes
-            get_place_type(ctx, parent, local_map, subst)
-        },
-
-        PlaceKind::Deref(inner) => {
-            // Get the type of the inner (which should be a pointer/ref type)
-            let inner_ty = get_place_type(ctx, inner, local_map, subst)?;
-            // Return the pointee type
-            get_pointee_type(ctx, inner_ty)
-        },
-    }
-}
-
-fn copy_aggregate_value(
-    ctx: &mut CodegenContext<'_>,
-    ty: Id<Ty>,
-    dest_ptr: CraneliftValue,
-    src_ptr: CraneliftValue,
-    builder: &mut FunctionBuilder<'_>,
+/// Store a scalar value directly to an aggregate destination.
+/// Used when a function returns a small value that fits in a register
+/// but the destination type is aggregate (Named struct).
+pub fn store_scalar_to_aggregate(
+    builder: &mut FunctionBuilder,
+    layouts: &mut LayoutCache,
+    ty: &MirTy,
+    dest: CrValue,
+    value: CrValue,
 ) {
-    // Unit types have zero size - nothing to copy
-    if matches!(ctx.mir.ty(ty), kestrel_execution_graph::MirTy::Unit) {
-        return;
-    }
-
-    let layout = ctx.layouts.layout_of(ty);
-    if layout.size == 0 {
-        return;
-    }
-
-    // Skip copy if src_ptr is a constant 0 (null pointer from Unit value).
-    // This can happen when if-else expressions have aggregate types but
-    // the branch values are from discarded statement results.
-    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr)
-        && let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
-            builder.func.dfg.insts[inst]
-        && imm.bits() == 0
-    {
-        return;
-    }
-
-    // Byte-wise copy keeps correctness for small aggregates (e.g. UInt8 structs).
-    for offset in 0..layout.size {
-        let byte = builder
-            .ins()
-            .load(cl_types::I8, MemFlags::new(), src_ptr, offset as i32);
+    let layout = layouts.layout_of(ty);
+    if layout.size <= 8 && layout.size > 0 {
         builder
             .ins()
-            .store(MemFlags::new(), byte, dest_ptr, offset as i32);
+            .store(MemFlags::new(), value, dest, Offset32::new(0));
+    } else {
+        // Shouldn't happen for non-sret returns, but fall back to copy
+        common::copy_aggregate(builder, layouts, ty, dest, value);
     }
 }
 
-/// Get field offset and type for a named field in a struct type.
-fn get_field_info(
-    ctx: &mut CodegenContext<'_>,
-    parent_ty: Id<Ty>,
-    field_name: &str,
-    subst: &Substitution,
-) -> Result<(usize, Id<Ty>), CodegenError> {
-    let mir_ty = ctx.mir.ty(parent_ty);
+/// Read a value from a place expression.
+pub fn compile_place_read(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+) -> Result<CrValue, CodegenError> {
+    // Guard against deep recursion from nested place projections
+    stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        compile_place_read_inner(ctx, state, builder, place)
+    })
+}
 
-    let (struct_id, type_args) = match mir_ty {
-        MirTy::Named { name, type_args } => {
-            let name_data = ctx.mir.name(*name);
-            // Apply substitution to type_args to replace any type parameters with concrete types
-            let type_args: Vec<_> = type_args
-                .iter()
-                .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
-                .collect();
-            let mut found = None;
-            for (id, def) in ctx.mir.structs.iter() {
-                if ctx.mir.name(def.name) == name_data {
-                    found = Some(id);
+/// Read a place whose MIR type is a primitive (bare `lang.iN`/`lang.fN`) or a
+/// single-field wrapper aggregate around one (Bool, Char, Int64, …) and
+/// return the primitive scalar value at `width`.
+///
+/// Aggregate-ness is decided from the MIR type — **never** from the cranelift
+/// SSA value type. On 64-bit targets `Int64`'s wrapper width (I64) collides
+/// with `ptr_type` (I64), so a bare `raw_ty == width` check would treat the
+/// scrutinee pointer as the value itself and silently compare addresses
+/// against literals. Any new code that needs a scalar out of a
+/// possibly-wrapped primitive must go through this helper.
+pub fn compile_place_read_scalar(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+    width: ir::Type,
+) -> Result<(CrValue, MirTy), CodegenError> {
+    let ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        place,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+    let raw = compile_place_read(ctx, state, builder, place)?;
+    let val = if is_aggregate(&ty, &mut ctx.layouts) {
+        builder
+            .ins()
+            .load(width, MemFlags::new(), raw, Offset32::new(0))
+    } else {
+        raw
+    };
+    Ok((val, ty))
+}
+
+fn compile_place_read_inner(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+) -> Result<CrValue, CodegenError> {
+    let ptr_ty = common::ptr_type(ctx.target);
+    let ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        place,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+
+    // Unit/Never are zero-sized — return a zero constant, never load from memory
+    if ty.is_unit() || matches!(ty, MirTy::Never) {
+        return Ok(builder.ins().iconst(ptr_ty, 0));
+    }
+
+    match place {
+        Place::Local(id) => Ok(builder.use_var(state.local_vars[id.index()])),
+        Place::Global(entity) => read_global(ctx, builder, entity, &ty),
+        Place::Field { parent, name } => read_field(ctx, state, builder, parent, name),
+        Place::Index { parent, index } => read_index(ctx, state, builder, parent, *index),
+        Place::Downcast { parent, variant } => read_downcast(ctx, state, builder, parent, variant),
+        Place::Deref(inner) => read_deref(ctx, state, builder, inner, &ty),
+    }
+}
+
+/// Either load a scalar value from `ptr` or return `ptr` unchanged when `ty`
+/// is aggregate (aggregates are passed/held by pointer).
+fn load_or_ptr(
+    ctx: &mut CodegenContext,
+    builder: &mut FunctionBuilder,
+    ty: &MirTy,
+    ptr: CrValue,
+) -> CrValue {
+    if is_aggregate(ty, &mut ctx.layouts) {
+        ptr
+    } else {
+        let cl_ty = types::translate_type(ty, ctx.target);
+        builder
+            .ins()
+            .load(cl_ty, MemFlags::new(), ptr, Offset32::new(0))
+    }
+}
+
+fn read_global(
+    ctx: &mut CodegenContext,
+    builder: &mut FunctionBuilder,
+    entity: &Entity,
+    ty: &MirTy,
+) -> Result<CrValue, CodegenError> {
+    let ptr_ty = common::ptr_type(ctx.target);
+    let static_def = ctx
+        .module
+        .statics
+        .iter()
+        .find(|s| s.entity == *entity)
+        .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
+
+    let mut mangler = kestrel_codegen::Mangler::new(ctx.module);
+    mangler.push_prefix();
+    mangler.mangle_name_path(&static_def.name);
+    let mangled = mangler.finish();
+
+    let data_id = ctx
+        .cl_module
+        .declare_data(&mangled, cranelift_module::Linkage::Import, false, false)
+        .map_err(|e| CodegenError::DataSection(format!("declare global: {e}")))?;
+
+    let gv = ctx.cl_module.declare_data_in_func(data_id, builder.func);
+    let addr = builder.ins().global_value(ptr_ty, gv);
+
+    Ok(load_or_ptr(ctx, builder, ty, addr))
+}
+
+fn read_field(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    parent: &Place,
+    name: &str,
+) -> Result<CrValue, CodegenError> {
+    let parent_val = compile_place_read(ctx, state, builder, parent)?;
+    let parent_ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        parent,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+
+    let MirTy::Named { entity, type_args } = &parent_ty else {
+        return Err(CodegenError::Unsupported(format!(
+            "field access on non-Named: {name}"
+        )));
+    };
+    let NamedKind::Struct(struct_id) = ctx.layouts.resolve_named(*entity) else {
+        return Err(CodegenError::Unsupported(format!(
+            "field access on non-struct: {name}"
+        )));
+    };
+
+    let type_args = common::substitute_type_args(
+        type_args,
+        &state.subst,
+        state.self_type.as_ref(),
+        ctx.module,
+    );
+    let (offset, field_ty) =
+        get_field_info(ctx.module, &mut ctx.layouts, struct_id, &type_args, name)?;
+    let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
+    Ok(load_or_ptr(ctx, builder, &field_ty, field_ptr))
+}
+
+fn read_index(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    parent: &Place,
+    index: usize,
+) -> Result<CrValue, CodegenError> {
+    let parent_val = compile_place_read(ctx, state, builder, parent)?;
+    let parent_ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        parent,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+
+    match &parent_ty {
+        MirTy::Tuple(elems) => {
+            let mut offset = 0u64;
+            let mut layout = kestrel_codegen::Layout::zero(1);
+            for (i, elem) in elems.iter().enumerate() {
+                let elem_layout = ctx.layouts.layout_of(elem);
+                let (field_offset, new_layout) = layout.append(elem_layout);
+                if i == index {
+                    offset = field_offset;
                     break;
                 }
+                layout = new_layout;
             }
-            let struct_id = found.ok_or_else(|| {
-                CodegenError::Unsupported(format!("struct not found: {}", name_data))
-            })?;
-            (struct_id, type_args)
+            let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
+            let elem_ty = elems[index].clone();
+            Ok(load_or_ptr(ctx, builder, &elem_ty, field_ptr))
         },
-        _ => {
-            return Err(CodegenError::Unsupported(format!(
-                "field access on non-struct type: {:?}",
-                mir_ty
-            )));
-        },
-    };
-
-    // Get field offset from layout (pass type_args for generic structs)
-    // Also pass self_type from the substitution context - this is needed for closure
-    // environment structs in protocol extension methods where fields may have
-    // associated type projections like AssociatedTypeProjection { base: SelfType, ... }
-    let struct_def = ctx.mir.struct_def(struct_id);
-    let self_type = subst.get_self_type();
-    let struct_layout = ctx.layouts.struct_layout(struct_id, &type_args, self_type);
-    let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
-        let struct_name = ctx.mir.name(struct_def.name);
-        let available_fields: Vec<_> = struct_layout.field_offsets.keys().collect();
-        CodegenError::Unsupported(format!(
-            "unknown field: {} in struct {} (available: {:?})",
-            field_name, struct_name, available_fields
-        ))
-    })?;
-
-    // Get field type
-    let type_params: Vec<_> = struct_def.type_params.clone();
-    let mut field_ty = None;
-    for field_id in &struct_def.fields {
-        let field_def = &ctx.mir.fields[*field_id];
-        if field_def.name == field_name {
-            field_ty = Some(field_def.ty);
-            break;
-        }
-    }
-
-    let mut field_ty = field_ty.ok_or_else(|| {
-        CodegenError::Unsupported(format!("field type not found: {}", field_name))
-    })?;
-
-    // Substitute the field type if the struct is generic
-    if !type_params.is_empty() && type_params.len() == type_args.len() {
-        let field_subst = build_substitution(ctx.mir, &type_params, &type_args);
-        if let Ok(substituted_ty) = field_subst.apply_ty_readonly(ctx.mir, field_ty) {
-            field_ty = substituted_ty;
-        }
-    }
-
-    Ok((offset, field_ty))
-}
-
-/// Get field offset and type by index for a struct or enum payload.
-///
-/// This handles the case where we have a downcast to an enum variant and need
-/// to access the payload fields by index.
-fn get_field_by_index(
-    ctx: &mut CodegenContext<'_>,
-    parent_place: &Place,
-    parent_ty: Id<Ty>,
-    index: usize,
-    subst: &Substitution,
-) -> Result<(usize, Id<Ty>), CodegenError> {
-    // Check if the parent is a downcast - in that case, we need to find the variant struct
-    if let PlaceKind::Downcast {
-        parent: grandparent,
-        variant,
-    } = &parent_place.kind
-    {
-        // Get the enum type from the grandparent
-        let enum_ty = get_place_type(ctx, grandparent, &HashMap::new(), subst)?;
-        let mir_ty = ctx.mir.ty(enum_ty);
-
-        if let MirTy::Named { name, type_args } = mir_ty {
-            let name_data = ctx.mir.name(*name);
-            let type_args = type_args.clone();
-
-            // Find the enum
-            for (_enum_id, enum_def) in ctx.mir.enums.iter() {
-                let def_name = ctx.mir.name(enum_def.name);
-                if def_name == name_data {
-                    // Find the case
-                    let case_id = enum_def.case_by_name(variant).ok_or_else(|| {
-                        CodegenError::Unsupported(format!("enum case not found: {}", variant))
-                    })?;
-                    let case_def = &ctx.mir.enum_cases[case_id];
-
-                    // Get the payload struct
-                    let struct_id = case_def.struct_def.ok_or_else(|| {
-                        CodegenError::Unsupported(format!(
-                            "enum case {} has no struct_def",
-                            variant
-                        ))
-                    })?;
-
-                    // Pass the enum's type_args since payload struct uses the same type parameters
-                    return get_struct_field_by_index(ctx, struct_id, &type_args, index, subst);
-                }
-            }
-
-            return Err(CodegenError::Unsupported(format!(
-                "enum not found for downcast: {}",
-                name_data
-            )));
-        }
-    }
-
-    // Otherwise, it's a regular struct or tuple - look up by index
-    // Resolve AssociatedTypeProjection through substitution before matching
-    let parent_ty = if matches!(
-        ctx.mir.ty(parent_ty),
-        MirTy::AssociatedTypeProjection { .. }
-    ) {
-        subst
-            .apply_ty_readonly(ctx.mir, parent_ty)
-            .unwrap_or(parent_ty)
-    } else {
-        parent_ty
-    };
-    let mir_ty = ctx.mir.ty(parent_ty);
-
-    match mir_ty {
-        MirTy::Named { name, type_args } => {
-            let name_data = ctx.mir.name(*name);
-            let type_args = type_args.clone();
-
-            // Try to find as struct
-            for (struct_id, def) in ctx.mir.structs.iter() {
-                if ctx.mir.name(def.name) == name_data {
-                    return get_struct_field_by_index(ctx, struct_id, &type_args, index, subst);
-                }
-            }
-
-            Err(CodegenError::Unsupported(format!(
-                "struct not found for index access: {}",
-                name_data
-            )))
-        },
-        MirTy::Tuple(elements) => {
-            // For tuples, calculate offset sequentially
-            let elements = elements.clone();
-            if index >= elements.len() {
+        MirTy::Named { entity, type_args } => {
+            let NamedKind::Struct(struct_id) = ctx.layouts.resolve_named(*entity) else {
                 return Err(CodegenError::Unsupported(format!(
-                    "tuple index {} out of bounds (len {})",
-                    index,
-                    elements.len()
+                    "index on non-struct Named: {index}"
                 )));
-            }
-
-            // Calculate offset by summing sizes of previous elements
-            // Apply substitution to element types to get correct layouts
-            let mut offset = 0usize;
-            for (i, elem_ty) in elements.iter().enumerate() {
-                let concrete_ty = subst
-                    .apply_ty_readonly(ctx.mir, *elem_ty)
-                    .unwrap_or(*elem_ty);
-                let elem_layout = ctx.layouts.layout_of(concrete_ty);
-                // Align to this element's alignment
-                offset = (offset + elem_layout.align - 1) & !(elem_layout.align - 1);
-                if i == index {
-                    return Ok((offset, *elem_ty));
-                }
-                offset += elem_layout.size;
-            }
-
-            unreachable!()
+            };
+            let type_args = common::substitute_type_args(
+                type_args,
+                &state.subst,
+                state.self_type.as_ref(),
+                ctx.module,
+            );
+            let (offset, field_ty) = common::get_field_by_index(
+                ctx.module,
+                &mut ctx.layouts,
+                struct_id,
+                &type_args,
+                index,
+            )?;
+            let field_ptr = builder.ins().iadd_imm(parent_val, offset as i64);
+            Ok(load_or_ptr(ctx, builder, &field_ty, field_ptr))
         },
         _ => Err(CodegenError::Unsupported(format!(
-            "index access on unsupported type: {:?}",
-            mir_ty
+            "index on unsupported type: {index}"
         ))),
     }
 }
 
-/// Get a struct field by index.
-fn get_struct_field_by_index(
-    ctx: &mut CodegenContext<'_>,
-    struct_id: kestrel_execution_graph::Id<kestrel_execution_graph::Struct>,
-    type_args: &[Id<Ty>],
-    index: usize,
-    subst: &Substitution,
-) -> Result<(usize, Id<Ty>), CodegenError> {
-    let struct_def = ctx.mir.struct_def(struct_id);
-    let fields: Vec<_> = struct_def.fields.clone();
-    let type_params: Vec<_> = struct_def.type_params.clone();
+fn read_downcast(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    parent: &Place,
+    variant: &str,
+) -> Result<CrValue, CodegenError> {
+    let parent_val = compile_place_read(ctx, state, builder, parent)?;
+    let parent_ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        parent,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
 
-    if index >= fields.len() {
+    let MirTy::Named { entity, type_args } = &parent_ty else {
         return Err(CodegenError::Unsupported(format!(
-            "field index {} out of bounds (struct has {} fields)",
-            index,
-            fields.len()
+            "downcast on non-Named: {variant}"
         )));
-    }
-
-    let field_id = fields[index];
-    let field_def = &ctx.mir.fields[field_id];
-    let field_name = &field_def.name;
-    let mut field_ty = field_def.ty;
-
-    // Apply substitution to type_args to get concrete types
-    let concrete_type_args: Vec<_> = type_args
-        .iter()
-        .map(|&ty| subst.apply_ty_readonly(ctx.mir, ty).unwrap_or(ty))
-        .collect();
-
-    // Get field offset from layout (pass substituted type_args for generic structs)
-    let struct_layout = ctx
-        .layouts
-        .struct_layout(struct_id, &concrete_type_args, None);
-    let offset = *struct_layout.field_offsets.get(field_name).ok_or_else(|| {
-        CodegenError::Unsupported(format!("field offset not found: {}", field_name))
-    })?;
-
-    // Substitute the field type if the struct is generic
-    // The field may have type T (a type parameter) which needs to be substituted
-    // with the concrete type argument
-    if !type_params.is_empty() && type_params.len() == concrete_type_args.len() {
-        let field_subst = build_substitution(ctx.mir, &type_params, &concrete_type_args);
-        if let Ok(substituted_ty) = field_subst.apply_ty_readonly(ctx.mir, field_ty) {
-            field_ty = substituted_ty;
-        }
-    }
-
-    Ok((offset, field_ty))
-}
-
-/// Write a value to a place.
-pub fn compile_place_write(
-    ctx: &mut CodegenContext<'_>,
-    place: &Place,
-    value: CraneliftValue,
-    builder: &mut FunctionBuilder<'_>,
-    local_map: &HashMap<Id<Local>, Variable>,
-    subst: &Substitution,
-    stack_locals: &HashSet<Id<Local>>,
-) -> Result<(), CodegenError> {
-    match &place.kind {
-        PlaceKind::Local(local_id) => {
-            let var = local_map
-                .get(local_id)
-                .ok_or_else(|| CodegenError::Unsupported("unknown local".to_string()))?;
-
-            let local_def = ctx.mir.local(*local_id);
-            let concrete_ty = subst
-                .apply_ty_readonly(ctx.mir, local_def.ty)
-                .unwrap_or(local_def.ty);
-
-            // Unit types are zero-sized - nothing to write
-            if matches!(
-                ctx.mir.ty(concrete_ty),
-                kestrel_execution_graph::MirTy::Unit
-            ) {
-                return Ok(());
-            }
-
-            if stack_locals.contains(local_id) {
-                let addr = builder.use_var(*var);
-                builder.ins().store(MemFlags::new(), value, addr, 0);
-                return Ok(());
-            }
-            if is_aggregate_type(ctx, concrete_ty) {
-                let dest_ptr = builder.use_var(*var);
-                copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
-                return Ok(());
-            }
-
-            builder.def_var(*var, value);
-            Ok(())
-        },
-
-        PlaceKind::Global(name_id) => {
-            // Global/static variable write
-            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
-
-            // Look up the global symbol
-            let global_ref = ctx
-                .module
-                .declare_data(
-                    &mangled_name,
-                    cranelift_module::Linkage::Import,
-                    true,
-                    false,
-                )
-                .map_err(|e| {
-                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
-                })?;
-
-            // Get the global address
-            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
-
-            // Find the static definition to get its type
-            let static_def = ctx
-                .mir
-                .statics
-                .iter()
-                .find(|(_, def)| def.name == *name_id)
-                .map(|(_, def)| def)
-                .ok_or_else(|| {
-                    let global_name = ctx.mir.name(*name_id);
-                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
-                })?;
-
-            let static_ty = static_def.ty;
-            let concrete_ty = subst
-                .apply_ty_readonly(ctx.mir, static_ty)
-                .unwrap_or(static_ty);
-
-            // Compute pointer type
-            let ptr_type = if ctx.target.is_64bit() {
-                cl_types::I64
-            } else {
-                cl_types::I32
-            };
-
-            // Get the pointer to the global
-            let ptr = builder.ins().global_value(ptr_type, global_addr);
-
-            // Handle aggregate types (structs, tuples) by copying the data
-            if is_aggregate_type(ctx, concrete_ty) {
-                copy_aggregate_value(ctx, concrete_ty, ptr, value, builder);
-            } else {
-                // Store scalar value directly to the global
-                builder.ins().store(MemFlags::new(), value, ptr, 0);
-            }
-            Ok(())
-        },
-
-        PlaceKind::Field { parent, name } => {
-            // Get the struct pointer from the parent place
-            let struct_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-
-            // Get the type of the parent to find field offset
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (field_offset, field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
-
-            // Store the value at struct_ptr + offset
-            let concrete_ty = subst
-                .apply_ty_readonly(ctx.mir, field_ty)
-                .unwrap_or(field_ty);
-            if is_aggregate_type(ctx, concrete_ty) {
-                let dest_ptr = if field_offset == 0 {
-                    struct_ptr
-                } else {
-                    builder.ins().iadd_imm(struct_ptr, field_offset as i64)
-                };
-                copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
-                return Ok(());
-            }
-
-            builder
-                .ins()
-                .store(MemFlags::new(), value, struct_ptr, field_offset as i32);
-            Ok(())
-        },
-
-        PlaceKind::Index { parent, index } => {
-            // Index write is used for:
-            // 1. Tuple field assignment (tuple.0 = value)
-            // 2. Enum payload field assignment after downcast (enum.SomeCase.0 = value)
-            let parent_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-
-            // Get the parent type to find the field at this index
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-
-            // Find the field offset for this index
-            let (field_offset, field_ty) =
-                get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
-
-            // Store the value at parent_ptr + offset
-            let concrete_ty = subst
-                .apply_ty_readonly(ctx.mir, field_ty)
-                .unwrap_or(field_ty);
-            if is_aggregate_type(ctx, concrete_ty) {
-                let dest_ptr = if field_offset == 0 {
-                    parent_ptr
-                } else {
-                    builder.ins().iadd_imm(parent_ptr, field_offset as i64)
-                };
-                copy_aggregate_value(ctx, concrete_ty, dest_ptr, value, builder);
-                return Ok(());
-            }
-
-            builder
-                .ins()
-                .store(MemFlags::new(), value, parent_ptr, field_offset as i32);
-            Ok(())
-        },
-
-        PlaceKind::Downcast { parent, variant } => {
-            // Downcast write is used when assigning to an enum variant's payload area.
-            // The enum layout is: [discriminant: i32][padding][payload...]
-            // We need to get the pointer to the payload area and store there.
-            let enum_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-            let enum_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant, subst)? as i32;
-
-            // Store the value at the payload area
-            builder
-                .ins()
-                .store(MemFlags::new(), value, enum_ptr, payload_offset);
-            Ok(())
-        },
-
-        PlaceKind::Deref(inner) => {
-            // Get the pointer value from the inner place
-            let ptr = compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)?;
-
-            // Store the value at the pointer address
-            let dest_ty = get_place_type(ctx, place, local_map, subst)?;
-            let concrete_ty = subst.apply_ty_readonly(ctx.mir, dest_ty).unwrap_or(dest_ty);
-            if is_aggregate_type(ctx, concrete_ty) {
-                copy_aggregate_value(ctx, concrete_ty, ptr, value, builder);
-                return Ok(());
-            }
-
-            builder.ins().store(MemFlags::new(), value, ptr, 0);
-            Ok(())
-        },
-    }
-}
-
-/// Get the address of a place (for taking references).
-///
-/// This is used by Rvalue::Ref and Rvalue::RefMut to get a pointer to a place.
-#[allow(dead_code)]
-pub fn compile_place_addr(
-    ctx: &mut CodegenContext<'_>,
-    place: &Place,
-    builder: &mut FunctionBuilder<'_>,
-    local_map: &HashMap<Id<Local>, Variable>,
-    local_slots: &HashMap<Id<Local>, cranelift_codegen::ir::StackSlot>,
-    subst: &Substitution,
-    stack_locals: &HashSet<Id<Local>>,
-) -> Result<CraneliftValue, CodegenError> {
-    let ptr_type = if ctx.target.is_64bit() {
-        cl_types::I64
-    } else {
-        cl_types::I32
+    };
+    let NamedKind::Enum(enum_id) = ctx.layouts.resolve_named(*entity) else {
+        return Err(CodegenError::Unsupported(format!(
+            "downcast on non-enum: {variant}"
+        )));
     };
 
-    match &place.kind {
-        PlaceKind::Local(local_id) => {
-            // Get the stack slot for this local
-            let slot = local_slots.get(local_id).ok_or_else(|| {
-                CodegenError::Unsupported(
-                    "no stack slot for local (cannot take reference of register-only local)"
-                        .to_string(),
-                )
-            })?;
-            Ok(builder.ins().stack_addr(ptr_type, *slot, 0))
+    let type_args = common::substitute_type_args(
+        type_args,
+        &state.subst,
+        state.self_type.as_ref(),
+        ctx.module,
+    );
+    let payload_offset = get_enum_payload_offset(ctx.module, &mut ctx.layouts, enum_id, &type_args);
+    Ok(builder.ins().iadd_imm(parent_val, payload_offset as i64))
+}
+
+fn read_deref(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    inner: &Place,
+    ty: &MirTy,
+) -> Result<CrValue, CodegenError> {
+    let ptr_val = compile_place_read(ctx, state, builder, inner)?;
+    Ok(load_or_ptr(ctx, builder, ty, ptr_val))
+}
+
+/// Write a value to a place expression.
+pub fn compile_place_write(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+    value: CrValue,
+) -> Result<(), CodegenError> {
+    let ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        place,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+
+    // Unit/Never are zero-sized — nothing to write
+    if ty.is_unit() || matches!(ty, MirTy::Never) {
+        return Ok(());
+    }
+
+    match place {
+        Place::Local(id) => {
+            if is_aggregate(&ty, &mut ctx.layouts) || state.stack_locals.contains(id) {
+                // Write to the stack slot pointed to by the variable
+                let dest_ptr = builder.use_var(state.local_vars[id.index()]);
+                if is_aggregate(&ty, &mut ctx.layouts) {
+                    common::copy_aggregate(builder, &mut ctx.layouts, &ty, dest_ptr, value);
+                } else {
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
+                }
+            } else {
+                builder.def_var(state.local_vars[id.index()], value);
+            }
+            Ok(())
         },
 
-        PlaceKind::Global(name_id) => {
-            // Global/static variable - return the address of the global
-            let mangled_name = kestrel_codegen::mangle_name(ctx.mir, *name_id, &[]);
+        Place::Field { parent, name } => {
+            let parent_ptr = compile_place_read(ctx, state, builder, parent)?;
+            let parent_ty = common::get_place_type(
+                ctx.module,
+                state.body,
+                parent,
+                &state.subst,
+                state.self_type.as_ref(),
+                &ctx.layouts,
+            )?;
 
-            // Look up the global symbol
-            let global_ref = ctx
+            match &parent_ty {
+                MirTy::Named { entity, type_args } => {
+                    let type_args = common::substitute_type_args(
+                        type_args,
+                        &state.subst,
+                        state.self_type.as_ref(),
+                        ctx.module,
+                    );
+
+                    match ctx.layouts.resolve_named(*entity) {
+                        NamedKind::Struct(struct_id) => {
+                            let (offset, field_ty) = get_field_info(
+                                ctx.module,
+                                &mut ctx.layouts,
+                                struct_id,
+                                &type_args,
+                                name,
+                            )?;
+                            let field_ptr = builder.ins().iadd_imm(parent_ptr, offset as i64);
+
+                            if is_aggregate(&field_ty, &mut ctx.layouts) {
+                                common::copy_aggregate(
+                                    builder,
+                                    &mut ctx.layouts,
+                                    &field_ty,
+                                    field_ptr,
+                                    value,
+                                );
+                            } else {
+                                builder.ins().store(
+                                    MemFlags::new(),
+                                    value,
+                                    field_ptr,
+                                    Offset32::new(0),
+                                );
+                            }
+                            Ok(())
+                        },
+                        _ => Err(CodegenError::Unsupported(format!(
+                            "field write on non-struct: {name}"
+                        ))),
+                    }
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "field write on non-Named: {name}"
+                ))),
+            }
+        },
+
+        Place::Deref(inner) => {
+            let ptr_val = compile_place_read(ctx, state, builder, inner)?;
+            if is_aggregate(&ty, &mut ctx.layouts) {
+                common::copy_aggregate(builder, &mut ctx.layouts, &ty, ptr_val, value);
+            } else {
+                builder
+                    .ins()
+                    .store(MemFlags::new(), value, ptr_val, Offset32::new(0));
+            }
+            Ok(())
+        },
+
+        // Index, Downcast, Global writes follow the same pattern
+        _ => {
+            let dest_ptr = compile_place_addr(ctx, state, builder, place)?;
+            if is_aggregate(&ty, &mut ctx.layouts) {
+                common::copy_aggregate(builder, &mut ctx.layouts, &ty, dest_ptr, value);
+            } else {
+                builder
+                    .ins()
+                    .store(MemFlags::new(), value, dest_ptr, Offset32::new(0));
+            }
+            Ok(())
+        },
+    }
+}
+
+/// Get the address of a place expression (for taking references).
+pub fn compile_place_addr(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    place: &Place,
+) -> Result<CrValue, CodegenError> {
+    let ptr_ty = common::ptr_type(ctx.target);
+
+    match place {
+        Place::Local(id) => {
+            // For address-taken or aggregate locals, the var already holds a pointer
+            let var = state.local_vars[id.index()];
+            Ok(builder.use_var(var))
+        },
+
+        Place::Field { parent, name } => {
+            let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
+            let parent_ty = common::get_place_type(
+                ctx.module,
+                state.body,
+                parent,
+                &state.subst,
+                state.self_type.as_ref(),
+                &ctx.layouts,
+            )?;
+
+            match &parent_ty {
+                MirTy::Named { entity, type_args } => {
+                    let type_args = common::substitute_type_args(
+                        type_args,
+                        &state.subst,
+                        state.self_type.as_ref(),
+                        ctx.module,
+                    );
+
+                    match ctx.layouts.resolve_named(*entity) {
+                        NamedKind::Struct(struct_id) => {
+                            let (offset, _) = get_field_info(
+                                ctx.module,
+                                &mut ctx.layouts,
+                                struct_id,
+                                &type_args,
+                                name,
+                            )?;
+                            Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
+                        },
+                        _ => Err(CodegenError::Unsupported(format!(
+                            "field addr on non-struct: {name}"
+                        ))),
+                    }
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "field addr on non-Named: {name}"
+                ))),
+            }
+        },
+
+        Place::Deref(inner) => {
+            // The address of *ptr is just ptr
+            compile_place_read(ctx, state, builder, inner)
+        },
+
+        Place::Index { parent, index } => {
+            let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
+            let parent_ty = common::get_place_type(
+                ctx.module,
+                state.body,
+                parent,
+                &state.subst,
+                state.self_type.as_ref(),
+                &ctx.layouts,
+            )?;
+
+            match &parent_ty {
+                MirTy::Tuple(elems) => {
+                    let mut offset = 0u64;
+                    let mut layout = kestrel_codegen::Layout::zero(1);
+                    for (i, elem) in elems.iter().enumerate() {
+                        let elem_layout = ctx.layouts.layout_of(elem);
+                        let (field_offset, new_layout) = layout.append(elem_layout);
+                        if i == *index {
+                            offset = field_offset;
+                            break;
+                        }
+                        layout = new_layout;
+                    }
+                    Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
+                },
+                MirTy::Named { entity, type_args } => {
+                    let type_args = common::substitute_type_args(
+                        type_args,
+                        &state.subst,
+                        state.self_type.as_ref(),
+                        ctx.module,
+                    );
+                    match ctx.layouts.resolve_named(*entity) {
+                        NamedKind::Struct(struct_id) => {
+                            let (offset, _) = common::get_field_by_index(
+                                ctx.module,
+                                &mut ctx.layouts,
+                                struct_id,
+                                &type_args,
+                                *index,
+                            )?;
+                            Ok(builder.ins().iadd_imm(parent_ptr, offset as i64))
+                        },
+                        _ => Err(CodegenError::Unsupported(format!(
+                            "index addr on non-struct: {index}"
+                        ))),
+                    }
+                },
+                _ => Err(CodegenError::Unsupported(format!(
+                    "index addr on unsupported type: {index}"
+                ))),
+            }
+        },
+
+        Place::Downcast { parent, .. } => {
+            // Address of a downcast is the payload address
+            let parent_ptr = compile_place_addr(ctx, state, builder, parent)?;
+            let parent_ty = common::get_place_type(
+                ctx.module,
+                state.body,
+                parent,
+                &state.subst,
+                state.self_type.as_ref(),
+                &ctx.layouts,
+            )?;
+            match &parent_ty {
+                MirTy::Named { entity, type_args } => {
+                    let type_args = common::substitute_type_args(
+                        type_args,
+                        &state.subst,
+                        state.self_type.as_ref(),
+                        ctx.module,
+                    );
+                    match ctx.layouts.resolve_named(*entity) {
+                        NamedKind::Enum(enum_id) => {
+                            let payload_offset = common::get_enum_payload_offset(
+                                ctx.module,
+                                &mut ctx.layouts,
+                                enum_id,
+                                &type_args,
+                            );
+                            Ok(builder.ins().iadd_imm(parent_ptr, payload_offset as i64))
+                        },
+                        _ => Err(CodegenError::Unsupported(
+                            "downcast addr on non-enum".into(),
+                        )),
+                    }
+                },
+                _ => Err(CodegenError::Unsupported(
+                    "downcast addr on non-Named".into(),
+                )),
+            }
+        },
+
+        Place::Global(entity) => {
+            let static_def = ctx
                 .module
-                .declare_data(
-                    &mangled_name,
-                    cranelift_module::Linkage::Import,
-                    false,
-                    false,
-                )
-                .map_err(|e| {
-                    CodegenError::Unsupported(format!("failed to declare global: {}", e))
-                })?;
-
-            // Get the global address
-            let global_addr = ctx.module.declare_data_in_func(global_ref, builder.func);
-
-            // Return the address of the global
-            Ok(builder.ins().global_value(ptr_type, global_addr))
-        },
-
-        PlaceKind::Field { parent, name } => {
-            // Get the parent's address (which is a struct pointer)
-            // For a field, the parent is already a pointer to the struct
-            let struct_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-
-            // Get the field offset
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (field_offset, _field_ty) = get_field_info(ctx, parent_ty, name, subst)?;
-
-            // Compute field address
-            if field_offset == 0 {
-                Ok(struct_ptr)
-            } else {
-                Ok(builder.ins().iadd_imm(struct_ptr, field_offset as i64))
-            }
-        },
-
-        PlaceKind::Index { parent, index } => {
-            // Get the parent pointer
-            let parent_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-
-            // Get the parent type and field info
-            let parent_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let (field_offset, _field_ty) =
-                get_field_by_index(ctx, parent, parent_ty, *index, subst)?;
-
-            // Compute field address
-            if field_offset == 0 {
-                Ok(parent_ptr)
-            } else {
-                Ok(builder.ins().iadd_imm(parent_ptr, field_offset as i64))
-            }
-        },
-
-        PlaceKind::Downcast { parent, variant } => {
-            // Downcast doesn't change the address - it just changes how we interpret it.
-            let enum_ptr =
-                compile_place_read(ctx, parent, builder, local_map, subst, stack_locals)?;
-            let enum_ty = get_place_type(ctx, parent, local_map, subst)?;
-            let payload_offset = get_enum_payload_offset(ctx, enum_ty, variant, subst)?;
-            Ok(builder.ins().iadd_imm(enum_ptr, payload_offset as i64))
-        },
-
-        PlaceKind::Deref(inner) => {
-            // The address of *ptr is just ptr itself
-            compile_place_read(ctx, inner, builder, local_map, subst, stack_locals)
+                .statics
+                .iter()
+                .find(|s| s.entity == *entity)
+                .ok_or_else(|| CodegenError::Unsupported(format!("unknown global {:?}", entity)))?;
+            let mut mangler = kestrel_codegen::Mangler::new(ctx.module);
+            mangler.push_prefix();
+            mangler.mangle_name_path(&static_def.name);
+            let mangled = mangler.finish();
+            let data_id = ctx
+                .cl_module
+                .declare_data(&mangled, cranelift_module::Linkage::Import, false, false)
+                .map_err(|e| CodegenError::DataSection(format!("declare global: {e}")))?;
+            let gv = ctx.cl_module.declare_data_in_func(data_id, builder.func);
+            Ok(builder.ins().global_value(ptr_ty, gv))
         },
     }
 }

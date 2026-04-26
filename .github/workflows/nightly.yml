@@ -53,7 +53,13 @@ jobs:
 
       - name: Build jessup
         working-directory: lang/jessup
-        run: KESTREL=../../target/release/kestrel KESTREL_STD=../std ../../lang/flock/flock build
+        run: |
+          # Remove any stale binary to ensure a fresh build
+          rm -f jessup
+          KESTREL=../../target/release/kestrel KESTREL_STD=../std ../../lang/flock/flock build
+          # Verify the binary was actually produced
+          test -f jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
+          file jessup
 
       - name: Package toolchain tarball
         run: |

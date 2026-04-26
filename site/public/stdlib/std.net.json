@@ -1,0 +1,9 @@
+{
+  "path": "std.net",
+  "name": "net",
+  "submodules": [
+    "std.net.libc",
+    "std.net.socket"
+  ],
+  "items": []
+}

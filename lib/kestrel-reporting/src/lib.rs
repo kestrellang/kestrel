@@ -5,19 +5,38 @@ use std::collections::HashMap;
 
 // Re-export commonly used types from codespan_reporting
 pub use codespan_reporting::diagnostic::{Diagnostic, Label, Severity};
+pub use codespan_reporting::files;
+
+/// Emit diagnostics to stderr using any `Files` implementation.
+///
+/// Unlike `DiagnosticContext::emit()` which uses its own `SimpleFiles`,
+/// this accepts any `Files` impl — useful when file storage lives
+/// elsewhere (e.g. an ECS world).
+pub fn emit_all<'a, F>(
+    files: &'a F,
+    diagnostics: &[Diagnostic<usize>],
+) -> Result<(), codespan_reporting::files::Error>
+where
+    F: codespan_reporting::files::Files<'a, FileId = usize>,
+{
+    let writer = StandardStream::stderr(ColorChoice::Always);
+    let config = term::Config::default();
+    for diagnostic in diagnostics {
+        term::emit_to_write_style(&mut writer.lock(), &config, files, diagnostic)?;
+    }
+    Ok(())
+}
 
 /// Trait for types that can be converted into a diagnostic.
 /// Implement this for your error types to integrate with the reporting system.
 ///
 /// The file ID is extracted from the span(s) stored in the error type.
-#[allow(clippy::wrong_self_convention)]
-pub trait IntoDiagnostic {
-    /// Convert this error into a codespan diagnostic.
-    fn into_diagnostic(&self) -> Diagnostic<usize>;
+pub trait ToDiagnostic {
+    fn to_diagnostic(&self) -> Diagnostic<usize>;
 }
 
 /// Context for managing and reporting diagnostics.
-/// This struct collects diagnostics and can emit them to the terminal.
+/// Collects diagnostics and source files, then emits them to the terminal.
 pub struct DiagnosticContext {
     files: SimpleFiles<String, String>,
     diagnostics: Vec<Diagnostic<usize>>,
@@ -25,7 +44,6 @@ pub struct DiagnosticContext {
 }
 
 impl DiagnosticContext {
-    /// Create a new diagnostic context.
     pub fn new() -> Self {
         Self {
             files: SimpleFiles::new(),
@@ -34,8 +52,7 @@ impl DiagnosticContext {
         }
     }
 
-    /// Add a source file to the context.
-    /// Returns the file ID that can be used when creating diagnostics.
+    /// Register a source file. Returns the file ID. Deduplicates by name.
     pub fn add_file(&mut self, name: String, source: String) -> usize {
         if let Some(&id) = self.file_map.get(&name) {
             return id;
@@ -45,29 +62,27 @@ impl DiagnosticContext {
         id
     }
 
-    /// Throw (add) a diagnostic to the context.
-    pub fn throw<D: IntoDiagnostic>(&mut self, diagnostic: D) {
-        self.diagnostics.push(diagnostic.into_diagnostic());
+    /// Convert and add a diagnostic via the ToDiagnostic trait.
+    pub fn throw<D: ToDiagnostic>(&mut self, diagnostic: D) {
+        self.diagnostics.push(diagnostic.to_diagnostic());
     }
 
-    /// Add a raw diagnostic to the context.
+    /// Add a raw pre-built diagnostic.
     pub fn add_diagnostic(&mut self, diagnostic: Diagnostic<usize>) {
         self.diagnostics.push(diagnostic);
     }
 
-    /// Check if there are any errors in the collected diagnostics.
+    /// True if any error or bug diagnostics have been collected.
     pub fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()
             .any(|d| d.severity == Severity::Error || d.severity == Severity::Bug)
     }
 
-    /// Get the number of diagnostics collected.
     pub fn len(&self) -> usize {
         self.diagnostics.len()
     }
 
-    /// Check if the context is empty (no diagnostics).
     pub fn is_empty(&self) -> bool {
         self.diagnostics.is_empty()
     }
@@ -75,31 +90,17 @@ impl DiagnosticContext {
     /// Emit all diagnostics to stderr with color support.
     pub fn emit(&self) -> Result<(), codespan_reporting::files::Error> {
         let writer = StandardStream::stderr(ColorChoice::Always);
-        let config = codespan_reporting::term::Config::default();
-
-        for diagnostic in &self.diagnostics {
-            term::emit_to_write_style(&mut writer.lock(), &config, &self.files, diagnostic)?;
-        }
-
-        Ok(())
+        self.emit_diagnostics(&mut writer.lock(), &self.diagnostics)
     }
 
-    /// Emit additional diagnostics to stderr with color support.
-    ///
-    /// This is useful for emitting diagnostics that were not collected during
-    /// the original compilation, such as lowering or codegen errors.
+    /// Emit additional diagnostics (e.g. from lowering/codegen) that weren't
+    /// collected during the original compilation phase.
     pub fn emit_additional(
         &self,
         diagnostics: &[Diagnostic<usize>],
     ) -> Result<(), codespan_reporting::files::Error> {
         let writer = StandardStream::stderr(ColorChoice::Always);
-        let config = codespan_reporting::term::Config::default();
-
-        for diagnostic in diagnostics {
-            term::emit_to_write_style(&mut writer.lock(), &config, &self.files, diagnostic)?;
-        }
-
-        Ok(())
+        self.emit_diagnostics(&mut writer.lock(), diagnostics)
     }
 
     /// Emit all diagnostics to a custom writer.
@@ -107,28 +108,33 @@ impl DiagnosticContext {
         &self,
         writer: &mut W,
     ) -> Result<(), codespan_reporting::files::Error> {
-        let config = codespan_reporting::term::Config::default();
-
-        for diagnostic in &self.diagnostics {
-            term::emit_to_write_style(writer, &config, &self.files, diagnostic)?;
-        }
-
-        Ok(())
+        self.emit_diagnostics(writer, &self.diagnostics)
     }
 
-    /// Clear all diagnostics (keeps the files).
+    /// Clear all diagnostics (keeps registered files).
     pub fn clear(&mut self) {
         self.diagnostics.clear();
     }
 
-    /// Get a reference to all diagnostics.
     pub fn diagnostics(&self) -> &[Diagnostic<usize>] {
         &self.diagnostics
     }
 
-    /// Get a file ID by name, if it exists.
+    /// Look up a file ID by name.
     pub fn get_file_id(&self, name: &str) -> Option<usize> {
         self.file_map.get(name).copied()
+    }
+
+    fn emit_diagnostics<W: term::termcolor::WriteColor>(
+        &self,
+        writer: &mut W,
+        diagnostics: &[Diagnostic<usize>],
+    ) -> Result<(), codespan_reporting::files::Error> {
+        let config = codespan_reporting::term::Config::default();
+        for diagnostic in diagnostics {
+            term::emit_to_write_style(writer, &config, &self.files, diagnostic)?;
+        }
+        Ok(())
     }
 }
 

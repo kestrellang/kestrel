@@ -12,7 +12,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
 use crate::pattern::{PatternVariant, emit_pattern_variant, pattern_parser};
 use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
@@ -193,6 +194,67 @@ fn deinit_statement_parser<'tokens>()
         .boxed()
 }
 
+/// Inline variable-declaration parser parameterized by the recursive
+/// expression handle.
+///
+/// Returns a parser yielding `StmtVariant::VariableDeclaration(data)`. This is
+/// the inline counterpart of [`variable_declaration_parser`]: it threads the
+/// `expr` handle from a `recursive(|expr| ...)` closure instead of calling
+/// the top-level `expr_parser()`. Used by both `expr/mod.rs` (for inline
+/// `let`/`var` inside `inline_code_block`) and `expr/closure.rs` (for
+/// `let`/`var` inside closure bodies), so they share one source of truth.
+pub(crate) fn inline_variable_declaration_parser<'tokens, P>(
+    expr: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    skip_trivia()
+        .ignore_then(
+            just(Token::Let)
+                .map_with(|_, e| (to_kestrel_span(e.span()), false))
+                .or(just(Token::Var).map_with(|_, e| (to_kestrel_span(e.span()), true))),
+        )
+        .then(pattern_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(ty_parser())
+                .or_not(),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(expr)
+                .or_not(),
+        )
+        // Trailing semicolon is recoverable. Emitter widens the diagnostic
+        // span back to the last real token via `add_token_or_missing`.
+        .then(
+            skip_trivia().ignore_then(
+                just(Token::Semicolon)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
+        )
+        .map(
+            |(
+                ((((mutability_span, is_mutable), pattern), type_annotation), initializer),
+                semicolon,
+            )| {
+                StmtVariant::VariableDeclaration(VariableDeclarationData {
+                    mutability_span,
+                    is_mutable,
+                    pattern,
+                    type_annotation,
+                    initializer,
+                    semicolon,
+                })
+            },
+        )
+        .boxed()
+}
+
 /// Parser for statements
 ///
 /// Currently supports:
@@ -230,35 +292,48 @@ pub fn emit_stmt_variant(sink: &mut EventSink, variant: &StmtVariant) {
     }
 }
 
-/// Emit events for a variable declaration
+/// Emit events for a variable declaration.
+///
+/// Destructures `VariableDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
 fn emit_variable_declaration(sink: &mut EventSink, data: &VariableDeclarationData) {
+    let VariableDeclarationData {
+        mutability_span,
+        is_mutable,
+        pattern,
+        type_annotation,
+        initializer,
+        semicolon,
+    } = data;
+
     sink.start_node(SyntaxKind::Statement);
     sink.start_node(SyntaxKind::VariableDeclaration);
 
     // let/var keyword
-    if data.is_mutable {
-        sink.add_token(SyntaxKind::Var, data.mutability_span.clone());
+    if *is_mutable {
+        sink.add_token(SyntaxKind::Var, mutability_span.clone());
     } else {
-        sink.add_token(SyntaxKind::Let, data.mutability_span.clone());
+        sink.add_token(SyntaxKind::Let, mutability_span.clone());
     }
 
     // Pattern
-    emit_pattern_variant(sink, &data.pattern);
+    emit_pattern_variant(sink, pattern);
 
     // Optional type annotation
-    if let Some((colon_span, ty)) = &data.type_annotation {
+    if let Some((colon_span, ty)) = type_annotation {
         sink.add_token(SyntaxKind::Colon, colon_span.clone());
         emit_ty_variant(sink, ty);
     }
 
     // Optional initializer
-    if let Some((eq_span, expr)) = &data.initializer {
+    if let Some((eq_span, expr)) = initializer {
         sink.add_token(SyntaxKind::Equals, eq_span.clone());
         emit_expr_variant(sink, expr);
     }
 
-    // Semicolon
-    sink.add_token(SyntaxKind::Semicolon, data.semicolon.clone());
+    // Semicolon — may be parser-synthesised; surface a diagnostic when so.
+    sink.add_token_or_missing(SyntaxKind::Semicolon, semicolon.clone(), ";");
 
     sink.finish_node(); // Finish VariableDeclaration
     sink.finish_node(); // Finish Statement
@@ -276,14 +351,24 @@ fn emit_expression_statement(sink: &mut EventSink, expr: &ExprVariant, semicolon
     sink.finish_node(); // Finish Statement
 }
 
-/// Emit events for a deinit statement
+/// Emit events for a deinit statement.
+///
+/// Destructures `DeinitStatementData` without a `..` rest pattern: adding a
+/// field forces this function to stop compiling until the new field is
+/// handled in emission.
 fn emit_deinit_statement(sink: &mut EventSink, data: &DeinitStatementData) {
+    let DeinitStatementData {
+        deinit_span,
+        identifier_span,
+        semicolon,
+    } = data;
+
     sink.start_node(SyntaxKind::Statement);
     sink.start_node(SyntaxKind::DeinitStatement);
 
-    sink.add_token(SyntaxKind::Deinit, data.deinit_span.clone());
-    sink.add_token(SyntaxKind::Identifier, data.identifier_span.clone());
-    sink.add_token(SyntaxKind::Semicolon, data.semicolon.clone());
+    sink.add_token(SyntaxKind::Deinit, deinit_span.clone());
+    sink.add_token(SyntaxKind::Identifier, identifier_span.clone());
+    sink.add_token(SyntaxKind::Semicolon, semicolon.clone());
 
     sink.finish_node(); // Finish DeinitStatement
     sink.finish_node(); // Finish Statement
@@ -294,19 +379,13 @@ pub fn parse_stmt<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match stmt_parser().parse(input).into_result() {
-        Ok(variant) => {
-            emit_stmt_variant(sink, &variant);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        stmt_parser(),
+        |sink, variant: StmtVariant| emit_stmt_variant(sink, &variant)
+    );
 }
 
 #[cfg(test)]

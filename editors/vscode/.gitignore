@@ -1,0 +1,6 @@
+node_modules/
+out/
+*.vsix
+# Bundled LSP binary — staged by `npm run server:build` and packaged
+# into the .vsix at publish time. Never tracked in git.
+server/
