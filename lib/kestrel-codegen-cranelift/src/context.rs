@@ -168,7 +168,9 @@ impl<'a> CodegenContext<'a> {
             // Define the raw data blob. Align to the element type's natural
             // alignment so ld doesn't warn about unaligned pointer loads into
             // the table (e.g. Int32 reads from LiteralSlice[Int32]).
-            let elem_align = self.layouts.layout_of(&file_const.element_ty).align.max(1);
+            let elem_layout = self.layouts.layout_of(&file_const.element_ty);
+            let elem_size = elem_layout.size.max(1);
+            let elem_align = elem_layout.align.max(1);
             let data_id = self
                 .cl_module
                 .declare_data(&data_name, Linkage::Local, false, false)
@@ -185,7 +187,15 @@ impl<'a> CodegenContext<'a> {
             let slice_size = ptr_size * 2;
             let mut slice_data = vec![0u8; slice_size];
             // Count is stored at offset ptr_size
-            let count = bytes.len();
+            if bytes.len() % elem_size as usize != 0 {
+                return Err(CodegenError::DataSection(format!(
+                    "file constant '{}' has {} bytes, not a multiple of element size {}",
+                    file_path.display(),
+                    bytes.len(),
+                    elem_size
+                )));
+            }
+            let count = bytes.len() / elem_size as usize;
             slice_data[ptr_size..slice_size]
                 .copy_from_slice(&(count as u64).to_le_bytes()[..ptr_size]);
 

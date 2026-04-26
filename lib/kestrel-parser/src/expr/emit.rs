@@ -369,7 +369,7 @@ fn emit_tuple_expr(
             sink.add_token(SyntaxKind::Comma, commas[i].clone());
         }
     }
-    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.add_token_or_missing(SyntaxKind::RParen, rparen, ")");
     sink.finish_node();
     sink.finish_node();
 }
@@ -379,7 +379,7 @@ fn emit_grouping_expr(sink: &mut EventSink, lparen: Span, inner: &ExprVariant, r
     sink.start_node(SyntaxKind::ExprGrouping);
     sink.add_token(SyntaxKind::LParen, lparen);
     emit_expr_variant(sink, inner);
-    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.add_token_or_missing(SyntaxKind::RParen, rparen, ")");
     sink.finish_node();
     sink.finish_node();
 }
@@ -886,7 +886,7 @@ fn emit_closure_expr(
     for item in body {
         emit_block_item(sink, item);
     }
-    sink.add_token(SyntaxKind::RBrace, rbrace);
+    sink.add_token_or_missing(SyntaxKind::RBrace, rbrace, "}");
     sink.finish_node();
     sink.finish_node();
 }

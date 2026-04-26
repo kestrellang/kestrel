@@ -101,9 +101,16 @@ where
                 .map(|opt| opt.unwrap_or((None, None))),
         )
         .then(body_items)
+        // Closing brace is recoverable: a half-typed closure body keeps its
+        // shape so member completion / hover see the inner expressions
+        // instead of falling through to scope and leaking module-level
+        // snippets. See parser_recovery_pattern in user memory.
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(
+                just(Token::RBrace)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
         )
         .map(
             |(((lbrace, (params, in_span)), body), rbrace)| ExprVariant::Closure {

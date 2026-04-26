@@ -26,6 +26,16 @@
         "path": "./syntaxes/kestrel.tmLanguage.json"
       }
     ],
+    "commands": [
+      {
+        "command": "kestrel.restartServer",
+        "title": "Kestrel: Restart Server"
+      },
+      {
+        "command": "kestrel.runMain",
+        "title": "Kestrel: Run main"
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "Kestrel",
@@ -45,6 +55,16 @@
           "type": "string",
           "default": "",
           "description": "Override the Kestrel stdlib search path. Leave empty to use the compiler's default."
+        },
+        "kestrel.flockCachePath": {
+          "type": "string",
+          "default": "",
+          "description": "Override flock's package cache directory. Leave empty to use ~/.kestrel/packages (flock's default)."
+        },
+        "kestrel.flockPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the flock binary used by the ▶ Run code lens. Leave empty to discover (PATH, then ./flock in the workspace)."
         }
       }
     }

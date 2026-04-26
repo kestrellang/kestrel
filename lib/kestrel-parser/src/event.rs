@@ -162,6 +162,44 @@ impl EventSink {
         });
     }
 
+    /// Add a closing token whose span the parser may have synthesised when
+    /// the real token was missing. A zero-width span means the parser ran
+    /// the recovery branch (`or(empty().map_with(...))`); in that case
+    /// emit a `missing_token` CST event plus a "expected `<kind>`"
+    /// diagnostic so the editor still squiggles the gap. Real tokens go
+    /// through the normal `add_token` path. Use this for any closing
+    /// `)` / `]` / `}` / `;` that has the parser-recovery pattern in
+    /// `parser_recovery_pattern.md`.
+    ///
+    /// The diagnostic span widens the synthesised zero-width span by one
+    /// byte to the left when possible — VSCode collapses zero-width
+    /// diagnostics to invisible squiggles, so we anchor the underline on
+    /// the character preceding the cursor (where the missing token should
+    /// have appeared).
+    pub fn add_token_or_missing(
+        &mut self,
+        kind: SyntaxKind,
+        span: Span,
+        expected_label: &str,
+    ) {
+        if span.start == span.end {
+            // Use the sink's file_id, not the span's: chumsky-derived
+            // spans always have file_id 0 (see `to_kestrel_span`), which
+            // would route the diagnostic to the wrong file in the LSP's
+            // file_id → URL map and silently drop it.
+            let diag_start = span.start.saturating_sub(1);
+            self.error_at_span(
+                format!("expected `{}`", expected_label),
+                Span::new(self.file_id, diag_start..span.end),
+            );
+            // Same fix for the missing_token CST event so downstream
+            // consumers can locate the gap by file.
+            self.missing_token(kind, Span::new(self.file_id, span.start..span.end));
+        } else {
+            self.add_token(kind, span);
+        }
+    }
+
     /// Get the collected events
     pub fn events(&self) -> &[Event] {
         &self.events

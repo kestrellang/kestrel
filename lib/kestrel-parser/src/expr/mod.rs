@@ -549,8 +549,15 @@ pub fn expr_parser<'tokens>()
                                     })
                                     .or(empty().to((false, Span::new(0, 0..0), vec![]))),
                             )
+                            // RParen is recoverable: a half-typed `(expr.` /
+                            // `(expr,` should still parse as a Grouping/Tuple
+                            // so completion / hover see the inner expression.
+                            // Without this, the surrounding statement collapses
+                            // and cursor-at-dot loses its receiver type.
                             .then(skip_trivia().ignore_then(
-                                just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                                just(Token::RParen)
+                                    .map_with(|_, e| to_kestrel_span(e.span()))
+                                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
                             ))
                             .map(|((first, (has_comma, _first_comma, more)), rparen)| {
                                 if !has_comma {

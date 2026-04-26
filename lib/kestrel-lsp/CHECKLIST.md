@@ -93,15 +93,60 @@ Background fix for the M3 known limitation: parser must produce a well-formed CS
 - [ ] Multi-file rename smoke (real `flock.toml` workspace) — covered by single-file tests; needs a multi-file fixture in the Extension Development Host pass.
 
 ## M5 — Formatting, code actions, workspace discovery, polish
-- [ ] `handlers/formatting.rs` — CST trivia-preserving formatter (whitespace/indent only in M5)
-- [ ] `handlers/code_actions.rs` — map `AnalyzeDiagnostic.descriptor_id` → quick-fix; implement top 3–5 fixes
-- [ ] Extend `project.rs` to resolve registry deps via `flock.lock` + flock's cache dir; load resolved sources via `set_source`
-- [ ] If cache is missing for a pinned dep, surface a warning + suggest running `flock build`; do NOT auto-fetch from the LSP
-- [ ] `workspace/didChangeWatchedFiles` handler for `flock.toml` and `flock.lock` → reload project sources (filesystem watchers are already registered in `extension.ts`)
-- [ ] Wire `kestrel.stdlibPath` setting through to the compiler config
-- [ ] Setting `kestrel.flockCachePath` (default = flock's default cache location) for non-standard installs
-- [ ] CI: add `cargo build -p kestrel-lsp --release` and `cd editors/vscode && npm ci && npm run compile`
-- [ ] `vsce package` produces a `.vsix` cleanly (sideload-installable; publishing deferred)
+- [ ] `handlers/formatting.rs` — CST trivia-preserving formatter. Deferred: multi-day work on its own; not the highest-leverage M5 item once rename + diagnostics already work in the editor. Tracked separately.
+- [x] `handlers/code_actions.rs` — first quick-fix shipped: **E002 (unreachable_code)** → "Remove unreachable code" deletes the diagnostic span (extending past the trailing newline so no blank line remains). Maps via `Diagnostic.code = NumberOrString::String(descriptor_id)`. Server advertises `codeActionProvider`. **Deferred fixes:** E203/E204/E205/E206 (let→var promotion) and E005 (stub uninitialized fields) — both need binding-site lookup beyond the diagnostic's primary span; will need either a structured "binding" label on the diagnostic or a CST/HIR walk in the handler. Pattern is in place for adding more.
+- [x] `project.rs` extended for registry deps via `flock.lock`. Reads `[[package]]` entries with `source = "registry"`, looks them up at `<cache>/{name}/{version}/flock.toml`, recurses into the cached package. Path-source entries also handled. Cache root defaults to `~/.kestrel/packages` (matches flock's own default) and is overridden by `kestrel.flockCachePath`. New `CollectReport { sources, missing_cache }` return type so callers know what didn't resolve.
+- [x] Cache misses logged via `client.log_message(WARNING, ...)` so the editor's "Output → Kestrel Language Server" panel shows: `Kestrel: registry dep <name>@<version> not in flock cache. Run \`flock build\` to fetch.`
+- [x] `workspace/didChangeWatchedFiles` — for `flock.toml` / `flock.lock` changes, clear sources and re-walk the workspace folders. For `.ks` changes, re-read the affected file (or remove it on DELETED). Refreshes diagnostics after.
+- [x] `kestrel.stdlibPath` wired through `initializationOptions` → `ServerState::stdlib_path` → `load_workspace` walks the dir for `.ks` files and adds them to the source map before workspace files (so user code can resolve std imports).
+- [x] `kestrel.flockCachePath` added to `package.json`, plumbed through `initializationOptions` → `ServerState::flock_cache_path` → `project::collect_sources(manifest_path, cache_root)`.
+- [x] CI: added `cargo build -p kestrel-lsp --release` step to the Rust job + a new `vscode-extension` job that runs `npm ci` + `npm run compile` against `editors/vscode/`.
+- [ ] `vsce package` produces a `.vsix` cleanly (sideload-installable; publishing deferred). Not run in CI yet — needs `vsce` install step.
+
+## M6 — Inlay hints, signature help, document highlight, call & type hierarchy
+High-leverage editor surface that reuses inference + overload-set data already wired for hover / completion / references. Only `subtypes` in type hierarchy needs a new compiler-side index; everything else falls out of existing queries.
+
+### Inlay hints
+- [ ] `handlers/inlay_hints.rs` — `textDocument/inlayHint` over a `Range`. For each `HirBody` whose `text_range` overlaps the requested range:
+  - **Type hints on `let` / `var` without an explicit annotation.** Walk `HirBody.locals`; for each local with no source-level type, look up `TypedBody.local_types[id]` and emit `InlayHint { position: end-of-pattern, label: ": <ty>", kind: Type, padding_left: false }`. Skip locals whose type is `Error` or whose pattern is destructuring (cluttered).
+  - **Parameter-name hints at call sites.** For each `HirExpr::Call` / `HirExpr::MethodCall`, look up the resolved callee in `TypedBody.resolutions`, fetch its parameter names from the callee entity's `Params` component, and emit `InlayHint { position: arg-start, label: "<name>:", kind: Parameter, padding_right: true }`. Skip when the arg already has an explicit label, when the call is variadic past the named params, or when receiver and arg trivially match (`foo(x)` where param is also `x`).
+- [ ] Format types via existing `ty_format::format_ty`; cap label length (~40 chars) and ellide.
+- [ ] Settings: `kestrel.inlayHints.types` (default true), `kestrel.inlayHints.parameterNames` (default true). Respect `InlayHintWorkspaceClientCapabilities.refresh_support` — fire `workspace/inlayHint/refresh` on diagnostic publish so stale hints don't linger.
+- [ ] Server advertises `inlayHintProvider`.
+- [ ] Tests: `let x = 42` → `: lang.i64`; `foo(1, 2)` where `func foo(width: Int, height: Int)` → `width:`/`height:`; explicit `let x: Int = 42` → no hint; `foo(width: 1, 2)` → only `height:` hint on the second arg.
+
+### Signature help
+- [x] `handlers/signature_help.rs` — `textDocument/signatureHelp`. Locate the smallest `HirExpr::Call` / `HirExpr::MethodCall` / `HirExpr::ProtocolCall` whose argument-list span contains the cursor. Active-parameter index comes from the cursor's position among the `Argument` children of the CST `ArgumentList` (the parser folds each `,` into the *following* `Argument`, so direct comma-counting under-counts).
+  - **Single resolution**: pull the callee entity from the callee `HirExpr::Def` (or `TypedBody.resolutions` for method/protocol calls), render `SignatureInformation { label, parameters }` from `Callable` + `TypeAnnotation`. Param types are sourced via the AST `ty` span — `format_ty` is reserved for the inferred-type fallback path.
+  - **Overload sets**: every candidate of `HirExpr::OverloadSet` is rendered as its own `SignatureInformation`. `active_signature` is set to whichever candidate `TypedBody.resolutions` settled on (overload resolution's pick), else 0.
+- [x] Trigger characters: `(` opens, `,` advances active parameter. Server advertises `signatureHelpProvider { trigger_characters }`.
+- [x] Tests in `handlers/signature_help.rs`: cursor right after `(` → active_parameter 0; after `,` → 1; cursor on the callee identifier → no popup; nested call picks the inner signature; two overloads of `add` → both surfaced; per-parameter `LabelOffsets` slice into the rendered label correctly.
+- [ ] Follow-up: doc comments in `SignatureInformation.documentation` (reuse hover's `collect_doc_comments`); type-inference-driven param types so generic substitution shows up (currently we slice the AST source, so `func foo[T](x: T)` always renders `x: T`).
+
+### Document highlight
+- [ ] `handlers/document_highlight.rs` — `textDocument/documentHighlight`. Reuses the `references_to` + local-references machinery from M4 but scoped to the active file. Maps each `ReferenceSite` to `DocumentHighlight { range, kind }`:
+  - `Read` for plain expression occurrences (HIR `Def` / `MethodCall` callee / `Field` access).
+  - `Write` for the LHS of `HirStmt::Assign` (and compound-assign LHS).
+  - `Text` for the declaration's identifier itself.
+  Spans clipped via the existing `clip_to_identifier` helper.
+- [ ] Server advertises `documentHighlightProvider`.
+- [ ] Tests: cursor on a local → all reads + the `let` decl + any `=` LHS marked Write; cursor on a function name → every call site in the file marked Read; cursor on a struct field → field decl marked Text and `.field` accesses marked Read.
+
+### Call hierarchy
+LSP shape: `textDocument/prepareCallHierarchy` returns one or more `CallHierarchyItem`s for the symbol under the cursor; the editor then calls `callHierarchy/incomingCalls` and `callHierarchy/outgoingCalls` on each item as the user expands the tree in the panel.
+- [ ] `handlers/call_hierarchy.rs` — `prepare`: dispatch by HIR shape at the cursor (same locator as references / rename); resolve to a callable entity (function, initializer, method, protocol method). Disqualify locals, modules, types. Build `CallHierarchyItem { name, kind, uri, range: DeclSpan, selection_range: get_name_span(...) }`.
+- [ ] `incomingCalls`: filter `references_to(target)` to call sites only — HIR `Call` / `MethodCall` / `ProtocolCall` whose resolved callee is `target`. For each site, find the enclosing decl via `enclosing_decl_at`, group by that decl entity, return one `CallHierarchyIncomingCall { from: <enclosing item>, from_ranges: [call-site spans] }` per group.
+- [ ] `outgoingCalls`: walk `target`'s `HirBody` once, collect every `Call` / `MethodCall` / `ProtocolCall`; for each, look up the callee in `TypedBody.resolutions`, group by callee entity, emit `CallHierarchyOutgoingCall { to: <callee item>, from_ranges: [call-site spans] }`.
+- [ ] Server advertises `callHierarchyProvider`.
+- [ ] Tests: `prepare` on a function name returns one item; `prepare` on an overload-set call returns N items; incoming on `foo` from a file with three call sites in two functions → 2 incoming entries with the right `from_ranges`; outgoing on a function calling `bar` and `baz.qux()` → 2 outgoing entries.
+
+### Type hierarchy
+LSP shape: `textDocument/prepareTypeHierarchy` → `typeHierarchy/supertypes` / `subtypes`. Same prepare-then-expand pattern as call hierarchy.
+- [ ] `handlers/type_hierarchy.rs` — `prepare`: resolve cursor to a type entity (nominal or protocol). Build a `TypeHierarchyItem` with `kind` (Class/Struct/Enum/Interface), `range: DeclSpan`, `selection_range: get_name_span(...)`.
+- [ ] `supertypes`: for a nominal, read its `ProtocolConformance` component — return one `TypeHierarchyItem` per conformed protocol. For a protocol, read its inherited-protocol list (`where Self: Foo` clauses on the protocol decl).
+- [ ] `subtypes`: for a protocol, return every nominal that conforms. **Pilot with an O(n) scan over all nominal entities** filtering by `ProtocolConformance.contains(target)` — fine at current corpus size. If it shows up in profiles, promote to a `ConformersOf { protocol }` query in `kestrel-name-res` (cached, invalidated on any conformance change). For a nominal, return empty (no nominal subtyping in Kestrel).
+- [ ] Server advertises `typeHierarchyProvider`.
+- [ ] Tests: prepare on `struct Point` returns one item with kind Struct; supertypes lists every protocol `Point` conforms to; prepare on `protocol Iterator` → subtypes lists every conforming nominal in the workspace; protocol with inherited protocols lists them as supertypes.
 
 ## Cross-cutting / quality gates
 - [x] Unit tests for `position.rs`

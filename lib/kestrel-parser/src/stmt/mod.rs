@@ -228,9 +228,16 @@ where
                 .then(expr)
                 .or_not(),
         )
+        // Trailing semicolon is recoverable: a half-typed `let z = it`
+        // inside a closure / inline block synthesises a zero-width span so
+        // the surrounding parser still constructs a valid VariableDeclaration
+        // and doesn't tear down the enclosing closure / function body.
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(
+                just(Token::Semicolon)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
         )
         .map(
             |(
@@ -327,8 +334,8 @@ fn emit_variable_declaration(sink: &mut EventSink, data: &VariableDeclarationDat
         emit_expr_variant(sink, expr);
     }
 
-    // Semicolon
-    sink.add_token(SyntaxKind::Semicolon, semicolon.clone());
+    // Semicolon — may be parser-synthesised; surface a diagnostic when so.
+    sink.add_token_or_missing(SyntaxKind::Semicolon, semicolon.clone(), ";");
 
     sink.finish_node(); // Finish VariableDeclaration
     sink.finish_node(); // Finish Statement

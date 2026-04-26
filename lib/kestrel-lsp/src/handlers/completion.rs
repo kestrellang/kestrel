@@ -111,7 +111,13 @@ fn member_completion(
     let hir = ctx.query(LowerBody { entity: body_entity, root })?;
     let typed = ctx.query(InferBody { entity: body_entity, root })?;
 
-    let receiver_ty = receiver_type_at_dot(&hir, &typed, world, root, ctx, offset)?;
+    // Two paths: the HIR-Field path handles `foo.|` cleanly when the
+    // parser produced a Field with HirName::Missing. The CST-Dot path
+    // handles `foo.|\n    bar.x` where the parser greedily fuses the
+    // newline-separated identifier into the path (so the HIR sees one
+    // long Field chain whose spans don't cover the cursor).
+    let receiver_ty = receiver_type_at_dot(&hir, &typed, world, root, ctx, offset)
+        .or_else(|| receiver_type_via_cst_dot(world, &hir, &typed, body_entity, offset))?;
 
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -156,6 +162,53 @@ fn receiver_type_at_dot(
     }
 
     Some(base_ty.clone())
+}
+
+/// CST-based fallback for `receiver.|` when the parser greedily fused
+/// the newline after the dot into a longer path expression. We find the
+/// `.` token at or just before `offset`, take the preceding token range
+/// (the path element to its left — `arr` in `arr.|`), and pull the
+/// matching HIR expression out by exact-end-of-span.
+fn receiver_type_via_cst_dot(
+    world: &World,
+    hir: &HirBody,
+    typed: &TypedBody,
+    body_entity: Entity,
+    offset: usize,
+) -> Option<ResolvedTy> {
+    use kestrel_ast_builder::Valued;
+    use kestrel_syntax_tree::SyntaxKind;
+    use rowan::TextSize;
+
+    let cst = &world.get::<Valued>(body_entity)?.0;
+    let pos = TextSize::from(offset as u32);
+    // Find the smallest Dot token whose end == cursor (or whose range
+    // contains the cursor).
+    let mut dot_end: Option<usize> = None;
+    for tok in cst.descendants_with_tokens().filter_map(|e| e.into_token()) {
+        if tok.kind() != SyntaxKind::Dot { continue }
+        let r = tok.text_range();
+        if r.end() == pos || (r.start() <= pos && pos <= r.end()) {
+            dot_end = Some(r.end().into());
+            break;
+        }
+    }
+    let dot_end = dot_end?;
+    // Receiver = HIR expression whose span ends just before the dot.
+    // We walk all expressions and find the one whose end == dot_start.
+    let dot_start = dot_end - 1;
+    let mut best: Option<(kestrel_hir::body::HirExprId, usize)> = None;
+    for (id, expr) in hir.exprs.iter() {
+        let s = semantic::hir_expr_span(expr);
+        if s.end == dot_start {
+            let len = s.end - s.start;
+            if best.map(|(_, l)| len > l).unwrap_or(true) {
+                best = Some((id, len));
+            }
+        }
+    }
+    let (recv_id, _) = best?;
+    typed.expr_types.get(&recv_id).cloned()
 }
 
 /// Find the smallest `HirExpr::Field` whose span covers `offset`. Walks
@@ -450,6 +503,113 @@ mod tests {
         assert!(
             labels.contains("x") && labels.contains("y"),
             "expected fields `x` and `y` in {:?}",
+            labels
+        );
+    }
+
+    /// Regression: typing `let z = p` (no semicolon) inside a function body
+    /// must not bail out of the entire FunctionDeclaration. Parser recovery
+    /// should keep the FunctionBody / CodeBlock structure intact so the
+    /// LSP's `enclosing_decl_at` lands on the Function (not the Module),
+    /// preventing top-level snippets (`protocol`, `extend`) from leaking
+    /// in. Companion fix: a single missing-semicolon should not corrupt the
+    /// surrounding body.
+    #[test]
+    fn malformed_statement_does_not_kill_function_decl() {
+        use kestrel_syntax_tree::SyntaxKind;
+        let src = "module Demo\nstruct P { var x: lang.i64 }\nfunc foo(p: P) {\n    let z = p\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/repro.ks", src.into());
+        c.build(f);
+        let cst = c.parse(f).tree;
+        let kinds: Vec<_> = cst.descendants().map(|n| n.kind()).collect();
+        assert!(
+            kinds.contains(&SyntaxKind::FunctionBody),
+            "FunctionBody must survive a missing-semicolon recovery; got {kinds:?}"
+        );
+    }
+
+    /// Recovery diagnostics: parser-synthesised closing tokens (`;`, `}`,
+    /// `)`) must surface as `expected …` diagnostics so the editor still
+    /// shows the missing-token squiggle. Walks the compiler's reported
+    /// diagnostics for each scenario.
+    #[test]
+    fn missing_token_recovery_emits_diagnostics() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("missing `;`", "module D\nfunc f() {\n    let z = 42\n}\n", "expected `;`"),
+            ("missing `}` (function body)", "module D\nfunc f() {\n    let z = 42;\n", "expected `}`"),
+            ("missing `)`", "module D\nfunc f() {\n    let z = (42;\n}\n", "expected `)`"),
+            ("missing `}` (closure)", "module D\nfunc f() {\n    let g = { 42\n}\n", "expected `}`"),
+        ];
+        for (label, src, want) in cases {
+            // Exact LSP path: rebuild_compiler builds via set_source +
+            // compiler.build, then driver runs infer_all/analyze_all, then
+            // compiler.diagnostics() collects everything.
+            let mut c = Compiler::new();
+            let f = c.set_source("/tmp/diag.ks", (*src).into());
+            c.build(f);
+            let driver = kestrel_compiler_driver::CompilerDriver::new(&c);
+            let _ = driver.infer_all();
+            let _ = driver.analyze_all();
+            let diags = c.diagnostics();
+            let msgs: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
+            // Diagnostic must carry the sink's file_id, not the chumsky
+            // span's default `0` — the LSP's file_id → URL map drops
+            // any diagnostic whose label points at a file_id it doesn't know.
+            assert!(diags.iter().all(|d| d.labels.iter().all(|l| l.file_id == f.index())),
+                "[{label}] expected diagnostic file_id == {} for {msgs:?}", f.index());
+            assert!(
+                msgs.iter().any(|m| m.contains(want)),
+                "[{label}] expected compiler diagnostic containing {want:?}; got {msgs:?}"
+            );
+        }
+    }
+
+    /// Regression: `arr.|` followed by `arr.chunks();` on the next line.
+    /// The parser greedily fuses both into one path expression, so HIR
+    /// Field spans don't cover the cursor. The CST-Dot fallback in
+    /// `receiver_type_via_cst_dot` finds the receiver via the `.` token's
+    /// left sibling instead of relying on `smallest_field_at`.
+    #[test]
+    fn member_completion_with_following_statement() {
+        let src = "module Demo\nstruct P { var x: lang.i64; var y: lang.i64 }\nfunc f(p: P) {\n    p.\n    p.x;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/i1a.ks", src.into());
+        c.build(f);
+        let cur = src.find("p.\n").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `p.` even with following stmt");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("x") && labels.contains("y"),
+            "expected fields x, y; got {:?}",
+            labels
+        );
+    }
+
+    /// Companion: with the missing-semicolon parser recovery in place, the
+    /// trailing-dot in `let z = p.` should still resolve to a Field over
+    /// the `p` receiver, so member completion lists struct fields rather
+    /// than falling through to scope/snippet completion.
+    #[test]
+    fn member_completion_after_dot_in_let_rhs() {
+        let src = "module Demo\nstruct P { var x: lang.i64; var y: lang.i64 }\nfunc foo(p: P) {\n    let z = p.\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/letrhs.ks", src.into());
+        c.build(f);
+        let cur = src.find("p.").unwrap() + 2; // right after the dot
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire for `let z = p.|`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("x") && labels.contains("y"),
+            "expected fields x, y in {:?}",
             labels
         );
     }

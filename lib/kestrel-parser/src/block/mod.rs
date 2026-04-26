@@ -352,14 +352,23 @@ where
 /// - Empty blocks: { }
 /// - Statement-only blocks: { stmt; stmt; }
 /// - Trailing expression blocks: { stmt; expr }
+///
+/// Recovery: a missing closing `}` synthesises a zero-width span at the
+/// current position so a half-typed function body still parses as a
+/// `CodeBlock`. Without this, a single unclosed brace tears the whole
+/// `FunctionDeclaration` down to an `Error` node, which breaks LSP
+/// completion / hover / go-to-def for everything inside.
 pub fn code_block_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_items_parser())
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(
+                just(Token::RBrace)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
         )
         .map(|((lbrace, items), rbrace)| CodeBlockData {
             lbrace,
@@ -579,9 +588,24 @@ fn code_block_items_parser<'tokens>()
                 .then(expr_parser())
                 .or_not(),
         )
+        // Semicolon is recoverable: if missing, synthesize a zero-width
+        // span at the current position so a half-typed line like
+        // `let z = p` doesn't bail out of the entire block. Without this,
+        // recovery refuses `let` (it's a block-item boundary) and the
+        // surrounding `code_block_parser` fails, taking the whole
+        // FunctionBody / FunctionDeclaration with it.
+        //
+        // The `empty()` branch runs *before* trivia is skipped so the
+        // synthesised span sits right after the previous parsed thing
+        // (i.e. the end of the let-RHS expression) instead of on the
+        // whitespace of the following line — that's where the missing-`;`
+        // diagnostic should anchor.
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+            just(Token::Semicolon)
+                .map_with(|_, e| to_kestrel_span(e.span()))
+                .or(skip_trivia()
+                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))))
+                .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(
@@ -620,26 +644,39 @@ fn code_block_items_parser<'tokens>()
             }))
         });
 
-    // Expression-based item: parse expression first, then check for semicolon
+    // Expression-based item: parse expression first, then check for semicolon.
+    // Three outcomes after the expression:
+    //   1. Real `;` follows  →  Statement(Expression(expr, real_semi))
+    //   2. Block-end follows (`}` / EOF)  →  expr might be the trailing
+    //      expression; fail this alt unless the expr is statement-like
+    //      so the outer block parser can pick it up via the trailing
+    //      expression alternative.
+    //   3. Something else follows  →  the user typed a half-statement
+    //      (`arr.` then a new statement on the next line). Synthesise a
+    //      zero-width `;` so the broken expression becomes a recovered
+    //      statement instead of swallowing the rest of the block as a
+    //      trailing expression. This is the parser-recovery sibling of
+    //      the var-decl / closure-body fixes.
+    let block_end_lookahead = skip_trivia()
+        .ignore_then(just(Token::RBrace).ignored().or(end()))
+        .rewind();
     let expr_item = expr_parser()
         .then(
-            // Check if there's a semicolon (making it a regular statement)
+            // Real semicolon
             skip_trivia()
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
-                .map(Some)
-                .or(empty().to(None)),
+                .map(|s| Some((s, false)))
+                // Block end ahead → leave maybe_semi None for the trailing-expr path
+                .or(block_end_lookahead.to(None))
+                // Otherwise synthesise a `;`
+                .or(empty().map_with(|_, e| Some((to_kestrel_span(e.span()), true)))),
         )
-        .try_map(|(expr, maybe_semi), span| {
-            if let Some(semi) = maybe_semi {
-                // Has semicolon - it's a regular expression statement
-                Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi)))
-            } else if is_statement_like_expr(&expr) {
-                // No semicolon but it's statement-like - OK
-                Ok(BlockItem::StatementExpr(expr))
-            } else {
-                // No semicolon and not statement-like - fail, let it be parsed as trailing
-                Err(Rich::custom(span, "expected semicolon"))
-            }
+        .try_map(|(expr, maybe_semi), span| match maybe_semi {
+            Some((semi, _synth)) => Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi))),
+            None if is_statement_like_expr(&expr) => Ok(BlockItem::StatementExpr(expr)),
+            // Block end ahead and not statement-like — fail so the
+            // trailing-expression alt picks the expr up.
+            None => Err(Rich::custom(span, "expected semicolon")),
         });
 
     // A block item is a guard-let, deinit statement, variable declaration, or expression-based item
@@ -714,6 +751,8 @@ fn is_expr_starter(token: &Token) -> bool {
             | Token::LBracket
             | Token::LBrace
             | Token::Bang
+            | Token::Not
+            | Token::Plus
             | Token::Minus
             | Token::Dot
     )
@@ -781,7 +820,7 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
         }
     }
 
-    sink.add_token(SyntaxKind::RBrace, data.rbrace.clone());
+    sink.add_token_or_missing(SyntaxKind::RBrace, data.rbrace.clone(), "}");
     sink.finish_node();
 }
 

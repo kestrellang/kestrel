@@ -734,7 +734,7 @@ impl LowerCtx {
         let op = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
-            .find(|t| !is_trivia(t.kind()))
+            .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
             .and_then(|t| token_to_unary_op(t.kind()))
             .unwrap_or(UnaryOp::Neg);
 
@@ -1487,7 +1487,7 @@ impl LowerCtx {
         let kind = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
-            .find(|t| !is_trivia(t.kind()))
+            .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
             .map(|t| {
                 let text = t.text().to_string();
                 match t.kind() {
@@ -1524,7 +1524,7 @@ impl LowerCtx {
                     SyntaxKind::DotDotEquals | SyntaxKind::DotDotLess | SyntaxKind::DotDot => {
                         before_op = false;
                     },
-                    kind if !is_trivia(kind) => {
+                    kind if !is_trivia(kind) && kind != SyntaxKind::Error => {
                         let text = token.text().to_string();
                         let lit = match kind {
                             SyntaxKind::Integer => LitPatKind::Integer(text),
@@ -1914,7 +1914,7 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
 fn first_token_text(node: &SyntaxNode) -> Option<String> {
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
-        .find(|t| !is_trivia(t.kind()))
+        .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
         .map(|t| t.text().to_string())
 }
 
@@ -2302,6 +2302,13 @@ mod tests {
                     assert_eq!(arguments.len(), 2);
                     assert!(arguments[0].label.is_none());
                     assert!(arguments[1].label.is_none());
+                    match &body.exprs[arguments[1].value] {
+                        AstExpr::Literal {
+                            kind: AstLiteral::Integer(v),
+                            ..
+                        } => assert_eq!(v, "2"),
+                        other => panic!("expected integer literal, got {:?}", other),
+                    }
                 },
                 other => panic!("expected Call, got {:?}", other),
             }
@@ -2401,7 +2408,7 @@ mod tests {
 
     #[test]
     fn match_expression() {
-        let body = lower_func_body("func f() { match x { .A => 1, .B => 2 } }");
+        let body = lower_func_body("func f() { match x { 1 => 1, 2 => 2 } }");
         // Match may be tail expr or statement depending on parser
         let expr_id = body
             .tail_expr
@@ -2419,6 +2426,13 @@ mod tests {
         match &body.exprs[expr_id] {
             AstExpr::Match { arms, .. } => {
                 assert_eq!(arms.len(), 2);
+                match &body.pats[arms[1].pattern] {
+                    AstPat::Literal {
+                        kind: LitPatKind::Integer(v),
+                        ..
+                    } => assert_eq!(v, "2"),
+                    other => panic!("expected integer pattern, got {:?}", other),
+                }
             },
             other => panic!("expected Match, got {:?}", other),
         }

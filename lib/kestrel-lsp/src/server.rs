@@ -40,6 +40,13 @@ pub struct ServerState {
     /// Bumped on every edit. Stale analysis tasks compare against this and
     /// drop their results if the world has moved on.
     pub revision_token: u64,
+    /// `kestrel.stdlibPath` from `initializationOptions`. When set, the
+    /// project loader walks this directory for `.ks` sources and includes
+    /// them in every build. Empty/None = compiler-default behaviour.
+    pub stdlib_path: Option<PathBuf>,
+    /// `kestrel.flockCachePath` from `initializationOptions`. Overrides
+    /// flock's `~/.kestrel/packages` when resolving registry deps.
+    pub flock_cache_path: Option<PathBuf>,
 }
 
 impl Default for ServerState {
@@ -57,6 +64,8 @@ impl ServerState {
             workspace_roots: Vec::new(),
             published: HashSet::new(),
             revision_token: 0,
+            stdlib_path: None,
+            flock_cache_path: None,
         }
     }
 
