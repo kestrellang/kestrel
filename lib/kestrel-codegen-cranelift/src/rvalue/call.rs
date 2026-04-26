@@ -220,12 +220,23 @@ fn compile_resolved_call(
 
     // Build the callee's substitution once — used for sret slot sizing and
     // for resolving each parameter's expected type when compiling args.
-    let callee_subst: HashMap<Entity, MirTy> = func_def
+    // Also augment with `resolve_assoc_type_substs` so conformance-introduced
+    // free TypeParams (`extend C: Proto[T_ext]` → `Yield = Param(T_ext)`)
+    // bind to the call-site's protocol args. Without this, the callee's
+    // return type or param type can substitute to `Param(T_ext)` and
+    // `layout_of` DIAGs at the sret slot or arg slot allocation.
+    let mut callee_subst: HashMap<Entity, MirTy> = func_def
         .type_params
         .iter()
         .zip(callee_type_args.iter())
         .map(|(tp, arg)| (tp.entity, arg.clone()))
         .collect();
+    crate::function::resolve_assoc_type_substs(
+        ctx.module,
+        func_def,
+        &mut callee_subst,
+        callee_self_type,
+    );
 
     // If sret, allocate a stack slot for the return value.
     let sret_addr = if callee_sret {
@@ -456,6 +467,40 @@ fn compile_call_arg(
     arg: &CallArg,
     expected_param_ty: Option<&MirTy>,
 ) -> Result<CrValue, CodegenError> {
+    // ABI reconciliation: MIR construction encodes args as Ref/MutRef when
+    // the callee's formal param type is abstract (TypeParam / SelfType /
+    // unresolved AssociatedProjection). After substitution at this call
+    // site, the param may collapse to a scalar (e.g., `value: T` with
+    // `T = i64` after binding the conformance's free TypeParam). Spilling a
+    // scalar to a stack slot and passing the slot's address would deliver a
+    // pointer where the callee expects an i64 — the callee then writes the
+    // pointer-as-i64 to wherever the body stores it. Detect the collapse and
+    // pass by value instead.
+    if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef)
+        && let Some(expected) = expected_param_ty
+        && let Value::Place(place) = &arg.value
+        && !is_aggregate_for_call(expected)
+    {
+        // The callee receives a scalar in a register. If the source local got
+        // promoted to a stack slot (because `collect_address_taken_locals` saw
+        // a Ref arg referencing a non-aggregate local), `compile_place_read`
+        // returns the slot's pointer — which would be passed as the scalar,
+        // delivering a pointer where the callee reads a value. Detect that
+        // case and load through the pointer.
+        let promoted_to_slot = match place {
+            Place::Local(id) => state.stack_locals.contains(id),
+            _ => false,
+        };
+        if promoted_to_slot {
+            let addr = place::compile_place_read(ctx, state, builder, place)?;
+            let cl_ty = types::translate_type(expected, ctx.target);
+            return Ok(builder
+                .ins()
+                .load(cl_ty, ir::MemFlags::new(), addr, Offset32::new(0)));
+        }
+        return rvalue::compile_value(ctx, state, builder, &arg.value);
+    }
+
     match arg.mode {
         PassingMode::Ref | PassingMode::MutRef => {
             // Pass by reference: take the address
@@ -525,6 +570,23 @@ fn compile_call_arg(
             rvalue::compile_value(ctx, state, builder, &arg.value)
         },
     }
+}
+
+/// Aggregate-or-pointer test for ABI reconciliation. Returns true when the
+/// callee receives the value via a pointer (aggregate, raw pointer, ref). A
+/// `false` result means the callee expects a scalar in a register, so the
+/// caller must deliver a value rather than an address.
+fn is_aggregate_for_call(ty: &MirTy) -> bool {
+    matches!(
+        ty,
+        MirTy::Tuple(_)
+            | MirTy::Named { .. }
+            | MirTy::Str
+            | MirTy::FuncThick { .. }
+            | MirTy::Pointer(_)
+            | MirTy::Ref(_)
+            | MirTy::RefMut(_)
+    )
 }
 
 /// Compile a call argument for an `@extern(.C)` callee.

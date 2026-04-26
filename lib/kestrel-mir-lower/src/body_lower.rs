@@ -1823,9 +1823,23 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
         let parent_tp_count = parent_tps.0.len();
 
-        // Strategy 1: Check inference type_args for callee_expr and expr_id
+        // Strategy 1: Check inference type_args for callee_expr and expr_id.
+        // Skip `callee_expr` when it's itself a Call expression — its
+        // recorded type_args belong to that inner call's resolution
+        // (e.g. `parts(0)(unchecked: 0)` — the inner `parts(0)` has type_args
+        // [Array.T, Array.subscript.I], unrelated to the outer Slice.subscript
+        // we're inferring args for here).
+        let callee_is_call = matches!(
+            self.hir.exprs[callee_expr],
+            kestrel_hir::body::HirExpr::Call { .. }
+        );
         if let Some(typed) = self.typed {
-            for &eid in &[callee_expr, expr_id] {
+            let candidates: &[HirExprId] = if callee_is_call {
+                &[expr_id]
+            } else {
+                &[callee_expr, expr_id]
+            };
+            for &eid in candidates {
                 if let Some(resolved_args) = typed.type_args.get(&eid) {
                     if resolved_args.len() >= parent_tp_count {
                         return resolved_args
@@ -2117,7 +2131,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             // path (e.g. `Array[T]`), while `resolve_type_args(expr_id)`
             // already gives the full init-arg list; picking up the Def args
             // would double the struct portion.
-            if type_args.is_empty() && !is_init_call {
+            //
+            // Don't fall back when the callee expression is itself a Call
+            // (`a(0)(1)` — chained subscript / chained call): its type_args
+            // belong to that inner call's resolution, NOT this outer one.
+            // Picking them up here would graft type args from a different
+            // function onto `func_entity` and either crash monomorphization
+            // (arg count mismatch) or silently mis-instantiate.
+            let callee_is_call = matches!(
+                self.hir.exprs[callee_expr],
+                kestrel_hir::body::HirExpr::Call { .. }
+            );
+            if type_args.is_empty() && !is_init_call && !callee_is_call {
                 type_args = self.resolve_type_args(callee_expr);
             }
             // Use explicit type args from the path (e.g., Array[Int64](...))

@@ -15,35 +15,45 @@ The literal syntax `[a, b, c]` infers the element type from the contents; an emp
 ## Indexing
 
 ```swift
-let first = xs[0]      // 1
-xs[0] = 99             // requires xs to be `var`
+let first = xs(0)      // 1
+xs(0) = 99             // requires xs to be `var`
 ```
 
-Out-of-bounds access is a runtime error, not a compile-time one — guard with bounds checks if the index might be wrong:
+The default subscript panics on out-of-bounds. For a non-panicking lookup, use the `checked:` variant which returns `Optional[T]`:
 
 ```swift
-if i < xs.count() {
-    let value = xs[i]
+if let .Some(v) = xs(checked: i) {
+    // ...
 }
 ```
 
-For a guaranteed-safe lookup, use `xs.get(at: i)` which returns `Optional[T]`.
+Other subscript variants cover common access patterns:
+
+```swift
+xs(unchecked: i)        // skips the bounds check (UB if out of range)
+xs(wrapping: -1)        // Optional[T]; negative/overflow wraps modulo count
+xs(clamping: 100)       // Optional[T]; saturates to first/last
+xs(0..<3)               // Slice[T]; panics if range is out of bounds
+xs(checked: 0..<4)     // Optional[Slice[T]]
+xs(clamping: -5..<100)    // Slice[T]; clamps the range to valid bounds
+```
 
 ## Common methods
 
 ```swift
-xs.count()           // number of elements
-xs.isEmpty()         // count == 0
+xs.count             // number of elements
+xs.isEmpty           // count == 0
 xs.first()           // Optional[T]
 xs.last()            // Optional[T]
 
-xs.append(4)         // mutates; xs must be `var`
-xs.insert(0, at: 0)
-xs.remove(at: 1)
-xs.removeLast()      // returns Optional[T]
+xs.append(element: 4)            // mutates; xs must be `var`
+xs.insert(element: 0, at: 0)
+xs.remove(at: 1)                 // returns T
+xs.pop()                         // returns Optional[T]; removes the last
+xs.popFirst()                    // returns Optional[T]; removes the first
 
-xs.contains(2)       // Bool
-xs.firstIndex(of: 2) // Optional[Int]
+xs.contains(element: 2)          // Bool
+xs.firstIndex(of: 2)             // Optional[Int64]
 
 xs.sort()            // requires T: Comparable, mutates
 xs.sorted()          // non-mutating, returns a new Array
@@ -63,7 +73,3 @@ let any = xs.any { it > 100 }
 ```
 
 Most iterator methods are lazy until a terminal operation forces them — chains stay efficient even on long arrays.
-
----
-
-[← Collections](index.md) · [↑ Collections](index.md) · [Dictionaries →](dictionaries.md)

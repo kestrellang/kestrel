@@ -13,20 +13,11 @@ cd hello
 
 ```swift
 module Main
-import std.io.stdio.println
 
-func main() -> Int {
+func main() {
     println("Hello, world!")
-    0
 }
 ```
-
-A few things to notice:
-
-- Every file declares the module it belongs to. `module Main` makes this the entry-point module.
-- `import` brings names from other modules into scope. `println` is in `std.io.stdio`.
-- `main` returns `Int` — the program's exit code. `0` means success.
-- The last expression in a function body is the return value. No `return` keyword needed for the happy path.
 
 ## Run it
 
@@ -47,7 +38,7 @@ Hello, world!
 Change the message:
 
 ```swift
-println("Hello, \(name())!")
+print("Hello, \(name())!")
 
 func name() -> String {
     "Kestrel"
@@ -61,7 +52,3 @@ Save and `flock run` again. The compile is incremental — changes rebuild only 
 You've seen functions, return values, string interpolation, modules, and imports. The [Tour](../tour/index.md) builds on these to walk through the language end-to-end with three small programs.
 
 If you'd rather jump straight to the reference, [Values & Variables](../values-and-variables.md) is the linear guide's first chapter.
-
----
-
-[← Installation](installation.md) · [↑ Getting Started](index.md) · [Flock →](flock.md)

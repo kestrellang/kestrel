@@ -6,20 +6,17 @@ This guide moves from setup, to a hands-on tour, to a top-to-bottom walk through
 
 ```swift
 module Main
-import std.io.stdio.println
-
-func main() -> Int {
-    let names = ["Alice", "Morgana", "Robin"]
+func main() {
+    let names = ["Alice", "Morgana", "Robin"];
     for name in names {
         println("Hello, \(name)!")
     }
-    0
 }
 ```
 
 ## Where to start
 
-- New to Kestrel? Read [Getting Started](getting-started/index.md) and then [the Tour](tour/index.md). 30 minutes total.
+- New to Kestrel? Read [Getting Started](getting-started/index.md) and then [the Tour](tour/index.md).
 - Coming from another language? Skim the Tour, then jump to whatever chapter answers your "wait, how does X work here?" question.
 - Looking up something specific? Hit the search box (top-right) or jump straight to [Reference](reference/index.md).
 
@@ -42,7 +39,3 @@ func main() -> Int {
 15. [Concepts](concepts/index.md) — type inference, the memory model
 16. [Tooling](tooling/index.md) — Flock, the LSP, Jessup
 17. [Reference](reference/index.md) — diagnostics, stdlib, operators, builtins
-
----
-
-[Getting Started →](getting-started/index.md)

@@ -36,6 +36,14 @@ export default function Hero() {
             >
               <path d="M0 0 L10 5 L0 10 Z" fill="none" stroke="context-stroke" strokeOpacity="0.2" strokeWidth="1.5" strokeLinejoin="round" />
             </marker>
+            {/* Knock holes in the vertical line at every dashed-circle intersection */}
+            <mask id="hero-line-break" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="900">
+              <rect x="0" y="0" width="1000" height="900" fill="white" />
+              <circle cx="430" cy="180" r="9" fill="black" />
+              <circle cx="430" cy="260" r="9" fill="black" />
+              <circle cx="430" cy="436" r="9" fill="black" />
+              <circle cx="430" cy="516" r="9" fill="black" />
+            </mask>
           </defs>
           <g
             className="dark:hidden"
@@ -49,6 +57,7 @@ export default function Hero() {
               d="M430 140 L 430 730"
               fill="none"
               strokeDasharray="7 9"
+              mask="url(#hero-line-break)"
               markerStart="url(#hero-guide-arrow)"
               markerEnd="url(#hero-guide-arrow)"
             />
@@ -59,8 +68,6 @@ export default function Hero() {
               markerStart="url(#hero-guide-arrow)"
               markerEnd="url(#hero-guide-arrow)"
             />
-            {/* Mask lines inside the focal area with the section background */}
-            <circle cx="430" cy="348" r="168" fill="#f8f6f1" fillOpacity="1" stroke="none" />
             <circle cx="430" cy="348" r="88" fill="none" strokeDasharray="7 9" />
             <circle cx="430" cy="348" r="168" fill="none" strokeDasharray="7 9" />
             <circle cx="430" cy="348" r="3.5" fill="none" />
@@ -85,6 +92,7 @@ export default function Hero() {
               d="M430 140 L 430 730"
               fill="none"
               strokeDasharray="7 9"
+              mask="url(#hero-line-break)"
               markerStart="url(#hero-guide-arrow)"
               markerEnd="url(#hero-guide-arrow)"
             />
@@ -95,8 +103,6 @@ export default function Hero() {
               markerStart="url(#hero-guide-arrow)"
               markerEnd="url(#hero-guide-arrow)"
             />
-            {/* Mask lines inside the focal area with the section background */}
-            <circle cx="430" cy="348" r="168" fill="#1c1916" fillOpacity="1" stroke="none" />
             <circle cx="430" cy="348" r="88" fill="none" strokeDasharray="7 9" />
             <circle cx="430" cy="348" r="168" fill="none" strokeDasharray="7 9" />
             <circle cx="430" cy="348" r="3.5" fill="none" />

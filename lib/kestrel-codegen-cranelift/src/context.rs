@@ -392,13 +392,20 @@ impl<'a> CodegenContext<'a> {
         let ptr_ty = common::ptr_type(self.target);
         let mut sig = self.cl_module.make_signature();
 
-        // Build substitution
-        let subst: HashMap<Entity, MirTy> = func_def
+        // Build substitution. Use the same augmentation path that
+        // `compile_function` uses so signature ABI matches body codegen —
+        // without `resolve_assoc_type_substs`, conformance-introduced free
+        // TypeParams (e.g. `extend C: Proto[T_ext]` → `Output = Param(T_ext)`)
+        // wouldn't be bound, and the signature would treat the param as
+        // by-reference while the body / callee compiles it as a concrete
+        // scalar. Mismatch → calls pass the wrong ABI shape.
+        let mut subst: HashMap<Entity, MirTy> = func_def
             .type_params
             .iter()
             .zip(type_args.iter())
             .map(|(tp, arg)| (tp.entity, arg.clone()))
             .collect();
+        function::resolve_assoc_type_substs(self.module, func_def, &mut subst, self_type);
 
         // Resolve return type
         let ret_ty = substitute_type_with_self(&func_def.ret, &subst, self_type, self.module);

@@ -25,8 +25,4 @@ When you're learning the language, the skill pairs well with this guide — read
 
 ## What to skip
 
-Don't use the skill for understanding the *compiler* (the Rust code in `lib/`). Different agent, different context. The Kestrel skill is about the language; the compiler internals have their own dedicated docs.
-
----
-
-[← Flock](flock.md) · [↑ Getting Started](index.md) · [Install the LSP Extension →](lsp-extension.md)
+Don't use the skill for understanding the _compiler_ (the Rust code in `lib/`). Different agent, different context. The Kestrel skill is about the language; the compiler internals have their own dedicated docs.

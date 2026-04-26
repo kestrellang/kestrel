@@ -249,6 +249,15 @@ fn witness_protocol_args_match(witness: &WitnessDef, expected: &[MirTy]) -> bool
     if expected.is_empty() {
         return true;
     }
+    // A witness whose `protocol_type_args` is empty was constructed from a
+    // conformance that didn't spell the protocol args explicitly (`extend
+    // Int64: Addable` — Addable's `Rhs` defaults to `Self`, but the witness
+    // lowering doesn't synthesize the default). Treat the empty case as
+    // wildcards so callers that DO know the proto args (post-Phase-1
+    // prepending) still match.
+    if witness.protocol_type_args.is_empty() {
+        return true;
+    }
     if witness.protocol_type_args.len() != expected.len() {
         return false;
     }

@@ -447,10 +447,12 @@ struct ArrayStorage[T]: Cloneable {
 /// for every common policy: `arr(checked: i)` returns `T?`,
 /// `arr(unchecked: i)` skips the bounds check (UB on OOB),
 /// `arr(wrapping: i)` wraps with modulo (and supports negative indices),
-/// and `arr(clamping: i)` clamps to `[0, count-1]`. The same scheme
-/// applies to range subscripts (`arr(0..<3)`, `arr(checked: r)`,
-/// `arr(uncheckedRange: r)`, `arr(clampingRange: r)`) which return
-/// `Slice[T]`.
+/// and `arr(clamping: i)` clamps to `[0, count-1]`. Range arguments use the
+/// same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)` —
+/// dispatched through the `ArrayIndex[T]` protocol so `Int64` and
+/// `Range[Int64]` share the same call shape. `arr(clampingRange: r)`
+/// remains a Range-specific clamping accessor since `clamping:` for `Int64`
+/// returns an `Optional[T]` rather than a slice.
 ///
 /// # Capacity & Reallocation
 ///
@@ -481,6 +483,51 @@ struct ArrayStorage[T]: Cloneable {
 /// - `count <= capacity` always.
 /// - Iteration order is insertion order.
 /// - Operations marked O(1) are amortized; growth is geometric.
+// ============================================================================
+// ARRAY INDEX PROTOCOL
+// ============================================================================
+
+/// Index types for `Array[T]` subscripting.
+///
+/// Conforming types describe how a value of that type accesses elements of
+/// an `Array[T]`. Used by `Array`'s generic subscripts so a single set of
+/// `(i)`, `(checked: i)`, `(unchecked: i)` definitions covers both `Int64`
+/// (single elements) and `Range[Int64]` (slices). `Output` is what the
+/// access yields — `T` for `Int64`, `Slice[T]` for `Range[Int64]`.
+///
+/// Conformances provide three loaders (panicking, optional-on-OOB,
+/// unchecked) and two stores (panicking, unchecked). The store helpers may
+/// panic for index types where writing is undefined — e.g.,
+/// `Range[Int64]`'s `storeIntoArray` panics because there's no meaningful
+/// "write a slice into a range" semantics.
+public protocol ArrayIndex[T] {
+    /// Element-or-slice type the access produces. Named `Yield` rather
+    /// than the more obvious `Output` because `Output` is the standard
+    /// associated-type name across `Addable`/`Subtractable`/etc., and
+    /// `Int64`'s conformance to those protocols already binds
+    /// `Output = Int64`. Inference's associated-type resolution looks up
+    /// associated names across all conformances on the concrete type,
+    /// returning the first match — so a shared name would shadow.
+    type Yield
+
+    /// Read with bounds check — panics on out-of-bounds.
+    func loadFromArray(array array: Array[T]) -> Yield
+
+    /// Read with bounds check — returns `None` on out-of-bounds.
+    func loadFromArrayChecked(array array: Array[T]) -> Yield?
+
+    /// Read with no bounds check — UB on out-of-bounds.
+    func loadFromArrayUnchecked(array array: Array[T]) -> Yield
+
+    /// Write with bounds check — panics on out-of-bounds. May also panic
+    /// when the conforming index type has no meaningful write semantics.
+    func storeIntoArray(mutating array array: Array[T], value value: Yield)
+
+    /// Write with no bounds check — UB on out-of-bounds. May also panic
+    /// when the conforming index type has no meaningful write semantics.
+    func storeIntoArrayUnchecked(mutating array array: Array[T], value value: Yield)
+}
+
 @builtin(.ArrayStruct)
 public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
     /// `Iterable` element type — the element produced by `iter().next()`.
@@ -890,103 +937,88 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// @name Indexed
     /// Reads or writes the element at `index`, panicking on out-of-bounds.
     ///
-    /// The default subscript: trades safety for ergonomics. Use
+    /// The default subscript: trades safety for ergonomics. Dispatches via
+    /// the `ArrayIndex[T]` protocol — `Int64` reads/writes a single element
+    /// and `Range[Int64]` reads a `Slice[T]` (range writes panic; there is
+    /// no meaningful "store a slice into a range" operation). Use
     /// `arr(checked: i)` for an `Optional` instead of a panic, or
-    /// `arr(unchecked: i)` to skip the bounds check entirely. The setter
-    /// triggers COW; if storage is shared the buffer is cloned before the
-    /// write lands.
+    /// `arr(unchecked: i)` to skip the bounds check entirely. The Int64
+    /// setter triggers COW; if storage is shared the buffer is cloned
+    /// before the write lands.
     ///
     /// # Errors
     ///
-    /// Panics with `"Array index out of bounds"` if `index < 0` or
-    /// `index >= count`.
+    /// Panics with `"Array index out of bounds"` (Int64) or
+    /// `"Array range out of bounds"` (Range) if the access is out of
+    /// range. Range setters always panic.
     ///
     /// # Examples
     ///
     /// ```
-    /// var arr = [10, 20, 30];
+    /// var arr = [10, 20, 30, 40, 50];
     /// arr(0);         // 10
-    /// arr(1) = 25;    // arr is now [10, 25, 30]
+    /// arr(1) = 25;    // arr is now [10, 25, 30, 40, 50]
+    /// arr(1..<4);     // Slice[25, 30, 40]
     /// arr(5);         // PANIC: index out of bounds
     /// arr(-1);        // PANIC: index out of bounds
     /// ```
-    public subscript(index: Int64) -> T {
-        get {
-            if index < Int64(intLiteral: 0) or index >= self.len() {
-                lang.panic("Array index out of bounds")
-            }
-            self.ptr().offset(by: index).read()
-        }
-        set {
-            if index < Int64(intLiteral: 0) or index >= self.len() {
-                lang.panic("Array index out of bounds")
-            }
-            self.makeUnique();
-            self.ptr().offset(by: index).write(newValue)
-        }
+    public subscript[I](index: I) -> I.Yield where I: ArrayIndex[T] {
+        get { index.loadFromArray(array: self) }
+        set { index.storeIntoArray(array: self, value: newValue) }
     }
 
     /// @name Checked Index
-    /// Reads the element at `index`, returning `None` on out-of-bounds.
+    /// Reads at `index`, returning `None` on out-of-bounds.
     ///
     /// The non-panicking counterpart to `arr(i)`. Read-only; for fallible
     /// writes pattern-match the result and assign through the default
-    /// subscript. Prefer this when `index` may come from untrusted input.
+    /// subscript. `Int64` returns `T?`; `Range[Int64]` returns `Slice[T]?`.
+    /// Prefer this when `index` may come from untrusted input.
     ///
     /// # Examples
     ///
     /// ```
     /// let arr = [10, 20, 30];
-    /// arr(checked: 0);   // Some(10)
-    /// arr(checked: 5);   // None
-    /// arr(checked: -1);  // None
+    /// arr(checked: 0);       // Some(10)
+    /// arr(checked: 5);       // None
+    /// arr(checked: -1);      // None
+    /// arr(checked: 0..<2);   // Some(Slice[10, 20])
+    /// arr(checked: 0..<10);  // None
     ///
     /// if let .Some(v) = arr(checked: i) {
     ///     // ...
     /// }
     /// ```
-    public subscript(checked index: Int64) -> T? {
-        get {
-            if index >= Int64(intLiteral: 0) and index < self.len() {
-                .Some(self.ptr().offset(by: index).read())
-            } else {
-                .None
-            }
-        }
+    public subscript[I](checked index: I) -> I.Yield? where I: ArrayIndex[T] {
+        get { index.loadFromArrayChecked(array: self) }
     }
 
     /// @name Unchecked Index
-    /// Reads or writes the element at `index` without a bounds check.
+    /// Reads or writes at `index` without a bounds check.
     ///
     /// The fastest accessor; intended for hot loops where the index has
-    /// already been validated (e.g. inside `0..<count`). The setter still
+    /// already been validated (e.g. inside `0..<count`). The Int64 setter
     /// triggers COW, so semantics match the default subscript apart from
-    /// the missing bounds check.
+    /// the missing bounds check. Range writes panic — there is no
+    /// meaningful "store a slice into a range" operation.
     ///
     /// # Safety
     ///
-    /// Undefined behavior if `index < 0` or `index >= count`. Always
-    /// guard with `isValidIndex(index:)` or an enclosing `0..<count`
-    /// loop.
+    /// Undefined behavior if the access is out of range. Always validate
+    /// before calling.
     ///
     /// # Examples
     ///
     /// ```
     /// let arr = [10, 20, 30];
     /// for i in arr.indices {
-    ///         let v = arr(unchecked: i);   // safe — i is in range
+    ///         let v = arr(unchecked: i);            // safe — i is in range
     /// }
-    ///
-    /// if arr.isValidIndex(index: i) {
-    ///         let v = arr(unchecked: i);   // safe — i checked above
-    /// }
+    /// let s = arr(unchecked: 0..<2);                 // Slice[10, 20]
     /// ```
-    public subscript(unchecked index: Int64) -> T {
-        get { self.ptr().offset(by: index).read() }
-        set {
-            self.makeUnique();
-            self.ptr().offset(by: index).write(newValue)
-        }
+    public subscript[I](unchecked index: I) -> I.Yield where I: ArrayIndex[T] {
+        get { index.loadFromArrayUnchecked(array: self) }
+        set { index.storeIntoArrayUnchecked(array: self, value: newValue) }
     }
 
     /// @name Wrapping Index
@@ -1090,89 +1122,12 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // ========================================================================
     // RANGE SUBSCRIPTS
     // ========================================================================
-
-    /// @name Range
-    /// Returns a `Slice[T]` borrowing the elements in `range`.
-    ///
-    /// The returned slice aliases the array's buffer; reallocation
-    /// invalidates it. For a non-panicking variant use
-    /// `arr(checked: r)`; for clamping see `arr(clampingRange: r)`.
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"Array range out of bounds"` if `range.start < 0`,
-    /// `range.end > count`, or `range.start > range.end`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let arr = [10, 20, 30, 40, 50];
-    /// arr(1..<4);  // Slice[20, 30, 40]
-    /// arr(0..<2);  // Slice[10, 20]
-    /// arr(0..<6);  // PANIC: range out of bounds
-    /// ```
-    public subscript(range range: Range[Int64]) -> Slice[T] {
-        get {
-            let start = range.start;
-            let end = range.end;
-            if start < Int64(intLiteral: 0) or end > self.len() or start > end {
-                lang.panic("Array range out of bounds")
-            }
-            Slice(pointer: self.ptr().offset(by: start), count: end - start)
-        }
-    }
-
-    /// @name Checked Range
-    /// Returns a `Slice[T]` for `range`, or `None` if any endpoint is out
-    /// of bounds.
-    ///
-    /// The non-panicking analogue of `arr(range: r)`. The returned slice
-    /// aliases the array's buffer; reallocation invalidates it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let arr = [10, 20, 30];
-    /// arr(checkedRange: 0..<2);   // Some(Slice[10, 20])
-    /// arr(checkedRange: 0..<10);  // None — end out of bounds
-    /// arr(checkedRange: -1..<2);  // None — start out of bounds
-    /// ```
-    public subscript(checkedRange range: Range[Int64]) -> Slice[T]? {
-        get {
-            let start = range.start;
-            let end = range.end;
-            if start >= Int64(intLiteral: 0) and end <= self.len() and start <= end {
-                .Some(Slice(pointer: self.ptr().offset(by: start), count: end - start))
-            } else {
-                .None
-            }
-        }
-    }
-
-    /// @name Unchecked Range
-    /// Returns a `Slice[T]` for `range` with no bounds check.
-    ///
-    /// The fastest range accessor; pair with explicit pre-validation.
-    ///
-    /// # Safety
-    ///
-    /// Undefined behavior if `range.start < 0`, `range.end > count`, or
-    /// `range.start > range.end`. Always validate the endpoints before
-    /// calling.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let arr = [10, 20, 30, 40, 50];
-    /// if start >= 0 and end <= arr.count and start <= end {
-    ///         let s = arr(uncheckedRange: start..<end);  // safe
-    /// }
-    /// ```
-    public subscript(uncheckedRange range: Range[Int64]) -> Slice[T] {
-        get {
-            Slice(pointer: self.ptr().offset(by: range.start), count: range.end - range.start)
-        }
-    }
+    //
+    // The `(r)`, `(checked: r)`, and `(unchecked: r)` range accessors live
+    // on the generic `ArrayIndex[T]` subscripts above and are implemented
+    // by `extend Range[Int64]: ArrayIndex[T]` below. Only `clampingRange:`
+    // remains as a Range-specific subscript — `clamping:` for `Int64`
+    // returns `T?` rather than a slice, so the two can't share a label.
 
     /// @name Clamping Range
     /// Returns a `Slice[T]` for `range` with both endpoints clamped to
@@ -2453,6 +2408,94 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public func clone() -> Array[T] {
         Array(storage: self.storage.clone())
+    }
+}
+
+// ============================================================================
+// ARRAY INDEX CONFORMANCES
+// ============================================================================
+
+/// `Int64` indexes a single element of `Array[T]`.
+///
+/// `Output = T` — both reads and writes apply to the single element at
+/// `self`. `loadFromArrayChecked` returns `None` when out of bounds; the
+/// other helpers panic / are UB on out-of-bounds (matching the
+/// `arr(i) / arr(checked: i) / arr(unchecked: i)` semantics on
+/// `Array[T]`'s subscripts).
+extend Int64: ArrayIndex[T] {
+    type ArrayIndex[T].Yield = T
+
+    public func loadFromArray(array array: Array[T]) -> T {
+        if self < Int64(intLiteral: 0) or self >= array.len() {
+            lang.panic("Array index out of bounds")
+        }
+        array.ptr().offset(by: self).read()
+    }
+
+    public func loadFromArrayChecked(array array: Array[T]) -> T? {
+        if self >= Int64(intLiteral: 0) and self < array.len() {
+            .Some(array.ptr().offset(by: self).read())
+        } else {
+            .None
+        }
+    }
+
+    public func loadFromArrayUnchecked(array array: Array[T]) -> T {
+        array.ptr().offset(by: self).read()
+    }
+
+    public func storeIntoArray(mutating array array: Array[T], value value: T) {
+        if self < Int64(intLiteral: 0) or self >= array.len() {
+            lang.panic("Array index out of bounds")
+        }
+        array.makeUnique();
+        array.ptr().offset(by: self).write(value)
+    }
+
+    public func storeIntoArrayUnchecked(mutating array array: Array[T], value value: T) {
+        array.makeUnique();
+        array.ptr().offset(by: self).write(value)
+    }
+}
+
+/// `Range[Int64]` indexes a contiguous slice of `Array[T]`.
+///
+/// `Output = Slice[T]`. The returned slice aliases the array's buffer;
+/// reallocation invalidates it. The store helpers panic — there is no
+/// meaningful "write a slice into a range" operation on `Array`. Use
+/// element-wise iteration if you need to overwrite a sub-range.
+extend Range[Int64]: ArrayIndex[T] {
+    type ArrayIndex[T].Yield = Slice[T]
+
+    public func loadFromArray(array array: Array[T]) -> Slice[T] {
+        let start = self.start;
+        let end = self.end;
+        if start < Int64(intLiteral: 0) or end > array.len() or start > end {
+            lang.panic("Array range out of bounds")
+        }
+        Slice(pointer: array.ptr().offset(by: start), count: end - start)
+    }
+
+    public func loadFromArrayChecked(array array: Array[T]) -> Slice[T]? {
+        let start = self.start;
+        let end = self.end;
+        if start >= Int64(intLiteral: 0) and end <= array.len() and start <= end {
+            .Some(Slice(pointer: array.ptr().offset(by: start), count: end - start))
+        } else {
+            .None
+        }
+    }
+
+    public func loadFromArrayUnchecked(array array: Array[T]) -> Slice[T] {
+        Slice(pointer: array.ptr().offset(by: self.start), count: self.end - self.start)
+    }
+
+    public func storeIntoArray(mutating array array: Array[T], value value: Slice[T]) {
+        lang.panic("Array range subscript is read-only — assigning a slice into a range is unsupported")
+    }
+
+    public func storeIntoArrayUnchecked(mutating array array: Array[T], value value: Slice[T]) {
+        lang.panic("Array range subscript is read-only — assigning a slice into a range is unsupported")
     }
 }
 

@@ -2334,10 +2334,18 @@ fn solve_member(
     }
 
     // Map protocol type params when member comes from a protocol.
+    // Only fires when `self_entity` is a Protocol — for inits and struct
+    // members `self_type` is the struct itself, whose type params are already
+    // mapped above via the recv_type_args loop. Prepending those again would
+    // double the recorded type args (regression: init in generic extension).
     // If protocol_type_args are provided (from where clause, e.g., F: Factory[i64]),
     // use those. Otherwise default to receiver (e.g., Addable[Rhs = Self]).
     let mut proto_type_args_tvs: Vec<TyVar> = Vec::new();
-    if let Some(self_entity) = resolution.self_type {
+    let self_is_protocol = resolution
+        .self_type
+        .map(|e| ctx.query_ctx.get::<NodeKind>(e) == Some(&NodeKind::Protocol))
+        .unwrap_or(false);
+    if self_is_protocol && let Some(self_entity) = resolution.self_type {
         let proto_type_params: Vec<kestrel_hecs::Entity> = ctx
             .query_ctx
             .get::<TypeParams>(self_entity)

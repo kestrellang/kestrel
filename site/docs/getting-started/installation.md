@@ -59,7 +59,3 @@ kestrel uninstall
 ```
 
 Removes everything the installer added. Your projects are untouched.
-
----
-
-[← Getting Started](index.md) · [↑ Getting Started](index.md) · [Hello, World →](hello-world.md)

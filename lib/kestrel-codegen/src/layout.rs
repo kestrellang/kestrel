@@ -438,7 +438,12 @@ fn substitute_type_inner(
         | MirTy::Error => ty.clone(),
 
         MirTy::TypeParam(entity) => match subst.get(entity) {
-            Some(concrete) => concrete.clone(),
+            // Recurse through chained mappings: `resolve_assoc_type_substs`
+            // can produce entries like `Entity(A) → TypeParam(B)` paired with
+            // `Entity(B) → I64` when binding conformance-introduced free
+            // TypeParams. Without recursion, layout would see the intermediate
+            // TypeParam and DIAG.
+            Some(concrete) => rec(concrete),
             None => ty.clone(),
         },
 

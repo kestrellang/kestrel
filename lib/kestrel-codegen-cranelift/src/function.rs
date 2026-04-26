@@ -142,6 +142,267 @@ pub fn resolve_assoc_type_substs(
             }
         }
     }
+
+    // Recover conformance-introduced free TypeParams + correct assoc-type
+    // entity bindings. When a function's body dispatches `Callee::Witness`
+    // against a generic-bound `I: Proto[A, ..]` and the conformance is
+    // `extend C: Proto[T_ext, ..]`, the conformance's free `T_ext` only
+    // gets bound at the call site via the protocol args. For the OUTER
+    // monomorph that needs to lay out `I.Output` (which resolves through
+    // `C: Proto[T_ext]` to `Param(T_ext)`), `T_ext` must be in `subst`.
+    //
+    // Equally important: the existing first-match-by-name loop above can
+    // route a protocol's `Yield`/`Output`/etc. assoc through the WRONG
+    // conformance when more than one entity in `subst.values()` conforms
+    // to the same protocol (e.g. `subst` has both `Int64` and `Range[Int64]`
+    // for an `Array[Int64].subscript[I=Range[Int64]]` instance — both
+    // conform to `ArrayIndex`, and the first picked wins). Walk the body's
+    // witness calls and override the assoc-entity bindings with the
+    // witness's `type_bindings` for the call site's actual `self_type`.
+    if let Some(body) = &func.body {
+        for block in &body.blocks {
+            for stmt in &block.stmts {
+                let kestrel_mir::StatementKind::Call { callee, .. } = &stmt.kind else {
+                    continue;
+                };
+                let kestrel_mir::Callee::Witness {
+                    protocol,
+                    self_type: callee_self,
+                    method_type_args,
+                    ..
+                } = callee
+                else {
+                    continue;
+                };
+                bind_witness_protocol_args(
+                    module,
+                    *protocol,
+                    callee_self,
+                    method_type_args,
+                    self_type,
+                    subst,
+                    func,
+                );
+            }
+        }
+    }
+}
+
+/// For a single `Callee::Witness` site in a function body, substitute the
+/// site's `self_type` and `method_type_args` using the current `subst`, find
+/// the conformance witness for `(protocol, substituted self_type)`, and
+/// pattern-bind the witness's wildcard `protocol_type_args` against the
+/// substituted call-site protocol args. Newly recovered bindings get inserted
+/// into `subst`. No-op if the site's self_type doesn't substitute to a
+/// concrete type or no matching witness is found.
+fn bind_witness_protocol_args(
+    module: &kestrel_mir::MirModule,
+    protocol: Entity,
+    callee_self: &MirTy,
+    method_type_args: &[MirTy],
+    outer_self: Option<&MirTy>,
+    subst: &mut HashMap<Entity, MirTy>,
+    func: &FunctionDef,
+) {
+    use kestrel_codegen::substitute_type_with_self;
+
+    let sub_self = substitute_type_with_self(callee_self, subst, outer_self, module);
+    let sub_args: Vec<MirTy> = method_type_args
+        .iter()
+        .map(|t| substitute_type_with_self(t, subst, outer_self, module))
+        .collect();
+
+    let proto_param_count = module
+        .protocols
+        .iter()
+        .find(|p| p.entity == protocol)
+        .map(|p| p.type_params.len())
+        .unwrap_or(0);
+    if proto_param_count == 0 {
+        return;
+    }
+    let call_proto_args = sub_args.get(..proto_param_count).unwrap_or(&[]);
+    if call_proto_args.iter().any(ty_has_typeparam) {
+        return; // Need fully-concrete call args to bind extension free params.
+    }
+
+    let mut chosen: Option<&kestrel_mir::WitnessDef> = None;
+    for w in &module.witnesses {
+        if w.protocol != protocol {
+            continue;
+        }
+        let mut tmp = HashMap::new();
+        if !witness_pattern_matches(&w.implementing_type, &sub_self, &mut tmp) {
+            continue;
+        }
+        chosen = Some(w);
+        break;
+    }
+    let Some(witness) = chosen else { return };
+
+    for (witness_arg, call_arg) in witness
+        .protocol_type_args
+        .values()
+        .zip(call_proto_args.iter())
+    {
+        bind_pattern_into_subst(witness_arg, call_arg, subst);
+    }
+
+    // Bind the protocol's associated-type aliases via the witness's
+    // `type_bindings`. Without this, the existing first-match-by-name loop
+    // above can pick the wrong conformance (e.g., it sees `Int64` and
+    // `Range[Int64]` both in `subst.values()` and either one nominally
+    // satisfies the assoc lookup, but only the one that matches the actual
+    // call site is correct). Look up each assoc-name's TypeAlias entity on
+    // the protocol and override `subst[entity]` with the witness's binding.
+    let proto_def = module
+        .protocols
+        .iter()
+        .find(|p| p.entity == protocol);
+    let Some(proto_def) = proto_def else { return };
+    for assoc in &proto_def.associated_types {
+        let Some(bound) = witness.type_bindings.get(&assoc.name) else {
+            continue;
+        };
+        // Locate the protocol-level assoc-type entity by name. The protocol
+        // owns the alias as a child; look it up by walking children and
+        // matching `{Protocol}.{Name}` against `module.resolve_name`.
+        // Locate the protocol-level assoc-type entity by walking the
+        // function's candidate Named entities and matching the qualified
+        // name (`Protocol.Assoc`). MirModule has no central name→entity
+        // index; the candidate set is what's referenced by the function's
+        // own signature/body, so the alias entity is in there if it's
+        // mentioned anywhere in the surface this monomorph touches.
+        let qualified = format!("{}.{}", proto_def.name, assoc.name);
+        let mut candidates_local: Vec<Entity> = Vec::new();
+        collect_named_entities_from_func(func, &mut candidates_local);
+        let entity_for_assoc = candidates_local
+            .into_iter()
+            .find(|&cand| module.resolve_name(cand) == qualified);
+        if let Some(e) = entity_for_assoc {
+            // The witness's binding may reference the conformance's free
+            // TypeParams (e.g. `Yield = Slice[T_ext]`). Those resolve via
+            // the chained substitution + TypeParam recursion in
+            // `substitute_type_inner` once the proto-args pattern bindings
+            // above populate them.
+            //
+            // Only override when the existing binding is itself a bare
+            // TypeParam — that's the broken case (the existing first-match
+            // assoc loop returned a conformance whose bound was a free
+            // `Param(T_ext)` that nothing in `subst` resolves). A concrete
+            // existing binding means the assoc resolved correctly the first
+            // time; don't disturb it.
+            let should_insert = match subst.get(&e) {
+                None => true,
+                Some(MirTy::TypeParam(_)) => true,
+                Some(_) => false,
+            };
+            if should_insert {
+                subst.insert(e, bound.clone());
+            }
+        }
+    }
+}
+
+/// Pattern-match `pattern` against `concrete`, recording any TypeParam-
+/// in-pattern bindings into the shared `subst` (no overwriting). Mirrors
+/// `monomorphize::witness::match_pattern` but writes directly into the
+/// codegen subst map. `concrete` is assumed to already be substituted.
+fn bind_pattern_into_subst(
+    pattern: &MirTy,
+    concrete: &MirTy,
+    subst: &mut HashMap<Entity, MirTy>,
+) {
+    match (pattern, concrete) {
+        (MirTy::TypeParam(entity), _) => {
+            subst.entry(*entity).or_insert_with(|| concrete.clone());
+        },
+        (
+            MirTy::Named {
+                entity: e1,
+                type_args: a1,
+            },
+            MirTy::Named {
+                entity: e2,
+                type_args: a2,
+            },
+        ) if e1 == e2 && a1.len() == a2.len() => {
+            for (p, c) in a1.iter().zip(a2.iter()) {
+                bind_pattern_into_subst(p, c, subst);
+            }
+        },
+        (MirTy::Ref(a), MirTy::Ref(b))
+        | (MirTy::RefMut(a), MirTy::RefMut(b))
+        | (MirTy::Pointer(a), MirTy::Pointer(b)) => bind_pattern_into_subst(a, b, subst),
+        (MirTy::Tuple(a), MirTy::Tuple(b)) if a.len() == b.len() => {
+            for (p, c) in a.iter().zip(b.iter()) {
+                bind_pattern_into_subst(p, c, subst);
+            }
+        },
+        _ => {},
+    }
+}
+
+/// Local copy of structural pattern match used purely to test whether a
+/// witness's `implementing_type` matches a given concrete type. Doesn't
+/// commit bindings to the outer subst — uses a local map for the check.
+fn witness_pattern_matches(
+    pattern: &MirTy,
+    concrete: &MirTy,
+    bindings: &mut HashMap<Entity, MirTy>,
+) -> bool {
+    match (pattern, concrete) {
+        (MirTy::TypeParam(entity), _) => match bindings.get(entity) {
+            Some(existing) => existing == concrete,
+            None => {
+                bindings.insert(*entity, concrete.clone());
+                true
+            },
+        },
+        (
+            MirTy::Named {
+                entity: e1,
+                type_args: a1,
+            },
+            MirTy::Named {
+                entity: e2,
+                type_args: a2,
+            },
+        ) => {
+            e1 == e2
+                && a1.len() == a2.len()
+                && a1
+                    .iter()
+                    .zip(a2)
+                    .all(|(p, c)| witness_pattern_matches(p, c, bindings))
+        },
+        (MirTy::Ref(a), MirTy::Ref(b))
+        | (MirTy::RefMut(a), MirTy::RefMut(b))
+        | (MirTy::Pointer(a), MirTy::Pointer(b)) => witness_pattern_matches(a, b, bindings),
+        (MirTy::Tuple(a), MirTy::Tuple(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b)
+                    .all(|(p, c)| witness_pattern_matches(p, c, bindings))
+        },
+        (a, b) => a == b,
+    }
+}
+
+fn ty_has_typeparam(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_) => true,
+        MirTy::Named { type_args, .. } => type_args.iter().any(ty_has_typeparam),
+        MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
+            ty_has_typeparam(inner)
+        },
+        MirTy::Tuple(elems) => elems.iter().any(ty_has_typeparam),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(ty_has_typeparam) || ty_has_typeparam(ret)
+        },
+        MirTy::AssociatedProjection { base, .. } => ty_has_typeparam(base),
+        _ => false,
+    }
 }
 
 /// Collect all entities from Named types in a function's signature and body.
