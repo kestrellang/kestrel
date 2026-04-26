@@ -41,7 +41,7 @@ public func parseDecimal(s: String) -> Int64 {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let byte = s.byteAtUnchecked(i);
+        let byte = s.bytes(unchecked: i);
         let digit = Int64(from: byte) - 48;
         if digit >= 0 and digit <= 9 {
             result = result * 10 + digit

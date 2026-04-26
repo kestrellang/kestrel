@@ -133,7 +133,7 @@ public func exit(code: Int32) {
 func trimEnd(s: String) -> String {
     var end = s.byteCount;
     while end > 0 {
-        let b = s.byteAtUnchecked(end - 1);
+        let b = s.bytes(unchecked: end - 1);
         if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
             end = end - 1
         } else {

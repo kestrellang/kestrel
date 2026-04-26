@@ -326,7 +326,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
         let pattern = patternSegments(unchecked: i);
         let actual = requestSegments(unchecked: i);
 
-        if pattern.byteCount > 0 and pattern.byteAtUnchecked(0) == 58 { // ':'
+        if pattern.byteCount > 0 and pattern.bytes(unchecked: 0) == 58 { // ':'
             let paramName = pattern.substringBytes(from: 1, to: pattern.byteCount);
             let _ = params.insert(paramName, actual);
         } else if not pattern.equals(actual) {

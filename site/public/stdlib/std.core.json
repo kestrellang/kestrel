@@ -8,7 +8,7 @@
       "name": "AddAssign",
       "anchor": "protocol-AddAssign",
       "signature": "public protocol AddAssign[Rhs = Self]",
-      "doc": "Protocol for types that support addition assignment (+=).",
+      "doc": "Raw protocol backing the `+=` operator.\n\nIn-place mutation lets conforming types avoid the temporary that a\n`self = self + other` rewrite would produce — important for collections\n(e.g. `Array += other`) and other types where the binary `+` would copy.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -21,7 +21,7 @@
               "name": "addAssign",
               "anchor": "function-addAssign",
               "signature": "mutating func addAssign(Rhs)",
-              "doc": "Adds the other value to this one in place.",
+              "doc": "Mutates `self` to `self + other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -33,7 +33,7 @@
       "name": "Addable",
       "anchor": "protocol-Addable",
       "signature": "public protocol Addable[Rhs = Self]",
-      "doc": "Protocol for types that support addition (+).\nThe Output type allows the result to differ from the operand types.",
+      "doc": "Raw protocol backing the `+` operator.\n\n`Output` may differ from `Self` and `Rhs` — this is what allows mixed-type\narithmetic (e.g. `Vector + Scalar -> Vector`) without losing precision.\nThe associated `zero` value gives sums (and `Iterator.sum`) a starting\npoint and is the additive identity by definition.\n\n# Examples\n\n```\n2 + 3            // 5\nInt64.zero       // 0\n```",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -54,7 +54,7 @@
               "name": "add",
               "anchor": "function-add",
               "signature": "func add(Rhs) -> Output",
-              "doc": "Adds this value to another and returns the result.",
+              "doc": "Returns `self + other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             },
             {
@@ -62,7 +62,7 @@
               "name": "zero",
               "anchor": "field-zero",
               "signature": "static var zero: Self { get }",
-              "doc": "The additive identity (zero).\nUsed as the starting value for sum operations.",
+              "doc": "The additive identity — a value `z` such that `x + z == x` for all `x`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
           ]
@@ -74,7 +74,7 @@
       "name": "And",
       "anchor": "protocol-And",
       "signature": "public protocol And[Rhs = Self]",
-      "doc": "Protocol for types that support logical AND (and keyword).\nUses short-circuit evaluation: the right operand is only evaluated if needed.",
+      "doc": "Raw protocol backing the `and` keyword operator.\n\nThe `other` operand is a thunk so that conformers can short-circuit:\nthe right-hand side must not be evaluated when `self` is falsy. The\nstdlib implementations on `Bool` and the optional types all honour\nthis; user implementations should too.\n\n# Examples\n\n```\ntrue and false        // false\ntrue and { true }     // true (closure form, mostly internal)\n```",
       "source_path": "lang/std/core/logical.ks",
       "member_groups": [
         {
@@ -95,7 +95,7 @@
               "name": "logicalAnd",
               "anchor": "function-logicalAnd",
               "signature": "func logicalAnd(() -> Rhs) -> Output",
-              "doc": "Performs logical AND with short-circuit evaluation.\nThe closure is only called if self is truthy.",
+              "doc": "Returns `self and other()`. The closure runs only if needed.",
               "source_path": "lang/std/core/logical.ks"
             }
           ]
@@ -115,7 +115,7 @@
       "name": "ArrayMatchable",
       "anchor": "protocol-ArrayMatchable",
       "signature": "public protocol ArrayMatchable",
-      "doc": "Protocol for types that support array pattern matching.\nEnables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]`, `[a, ..rest, z]`\n\nThe protocol provides methods for length checking, element access, and slicing.\nConforming types include Array[T] and Slice[T].",
+      "doc": "Protocol enabling array patterns (`[a, b]`, `[a, ..rest]`,\n`[a, .., z]`, `[a, ..rest, z]`).\n\nThe compiler routes match-arm element access through `matchGet` and\nrest-binding through `matchSlice` — they take `Int64` bounds the\ncompiler has already verified. A conformer may assume `0 <= index <\nmatchLength()` and `0 <= from <= to <= matchLength()` and skip its\nown bounds checks; the conformance is unsafe to satisfy if those\ninvariants don't hold. `Array[T]` and `Slice[T]` are the canonical\nconformers.",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -136,7 +136,7 @@
               "name": "matchGet",
               "anchor": "function-matchGet",
               "signature": "func matchGet(Int64) -> Element",
-              "doc": "Returns the element at the given index.\nCaller guarantees index is valid (0 <= index < matchLength()).",
+              "doc": "Returns the element at `index`. Caller (the compiler) guarantees\n`0 <= index < matchLength()` — implementations may skip bounds checks.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -144,7 +144,7 @@
               "name": "matchLength",
               "anchor": "function-matchLength",
               "signature": "func matchLength() -> Int64",
-              "doc": "Returns the number of elements in the collection.",
+              "doc": "Total number of elements available to match.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -152,7 +152,7 @@
               "name": "matchSlice",
               "anchor": "function-matchSlice",
               "signature": "func matchSlice(Int64, Int64) -> Slice[Element]",
-              "doc": "Returns a slice from `from` (inclusive) to `to` (exclusive).\nCaller guarantees valid bounds (0 <= from <= to <= matchLength()).",
+              "doc": "Returns the slice `[from, to)`. Caller guarantees\n`0 <= from <= to <= matchLength()`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -164,7 +164,7 @@
       "name": "BitwiseAnd",
       "anchor": "protocol-BitwiseAnd",
       "signature": "public protocol BitwiseAnd[Rhs = Self]",
-      "doc": "Protocol for types that support bitwise AND (&).",
+      "doc": "Raw protocol backing the `&` operator.\n\nImplemented by every integer width; `Output` is `Self` for the standard\ninteger types but may differ for SIMD or bitset wrappers.\n\n# Examples\n\n```\n0b1100 & 0b1010   // 0b1000\n```",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -185,7 +185,7 @@
               "name": "bitwiseAnd",
               "anchor": "function-bitwiseAnd",
               "signature": "func bitwiseAnd(Rhs) -> Output",
-              "doc": "Performs bitwise AND of this value with another.",
+              "doc": "Returns `self & other`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
           ]
@@ -197,7 +197,7 @@
       "name": "BitwiseAndAssign",
       "anchor": "protocol-BitwiseAndAssign",
       "signature": "public protocol BitwiseAndAssign[Rhs = Self]",
-      "doc": "Protocol for types that support bitwise AND assignment (&=).",
+      "doc": "Raw protocol backing the `&=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -210,7 +210,7 @@
               "name": "bitwiseAndAssign",
               "anchor": "function-bitwiseAndAssign",
               "signature": "mutating func bitwiseAndAssign(Rhs)",
-              "doc": "Performs bitwise AND with the other value in place.",
+              "doc": "Mutates `self` to `self & other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -222,7 +222,7 @@
       "name": "BitwiseNot",
       "anchor": "protocol-BitwiseNot",
       "signature": "public protocol BitwiseNot",
-      "doc": "Protocol for types that support bitwise NOT (~).",
+      "doc": "Raw protocol backing the unary `~` operator.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -243,7 +243,7 @@
               "name": "bitwiseNot",
               "anchor": "function-bitwiseNot",
               "signature": "func bitwiseNot() -> Output",
-              "doc": "Returns the bitwise complement of this value.",
+              "doc": "Returns `~self` — every bit flipped.",
               "source_path": "lang/std/core/bitwise.ks"
             }
           ]
@@ -255,7 +255,7 @@
       "name": "BitwiseOr",
       "anchor": "protocol-BitwiseOr",
       "signature": "public protocol BitwiseOr[Rhs = Self]",
-      "doc": "Protocol for types that support bitwise OR (|).",
+      "doc": "Raw protocol backing the `|` operator.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -276,7 +276,7 @@
               "name": "bitwiseOr",
               "anchor": "function-bitwiseOr",
               "signature": "func bitwiseOr(Rhs) -> Output",
-              "doc": "Performs bitwise OR of this value with another.",
+              "doc": "Returns `self | other`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
           ]
@@ -288,7 +288,7 @@
       "name": "BitwiseOrAssign",
       "anchor": "protocol-BitwiseOrAssign",
       "signature": "public protocol BitwiseOrAssign[Rhs = Self]",
-      "doc": "Protocol for types that support bitwise OR assignment (|=).",
+      "doc": "Raw protocol backing the `|=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -301,7 +301,7 @@
               "name": "bitwiseOrAssign",
               "anchor": "function-bitwiseOrAssign",
               "signature": "mutating func bitwiseOrAssign(Rhs)",
-              "doc": "Performs bitwise OR with the other value in place.",
+              "doc": "Mutates `self` to `self | other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -313,7 +313,7 @@
       "name": "BitwiseXor",
       "anchor": "protocol-BitwiseXor",
       "signature": "public protocol BitwiseXor[Rhs = Self]",
-      "doc": "Protocol for types that support bitwise XOR (^).",
+      "doc": "Raw protocol backing the `^` operator.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -334,7 +334,7 @@
               "name": "bitwiseXor",
               "anchor": "function-bitwiseXor",
               "signature": "func bitwiseXor(Rhs) -> Output",
-              "doc": "Performs bitwise XOR of this value with another.",
+              "doc": "Returns `self ^ other`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
           ]
@@ -346,7 +346,7 @@
       "name": "BitwiseXorAssign",
       "anchor": "protocol-BitwiseXorAssign",
       "signature": "public protocol BitwiseXorAssign[Rhs = Self]",
-      "doc": "Protocol for types that support bitwise XOR assignment (^=).",
+      "doc": "Raw protocol backing the `^=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -359,7 +359,7 @@
               "name": "bitwiseXorAssign",
               "anchor": "function-bitwiseXorAssign",
               "signature": "mutating func bitwiseXorAssign(Rhs)",
-              "doc": "Performs bitwise XOR with the other value in place.",
+              "doc": "Mutates `self` to `self ^ other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -371,7 +371,7 @@
       "name": "Bool",
       "anchor": "struct-Bool",
       "signature": "public struct Bool { /* private fields */ }",
-      "doc": "The boolean type with support for logical operations, equality, hashing, and formatting.\nBool conforms to Equatable, Matchable, Formattable, Hash, And, Or, Not,\nExpressibleByBoolLiteral, BooleanConditional, and FFISafe protocols.",
+      "doc": "Two-state truth value with `true` and `false` as its only inhabitants.\n\n`Bool` is the canonical conformer of every logical, conditional, and\nequality protocol in `std.core`: equality, matching, hashing, formatting,\n`and`/`or`/`not`, plus FFI compatibility for crossing the C boundary as\na single byte. Custom types rarely need to wrap `Bool`; conform to the\nindividual protocols (e.g. `BooleanConditional`) instead.\n\n# Examples\n\n```\nlet alive = true;\nif alive { greet() }\n\nlet votes = [true, false, true];\nlet yesCount = votes.iter().filter({ |b| b }).count();   // 2\n```\n\n# Representation\n\nWraps a single `lang.i1`. The runtime promotes to a byte at FFI\nboundaries (`FFISafe` conformance).",
       "source_path": "lang/std/core/bool.ks",
       "member_groups": [
         {
@@ -381,10 +381,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Bool Literal",
+              "anchor": "initializer-Bool-Literal",
               "signature": "public init(boolLiteral: lang.i1)",
-              "doc": "Creates a Bool from a boolean literal value.",
+              "doc": "Builds a `Bool` from the primitive `lang.i1` produced by a literal.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -399,7 +399,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Bool) -> Bool",
-              "doc": "Compares this Bool with another for equality.\nReturns true if both values are the same.",
+              "doc": "Returns `true` if both bits agree. Drives `==` for `Bool`.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -414,7 +414,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "public func matches(Bool) -> Bool",
-              "doc": "Matches this Bool against another in pattern matching contexts.\nReturns true if both values are the same.",
+              "doc": "Pattern-match form of `equals`: `case true =>` and `case false =>`\ndispatch through here.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -429,7 +429,7 @@
               "name": "format",
               "anchor": "function-format",
               "signature": "public func format(FormatOptions) -> String",
-              "doc": "Formats this Bool as a string.\nDefault: \"true\" or \"false\".\nDebug: \"Bool(true)\" or \"Bool(false)\".",
+              "doc": "Renders as `\"true\"` / `\"false\"`. With `options.debug`, wraps as\n`\"Bool(true)\"` / `\"Bool(false)\"` for diagnostic dumps.\n\n# Examples\n\n```\ntrue.format()                                       // \"true\"\nfalse.format(FormatOptions.debug())                 // \"Bool(false)\"\n```",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -444,7 +444,7 @@
               "name": "hash",
               "anchor": "function-hash",
               "signature": "public func hash[H](into: mutating H) where H: Hasher",
-              "doc": "Hashes this Bool value into the given hasher.",
+              "doc": "Feeds a single `0` or `1` byte into `hasher`. Compatible with how the\nstdlib hashes other primitives — equal `Bool`s always hash equal.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -483,7 +483,7 @@
               "name": "logicalAnd",
               "anchor": "function-logicalAnd",
               "signature": "public func logicalAnd(() -> Bool) -> Bool",
-              "doc": "Logical AND with short-circuit evaluation.\nThe closure is only evaluated if self is true.",
+              "doc": "Short-circuiting `and`: `other` runs only when `self` is `true`.\nThe closure form is what the `and` keyword lowers into; users\ntypically write `a and b` rather than calling this directly.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -506,7 +506,7 @@
               "name": "logicalOr",
               "anchor": "function-logicalOr",
               "signature": "public func logicalOr(() -> Bool) -> Bool",
-              "doc": "Logical OR with short-circuit evaluation.\nThe closure is only evaluated if self is false.",
+              "doc": "Short-circuiting `or`: `other` runs only when `self` is `false`.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -529,7 +529,7 @@
               "name": "logicalNot",
               "anchor": "function-logicalNot",
               "signature": "public func logicalNot() -> Bool",
-              "doc": "Logical NOT - returns the inverse of this boolean.",
+              "doc": "Bit-flip; `not true == false`.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -541,10 +541,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Bool Literal",
+              "anchor": "initializer-Bool-Literal",
               "signature": "init(boolLiteral: lang.i1)",
-              "doc": "Creates an instance from a boolean literal.",
+              "doc": "Builds an instance from a boolean literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -559,7 +559,7 @@
               "name": "boolValue",
               "anchor": "function-boolValue",
               "signature": "public func boolValue() -> lang.i1",
-              "doc": "Returns the underlying boolean value for use in conditionals.",
+              "doc": "Returns the wrapped `lang.i1` so `if`/`while` can branch on it\nwithout a redundant `Bool` round-trip.",
               "source_path": "lang/std/core/bool.ks"
             }
           ]
@@ -571,7 +571,7 @@
       "name": "BooleanConditional",
       "anchor": "protocol-BooleanConditional",
       "signature": "public protocol BooleanConditional",
-      "doc": "Protocol for types that can be used as boolean conditions in if/while statements.\nTypes conforming to this protocol can be used directly in conditionals.",
+      "doc": "Protocol for types that may appear directly in `if`, `while`, and other\nboolean contexts.\n\n`Bool` is the canonical conformer. The method returns the primitive\n`lang.i1` rather than `Bool` to avoid a circular dependency between the\nconditional lowering and `Bool` itself.",
       "source_path": "lang/std/core/logical.ks",
       "member_groups": [
         {
@@ -584,7 +584,7 @@
               "name": "boolValue",
               "anchor": "function-boolValue",
               "signature": "func boolValue() -> lang.i1",
-              "doc": "Returns the boolean value for use in conditionals.",
+              "doc": "Returns the underlying truth value as a primitive `i1`.",
               "source_path": "lang/std/core/logical.ks"
             }
           ]
@@ -596,7 +596,7 @@
       "name": "BooleanLiteralType",
       "anchor": "typealias-BooleanLiteralType",
       "signature": "public type BooleanLiteralType = Bool",
-      "doc": "The default type for boolean literals when type cannot be inferred.",
+      "doc": "Default type for boolean literals (`let b = true` → `Bool`).",
       "source_path": "lang/std/core/literals.ks"
     },
     {
@@ -604,7 +604,7 @@
       "name": "CharLiteralType",
       "anchor": "typealias-CharLiteralType",
       "signature": "public type CharLiteralType = Char",
-      "doc": "The default type for character literals when type cannot be inferred.",
+      "doc": "Default type for character literals (`let c = 'a'` → `Char`).",
       "source_path": "lang/std/core/literals.ks"
     },
     {
@@ -612,7 +612,7 @@
       "name": "Cloneable",
       "anchor": "protocol-Cloneable",
       "signature": "public protocol Cloneable",
-      "doc": "Protocol for types that can be copied via a clone() method.\nUnlike simple Copyable (bitwise copy), Cloneable types have custom copy behavior.\nWhen a Cloneable value is copied, clone() is called automatically.\nCloneable extends Copyable, allowing cloneable types to be used where copyable is required.",
+      "doc": "Protocol for types that need custom logic when duplicated.\n\n`Cloneable` extends `Copyable` so that cloneable values can flow through\ngeneric code that asks only for `Copyable`. The compiler invokes\n`clone()` automatically wherever a `Cloneable` value would otherwise be\nimplicitly copied (assignment, argument pass, return). The implementation\ndecides how deep the copy goes — `RcBox`, for example, only bumps the\nrefcount.\n\n# Examples\n\n```\nlet a = RcBox(value: 1);\nlet b = a;            // implicit clone() — refcount bumps to 2\nlet c = a.clone();    // explicit clone — refcount bumps to 3\n```",
       "source_path": "lang/std/core/copy.ks",
       "member_groups": [
         {
@@ -625,7 +625,7 @@
               "name": "clone",
               "anchor": "function-clone",
               "signature": "func clone() -> Self",
-              "doc": "Creates and returns a copy of this value.\nThe implementation defines how deep the copy is.",
+              "doc": "Returns a copy of `self`. Conformers define the depth and any side\neffects (e.g. refcount adjustments).",
               "source_path": "lang/std/core/copy.ks"
             }
           ]
@@ -637,7 +637,7 @@
       "name": "ClosedRange",
       "anchor": "struct-ClosedRange",
       "signature": "public struct ClosedRange[T] where T: Steppable, T: Comparable { /* private fields */ }",
-      "doc": "A closed range [start, end] that includes both endpoints.\nCreated with the ..= operator. Example: 0..=10 includes 0 through 10.",
+      "doc": "Closed range `[start, end]` — produced by the `..=` operator. Both\nendpoints are included in iteration.\n\n# Examples\n\n```\nfor i in 0..=3 { print(i) }   // 0, 1, 2, 3\n(0..=10).contains(10)         // true (vs Range, which excludes the upper)\n```\n\n# Representation\n\nTwo values: `start` and `end`. No heap allocation.",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
         {
@@ -646,11 +646,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Bounds",
+              "anchor": "initializer-From-Bounds",
+              "signature": "public init(T, T)",
+              "doc": "Builds the closed range `[start, end]`.",
+              "source_path": "lang/std/core/range.ks"
+            },
+            {
               "kind": "function",
               "name": "contains",
               "anchor": "function-contains",
               "signature": "public func contains(T) -> Bool",
-              "doc": "Returns true if the value is within the range [start, end].",
+              "doc": "Returns `true` iff `start <= value <= end`.",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -658,15 +666,7 @@
               "name": "end",
               "anchor": "field-end",
               "signature": "public var end: T",
-              "doc": "The upper bound of the range (inclusive).",
-              "source_path": "lang/std/core/range.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(T, T)",
-              "doc": "Creates a range from start to end (both inclusive).",
+              "doc": "Upper bound — included.",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -674,7 +674,7 @@
               "name": "isEmpty",
               "anchor": "function-isEmpty",
               "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns true if the range contains no elements (start > end).",
+              "doc": "Returns `true` when `start > end` (no values are produced).",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -682,7 +682,7 @@
               "name": "start",
               "anchor": "field-start",
               "signature": "public var start: T",
-              "doc": "The lower bound of the range (inclusive).",
+              "doc": "Lower bound — included.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -697,7 +697,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(ClosedRange[T]) -> Bool",
-              "doc": "Compares this range with another for equality.",
+              "doc": "Equal when both bounds match.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -728,8 +728,188 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> ClosedRangeIterator[T]",
-              "doc": "Returns an iterator over the range values.",
+              "doc": "Returns a fresh iterator over the range.",
               "source_path": "lang/std/core/range.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayIndex",
+          "source_path": "std.collections.ArrayIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "ArrayYield",
+              "anchor": "typealias-ArrayYield",
+              "signature": "type ArrayYield = Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArray",
+              "anchor": "function-readArray",
+              "signature": "public func readArray(from: Array[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayChecked",
+              "anchor": "function-readArrayChecked",
+              "signature": "public func readArrayChecked(from: Array[T]) -> Slice[T]?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayUnchecked",
+              "anchor": "function-readArrayUnchecked",
+              "signature": "public func readArrayUnchecked(from: Array[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArray",
+              "anchor": "function-writeArray",
+              "signature": "public func writeArray(to: mutating Array[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArrayUnchecked",
+              "anchor": "function-writeArrayUnchecked",
+              "signature": "public func writeArrayUnchecked(to: mutating Array[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "SliceIndex",
+          "source_path": "std.memory.SliceIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "SliceYield",
+              "anchor": "typealias-SliceYield",
+              "signature": "type SliceYield = Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSlice",
+              "anchor": "function-readSlice",
+              "signature": "public func readSlice(from: Slice[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceChecked",
+              "anchor": "function-readSliceChecked",
+              "signature": "public func readSliceChecked(from: Slice[T]) -> Slice[T]?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceUnchecked",
+              "anchor": "function-readSliceUnchecked",
+              "signature": "public func readSliceUnchecked(from: Slice[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSlice",
+              "anchor": "function-writeSlice",
+              "signature": "public func writeSlice(to: Slice[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSliceUnchecked",
+              "anchor": "function-writeSliceUnchecked",
+              "signature": "public func writeSliceUnchecked(to: Slice[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "BytesIndex",
+          "source_path": "std.text.BytesIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "BytesYield",
+              "anchor": "typealias-BytesYield",
+              "signature": "type BytesYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytes",
+              "anchor": "function-readBytes",
+              "signature": "public func readBytes(from: BytesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesChecked",
+              "anchor": "function-readBytesChecked",
+              "signature": "public func readBytesChecked(from: BytesView) -> String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesUnchecked",
+              "anchor": "function-readBytesUnchecked",
+              "signature": "public func readBytesUnchecked(from: BytesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "CharsIndex",
+          "source_path": "std.text.CharsIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "CharsYield",
+              "anchor": "typealias-CharsYield",
+              "signature": "type CharsYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readChars",
+              "anchor": "function-readChars",
+              "signature": "public func readChars(from: CharsView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readCharsChecked",
+              "anchor": "function-readCharsChecked",
+              "signature": "public func readCharsChecked(from: CharsView) -> String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
             }
           ]
         }
@@ -740,7 +920,7 @@
       "name": "ClosedRangeConstructible",
       "anchor": "protocol-ClosedRangeConstructible",
       "signature": "public protocol ClosedRangeConstructible[Rhs = Self]",
-      "doc": "Protocol for types that support the inclusive range operator (..=).\nExample: 0..=10 creates a range from 0 to 10 (inclusive).",
+      "doc": "Raw protocol backing the closed `..=` operator (`start..=end`).",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
         {
@@ -761,7 +941,7 @@
               "name": "inclusiveRange",
               "anchor": "function-inclusiveRange",
               "signature": "func inclusiveRange(to: Rhs) -> Output",
-              "doc": "Creates an inclusive range from this value to the end value.",
+              "doc": "Builds the closed range `[self, end]`.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -773,7 +953,7 @@
       "name": "ClosedRangeIterator",
       "anchor": "struct-ClosedRangeIterator",
       "signature": "public struct ClosedRangeIterator[T] where T: Steppable, T: Comparable { /* private fields */ }",
-      "doc": "Iterator for ClosedRange that yields values from start through end (inclusive).",
+      "doc": "Iterator over a `ClosedRange[T]`. Differs from `RangeIterator` in\nthat it yields `end` and uses an extra `finished` bit so it can\nterminate after emitting the upper bound.\n\n# Representation\n\n`current`, `end`, and a one-bit `finished` flag.",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
         {
@@ -783,10 +963,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Bounds",
+              "anchor": "initializer-From-Bounds",
               "signature": "public init(current: T, end: T, finished: Bool)",
-              "doc": "Creates an iterator starting at current and ending at end (inclusive).",
+              "doc": "Builds an iterator yielding `current` through `end` inclusive.\nPass `finished: true` to construct an already-exhausted iterator.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -809,7 +989,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> T?",
-              "doc": "Returns the next value in the range, or None if exhausted.",
+              "doc": "Yields the next value, or `.None` when past `end`.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -821,7 +1001,7 @@
       "name": "Coalesce",
       "anchor": "protocol-Coalesce",
       "signature": "public protocol Coalesce[Default]",
-      "doc": "Protocol for types that support the null coalescing operator (??).\nEnables providing a default value when the receiver is None/null.\nUses short-circuit evaluation: the default is only computed if needed.",
+      "doc": "Raw protocol backing the `??` operator.\n\nImplemented by `Optional[T]` (with `Default = T`, `Output = T`) and by\n`Result[T, E]` (with `Default = T`, `Output = T`). The operand is a\nthunk so the default expression is only evaluated when needed — this\nmatters when the default has side effects or is expensive to compute.\n\n# Examples\n\n```\nlet name: String? = .None;\nname ?? \"anonymous\"           // \"anonymous\"\n\nlet cached: String? = .Some(\"hi\");\ncached ?? expensiveLookup()   // \"hi\" — expensiveLookup() not called\n```",
       "source_path": "lang/std/core/coalesce.ks",
       "member_groups": [
         {
@@ -842,7 +1022,7 @@
               "name": "coalesce",
               "anchor": "function-coalesce",
               "signature": "func coalesce(() -> Default) -> Output",
-              "doc": "Returns the contained value if present, otherwise evaluates and returns the default.\nThe closure is only called if self is None/null.",
+              "doc": "Returns the contained value, or the result of `default()` if absent.",
               "source_path": "lang/std/core/coalesce.ks"
             }
           ]
@@ -854,7 +1034,7 @@
       "name": "Comparable",
       "anchor": "protocol-Comparable",
       "signature": "public protocol Comparable",
-      "doc": "Protocol for types that have a total ordering.\nExtends Equatable to add comparison capabilities.",
+      "doc": "Protocol for types with a total ordering.\n\nConformers implement a single `compare(other:) -> Ordering`; the\nblanket extension below derives `<`, `<=`, `>`, `>=`, and `!=` (the\nlast shadowing the `Equatable` default since it can be cheaper via\n`compare`). `Comparable` extends `Equatable`, so equal values and a\n`compare` returning `.Equal` must agree.\n\n# Examples\n\n```\npublic struct Version: Comparable {\n    public var major: Int64\n    public var minor: Int64\n    public func equals(other: Version) -> Bool {\n        self.major == other.major and self.minor == other.minor\n    }\n    public func compare(other: Version) -> Ordering {\n        self.major.compare(other.major)\n            .then(self.minor.compare(other.minor))\n    }\n}\n```",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -867,7 +1047,7 @@
               "name": "compare",
               "anchor": "function-compare",
               "signature": "func compare(Self) -> Ordering",
-              "doc": "Compares this value with another and returns their ordering.",
+              "doc": "Returns the ordering of `self` relative to `other`. Must be a\ntotal order — for any `a`, `b`, `c` exactly one of `Less`,\n`Equal`, `Greater` holds, and the order is transitive.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -882,7 +1062,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "func equals(Self) -> Bool",
-              "doc": "Returns true if this value equals the other.",
+              "doc": "Returns `true` iff `self` and `other` are considered equal. Should\nbe reflexive, symmetric, and transitive — `Hash` requires equal\nvalues to hash equal, so don't drift from those laws.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -937,7 +1117,7 @@
               "name": "lessThan",
               "anchor": "function-lessThan",
               "signature": "public func lessThan(Self) -> Bool",
-              "doc": "Returns true if this value is less than the other.",
+              "doc": "`<` derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -960,7 +1140,7 @@
               "name": "lessThanOrEqual",
               "anchor": "function-lessThanOrEqual",
               "signature": "public func lessThanOrEqual(Self) -> Bool",
-              "doc": "Returns true if this value is less than or equal to the other.",
+              "doc": "`<=` derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -983,7 +1163,7 @@
               "name": "greaterThan",
               "anchor": "function-greaterThan",
               "signature": "public func greaterThan(Self) -> Bool",
-              "doc": "Returns true if this value is greater than the other.",
+              "doc": "`>` derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1006,7 +1186,7 @@
               "name": "greaterThanOrEqual",
               "anchor": "function-greaterThanOrEqual",
               "signature": "public func greaterThanOrEqual(Self) -> Bool",
-              "doc": "Returns true if this value is greater than or equal to the other.",
+              "doc": "`>=` derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1029,7 +1209,7 @@
               "name": "notEquals",
               "anchor": "function-notEquals",
               "signature": "public func notEquals(Self) -> Bool",
-              "doc": "Returns true if this value is not equal to the other.",
+              "doc": "`!=` derived from `compare`. Shadows the `Equatable` default with\na single dispatch.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1044,7 +1224,7 @@
               "name": "isAtLeast",
               "anchor": "function-isAtLeast",
               "signature": "public func isAtLeast(Self) -> Bool",
-              "doc": "Returns true if self >= bound",
+              "doc": "`start..` lower-bound check, derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -1052,7 +1232,7 @@
               "name": "isAtMost",
               "anchor": "function-isAtMost",
               "signature": "public func isAtMost(Self) -> Bool",
-              "doc": "Returns true if self <= bound",
+              "doc": "`..=end` upper-bound check, derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -1060,7 +1240,7 @@
               "name": "isBelow",
               "anchor": "function-isBelow",
               "signature": "public func isBelow(Self) -> Bool",
-              "doc": "Returns true if self < bound",
+              "doc": "`..<end` upper-bound check, derived from `compare`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1072,7 +1252,7 @@
       "name": "ControlFlow",
       "anchor": "enum-ControlFlow",
       "signature": "public enum ControlFlow[C, B]",
-      "doc": "The fundamental type for early return semantics.\nUsed internally by the try operator and error propagation.\nContinue indicates normal flow with the contained value.\nBreak indicates early return/error with the contained value.",
+      "doc": "The two-state result of a `tryExtract()` call: keep going with a value, or\nshort-circuit out of the current function with an early-return payload.\n\nConceptually `Either`-shaped, but the names are deliberately\ncontrol-flow flavoured because that is what the compiler does with\nthem — `Continue` flows to the next instruction, `Break` lowers into a\nbranch back to the function's epilogue via `FromResidual`.",
       "source_path": "lang/std/core/error.ks",
       "member_groups": [
         {
@@ -1085,7 +1265,7 @@
               "name": "Break",
               "anchor": "case-Break",
               "signature": "case Break(B)",
-              "doc": "",
+              "doc": "Early-return flow — carries the residual to propagate via `FromResidual`.",
               "source_path": "lang/std/core/error.ks"
             },
             {
@@ -1093,7 +1273,7 @@
               "name": "Continue",
               "anchor": "case-Continue",
               "signature": "case Continue(C)",
-              "doc": "",
+              "doc": "Normal flow — carries the value to use as the operator result.",
               "source_path": "lang/std/core/error.ks"
             }
           ]
@@ -1105,7 +1285,7 @@
       "name": "Convertible",
       "anchor": "protocol-Convertible",
       "signature": "public protocol Convertible[From]",
-      "doc": "Protocol for types that can be constructed from another type.\nImplement this to enable explicit type conversions using the init(from:) pattern.",
+      "doc": "Protocol for explicit type conversions via `init(from:)`.\n\nConform when you want callers to write `Target(from: source)`. Most\nnumeric types do this for every other numeric width (see\n`lang/std/num/integer.ks.template`). Conformances should be lossless or\ndocument their loss behavior; for fallible conversions prefer a separate\n`Result`-returning function.\n\n# Examples\n\n```\nlet i: Int64 = 42;\nlet u = UInt32(from: i);   // explicit narrowing conversion\n```",
       "source_path": "lang/std/core/convertible.ks",
       "member_groups": [
         {
@@ -1115,10 +1295,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -1130,7 +1310,7 @@
       "name": "Copyable",
       "anchor": "protocol-Copyable",
       "signature": "public protocol Copyable",
-      "doc": "Marker protocol for types that can be implicitly copied (bitwise copy).\nTypes implicitly conform to Copyable unless opted out with `not Copyable`.\nBitwise copy means the type's memory is directly duplicated without any special handling.",
+      "doc": "Marker protocol for types whose values are duplicated by a plain bitwise\ncopy of their storage.\n\nAll built-in scalars and most plain value structs conform implicitly — the\ncompiler synthesises the conformance unless the type explicitly opts out\nwith `not Copyable`. Opt out for types that own a resource (a heap\nallocation, a file handle) where bitwise duplication would alias the\nresource and break ownership.",
       "source_path": "lang/std/core/copy.ks"
     },
     {
@@ -1138,7 +1318,7 @@
       "name": "Defaultable",
       "anchor": "protocol-Defaultable",
       "signature": "public protocol Defaultable",
-      "doc": "Protocol for types that have a default value.\nEnables construction without arguments via init().",
+      "doc": "Protocol for types with a meaningful zero/default value.\n\n`Defaultable` is what `T()` resolves to when no other init is\nchosen. Conform when there's an obvious default: `0` for numbers,\n`\"\"` for strings, the empty collection for containers. Don't\nconform just to satisfy a generic bound — the absence of a default\nis information.",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -1148,10 +1328,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1171,7 +1351,7 @@
       "name": "DivideAssign",
       "anchor": "protocol-DivideAssign",
       "signature": "public protocol DivideAssign[Rhs = Self]",
-      "doc": "Protocol for types that support division assignment (/=).",
+      "doc": "Raw protocol backing the `/=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -1184,7 +1364,7 @@
               "name": "divideAssign",
               "anchor": "function-divideAssign",
               "signature": "mutating func divideAssign(Rhs)",
-              "doc": "Divides this value by the other in place.",
+              "doc": "Mutates `self` to `self / other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -1196,7 +1376,7 @@
       "name": "Divisible",
       "anchor": "protocol-Divisible",
       "signature": "public protocol Divisible[Rhs = Self]",
-      "doc": "Protocol for types that support division (/).",
+      "doc": "Raw protocol backing the `/` operator.\n\nDivision by zero is not modelled at the protocol level; conforming types\ndocument their own behavior (integer types panic, floats produce `inf`/`nan`).",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -1217,7 +1397,7 @@
               "name": "divide",
               "anchor": "function-divide",
               "signature": "func divide(Rhs) -> Output",
-              "doc": "Divides this value by another and returns the result.",
+              "doc": "Returns `self / other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
           ]
@@ -1229,7 +1409,7 @@
       "name": "Equal",
       "anchor": "protocol-Equal",
       "signature": "public protocol Equal[Rhs = Self]",
-      "doc": "Protocol for types that support equality comparison (==).",
+      "doc": "Raw protocol backing the `==` operator.\n\nMost user code should conform to `Equatable` instead, which conforms to\n`Equal[Self]` automatically with `Output = Bool`. Implement `Equal` directly\nonly when you need a non-Bool result (e.g. lifting equality into a vector\ntype that returns a mask).\n\n# Examples\n\n```\n1 == 1   // true\n\"a\" == \"b\"  // false\n```",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
         {
@@ -1250,7 +1430,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "func equals(Rhs) -> Output",
-              "doc": "Compares this value with another for equality.",
+              "doc": "Returns the equality result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
           ]
@@ -1262,7 +1442,7 @@
       "name": "Equatable",
       "anchor": "protocol-Equatable",
       "signature": "public protocol Equatable",
-      "doc": "Protocol for types that can be compared for equality.\nProvides the foundation for the == operator via the Equal protocol extension.",
+      "doc": "Protocol for types whose values can be compared for equality.\n\n`Equatable` is the semantic counterpart to the raw `Equal[Self]`\noperator protocol: conformers implement `equals` returning `Bool`, and a\nblanket extension below derives both `==` and `!=`. Most types should\nreach for `Equatable` rather than `Equal` directly — the `Bool`\nassociated-type binding is wired up automatically.\n\n# Examples\n\n```\npublic struct Point: Equatable {\n    public var x: Int64\n    public var y: Int64\n    public func equals(other: Point) -> Bool {\n        self.x == other.x and self.y == other.y\n    }\n}\n\nPoint(x: 1, y: 2) == Point(x: 1, y: 2)   // true\n```",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -1291,7 +1471,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "func equals(Self) -> Bool",
-              "doc": "Returns true if this value equals the other.",
+              "doc": "Returns `true` iff `self` and `other` are considered equal. Should\nbe reflexive, symmetric, and transitive — `Hash` requires equal\nvalues to hash equal, so don't drift from those laws.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1314,7 +1494,7 @@
               "name": "notEquals",
               "anchor": "function-notEquals",
               "signature": "public func notEquals(Self) -> Bool",
-              "doc": "Default implementation of inequality based on equality.",
+              "doc": "Default `!=` derived from `equals`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1326,7 +1506,7 @@
       "name": "ExpressibleByArrayLiteral",
       "anchor": "protocol-ExpressibleByArrayLiteral",
       "signature": "public protocol ExpressibleByArrayLiteral",
-      "doc": "User-facing protocol for array literal initialization.\nProvides a more convenient interface using LiteralSlice.\nThe compiler only uses `_ExpressibleByArrayLiteral` directly; this is a\nconvenience wrapper a type may also adopt to take `LiteralSlice` arguments.",
+      "doc": "User-facing protocol for array-literal lowering.\n\nProvides a `LiteralSlice` view over the literal's contents so the\nimplementation can iterate or copy without juggling raw pointers.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1336,10 +1516,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Array Literal",
+              "anchor": "initializer-Array-Literal",
               "signature": "init(LiteralSlice[Element])",
-              "doc": "Creates an instance from a literal slice of elements.",
+              "doc": "Builds an instance from a literal slice of elements.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1359,10 +1539,10 @@
             },
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Literal Bridge",
+              "anchor": "initializer-Literal-Bridge",
               "signature": "init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)",
-              "doc": "Creates an instance from a raw pointer to elements and count.",
+              "doc": "Compiler-emitted init taking a raw pointer and count.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1374,7 +1554,7 @@
       "name": "ExpressibleByBoolLiteral",
       "anchor": "protocol-ExpressibleByBoolLiteral",
       "signature": "public protocol ExpressibleByBoolLiteral",
-      "doc": "Protocol for types that can be constructed from boolean literals (true/false).",
+      "doc": "Protocol for types that accept a `true`/`false` literal.\n\nThe init takes a primitive `lang.i1` rather than `Bool` because `Bool`\nitself conforms — the literal lowering needs a representation that does\nnot depend on the type being constructed.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1384,10 +1564,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Bool Literal",
+              "anchor": "initializer-Bool-Literal",
               "signature": "init(boolLiteral: lang.i1)",
-              "doc": "Creates an instance from a boolean literal.",
+              "doc": "Builds an instance from a boolean literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1399,7 +1579,7 @@
       "name": "ExpressibleByCharLiteral",
       "anchor": "protocol-ExpressibleByCharLiteral",
       "signature": "public protocol ExpressibleByCharLiteral",
-      "doc": "Protocol for types that can be constructed from character literals.",
+      "doc": "Protocol for types that accept a character literal (`'a'`).",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1409,10 +1589,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Char Literal",
+              "anchor": "initializer-Char-Literal",
               "signature": "init(charLiteral: lang.i32)",
-              "doc": "Creates an instance from a character literal.",
+              "doc": "Builds an instance from a character literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1424,7 +1604,7 @@
       "name": "ExpressibleByDictionaryLiteral",
       "anchor": "protocol-ExpressibleByDictionaryLiteral",
       "signature": "public protocol ExpressibleByDictionaryLiteral",
-      "doc": "User-facing protocol for dictionary literal initialization.\nProvides a more convenient interface using LiteralSlice.\nThe compiler only uses `_ExpressibleByDictionaryLiteral` directly; this is\na convenience wrapper a type may also adopt to take `LiteralSlice` arguments.",
+      "doc": "User-facing protocol for dictionary-literal lowering. Mirrors\n`ExpressibleByArrayLiteral` but for key-value pairs.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1434,10 +1614,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Dictionary Literal",
+              "anchor": "initializer-Dictionary-Literal",
               "signature": "init(LiteralSlice[(Key, Value)])",
-              "doc": "Creates an instance from a literal slice of key-value pairs.",
+              "doc": "Builds an instance from a literal slice of key-value pairs.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1456,19 +1636,19 @@
               "source_path": "lang/std/core/literals.ks"
             },
             {
+              "kind": "initializer",
+              "name": "Literal Bridge",
+              "anchor": "initializer-Literal-Bridge",
+              "signature": "init(lang.ptr[(Key, Value)], lang.i64)",
+              "doc": "Compiler-emitted init taking a raw `(Key, Value)` pointer and count.",
+              "source_path": "lang/std/core/literals.ks"
+            },
+            {
               "kind": "typealias",
               "name": "Value",
               "anchor": "typealias-Value",
               "signature": "type Value",
               "doc": "",
-              "source_path": "lang/std/core/literals.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(lang.ptr[(Key, Value)], lang.i64)",
-              "doc": "Creates an instance from a raw pointer to key-value pairs and count.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1480,7 +1660,7 @@
       "name": "ExpressibleByFloatLiteral",
       "anchor": "protocol-ExpressibleByFloatLiteral",
       "signature": "public protocol ExpressibleByFloatLiteral",
-      "doc": "Protocol for types that can be constructed from floating-point literals.",
+      "doc": "Protocol for types that accept a floating-point literal (e.g. `3.14`).",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1490,10 +1670,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Float Literal",
+              "anchor": "initializer-Float-Literal",
               "signature": "init(floatLiteral: lang.f64)",
-              "doc": "Creates an instance from a floating-point literal.",
+              "doc": "Builds an instance from a floating-point literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1505,7 +1685,7 @@
       "name": "ExpressibleByIntLiteral",
       "anchor": "protocol-ExpressibleByIntLiteral",
       "signature": "public protocol ExpressibleByIntLiteral",
-      "doc": "Protocol for types that can be constructed from integer literals.",
+      "doc": "Protocol for types that accept an integer literal (e.g. `42`, `0xff`).\n\nAll the standard integer widths conform; types outside `std.num` (for\nexample a `BigInt` or a fixed-point number) can also conform to opt in\nto the literal syntax.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1515,10 +1695,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1530,7 +1710,7 @@
       "name": "ExpressibleByNullLiteral",
       "anchor": "protocol-ExpressibleByNullLiteral",
       "signature": "public protocol ExpressibleByNullLiteral",
-      "doc": "Protocol for types that can be constructed from null literals.",
+      "doc": "Protocol for types that accept the `null` literal.\n\n`Optional[T]` is the canonical conformer; it produces `.None`. Types\nthat wrap an optional or have a meaningful \"absent\" state may also\nconform.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1540,10 +1720,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Null Literal",
+              "anchor": "initializer-Null-Literal",
               "signature": "init()",
-              "doc": "Creates a null/none instance.",
+              "doc": "Builds the absent/none instance.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1555,7 +1735,7 @@
       "name": "ExpressibleByStringLiteral",
       "anchor": "protocol-ExpressibleByStringLiteral",
       "signature": "public protocol ExpressibleByStringLiteral",
-      "doc": "Protocol for types that can be constructed from string literals.",
+      "doc": "Protocol for types that accept a string literal (`\"…\"`).\n\nThe init receives a primitive `lang.str` (pointer + length pair) so that\nstring literal lowering does not require the target type to already exist\nin stdlib form.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1565,10 +1745,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "String Literal",
+              "anchor": "initializer-String-Literal",
               "signature": "init(stringLiteral: lang.str)",
-              "doc": "Creates an instance from a string literal.",
+              "doc": "Builds an instance from a string literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1580,7 +1760,7 @@
       "name": "FloatLiteralType",
       "anchor": "typealias-FloatLiteralType",
       "signature": "public type FloatLiteralType = Float64",
-      "doc": "The default type for floating-point literals when type cannot be inferred.",
+      "doc": "Default type for float literals (`let x = 1.0` → `Float64`).",
       "source_path": "lang/std/core/literals.ks"
     },
     {
@@ -1588,7 +1768,7 @@
       "name": "FromResidual",
       "anchor": "protocol-FromResidual",
       "signature": "public protocol FromResidual[Early]",
-      "doc": "Protocol that enables early return propagation.\nTypes conforming to FromResidual can be constructed from an early return value,\nallowing error types to propagate through function boundaries.",
+      "doc": "Protocol that lets a return type absorb a `try`-propagated residual.\n\nImplement when your error/optional type should be reachable via `try`\nfrom another type with a different residual. For example, `Result[T, E]`\nimplements `FromResidual[E]` so that `try someResult` inside a function\nreturning `Result[T, E]` rebuilds the failure.",
       "source_path": "lang/std/core/error.ks",
       "member_groups": [
         {
@@ -1601,7 +1781,7 @@
               "name": "fromResidual",
               "anchor": "function-fromResidual",
               "signature": "static func fromResidual(Early) -> Self",
-              "doc": "Creates an instance from an early return/error value.",
+              "doc": "Builds an instance carrying `residual` as its failure payload.",
               "source_path": "lang/std/core/error.ks"
             }
           ]
@@ -1613,7 +1793,7 @@
       "name": "Greater",
       "anchor": "protocol-Greater",
       "signature": "public protocol Greater[Rhs = Self]",
-      "doc": "Protocol for types that support greater-than comparison (>).",
+      "doc": "Raw protocol backing the `>` operator. See `Less` for guidance.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
         {
@@ -1634,7 +1814,7 @@
               "name": "greaterThan",
               "anchor": "function-greaterThan",
               "signature": "func greaterThan(Rhs) -> Output",
-              "doc": "Returns true if this value is greater than the other.",
+              "doc": "Returns the greater-than result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
           ]
@@ -1646,7 +1826,7 @@
       "name": "GreaterOrEqual",
       "anchor": "protocol-GreaterOrEqual",
       "signature": "public protocol GreaterOrEqual[Rhs = Self]",
-      "doc": "Protocol for types that support greater-than-or-equal comparison (>=).",
+      "doc": "Raw protocol backing the `>=` operator. See `Less` for guidance.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
         {
@@ -1667,7 +1847,7 @@
               "name": "greaterThanOrEqual",
               "anchor": "function-greaterThanOrEqual",
               "signature": "func greaterThanOrEqual(Rhs) -> Output",
-              "doc": "Returns true if this value is greater than or equal to the other.",
+              "doc": "Returns the greater-than-or-equal result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
           ]
@@ -1679,7 +1859,7 @@
       "name": "Hash",
       "anchor": "protocol-Hash",
       "signature": "public protocol Hash",
-      "doc": "Protocol for types that can be hashed.\nHashable types must also be equatable (equal values must have equal hashes).",
+      "doc": "Protocol for types whose values can be hashed.\n\n`Hash` extends `Equatable`: the contract is that `a == b` implies\n`a.hash(into:)` and `b.hash(into:)` feed the same bytes to the hasher.\nViolating this breaks `Set` and `Dictionary` — equal lookups won't\nland on the equal stored value. The hasher is generic so the same\nhash impl works across hashing algorithms (SipHash, FxHash, etc.).\n\n# Examples\n\n```\npublic struct Tag: Hash {\n    public var name: String\n    public func equals(other: Tag) -> Bool { self.name == other.name }\n    public func hash[H](mutating into hasher: H) where H: Hasher {\n        self.name.hash(into: hasher)\n    }\n}\n```",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -1692,7 +1872,7 @@
               "name": "hash",
               "anchor": "function-hash",
               "signature": "func hash[H](into: mutating H) where H: Hasher",
-              "doc": "Feeds this value's bytes into the given hasher.",
+              "doc": "Feeds this value's bytes into `hasher`. Must be deterministic\nacross calls and consistent with `equals`.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1707,7 +1887,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "func equals(Self) -> Bool",
-              "doc": "Returns true if this value equals the other.",
+              "doc": "Returns `true` iff `self` and `other` are considered equal. Should\nbe reflexive, symmetric, and transitive — `Hash` requires equal\nvalues to hash equal, so don't drift from those laws.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1719,7 +1899,7 @@
       "name": "Hasher",
       "anchor": "protocol-Hasher",
       "signature": "public protocol Hasher",
-      "doc": "Protocol for hash algorithm implementations.\nUsed by Hash-conforming types to compute hash values.",
+      "doc": "Protocol for hash algorithm implementations consumed by `Hash`.\n\nThe contract is the same as Rust / Swift: `Hash`-conforming types\n`write` their bytes into the hasher; the hasher accumulates state\nand emits a `UInt64` digest on `finish()`. Used by `Set`,\n`Dictionary`, and any structure that wants stable hashes.",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -1732,7 +1912,7 @@
               "name": "finish",
               "anchor": "function-finish",
               "signature": "mutating func finish() -> UInt64",
-              "doc": "Finalizes the hash computation and returns the hash value.",
+              "doc": "Returns the finalised hash. After calling `finish` the hasher's\nstate is unspecified — don't reuse it.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -1740,7 +1920,7 @@
               "name": "write",
               "anchor": "function-write",
               "signature": "mutating func write(Slice[UInt8])",
-              "doc": "Writes bytes to the hasher state.",
+              "doc": "Mixes `bytes` into the running hash state.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1752,7 +1932,7 @@
       "name": "IntegerLiteralType",
       "anchor": "typealias-IntegerLiteralType",
       "signature": "public type IntegerLiteralType = Int64",
-      "doc": "The default type for integer literals when type cannot be inferred.",
+      "doc": "Default type for integer literals (`let x = 1` → `Int64`).",
       "source_path": "lang/std/core/literals.ks"
     },
     {
@@ -1760,7 +1940,7 @@
       "name": "LeftShift",
       "anchor": "protocol-LeftShift",
       "signature": "public protocol LeftShift[Rhs = lang.i64]",
-      "doc": "Protocol for types that support left bit shift (<<).\nDefault Rhs is lang.i64 because type defaults must be resolvable at parse time.",
+      "doc": "Raw protocol backing the `<<` operator.\n\n`Rhs` defaults to the primitive `lang.i64` because protocol type defaults\nmust be resolvable at parse time, before stdlib types like `Int64` are\navailable. Conforming integer types narrow this to a more specific shift\ncount where appropriate.\n\n# Errors\n\nStandard integer types panic on out-of-range shift counts (see the\n`shiftLeft` documentation on the integer types).",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -1781,7 +1961,7 @@
               "name": "shiftLeft",
               "anchor": "function-shiftLeft",
               "signature": "func shiftLeft(by: Rhs) -> Output",
-              "doc": "Shifts this value's bits left by the given count.",
+              "doc": "Returns `self << count`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
           ]
@@ -1793,7 +1973,7 @@
       "name": "LeftShiftAssign",
       "anchor": "protocol-LeftShiftAssign",
       "signature": "public protocol LeftShiftAssign[Rhs]",
-      "doc": "Protocol for types that support left shift assignment (<<=).",
+      "doc": "Raw protocol backing the `<<=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -1806,7 +1986,7 @@
               "name": "shiftLeftAssign",
               "anchor": "function-shiftLeftAssign",
               "signature": "mutating func shiftLeftAssign(by: Rhs)",
-              "doc": "Shifts this value's bits left by the given count in place.",
+              "doc": "Mutates `self` to `self << count`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -1818,7 +1998,7 @@
       "name": "Less",
       "anchor": "protocol-Less",
       "signature": "public protocol Less[Rhs = Self]",
-      "doc": "Protocol for types that support less-than comparison (<).",
+      "doc": "Raw protocol backing the `<` operator.\n\n`Comparable` derives `Less`, `LessOrEqual`, `Greater`, `GreaterOrEqual` from\na single `compare()` method, so prefer conforming to `Comparable` for\ntotally-ordered types.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
         {
@@ -1839,7 +2019,7 @@
               "name": "lessThan",
               "anchor": "function-lessThan",
               "signature": "func lessThan(Rhs) -> Output",
-              "doc": "Returns true if this value is less than the other.",
+              "doc": "Returns the less-than result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
           ]
@@ -1851,7 +2031,7 @@
       "name": "LessOrEqual",
       "anchor": "protocol-LessOrEqual",
       "signature": "public protocol LessOrEqual[Rhs = Self]",
-      "doc": "Protocol for types that support less-than-or-equal comparison (<=).",
+      "doc": "Raw protocol backing the `<=` operator. See `Less` for guidance.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
         {
@@ -1872,7 +2052,7 @@
               "name": "lessThanOrEqual",
               "anchor": "function-lessThanOrEqual",
               "signature": "func lessThanOrEqual(Rhs) -> Output",
-              "doc": "Returns true if this value is less than or equal to the other.",
+              "doc": "Returns the less-than-or-equal result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
           ]
@@ -1884,7 +2064,7 @@
       "name": "Matchable",
       "anchor": "protocol-Matchable",
       "signature": "public protocol Matchable",
-      "doc": "Protocol for types that can be matched in match expressions.\nEnables pattern matching support for custom types.",
+      "doc": "Protocol enabling `match` against custom types via the `case` pattern.\n\nConformers decide what \"matches\" means — for `Bool` and the integer\ntypes it is straight equality; for ranges it is containment. The\ncompiler lowers `case <pattern> =>` to a `matches` call.",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -1897,7 +2077,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "func matches(Self) -> Bool",
-              "doc": "Returns true if this value matches the pattern.",
+              "doc": "Returns `true` if `other` matches the receiver.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1909,7 +2089,7 @@
       "name": "Modulo",
       "anchor": "protocol-Modulo",
       "signature": "public protocol Modulo[Rhs = Self]",
-      "doc": "Protocol for types that support modulo/remainder (%).",
+      "doc": "Raw protocol backing the `%` operator.\n\nFor integers this is the remainder of truncated division, with the sign of\nthe dividend. Use `floorMod` (defined on integer types) when you want\nEuclidean / floor-style remainder semantics.",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -1930,7 +2110,7 @@
               "name": "modulo",
               "anchor": "function-modulo",
               "signature": "func modulo(Rhs) -> Output",
-              "doc": "Computes the remainder of dividing this value by another.",
+              "doc": "Returns `self % other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
           ]
@@ -1942,7 +2122,7 @@
       "name": "ModuloAssign",
       "anchor": "protocol-ModuloAssign",
       "signature": "public protocol ModuloAssign[Rhs = Self]",
-      "doc": "Protocol for types that support modulo assignment (%=).",
+      "doc": "Raw protocol backing the `%=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -1955,7 +2135,7 @@
               "name": "modAssign",
               "anchor": "function-modAssign",
               "signature": "mutating func modAssign(Rhs)",
-              "doc": "Computes the remainder of this value divided by the other in place.",
+              "doc": "Mutates `self` to `self % other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -1967,7 +2147,7 @@
       "name": "Multipliable",
       "anchor": "protocol-Multipliable",
       "signature": "public protocol Multipliable[Rhs = Self]",
-      "doc": "Protocol for types that support multiplication (*).",
+      "doc": "Raw protocol backing the `*` operator.\n\nThe associated `one` value is the multiplicative identity, used as the\nstarting accumulator for products and powers.\n\n# Examples\n\n```\n6 * 7         // 42\nInt64.one     // 1\n```",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -1988,7 +2168,7 @@
               "name": "multiply",
               "anchor": "function-multiply",
               "signature": "func multiply(Rhs) -> Output",
-              "doc": "Multiplies this value by another and returns the result.",
+              "doc": "Returns `self * other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             },
             {
@@ -1996,7 +2176,7 @@
               "name": "one",
               "anchor": "field-one",
               "signature": "static var one: Self { get }",
-              "doc": "The multiplicative identity (one).\nUsed as the starting value for product operations.",
+              "doc": "The multiplicative identity — a value `o` such that `x * o == x` for all `x`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
           ]
@@ -2008,7 +2188,7 @@
       "name": "MultiplyAssign",
       "anchor": "protocol-MultiplyAssign",
       "signature": "public protocol MultiplyAssign[Rhs = Self]",
-      "doc": "Protocol for types that support multiplication assignment (*=).",
+      "doc": "Raw protocol backing the `*=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -2021,7 +2201,7 @@
               "name": "multiplyAssign",
               "anchor": "function-multiplyAssign",
               "signature": "mutating func multiplyAssign(Rhs)",
-              "doc": "Multiplies this value by the other in place.",
+              "doc": "Mutates `self` to `self * other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -2033,7 +2213,7 @@
       "name": "Negatable",
       "anchor": "protocol-Negatable",
       "signature": "public protocol Negatable",
-      "doc": "Protocol for types that support unary negation (-x).",
+      "doc": "Raw protocol backing the unary `-` operator.\n\nOn signed two's-complement integers, negating the minimum value overflows\n(e.g. `-Int8.minValue == Int8.minValue`); the operator wraps. Use\n`checkedNegate` if overflow needs to surface.",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -2054,7 +2234,7 @@
               "name": "negate",
               "anchor": "function-negate",
               "signature": "func negate() -> Output",
-              "doc": "Returns the negated value.",
+              "doc": "Returns `-self`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
           ]
@@ -2066,7 +2246,7 @@
       "name": "Not",
       "anchor": "protocol-Not",
       "signature": "public protocol Not",
-      "doc": "Protocol for types that support logical NOT (not keyword).",
+      "doc": "Raw protocol backing the `not` keyword operator.",
       "source_path": "lang/std/core/logical.ks",
       "member_groups": [
         {
@@ -2087,7 +2267,7 @@
               "name": "logicalNot",
               "anchor": "function-logicalNot",
               "signature": "func logicalNot() -> Output",
-              "doc": "Returns the logical negation of this value.",
+              "doc": "Returns `not self`.",
               "source_path": "lang/std/core/logical.ks"
             }
           ]
@@ -2099,7 +2279,7 @@
       "name": "NotEqual",
       "anchor": "protocol-NotEqual",
       "signature": "public protocol NotEqual[Rhs = Self]",
-      "doc": "Protocol for types that support inequality comparison (!=).",
+      "doc": "Raw protocol backing the `!=` operator.\n\n`Equatable` provides a default `notEquals` derived from `equals`, so\nconforming to `Equatable` is enough for both `==` and `!=`.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
         {
@@ -2120,7 +2300,7 @@
               "name": "notEquals",
               "anchor": "function-notEquals",
               "signature": "func notEquals(Rhs) -> Output",
-              "doc": "Compares this value with another for inequality.",
+              "doc": "Returns the inequality result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
           ]
@@ -2132,7 +2312,7 @@
       "name": "NullLiteralType",
       "anchor": "typealias-NullLiteralType",
       "signature": "public type NullLiteralType[T] = std.result.Optional[T]",
-      "doc": "The default type for null literals when type cannot be inferred.",
+      "doc": "Default type for null literals (`let x = null` → `Optional[T]`).",
       "source_path": "lang/std/core/literals.ks"
     },
     {
@@ -2140,7 +2320,7 @@
       "name": "Or",
       "anchor": "protocol-Or",
       "signature": "public protocol Or[Rhs = Self]",
-      "doc": "Protocol for types that support logical OR (or keyword).\nUses short-circuit evaluation: the right operand is only evaluated if needed.",
+      "doc": "Raw protocol backing the `or` keyword operator.\n\nAs with `And`, `other` is a thunk so the right-hand side can be skipped\nwhen `self` already determines the result.",
       "source_path": "lang/std/core/logical.ks",
       "member_groups": [
         {
@@ -2161,7 +2341,7 @@
               "name": "logicalOr",
               "anchor": "function-logicalOr",
               "signature": "func logicalOr(() -> Rhs) -> Output",
-              "doc": "Performs logical OR with short-circuit evaluation.\nThe closure is only called if self is falsy.",
+              "doc": "Returns `self or other()`. The closure runs only if needed.",
               "source_path": "lang/std/core/logical.ks"
             }
           ]
@@ -2173,7 +2353,7 @@
       "name": "Ordering",
       "anchor": "enum-Ordering",
       "signature": "public enum Ordering",
-      "doc": "Represents the result of comparing two values.\nUsed by the Comparable protocol to express total ordering.",
+      "doc": "The three-valued result of a `Comparable.compare()` call.\n\n`Ordering` is the lingua franca for comparison: types implementing\n`Comparable` define a single `compare` returning this enum, and the\nstdlib derives `<`, `<=`, `>`, `>=` on top. The `then` / `thenWith`\nhelpers make it easy to chain comparisons over multiple fields without\nnested `if`s.\n\n# Examples\n\n```\nlet cmp = a.compare(b);\nmatch cmp {\n    .Less => \"ascending\",\n    .Equal => \"tied\",\n    .Greater => \"descending\"\n}\n\n// Chain field comparisons: by lastName, then firstName.\na.lastName.compare(b.lastName)\n    .then(a.firstName.compare(b.firstName))\n```\n\n# Representation\n\nA plain three-state enum with no payload — lowers to a small integer tag.",
       "source_path": "lang/std/core/ordering.ks",
       "member_groups": [
         {
@@ -2186,7 +2366,7 @@
               "name": "Equal",
               "anchor": "case-Equal",
               "signature": "case Equal",
-              "doc": "The values are equal.",
+              "doc": "The two values compared equal.",
               "source_path": "lang/std/core/ordering.ks"
             },
             {
@@ -2194,7 +2374,7 @@
               "name": "Greater",
               "anchor": "case-Greater",
               "signature": "case Greater",
-              "doc": "The first value is greater than the second.",
+              "doc": "The receiver compared greater than the argument.",
               "source_path": "lang/std/core/ordering.ks"
             },
             {
@@ -2202,7 +2382,7 @@
               "name": "Less",
               "anchor": "case-Less",
               "signature": "case Less",
-              "doc": "The first value is less than the second.",
+              "doc": "The receiver compared less than the argument.",
               "source_path": "lang/std/core/ordering.ks"
             },
             {
@@ -2210,7 +2390,7 @@
               "name": "notEquals",
               "anchor": "function-notEquals",
               "signature": "public func notEquals(Ordering) -> Bool",
-              "doc": "Compares this ordering with another for inequality.",
+              "doc": "Inverse of `equals`.",
               "source_path": "lang/std/core/ordering.ks"
             },
             {
@@ -2218,7 +2398,7 @@
               "name": "reverse",
               "anchor": "function-reverse",
               "signature": "public func reverse() -> Ordering",
-              "doc": "Reverses this ordering (Less becomes Greater and vice versa).",
+              "doc": "Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting\nin reverse without writing a second comparator.\n\n# Examples\n\n```\nOrdering.Less.reverse()     // .Greater\nOrdering.Equal.reverse()    // .Equal\n```",
               "source_path": "lang/std/core/ordering.ks"
             },
             {
@@ -2226,7 +2406,7 @@
               "name": "then",
               "anchor": "function-then",
               "signature": "public func then(Ordering) -> Ordering",
-              "doc": "Returns this ordering if not Equal, otherwise returns the other ordering.\nUseful for chaining comparisons by multiple fields.",
+              "doc": "Tie-breaker chain: returns `self` if it is non-`Equal`, otherwise\n`other`. The eager form — both arguments are evaluated.\n\n# Examples\n\n```\nOrdering.Equal.then(.Less)     // .Less\nOrdering.Greater.then(.Less)   // .Greater (self wins)\n```",
               "source_path": "lang/std/core/ordering.ks"
             },
             {
@@ -2234,7 +2414,7 @@
               "name": "thenWith",
               "anchor": "function-thenWith",
               "signature": "public func thenWith(() -> Ordering) -> Ordering",
-              "doc": "Returns this ordering if not Equal, otherwise evaluates and returns the comparison.\nLazy version of then() that only evaluates the closure if needed.",
+              "doc": "Lazy variant of `then` — `compare` runs only when `self` is `Equal`.\nPrefer this when computing the secondary comparison is expensive.",
               "source_path": "lang/std/core/ordering.ks"
             }
           ]
@@ -2249,7 +2429,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Ordering) -> Bool",
-              "doc": "Compares this ordering with another for equality.",
+              "doc": "Equality on the orderings themselves: same variant ⇒ equal.",
               "source_path": "lang/std/core/ordering.ks"
             }
           ]
@@ -2264,7 +2444,7 @@
               "name": "format",
               "anchor": "function-format",
               "signature": "public func format(FormatOptions) -> String",
-              "doc": "Formats this ordering as a string.",
+              "doc": "Renders as `\"Less\"`, `\"Equal\"`, or `\"Greater\"`. With `debug` set,\nprefixes with the type name (`\"Ordering.Less\"`).",
               "source_path": "lang/std/core/ordering.ks"
             }
           ]
@@ -2276,7 +2456,7 @@
       "name": "Range",
       "anchor": "struct-Range",
       "signature": "public struct Range[T] where T: Steppable, T: Comparable { /* private fields */ }",
-      "doc": "A half-open range [start, end) that excludes the end value.\nCreated with the ..< operator. Example: 0..<10 includes 0 through 9.",
+      "doc": "Half-open range `[start, end)` — produced by the `..<` operator.\n\n`Range` is `Iterable`, so `for x in 0..<10 { … }` works directly.\n`T` must be `Steppable` (defines `successor()`) and `Comparable` (so\nthe iterator knows when to stop). Empty ranges (`start >= end`) yield\nnothing.\n\n# Examples\n\n```\nfor i in 0..<3 { print(i) }   // 0, 1, 2\n(0..<10).contains(5)          // true\n(0..<0).isEmpty()             // true\n```\n\n# Representation\n\nTwo values: `start` and `end`. No heap allocation.",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
         {
@@ -2285,11 +2465,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Bounds",
+              "anchor": "initializer-From-Bounds",
+              "signature": "public init(T, T)",
+              "doc": "Builds the range `[start, end)`.",
+              "source_path": "lang/std/core/range.ks"
+            },
+            {
               "kind": "function",
               "name": "contains",
               "anchor": "function-contains",
               "signature": "public func contains(T) -> Bool",
-              "doc": "Returns true if the value is within the range [start, end).",
+              "doc": "Returns `true` iff `start <= value < end`.",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -2297,15 +2485,7 @@
               "name": "end",
               "anchor": "field-end",
               "signature": "public var end: T",
-              "doc": "The upper bound of the range (exclusive).",
-              "source_path": "lang/std/core/range.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(T, T)",
-              "doc": "Creates a range from start (inclusive) to end (exclusive).",
+              "doc": "Upper bound — excluded from the range.",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -2313,7 +2493,7 @@
               "name": "isEmpty",
               "anchor": "function-isEmpty",
               "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns true if the range contains no elements (start >= end).",
+              "doc": "Returns `true` when `start >= end` (no values are produced).",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -2321,7 +2501,7 @@
               "name": "start",
               "anchor": "field-start",
               "signature": "public var start: T",
-              "doc": "The lower bound of the range (inclusive).",
+              "doc": "Lower bound — included in the range.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -2336,7 +2516,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Range[T]) -> Bool",
-              "doc": "Compares this range with another for equality.",
+              "doc": "Equal when both bounds match. Useful for range-keyed lookups and\ntests, not a structural property of the iteration order.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -2367,8 +2547,296 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> RangeIterator[T]",
-              "doc": "Returns an iterator over the range values.",
+              "doc": "Returns a fresh iterator over the range. Multiple calls produce\nindependent iterators — `Range` is value-typed.",
               "source_path": "lang/std/core/range.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayIndex",
+          "source_path": "std.collections.ArrayIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "ArrayYield",
+              "anchor": "typealias-ArrayYield",
+              "signature": "type ArrayYield = Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArray",
+              "anchor": "function-readArray",
+              "signature": "public func readArray(from: Array[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayChecked",
+              "anchor": "function-readArrayChecked",
+              "signature": "public func readArrayChecked(from: Array[T]) -> Slice[T]?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayUnchecked",
+              "anchor": "function-readArrayUnchecked",
+              "signature": "public func readArrayUnchecked(from: Array[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArray",
+              "anchor": "function-writeArray",
+              "signature": "public func writeArray(to: mutating Array[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArrayUnchecked",
+              "anchor": "function-writeArrayUnchecked",
+              "signature": "public func writeArrayUnchecked(to: mutating Array[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayClampable",
+          "source_path": "std.collections.ArrayClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "ArrayClampedYield",
+              "anchor": "typealias-ArrayClampedYield",
+              "signature": "type ArrayClampedYield = Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayClamped",
+              "anchor": "function-readArrayClamped",
+              "signature": "public func readArrayClamped(from: Array[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArrayClamped",
+              "anchor": "function-writeArrayClamped",
+              "signature": "public func writeArrayClamped(to: mutating Array[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "SliceIndex",
+          "source_path": "std.memory.SliceIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "SliceYield",
+              "anchor": "typealias-SliceYield",
+              "signature": "type SliceYield = Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSlice",
+              "anchor": "function-readSlice",
+              "signature": "public func readSlice(from: Slice[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceChecked",
+              "anchor": "function-readSliceChecked",
+              "signature": "public func readSliceChecked(from: Slice[T]) -> Slice[T]?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceUnchecked",
+              "anchor": "function-readSliceUnchecked",
+              "signature": "public func readSliceUnchecked(from: Slice[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSlice",
+              "anchor": "function-writeSlice",
+              "signature": "public func writeSlice(to: Slice[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSliceUnchecked",
+              "anchor": "function-writeSliceUnchecked",
+              "signature": "public func writeSliceUnchecked(to: Slice[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "SliceClampable",
+          "source_path": "std.memory.SliceClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "SliceClampedYield",
+              "anchor": "typealias-SliceClampedYield",
+              "signature": "type SliceClampedYield = Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceClamped",
+              "anchor": "function-readSliceClamped",
+              "signature": "public func readSliceClamped(from: Slice[T]) -> Slice[T]",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSliceClamped",
+              "anchor": "function-writeSliceClamped",
+              "signature": "public func writeSliceClamped(to: Slice[T], value: Slice[T])",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "BytesIndex",
+          "source_path": "std.text.BytesIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "BytesYield",
+              "anchor": "typealias-BytesYield",
+              "signature": "type BytesYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytes",
+              "anchor": "function-readBytes",
+              "signature": "public func readBytes(from: BytesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesChecked",
+              "anchor": "function-readBytesChecked",
+              "signature": "public func readBytesChecked(from: BytesView) -> String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesUnchecked",
+              "anchor": "function-readBytesUnchecked",
+              "signature": "public func readBytesUnchecked(from: BytesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "BytesClampable",
+          "source_path": "std.text.BytesClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "BytesClampedYield",
+              "anchor": "typealias-BytesClampedYield",
+              "signature": "type BytesClampedYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesClamped",
+              "anchor": "function-readBytesClamped",
+              "signature": "public func readBytesClamped(from: BytesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "CharsIndex",
+          "source_path": "std.text.CharsIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "CharsYield",
+              "anchor": "typealias-CharsYield",
+              "signature": "type CharsYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readChars",
+              "anchor": "function-readChars",
+              "signature": "public func readChars(from: CharsView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readCharsChecked",
+              "anchor": "function-readCharsChecked",
+              "signature": "public func readCharsChecked(from: CharsView) -> String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "CharsClampable",
+          "source_path": "std.text.CharsClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "CharsClampedYield",
+              "anchor": "typealias-CharsClampedYield",
+              "signature": "type CharsClampedYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readCharsClamped",
+              "anchor": "function-readCharsClamped",
+              "signature": "public func readCharsClamped(from: CharsView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
             }
           ]
         }
@@ -2379,7 +2847,7 @@
       "name": "RangeConstructible",
       "anchor": "protocol-RangeConstructible",
       "signature": "public protocol RangeConstructible[Rhs = Self]",
-      "doc": "Protocol for types that support the exclusive range operator (..<).\nExample: 0..<10 creates a range from 0 to 9.",
+      "doc": "Raw protocol backing the half-open `..<` operator (`start..<end`).\n\n`Output` is the range type produced — usually `Range[Self]`, but\ncustom types may produce their own range flavor (e.g. a date range).",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
         {
@@ -2400,7 +2868,7 @@
               "name": "exclusiveRange",
               "anchor": "function-exclusiveRange",
               "signature": "func exclusiveRange(to: Rhs) -> Output",
-              "doc": "Creates an exclusive range from this value to the end value.",
+              "doc": "Builds the half-open range `[self, end)`.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -2412,7 +2880,7 @@
       "name": "RangeIterator",
       "anchor": "struct-RangeIterator",
       "signature": "public struct RangeIterator[T] where T: Steppable, T: Comparable { /* private fields */ }",
-      "doc": "Iterator for Range that yields values from start up to (but not including) end.",
+      "doc": "Iterator over a half-open `Range[T]`. Yields successive values via\n`Steppable.successor()` until reaching (but not including) `end`.\n\n# Representation\n\nTwo values: `current` (next yield) and `end` (sentinel).",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
         {
@@ -2422,10 +2890,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Bounds",
+              "anchor": "initializer-From-Bounds",
               "signature": "public init(current: T, end: T)",
-              "doc": "Creates an iterator starting at current and ending before end.",
+              "doc": "Builds an iterator that yields `current`, `current.successor()`, …\nstopping before `end`.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -2448,7 +2916,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> T?",
-              "doc": "Returns the next value in the range, or None if exhausted.",
+              "doc": "Yields the next value, or `.None` when exhausted.",
               "source_path": "lang/std/core/range.ks"
             }
           ]
@@ -2460,7 +2928,7 @@
       "name": "RangeMatchable",
       "anchor": "protocol-RangeMatchable",
       "signature": "public protocol RangeMatchable[Bound = Self]",
-      "doc": "Protocol for types that support range pattern matching.\nEnables patterns like `start..=end`, `start..<end`, `..=end`, `..<end`, `start..`\n\nThe Bound type parameter allows heterogeneous matching, e.g., matching\nan Int64 against Char bounds.",
+      "doc": "Protocol enabling range patterns (`start..=end`, `..<end`, `start..`).\n\nSplit into three primitive comparisons rather than a single\n\"is in range\" call so the compiler can lower partial ranges (e.g.\n`..<10`) without synthesising a stand-in upper bound. The `Bound`\nparameter lets a value be matched against bounds of a different type —\ne.g. an `Int64` against `Char` bounds.",
       "source_path": "lang/std/core/protocols.ks",
       "member_groups": [
         {
@@ -2473,7 +2941,7 @@
               "name": "isAtLeast",
               "anchor": "function-isAtLeast",
               "signature": "func isAtLeast(Bound) -> Bool",
-              "doc": "Returns true if self >= bound (for start.. patterns)",
+              "doc": "Returns `true` when `self >= bound`. Powers `start..` patterns.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -2481,7 +2949,7 @@
               "name": "isAtMost",
               "anchor": "function-isAtMost",
               "signature": "func isAtMost(Bound) -> Bool",
-              "doc": "Returns true if self <= bound (for ..=end patterns)",
+              "doc": "Returns `true` when `self <= bound`. Powers `..=end` patterns.",
               "source_path": "lang/std/core/protocols.ks"
             },
             {
@@ -2489,7 +2957,7 @@
               "name": "isBelow",
               "anchor": "function-isBelow",
               "signature": "func isBelow(Bound) -> Bool",
-              "doc": "Returns true if self < bound (for ..<end patterns)",
+              "doc": "Returns `true` when `self < bound`. Powers `..<end` patterns.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -2501,7 +2969,7 @@
       "name": "RightShift",
       "anchor": "protocol-RightShift",
       "signature": "public protocol RightShift[Rhs = lang.i64]",
-      "doc": "Protocol for types that support right bit shift (>>).\nDefault Rhs is lang.i64 because type defaults must be resolvable at parse time.",
+      "doc": "Raw protocol backing the `>>` operator.\n\nBehaviour for signed types is arithmetic shift (sign-preserving); unsigned\ntypes use logical shift. The `Rhs` default mirrors `LeftShift`.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -2522,7 +2990,7 @@
               "name": "shiftRight",
               "anchor": "function-shiftRight",
               "signature": "func shiftRight(by: Rhs) -> Output",
-              "doc": "Shifts this value's bits right by the given count.",
+              "doc": "Returns `self >> count`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
           ]
@@ -2534,7 +3002,7 @@
       "name": "RightShiftAssign",
       "anchor": "protocol-RightShiftAssign",
       "signature": "public protocol RightShiftAssign[Rhs]",
-      "doc": "Protocol for types that support right shift assignment (>>=).",
+      "doc": "Raw protocol backing the `>>=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -2547,7 +3015,7 @@
               "name": "shiftRightAssign",
               "anchor": "function-shiftRightAssign",
               "signature": "mutating func shiftRightAssign(by: Rhs)",
-              "doc": "Shifts this value's bits right by the given count in place.",
+              "doc": "Mutates `self` to `self >> count`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -2559,7 +3027,7 @@
       "name": "StringLiteralType",
       "anchor": "typealias-StringLiteralType",
       "signature": "public type StringLiteralType = String",
-      "doc": "The default type for string literals when type cannot be inferred.",
+      "doc": "Default type for string literals (`let s = \"hi\"` → `String`).",
       "source_path": "lang/std/core/literals.ks"
     },
     {
@@ -2567,7 +3035,7 @@
       "name": "SubtractAssign",
       "anchor": "protocol-SubtractAssign",
       "signature": "public protocol SubtractAssign[Rhs = Self]",
-      "doc": "Protocol for types that support subtraction assignment (-=).",
+      "doc": "Raw protocol backing the `-=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
         {
@@ -2580,7 +3048,7 @@
               "name": "subtractAssign",
               "anchor": "function-subtractAssign",
               "signature": "mutating func subtractAssign(Rhs)",
-              "doc": "Subtracts the other value from this one in place.",
+              "doc": "Mutates `self` to `self - other`.",
               "source_path": "lang/std/core/assign.ks"
             }
           ]
@@ -2592,7 +3060,7 @@
       "name": "Subtractable",
       "anchor": "protocol-Subtractable",
       "signature": "public protocol Subtractable[Rhs = Self]",
-      "doc": "Protocol for types that support subtraction (-).",
+      "doc": "Raw protocol backing the `-` binary operator.",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -2613,7 +3081,7 @@
               "name": "subtract",
               "anchor": "function-subtract",
               "signature": "func subtract(Rhs) -> Output",
-              "doc": "Subtracts another value from this one and returns the result.",
+              "doc": "Returns `self - other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
           ]
@@ -2625,7 +3093,7 @@
       "name": "Tryable",
       "anchor": "protocol-Tryable",
       "signature": "public protocol Tryable",
-      "doc": "Protocol that enables the `try expr` syntax.\nTypes conforming to Tryable can be used with the try operator,\nwhich extracts the success value or propagates the error.",
+      "doc": "Protocol enabling the `try expr` operator.\n\n`Output` is the success value the operator yields; `Early` is the\n\"residual\" — typically an `Err` variant, a `None`, or a typed error —\nthat gets propagated. The compiler lowers `try x` to roughly\n`match x.tryExtract() { .Continue(v) => v, .Break(r) => return Self.fromResidual(r) }`,\nwhich is why the enclosing function's return type must conform to\n`FromResidual[Early]`.\n\n# Examples\n\n```\n// Optional and Result both conform; `try` chains them seamlessly.\nfunc parseAndDouble(s: String) -> Int64? {\n    let n = try Int64.parse(s);    // .None short-circuits the whole function\n    .Some(n * 2)\n}\n```",
       "source_path": "lang/std/core/error.ks",
       "member_groups": [
         {
@@ -2638,7 +3106,7 @@
               "name": "Early",
               "anchor": "typealias-Early",
               "signature": "type Early",
-              "doc": "The type propagated on failure.",
+              "doc": "The residual carried out of `try expr` on failure.",
               "source_path": "lang/std/core/error.ks"
             },
             {
@@ -2646,7 +3114,7 @@
               "name": "Output",
               "anchor": "typealias-Output",
               "signature": "type Output",
-              "doc": "The type produced on success.",
+              "doc": "The value produced by `try expr` on success.",
               "source_path": "lang/std/core/error.ks"
             },
             {
@@ -2654,7 +3122,7 @@
               "name": "tryExtract",
               "anchor": "function-tryExtract",
               "signature": "func tryExtract() -> ControlFlow[Output, Early]",
-              "doc": "Extracts the value or signals early return.\nReturns Continue(value) on success or Break(early) on failure.",
+              "doc": "Splits `self` into the success value or the early-return residual.",
               "source_path": "lang/std/core/error.ks"
             }
           ]
@@ -2666,7 +3134,7 @@
       "name": "_ExpressibleByArrayLiteral",
       "anchor": "protocol--ExpressibleByArrayLiteral",
       "signature": "public protocol _ExpressibleByArrayLiteral",
-      "doc": "Low-level protocol for array literal initialization.\nThe compiler calls this directly with raw pointer and count.",
+      "doc": "Compiler-internal protocol for array-literal lowering.\n\nThe lexer/parser lower `[a, b, c]` to a call into this init with a raw\npointer to a stack-allocated buffer of `Element`s. Only the compiler\nuses this directly; user types should conform to\n`ExpressibleByArrayLiteral` (which extends this with a friendlier API).",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -2684,10 +3152,10 @@
             },
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Literal Bridge",
+              "anchor": "initializer-Literal-Bridge",
               "signature": "init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)",
-              "doc": "Creates an instance from a raw pointer to elements and count.",
+              "doc": "Compiler-emitted init taking a raw pointer and count.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -2699,7 +3167,7 @@
       "name": "_ExpressibleByDictionaryLiteral",
       "anchor": "protocol--ExpressibleByDictionaryLiteral",
       "signature": "public protocol _ExpressibleByDictionaryLiteral",
-      "doc": "Low-level protocol for dictionary literal initialization.\nThe compiler calls this directly with raw pointer and count.",
+      "doc": "Compiler-internal protocol for dictionary-literal lowering.\n\nThe compiler lowers `[k1: v1, k2: v2]` into a call with a raw pointer\nto a `(Key, Value)` buffer. As with array literals, user types should\nprefer `ExpressibleByDictionaryLiteral`.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -2716,19 +3184,19 @@
               "source_path": "lang/std/core/literals.ks"
             },
             {
+              "kind": "initializer",
+              "name": "Literal Bridge",
+              "anchor": "initializer-Literal-Bridge",
+              "signature": "init(lang.ptr[(Key, Value)], lang.i64)",
+              "doc": "Compiler-emitted init taking a raw `(Key, Value)` pointer and count.",
+              "source_path": "lang/std/core/literals.ks"
+            },
+            {
               "kind": "typealias",
               "name": "Value",
               "anchor": "typealias-Value",
               "signature": "type Value",
               "doc": "",
-              "source_path": "lang/std/core/literals.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(lang.ptr[(Key, Value)], lang.i64)",
-              "doc": "Creates an instance from a raw pointer to key-value pairs and count.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -2740,7 +3208,7 @@
       "name": "fatalError",
       "anchor": "function-fatalError",
       "signature": "public func fatalError(String) -> Never",
-      "doc": "Abort the process with a message.",
+      "doc": "Aborts the process with `message`.\n\nReturns `!` (the never type), so the compiler treats any code after a\n`fatalError` call as unreachable. Use sparingly — almost every \"this\nshould be impossible\" branch is better expressed as a `Result` error or\na precondition check, because `fatalError` produces no recovery\nopportunity for the caller.\n\n# Examples\n\n```\nlet mode = readMode();\nmatch mode {\n    .Read => doRead(),\n    .Write => doWrite(),\n    _ => fatalError(\"unsupported mode\")\n}\n```",
       "source_path": "lang/std/core/panic.ks"
     }
   ]

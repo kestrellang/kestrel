@@ -7,15 +7,15 @@ module Test
             let s: std.text.String = "hello";
 
             // ---- bytes.count ----
-            if s.bytes().count != 5 { return 1 }
+            if s.bytes.count != 5 { return 1 }
 
             // ---- bytes.isEmpty() ----
-            if s.bytes().isEmpty() { return 2 }
+            if s.bytes.isEmpty() { return 2 }
 
             // Empty string bytes view
             let empty = std.text.String();
-            if empty.bytes().isEmpty() == false { return 3 }
-            if empty.bytes().count != 0 { return 4 }
+            if empty.bytes.isEmpty() == false { return 3 }
+            if empty.bytes.count != 0 { return 4 }
 
             // ---- bytes(checked:) ----
             // 'h' = 104

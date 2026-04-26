@@ -8,7 +8,7 @@
       "name": "GraphemeBreakProperty",
       "anchor": "enum-GraphemeBreakProperty",
       "signature": "public enum GraphemeBreakProperty",
-      "doc": "Grapheme cluster break property (UAX #29).",
+      "doc": "One of the UAX #29 Grapheme_Cluster_Break property values.\n\nReturned by `graphemeBreakProperty(c:)` and consumed by\n`shouldBreakBetween(...)`. Variant names match the Unicode property\nlabels — see UAX #29 for the precise definitions and the boundary\nrules (GB1–GB999) that consume them.\n\n# Representation\n\nA 14-state tag enum (no payload). `ordinal()` gives the numeric\nencoding used by the stage-2 lookup table.",
       "source_path": "lang/std/text/unicode/grapheme_tables.ks",
       "member_groups": [
         {
@@ -21,7 +21,7 @@
               "name": "CR",
               "anchor": "case-CR",
               "signature": "case CR",
-              "doc": "",
+              "doc": "Carriage Return (`U+000D`).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -29,7 +29,7 @@
               "name": "Control",
               "anchor": "case-Control",
               "signature": "case Control",
-              "doc": "",
+              "doc": "Other control characters that always force a break.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -37,7 +37,7 @@
               "name": "Extend",
               "anchor": "case-Extend",
               "signature": "case Extend",
-              "doc": "",
+              "doc": "Combining marks and other extending characters.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -45,7 +45,7 @@
               "name": "L",
               "anchor": "case-L",
               "signature": "case L",
-              "doc": "",
+              "doc": "Hangul leading consonant jamo (L).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -53,7 +53,7 @@
               "name": "LF",
               "anchor": "case-LF",
               "signature": "case LF",
-              "doc": "",
+              "doc": "Line Feed (`U+000A`).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -61,7 +61,7 @@
               "name": "LV",
               "anchor": "case-LV",
               "signature": "case LV",
-              "doc": "",
+              "doc": "Hangul precomposed LV syllable.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -69,7 +69,7 @@
               "name": "LVT",
               "anchor": "case-LVT",
               "signature": "case LVT",
-              "doc": "",
+              "doc": "Hangul precomposed LVT syllable.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -77,7 +77,7 @@
               "name": "Other",
               "anchor": "case-Other",
               "signature": "case Other",
-              "doc": "",
+              "doc": "Default class — anything not in another category.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -85,7 +85,7 @@
               "name": "Prepend",
               "anchor": "case-Prepend",
               "signature": "case Prepend",
-              "doc": "",
+              "doc": "Prepended concatenation marks.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -93,7 +93,7 @@
               "name": "RegionalIndicator",
               "anchor": "case-RegionalIndicator",
               "signature": "case RegionalIndicator",
-              "doc": "",
+              "doc": "Regional Indicator codepoints (used to form flag emoji in pairs).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -101,7 +101,7 @@
               "name": "SpacingMark",
               "anchor": "case-SpacingMark",
               "signature": "case SpacingMark",
-              "doc": "",
+              "doc": "Spacing combining marks.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -109,7 +109,7 @@
               "name": "T",
               "anchor": "case-T",
               "signature": "case T",
-              "doc": "",
+              "doc": "Hangul trailing consonant jamo (T).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -117,7 +117,7 @@
               "name": "V",
               "anchor": "case-V",
               "signature": "case V",
-              "doc": "",
+              "doc": "Hangul vowel jamo (V).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -125,7 +125,7 @@
               "name": "ZWJ",
               "anchor": "case-ZWJ",
               "signature": "case ZWJ",
-              "doc": "",
+              "doc": "Zero Width Joiner (`U+200D`).",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             },
             {
@@ -148,7 +148,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(GraphemeBreakProperty) -> Bool",
-              "doc": "",
+              "doc": "Equality by ordinal — same variant, same value.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             }
           ]
@@ -163,7 +163,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "public func matches(GraphemeBreakProperty) -> Bool",
-              "doc": "",
+              "doc": "Match form of `equals` for use in pattern matching.",
               "source_path": "lang/std/text/unicode/grapheme_tables.ks"
             }
           ]
@@ -175,7 +175,7 @@
       "name": "caseFold",
       "anchor": "function-caseFold",
       "signature": "public func caseFold(Char) -> Char",
-      "doc": "Returns the case-folded version of a character (for case-insensitive comparison).\nFor characters with multi-char folding, returns the first char.",
+      "doc": "Single-codepoint case fold for `c`. Use when comparing characters\ncase-insensitively: `caseFold(a) == caseFold(b)` is the canonical\nper-character equality test.\n\nFor codepoints whose Unicode fold is multi-codepoint (e.g. `ß → ss`),\nthis returns only the first folded codepoint — see\n`caseFoldExpansion` for the full sequence.\n\n# Examples\n\n```\ncaseFold('A')                       // 'a'\ncaseFold('İ')                       // 'i' — see caseFoldExpansion for \"i\\u{307}\"\ncaseFold('a') == caseFold('A')      // true\n```",
       "source_path": "lang/std/text/unicode/case_folding.ks"
     },
     {
@@ -183,7 +183,7 @@
       "name": "caseFoldExpansion",
       "anchor": "function-caseFoldExpansion",
       "signature": "public func caseFoldExpansion(Char) -> String",
-      "doc": "Returns the multi-character case fold for a character.",
+      "doc": "Full Unicode case fold of `c` as a `String`. Returns `\"\"` when\n`c` has no multi-codepoint fold — pair with `hasCaseFoldExpansion`,\nor fall back to `caseFold` for the single-codepoint form.\n\n# Examples\n\n```\ncaseFoldExpansion('ß')              // \"ss\"\ncaseFoldExpansion('ﬃ')             // \"ffi\"\ncaseFoldExpansion('a')              // \"\"  (no expansion; caseFold('a') == 'a')\n```",
       "source_path": "lang/std/text/unicode/case_folding.ks"
     },
     {
@@ -191,7 +191,7 @@
       "name": "graphemeBreakProperty",
       "anchor": "function-graphemeBreakProperty",
       "signature": "public func graphemeBreakProperty(Char) -> GraphemeBreakProperty",
-      "doc": "Returns the grapheme break property for a character.",
+      "doc": "Looks up the UAX #29 Grapheme_Cluster_Break property for `c`.\n\nO(1) — two array indexings into the trie. Codepoints above\n`U+10FFFF` (which are not valid Unicode scalars) yield `.Other`.\n\n# Examples\n\n```\ngraphemeBreakProperty('a')                  // .Other\ngraphemeBreakProperty('\\r')                 // .CR\ngraphemeBreakProperty('\\u{200D}')           // .ZWJ\n```",
       "source_path": "lang/std/text/unicode/grapheme_tables.ks"
     },
     {
@@ -199,7 +199,7 @@
       "name": "hasCaseFoldExpansion",
       "anchor": "function-hasCaseFoldExpansion",
       "signature": "public func hasCaseFoldExpansion(Char) -> Bool",
-      "doc": "Returns true if the character has a multi-character case fold.",
+      "doc": "`true` iff folding `c` produces more than one codepoint. Linear\nscan over `FOLD_EXPANSIONS` (~100 entries) — fine per-character but\nquadratic if applied across a large set.",
       "source_path": "lang/std/text/unicode/case_folding.ks"
     },
     {
@@ -207,7 +207,7 @@
       "name": "hasLowercaseExpansion",
       "anchor": "function-hasLowercaseExpansion",
       "signature": "public func hasLowercaseExpansion(Char) -> Bool",
-      "doc": "Returns true if the character has a multi-character lowercase expansion.",
+      "doc": "`true` iff lowercasing `c` produces more than one codepoint.\nSame scan caveats as `hasUppercaseExpansion`.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -215,7 +215,7 @@
       "name": "hasTitlecaseExpansion",
       "anchor": "function-hasTitlecaseExpansion",
       "signature": "public func hasTitlecaseExpansion(Char) -> Bool",
-      "doc": "Returns true if the character has a multi-character titlecase expansion.",
+      "doc": "`true` iff titlecasing `c` produces more than one codepoint.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -223,7 +223,7 @@
       "name": "hasUppercaseExpansion",
       "anchor": "function-hasUppercaseExpansion",
       "signature": "public func hasUppercaseExpansion(Char) -> Bool",
-      "doc": "Returns true if the character has a multi-character uppercase expansion.",
+      "doc": "`true` iff uppercasing `c` produces more than one codepoint.\nLinear scan over `UPPER_EXPANSIONS` (~100 entries); fine for\nper-character calls in normal text but quadratic if applied to a\nlarge codepoint set.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -231,7 +231,7 @@
       "name": "lowercaseExpansion",
       "anchor": "function-lowercaseExpansion",
       "signature": "public func lowercaseExpansion(Char) -> String",
-      "doc": "Returns the multi-character lowercase expansion for a character.",
+      "doc": "Full Unicode lowercase expansion for `c`. Empty string when no\nmulti-codepoint expansion applies — see `uppercaseExpansion` for\nthe same shape.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -239,7 +239,7 @@
       "name": "shouldBreakBetween",
       "anchor": "function-shouldBreakBetween",
       "signature": "public func shouldBreakBetween(GraphemeBreakProperty, GraphemeBreakProperty, Bool, Bool) -> Bool",
-      "doc": "Returns true if there should be a grapheme cluster break between\ntwo characters with the given properties.\nImplements UAX #29 grapheme cluster boundary rules.",
+      "doc": "Decides whether a grapheme cluster boundary lies between two\nadjacent codepoints with the given break properties.\n\nImplements the UAX #29 boundary rules GB3–GB13/GB999. The\ncaller must thread two scalar bits across calls to capture rules\nthat look further back than one codepoint:\n\n- `prevPrevWasRI`: was the codepoint *before* `prev` a\n  Regional_Indicator? Needed to keep regional-indicator pairs\n  together while still breaking between successive pairs (GB12/13).\n- `prevWasZWJ`: was the codepoint before `prev` a ZWJ? Needed for\n  the simplified emoji ZWJ-sequence rule (GB11).\n\nReturns `true` to break (start a new cluster at `curr`), `false` to\nkeep `prev` and `curr` in the same cluster.",
       "source_path": "lang/std/text/unicode/grapheme_tables.ks"
     },
     {
@@ -247,7 +247,7 @@
       "name": "titlecaseExpansion",
       "anchor": "function-titlecaseExpansion",
       "signature": "public func titlecaseExpansion(Char) -> String",
-      "doc": "Returns the multi-character titlecase expansion for a character.",
+      "doc": "Full Unicode titlecase expansion for `c`. Empty string when no\nmulti-codepoint expansion applies.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -255,7 +255,7 @@
       "name": "toLowercase",
       "anchor": "function-toLowercase",
       "signature": "public func toLowercase(Char) -> Char",
-      "doc": "Returns the lowercase version of a character.",
+      "doc": "Single-codepoint lowercase mapping for `c`. Same caveats as\n`toUppercase`: codepoints with multi-char lowercase forms return\nonly the first codepoint — see `lowercaseExpansion`.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -263,7 +263,7 @@
       "name": "toTitlecase",
       "anchor": "function-toTitlecase",
       "signature": "public func toTitlecase(Char) -> Char",
-      "doc": "Returns the titlecase version of a character.",
+      "doc": "Single-codepoint titlecase mapping for `c`. Differs from\n`toUppercase` only for the codepoints (mostly Greek/Croatian\ndigraphs) where Unicode defines a distinct \"Title\" form. Multi-char\nexpansions live in `titlecaseExpansion`.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -271,7 +271,7 @@
       "name": "toUppercase",
       "anchor": "function-toUppercase",
       "signature": "public func toUppercase(Char) -> Char",
-      "doc": "Returns the uppercase version of a character.\nFor characters with multi-char expansions, returns the first char.\nUse hasUppercaseExpansion() and uppercaseExpansion() for full support.",
+      "doc": "Single-codepoint uppercase mapping for `c`. Falls back to `c` for\ncharacters with no mapping and for codepoints above `U+10FFFF`.\n\nFor characters whose Unicode uppercase form expands to multiple\ncodepoints (e.g. `ß → SS`, `ﬁ → FI`), this returns only the first\ncodepoint of the expansion. Use `hasUppercaseExpansion(c:)` to detect\nthe multi-char case and `uppercaseExpansion(c:)` to retrieve the full\n`String`.\n\n# Examples\n\n```\ntoUppercase('a')           // 'A'\ntoUppercase('ß')           // 'S' — see uppercaseExpansion for \"SS\"\ntoUppercase('1')           // '1' — no mapping\n```",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -279,7 +279,7 @@
       "name": "unicodeVersion",
       "anchor": "field-unicodeVersion",
       "signature": "public let unicodeVersion: String",
-      "doc": "The Unicode version these tables were generated from.",
+      "doc": "Unicode version these tables track. Bump alongside the regeneration\nof the underlying `data/*.bin` files.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
     {
@@ -287,7 +287,7 @@
       "name": "uppercaseExpansion",
       "anchor": "function-uppercaseExpansion",
       "signature": "public func uppercaseExpansion(Char) -> String",
-      "doc": "Returns the multi-character uppercase expansion for a character.\nReturns empty string if no expansion exists.",
+      "doc": "Full Unicode uppercase expansion for `c` as a `String`. Returns the\nempty string when `c` has no multi-codepoint expansion — pair with\n`hasUppercaseExpansion` (or call `toUppercase` instead) to avoid the\nscan when you only need the single-codepoint form.\n\n# Examples\n\n```\nuppercaseExpansion('ß')          // \"SS\"\nuppercaseExpansion('ﬁ')          // \"FI\"\nuppercaseExpansion('a')          // \"\"  (use toUppercase for 'A')\n```",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     }
   ]

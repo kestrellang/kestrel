@@ -8,7 +8,7 @@
       "name": "File",
       "anchor": "struct-File",
       "signature": "public struct File { /* private fields */ }",
-      "doc": "An owned file handle that automatically closes when dropped.\n\nFile provides safe, RAII-style file access. The underlying file descriptor\nis closed automatically when the File goes out of scope. File is not\ncopyable to ensure exclusive ownership of the file descriptor.\n\nFile implements both Read and Write protocols, though not all open modes\nsupport both operations (e.g., a file opened with `open()` is read-only).\n\nExample:\n    // RAII: file automatically closed at end of scope\n    {\n        var file = try File.open(path: \"data.txt\")\n        // use file...\n    } // file closed here\n\n    // Read entire file\n    var file = try File.open(path: \"input.txt\")\n    var contents = Array[UInt8]()\n    try readAll(reader: file, into: contents)",
+      "doc": "RAII-owned POSIX file handle.\n\nThe wrapped file descriptor is closed automatically when the `File`\ngoes out of scope, so explicit `close` is never necessary. `File` is\n`not Copyable` to keep the descriptor uniquely owned — pass by\nreference or move it instead. Conforms to both `Read` and `Write`,\nalthough calls fail with `EBADF` if the open mode does not permit the\ndirection (e.g. writing to a file opened with `open()`).\n\n# Examples\n\n```\n// Read whole file in 4 KiB chunks.\nvar file = try File.open(\"input.txt\");\nvar buf = Array[UInt8](repeating: 0, count: 4096);\nwhile true {\n    let n = try file.read(into: buf.asSlice());\n    if n == 0 { break }\n    // process buf[0..n]\n}\n```\n\n# Representation\n\nOne `libc.Fd` (32-bit signed integer) field.\n\n# Memory Model\n\nOwning, unique. The `deinit` calls `close(fd)` if `fd >= 0`; close\nerrors are silently ignored — there's no caller to surface them to.",
       "source_path": "lang/std/io/file.ks",
       "member_groups": [
         {
@@ -17,19 +17,27 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Fd",
+              "anchor": "initializer-From-Fd",
+              "signature": "init(libc.Fd)",
+              "doc": "Internal init wrapping a raw descriptor; not for general use.",
+              "source_path": "lang/std/io/file.ks"
+            },
+            {
               "kind": "function",
               "name": "create",
               "anchor": "function-create",
-              "signature": "public static func create(String) -> Result[File, Error]",
-              "doc": "Creates a file for writing, truncating if it exists.\n\nIf the file exists, it is truncated to zero length.\nIf the file doesn't exist, it is created with default permissions (0644).\n\nExample:\n    var file = try File.create(path: \"output.txt\")\n    try writeStr(writer: file, s: \"New content\")",
+              "signature": "public static func create(String) -> Result[File, IoError]",
+              "doc": "Creates (or truncates) `path` for writing with mode `0644`.\nExisting contents are discarded.\n\n# Examples\n\n```\nvar file = try File.create(\"output.txt\");\ntry writeStr(file, \"New content\");\n```",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "createNew",
               "anchor": "function-createNew",
-              "signature": "public static func createNew(String) -> Result[File, Error]",
-              "doc": "Creates a new file, failing if it already exists.\n\nUse for exclusive file creation when overwriting would be an error.\nReturns Err with EEXIST if the file already exists.\n\nExample:\n    match File.createNew(path: \"lock.pid\") {\n        case .Ok(file) => // we have the lock\n        case .Err(e) => // another process has the lock\n    }",
+              "signature": "public static func createNew(String) -> Result[File, IoError]",
+              "doc": "Creates a new file, failing if the path already exists. The\ncanonical pattern for cooperative locking via lockfiles.\n\n# Errors\n\nReturns `Err` carrying `EEXIST` if the path already exists.\n\n# Examples\n\n```\nmatch File.createNew(\"lock.pid\") {\n    .Ok(f) => /* we hold the lock */ holdLock(f),\n    .Err(e) => /* somebody else has it */ retryLater()\n}\n```",
               "source_path": "lang/std/io/file.ks"
             },
             {
@@ -41,43 +49,35 @@
               "source_path": "lang/std/io/file.ks"
             },
             {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(libc.Fd)",
-              "doc": "Private: create from raw fd.",
-              "source_path": "lang/std/io/file.ks"
-            },
-            {
               "kind": "function",
               "name": "open",
               "anchor": "function-open",
-              "signature": "public static func open(String) -> Result[File, Error]",
-              "doc": "Opens a file for reading.\n\nThe file must exist. Returns Err with ENOENT if the file doesn't exist,\nor EACCES if permission is denied.\n\nExample:\n    var file = try File.open(path: \"existing.txt\")\n    var buf = Array[UInt8](repeating: 0, count: 100)\n    let n = try file.read(into: buf.asSlice())",
+              "signature": "public static func open(String) -> Result[File, IoError]",
+              "doc": "Opens an existing file for reading. The file must exist; missing\npaths surface as `Err(IoError.last())` carrying `ENOENT`, and\npermission failures as `EACCES`.",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "openAppend",
               "anchor": "function-openAppend",
-              "signature": "public static func openAppend(String) -> Result[File, Error]",
-              "doc": "Opens a file for appending, creating if it doesn't exist.\n\nAll writes are atomically appended to the end of the file,\nregardless of seek position. Useful for log files.\n\nExample:\n    var log = try File.openAppend(path: \"app.log\")\n    try writeLine(writer: log, s: \"Application started\")",
+              "signature": "public static func openAppend(String) -> Result[File, IoError]",
+              "doc": "Opens (or creates) a file in append mode. Every write atomically\nlands at the current end of file regardless of where `seek` last\nleft the cursor — the standard idiom for log files and any\nconcurrent appender.",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "openReadWrite",
               "anchor": "function-openReadWrite",
-              "signature": "public static func openReadWrite(String) -> Result[File, Error]",
-              "doc": "Opens a file for both reading and writing.\n\nThe file must exist. Use for in-place modification of existing files.\n\nExample:\n    var file = try File.openReadWrite(path: \"data.bin\")\n    var header = Array[UInt8](repeating: 0, count: 16)\n    try file.read(into: header.asSlice())\n    try file.seek(to: .Start(0))\n    try file.write(from: newHeader.asSlice())",
+              "signature": "public static func openReadWrite(String) -> Result[File, IoError]",
+              "doc": "Opens an existing file for both reading and writing. Use for\nin-place modification of a file that already exists; for \"create\nor open\" semantics combine with `create` / `createNew` as\nappropriate.",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "position",
               "anchor": "function-position",
-              "signature": "public mutating func position() -> Result[Int64, Error]",
-              "doc": "Returns the current position in the file.\n\nEquivalent to `seek(to: .Current(0))`.\n\nExample:\n    var file = try File.open(path: \"data.bin\")\n    let start = try file.position()  // 0\n    try file.read(into: buf.asSlice())\n    let after = try file.position()  // advanced by bytes read",
+              "signature": "public mutating func position() -> Result[Int64, IoError]",
+              "doc": "Convenience for `seek(.Current(0))`.",
               "source_path": "lang/std/io/file.ks"
             },
             {
@@ -85,23 +85,23 @@
               "name": "rawFd",
               "anchor": "function-rawFd",
               "signature": "public func rawFd() -> libc.Fd",
-              "doc": "Returns the raw file descriptor.\n\nUse for interop with libc functions or FFI. The File retains\nownership; do not close the returned fd manually.\n\nExample:\n    let file = try File.open(path: \"data.bin\")\n    let fd = file.rawFd()\n    // use fd with libc functions...",
+              "doc": "Returns the underlying libc file descriptor for direct FFI use.\nOwnership stays with the `File`; do not call `close` on the\nreturned value or the `deinit` will hit `EBADF`.",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "rewind",
               "anchor": "function-rewind",
-              "signature": "public mutating func rewind() -> Result[(), Error]",
-              "doc": "Seeks to the beginning of the file.\n\nEquivalent to `seek(to: .Start(0))` but discards the position result.\n\nExample:\n    var file = try File.open(path: \"data.txt\")\n    // read some data...\n    try file.rewind()  // back to start\n    // read again from beginning",
+              "signature": "public mutating func rewind() -> Result[(), IoError]",
+              "doc": "Convenience for `seek(.Start(0))` that drops the returned offset.",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "seek",
               "anchor": "function-seek",
-              "signature": "public mutating func seek(to: Seek) -> Result[Int64, Error]",
-              "doc": "Seeks to a position in the file.\n\nReturns the new absolute position from the start of the file.\nSeeking past the end of a file is allowed; a subsequent write\nwill extend the file (creating a hole on some filesystems).\n\nExample:\n    var file = try File.openReadWrite(path: \"data.bin\")\n\n    // Go to beginning\n    try file.seek(to: .Start(0))\n\n    // Skip forward\n    try file.seek(to: .Current(100))\n\n    // Go to end and get file size\n    let size = try file.seek(to: .End(0))",
+              "signature": "public mutating func seek(to: Seek) -> Result[Int64, IoError]",
+              "doc": "Calls `lseek(2)` with the requested anchor and offset. Returns\nthe new absolute position from the start of the file. Seeking\npast EOF is allowed; a subsequent write extends the file (with a\nhole on filesystems that support sparse files).\n\n# Examples\n\n```\nvar file = try File.openReadWrite(\"data.bin\");\ntry file.seek(.Start(0));        // rewind\ntry file.seek(.Current(100));    // skip 100 bytes\nlet size = try file.seek(.End(0));   // size of file\n```",
               "source_path": "lang/std/io/file.ks"
             }
           ]
@@ -115,8 +115,8 @@
               "kind": "function",
               "name": "read",
               "anchor": "function-read",
-              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
-              "doc": "Reads bytes from the file into the buffer.\n\nReads up to buf.count bytes starting at the current position.\nAdvances the file position by the number of bytes read.\n\nReturns:\n- Ok(n) where n > 0: read n bytes into buf[0..n]\n- Ok(0): end of file reached\n- Err: an error occurred\n\nNote: May read fewer bytes than requested even if more data exists.\nThis is not an error; call read again for more data.\n\nExample:\n    var file = try File.open(path: \"data.bin\")\n    var buf = Array[UInt8](repeating: 0, count: 4096)\n    while true {\n        let n = try file.read(into: buf.asSlice())\n        if n == 0 { break }  // EOF\n        // process buf[0..n]\n    }",
+              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]",
+              "doc": "Calls `read(2)`. Advances the file position by the byte count\nreturned. Short reads (`n < buf.count`) are normal — keep calling\nuntil `0` is returned (EOF) or an error fires. Use `readAll`/\n`readExact` from `std.io.read` when looping by hand isn't wanted.",
               "source_path": "lang/std/io/file.ks"
             }
           ]
@@ -130,16 +130,16 @@
               "kind": "function",
               "name": "flush",
               "anchor": "function-flush",
-              "signature": "public mutating func flush() -> Result[(), Error]",
-              "doc": "Flushes buffered writes to the underlying file.\n\nEnsures data written to the file handle reaches the OS.\nNote: This does not guarantee data is persisted to disk;\nthe OS may still buffer the data.\n\nExample:\n    var file = try File.create(path: \"important.dat\")\n    try writeAll(writer: file, from: data.asSlice())\n    try file.flush()  // ensure data reaches OS",
+              "signature": "public mutating func flush() -> Result[(), IoError]",
+              "doc": "No-op; `File` does no internal buffering. Reaches the kernel as\nsoon as `write` returns, but does not call `fsync` — durability\nacross power loss requires a separate, currently-unwrapped libc\ncall.",
               "source_path": "lang/std/io/file.ks"
             },
             {
               "kind": "function",
               "name": "write",
               "anchor": "function-write",
-              "signature": "public mutating func write(from: Slice[UInt8]) -> Result[Int64, Error]",
-              "doc": "Writes bytes from the buffer to the file.\n\nWrites up to buf.count bytes starting at the current position\n(or at end of file if opened with openAppend).\nAdvances the file position by the number of bytes written.\n\nReturns:\n- Ok(n): wrote n bytes from buf[0..n]\n- Err: an error occurred (e.g., disk full, permission denied)\n\nNote: May write fewer bytes than provided. Use writeAll() to ensure\nall bytes are written, or retry with the remaining bytes.\n\nExample:\n    var file = try File.create(path: \"output.bin\")\n    let data: [UInt8] = [0x00, 0x01, 0x02, 0x03]\n    try writeAll(writer: file, from: data.asSlice())",
+              "signature": "public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]",
+              "doc": "Calls `write(2)`. May write fewer bytes than supplied — wrap with\n`writeAll` from `std.io.write` to loop until done.",
               "source_path": "lang/std/io/file.ks"
             }
           ]
@@ -151,7 +151,7 @@
       "name": "Seek",
       "anchor": "enum-Seek",
       "signature": "public enum Seek",
-      "doc": "Represents a seek position for file operations.\n\nUsed with `File.seek()` to reposition the file cursor.\n\nExample:\n    try file.seek(to: .Start(0))     // beginning\n    try file.seek(to: .Current(-10)) // back 10 bytes\n    try file.seek(to: .End(0))       // end of file",
+      "doc": "Anchor + offset pair passed to `File.seek`. The three variants match\nPOSIX `SEEK_SET`, `SEEK_CUR`, and `SEEK_END`; the payload is the\noffset in bytes (signed, so backwards seeks work).\n\n# Examples\n\n```\ntry file.seek(.Start(0));        // beginning\ntry file.seek(.Current(-10));    // back 10 bytes\ntry file.seek(.End(0));          // end of file\n```",
       "source_path": "lang/std/io/file.ks",
       "member_groups": [
         {
@@ -164,7 +164,7 @@
               "name": "Current",
               "anchor": "case-Current",
               "signature": "case Current(Int64)",
-              "doc": "Seek relative to the current position.\n\nPositive values move forward, negative values move backward.\n\nExample:\n    try file.seek(to: .Current(10))   // forward 10 bytes\n    try file.seek(to: .Current(-5))   // back 5 bytes",
+              "doc": "Seek by `n` bytes from the current position. Negative values move\nbackwards.",
               "source_path": "lang/std/io/file.ks"
             },
             {
@@ -172,7 +172,7 @@
               "name": "End",
               "anchor": "case-End",
               "signature": "case End(Int64)",
-              "doc": "Seek relative to the end of the file.\n\nUse negative values to seek before the end.\n\nExample:\n    try file.seek(to: .End(0))    // go to end\n    try file.seek(to: .End(-10))  // 10 bytes before end",
+              "doc": "Seek by `n` bytes from EOF. Use `0` to land exactly at EOF;\nnegative values move backwards from the end.",
               "source_path": "lang/std/io/file.ks"
             },
             {
@@ -180,7 +180,7 @@
               "name": "Start",
               "anchor": "case-Start",
               "signature": "case Start(Int64)",
-              "doc": "Seek to an absolute position from the start of the file.\n\nExample:\n    try file.seek(to: .Start(100))  // go to byte 100",
+              "doc": "Seek to an absolute byte offset from the start of the file.",
               "source_path": "lang/std/io/file.ks"
             }
           ]
@@ -191,48 +191,48 @@
       "kind": "function",
       "name": "appendFileBytes",
       "anchor": "function-appendFileBytes",
-      "signature": "public func appendFileBytes(String, Array[UInt8]) -> Result[(), Error]",
-      "doc": "Appends bytes to a file, creating if it doesn't exist.\n\nExample:\n    try appendFileBytes(path: \"data.bin\", content: newData)",
+      "signature": "public func appendFileBytes(String, Array[UInt8]) -> Result[(), IoError]",
+      "doc": "Appends bytes to `path`, creating if absent. Binary counterpart to\n`appendFileString`.",
       "source_path": "lang/std/io/file.ks"
     },
     {
       "kind": "function",
       "name": "appendFileString",
       "anchor": "function-appendFileString",
-      "signature": "public func appendFileString(String, String) -> Result[(), Error]",
-      "doc": "Appends a string to a file, creating if it doesn't exist.\n\nOpens the file in append mode and writes the string as UTF-8.\nUseful for log files or accumulating data.\n\nExample:\n    try appendFileString(path: \"log.txt\", content: \"Event occurred\\n\")",
+      "signature": "public func appendFileString(String, String) -> Result[(), IoError]",
+      "doc": "Appends `content` to `path` as UTF-8, creating the file if absent.\nAtomic per-write under POSIX `O_APPEND` semantics — safe to call from\nmultiple writers without intermediate locking, though writes longer\nthan `PIPE_BUF` may interleave.",
       "source_path": "lang/std/io/file.ks"
     },
     {
       "kind": "function",
       "name": "readFileBytes",
       "anchor": "function-readFileBytes",
-      "signature": "public func readFileBytes(String) -> Result[Array[UInt8], Error]",
-      "doc": "Reads an entire file into a byte array.\n\nOpens the file, reads all contents, closes the file, and returns\nthe contents as a byte array. Suitable for binary files.\n\nExample:\n    let bytes = try readFileBytes(path: \"image.png\")",
+      "signature": "public func readFileBytes(String) -> Result[Array[UInt8], IoError]",
+      "doc": "Reads `path` into an `Array[UInt8]`. The binary counterpart to\n`readFileString` — does no UTF-8 decoding.",
       "source_path": "lang/std/io/file.ks"
     },
     {
       "kind": "function",
       "name": "readFileString",
       "anchor": "function-readFileString",
-      "signature": "public func readFileString(String) -> Result[String, Error]",
-      "doc": "Reads an entire file into a string.\n\nOpens the file, reads all contents, closes the file, and returns\nthe contents as a UTF-8 string. Suitable for small to medium files.\n\nReturns Err if the file cannot be opened or read.\n\nExample:\n    let config = try readFileString(path: \"config.json\")\n    let readme = try readFileString(path: \"/etc/hosts\")",
+      "signature": "public func readFileString(String) -> Result[String, IoError]",
+      "doc": "Reads `path` into a `String`, decoding the bytes as UTF-8. Convenient\nfor config files, source files, and other small/medium text. Slurps\nthe entire file into memory — for huge inputs prefer streaming via\n`File` + `readAll`.\n\n# Examples\n\n```\nlet cfg = try readFileString(\"config.json\");\n```",
       "source_path": "lang/std/io/file.ks"
     },
     {
       "kind": "function",
       "name": "writeFileBytes",
       "anchor": "function-writeFileBytes",
-      "signature": "public func writeFileBytes(String, Array[UInt8]) -> Result[(), Error]",
-      "doc": "Writes bytes to a file, creating or truncating as needed.\n\nCreates the file if it doesn't exist, truncates if it does.\n\nExample:\n    let data: [UInt8] = [0x89, 0x50, 0x4E, 0x47]  // PNG header\n    try writeFileBytes(path: \"header.bin\", content: data)",
+      "signature": "public func writeFileBytes(String, Array[UInt8]) -> Result[(), IoError]",
+      "doc": "Writes `content` to `path`, creating or truncating as needed.\nBinary equivalent of `writeFileString`.",
       "source_path": "lang/std/io/file.ks"
     },
     {
       "kind": "function",
       "name": "writeFileString",
       "anchor": "function-writeFileString",
-      "signature": "public func writeFileString(String, String) -> Result[(), Error]",
-      "doc": "Writes a string to a file, creating or truncating as needed.\n\nCreates the file if it doesn't exist, truncates if it does.\nWrites the string as UTF-8 bytes.\n\nExample:\n    try writeFileString(path: \"output.txt\", content: \"Hello, World!\")",
+      "signature": "public func writeFileString(String, String) -> Result[(), IoError]",
+      "doc": "Writes `content` to `path`, creating or truncating as needed. Bytes\nare the UTF-8 encoding of the string. The mirror of `readFileString`.",
       "source_path": "lang/std/io/file.ks"
     }
   ]

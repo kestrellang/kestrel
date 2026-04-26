@@ -85,7 +85,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
             var i: Int64 = 0;
             let len = s.byteCount;
             while i < len {
-                let b = s.byteAtUnchecked(i);
+                let b = s.bytes(unchecked: i);
                 if b == 46 or b == 101 or b == 69 {
                     hasDot = true
                 }
@@ -137,7 +137,7 @@ func isBareKey(s: String) -> Bool {
     }
     var i: Int64 = 0;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         let isAlpha = (b >= 65 and b <= 90) or (b >= 97 and b <= 122);
         let isDigit = b >= 48 and b <= 57;
         let isDash = b == 45;
@@ -157,7 +157,7 @@ func emitTomlString(s: String, mutating buf: String) {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 34 {
             buf.append("\\\"")
         } else if b == 92 {

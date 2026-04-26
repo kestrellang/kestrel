@@ -5,10 +5,10 @@
   "items": [
     {
       "kind": "struct",
-      "name": "Error",
-      "anchor": "struct-Error",
-      "signature": "public struct Error { /* private fields */ }",
-      "doc": "Represents an I/O error with a POSIX error code.",
+      "name": "IoError",
+      "anchor": "struct-IoError",
+      "signature": "public struct IoError { /* private fields */ }",
+      "doc": "Structured I/O error: a classified `kind` plus the originating POSIX\nerrno.\n\nReturned in the `Err` arm of every `Result` produced by `Read`, `Write`,\n`File`, `stdio`, and the `os.fs` helpers. Pattern-match on `kind` for\nprogrammatic dispatch; call `description()` for a short human-readable\nphrase. The convenience constructors at the bottom (`notFound()`,\n`permissionDenied()`, etc.) build common kinds without spelling the enum.\n\n# Examples\n\n```\nmatch File.open(\"missing.txt\") {\n    .Ok(f) => use(f),\n    .Err(e) => match e.kind {\n        .NotFound          => createDefault(),\n        .PermissionDenied  => requestAccess(),\n        _                  => log(e.description())\n    }\n}\n```",
       "source_path": "lang/std/io/error.ks",
       "member_groups": [
         {
@@ -17,11 +17,19 @@
           "source_path": null,
           "members": [
             {
-              "kind": "field",
-              "name": "code",
-              "anchor": "field-code",
-              "signature": "var code: Int32",
-              "doc": "",
+              "kind": "initializer",
+              "name": "From Code",
+              "anchor": "initializer-From-Code",
+              "signature": "public init(code: Int32)",
+              "doc": "Builds an error from a raw POSIX errno; classifies the kind.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "From Kind",
+              "anchor": "initializer-From-Kind",
+              "signature": "public init(kind: IoErrorKind)",
+              "doc": "Builds an error for a categorized kind.",
               "source_path": "lang/std/io/error.ks"
             },
             {
@@ -29,7 +37,7 @@
               "name": "description",
               "anchor": "function-description",
               "signature": "public func description() -> String",
-              "doc": "Returns a human-readable description of the error.",
+              "doc": "Returns a short human-readable phrase for the error kind. Unknown\ncodes yield `\"unknown error\"`; for full coverage use `errno()`\nwith a platform `strerror`.",
               "source_path": "lang/std/io/error.ks"
             },
             {
@@ -37,23 +45,184 @@
               "name": "errno",
               "anchor": "function-errno",
               "signature": "public func errno() -> Int32",
-              "doc": "Returns the raw POSIX error code.",
+              "doc": "The raw POSIX error code. Use for programmatic dispatch when\npattern-matching on `kind` is too coarse — e.g. distinguishing\nbetween `.Other` codes.",
               "source_path": "lang/std/io/error.ks"
             },
             {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(Int32)",
-              "doc": "Creates an error from an error code.",
+              "kind": "field",
+              "name": "kind",
+              "anchor": "field-kind",
+              "signature": "public var kind: IoErrorKind",
+              "doc": "",
               "source_path": "lang/std/io/error.ks"
             },
             {
               "kind": "function",
               "name": "last",
               "anchor": "function-last",
-              "signature": "public static func last() -> Error",
-              "doc": "Creates an error from the current errno value.",
+              "signature": "public static func last() -> IoError",
+              "doc": "Snapshots the current value of the platform's `errno` thread-local.\nCall immediately after a failed libc call — any other libc activity\nin between can clobber the value.",
+              "source_path": "lang/std/io/error.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "enum",
+      "name": "IoErrorKind",
+      "anchor": "enum-IoErrorKind",
+      "signature": "public enum IoErrorKind",
+      "doc": "Categorical classification of an I/O error.\n\n`IoError` carries one of these alongside its raw `errno`. The named\nvariants cover the common categories applications dispatch on; everything\nelse falls into `.Other` carrying the original POSIX code so no\ninformation is lost. Built from a code via `IoErrorKind.fromErrno(code:)`,\nor matched directly in error-handling code:\n\n```\nmatch e.kind {\n    .NotFound          => createDefault(),\n    .PermissionDenied  => promptForElevation(),\n    .Other(c)          => log(\"unhandled errno: \" + c.toString())\n}\n```",
+      "source_path": "lang/std/io/error.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "case",
+              "name": "AlreadyExists",
+              "anchor": "case-AlreadyExists",
+              "signature": "case AlreadyExists",
+              "doc": "`EEXIST` — the path already exists (e.g. `O_CREAT | O_EXCL`).",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "BadFileDescriptor",
+              "anchor": "case-BadFileDescriptor",
+              "signature": "case BadFileDescriptor",
+              "doc": "`EBADF` — file descriptor is invalid or closed.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "BrokenPipe",
+              "anchor": "case-BrokenPipe",
+              "signature": "case BrokenPipe",
+              "doc": "`EPIPE` — write to a pipe with no reader.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Interrupted",
+              "anchor": "case-Interrupted",
+              "signature": "case Interrupted",
+              "doc": "`EINTR` — operation interrupted by a signal.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "InvalidInput",
+              "anchor": "case-InvalidInput",
+              "signature": "case InvalidInput",
+              "doc": "`EINVAL` — invalid argument to a libc call.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "IoFailure",
+              "anchor": "case-IoFailure",
+              "signature": "case IoFailure",
+              "doc": "`EIO` — generic kernel-reported I/O failure.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "IsADirectory",
+              "anchor": "case-IsADirectory",
+              "signature": "case IsADirectory",
+              "doc": "`EISDIR` — operation expected a file but got a directory.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "NoSpaceLeft",
+              "anchor": "case-NoSpaceLeft",
+              "signature": "case NoSpaceLeft",
+              "doc": "`ENOSPC` — no space left on device.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "NotADirectory",
+              "anchor": "case-NotADirectory",
+              "signature": "case NotADirectory",
+              "doc": "`ENOTDIR` — a path component is not a directory.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "NotFound",
+              "anchor": "case-NotFound",
+              "signature": "case NotFound",
+              "doc": "`ENOENT` — the path does not exist.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "NotPermitted",
+              "anchor": "case-NotPermitted",
+              "signature": "case NotPermitted",
+              "doc": "`EPERM` — operation not permitted.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Other",
+              "anchor": "case-Other",
+              "signature": "case Other(Int32)",
+              "doc": "Any other POSIX errno — keeps the original code so callers can\nstill dispatch on the raw value.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "OutOfMemory",
+              "anchor": "case-OutOfMemory",
+              "signature": "case OutOfMemory",
+              "doc": "`ENOMEM` — kernel allocation failed.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "PermissionDenied",
+              "anchor": "case-PermissionDenied",
+              "signature": "case PermissionDenied",
+              "doc": "`EACCES` — caller lacks permission for the operation.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "case",
+              "name": "WouldBlock",
+              "anchor": "case-WouldBlock",
+              "signature": "case WouldBlock",
+              "doc": "`EAGAIN` — non-blocking call would have blocked.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "function",
+              "name": "description",
+              "anchor": "function-description",
+              "signature": "public func description() -> String",
+              "doc": "Short human-readable phrase, locale-independent.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "function",
+              "name": "errno",
+              "anchor": "function-errno",
+              "signature": "public func errno() -> Int32",
+              "doc": "The POSIX errno corresponding to this kind. Lossless round-trip\nfor all named variants and `.Other`.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromErrno",
+              "anchor": "function-fromErrno",
+              "signature": "public static func fromErrno(Int32) -> IoErrorKind",
+              "doc": "Classifies a POSIX errno. Unknown codes fall through to `.Other(c)`.",
               "source_path": "lang/std/io/error.ks"
             }
           ]
@@ -64,56 +233,56 @@
       "kind": "function",
       "name": "alreadyExists",
       "anchor": "function-alreadyExists",
-      "signature": "public func alreadyExists() -> Error",
-      "doc": "Creates an \"already exists\" error (EEXIST).",
+      "signature": "public func alreadyExists() -> IoError",
+      "doc": "`EEXIST` — the path already exists (e.g. `O_CREAT | O_EXCL`).",
       "source_path": "lang/std/io/error.ks"
     },
     {
       "kind": "function",
       "name": "brokenPipe",
       "anchor": "function-brokenPipe",
-      "signature": "public func brokenPipe() -> Error",
-      "doc": "Creates a \"broken pipe\" error (EPIPE).",
+      "signature": "public func brokenPipe() -> IoError",
+      "doc": "`EPIPE` — write to a pipe with no reader.",
       "source_path": "lang/std/io/error.ks"
     },
     {
       "kind": "function",
       "name": "interrupted",
       "anchor": "function-interrupted",
-      "signature": "public func interrupted() -> Error",
-      "doc": "Creates an \"interrupted\" error (EINTR).",
+      "signature": "public func interrupted() -> IoError",
+      "doc": "`EINTR` — operation interrupted by a signal.",
       "source_path": "lang/std/io/error.ks"
     },
     {
       "kind": "function",
       "name": "invalidInput",
       "anchor": "function-invalidInput",
-      "signature": "public func invalidInput() -> Error",
-      "doc": "Creates an \"invalid input\" error (EINVAL).",
+      "signature": "public func invalidInput() -> IoError",
+      "doc": "`EINVAL` — invalid argument to a libc call.",
       "source_path": "lang/std/io/error.ks"
     },
     {
       "kind": "function",
       "name": "notFound",
       "anchor": "function-notFound",
-      "signature": "public func notFound() -> Error",
-      "doc": "Creates a \"not found\" error (ENOENT).",
+      "signature": "public func notFound() -> IoError",
+      "doc": "`ENOENT` — the path does not exist.",
       "source_path": "lang/std/io/error.ks"
     },
     {
       "kind": "function",
       "name": "permissionDenied",
       "anchor": "function-permissionDenied",
-      "signature": "public func permissionDenied() -> Error",
-      "doc": "Creates a \"permission denied\" error (EACCES).",
+      "signature": "public func permissionDenied() -> IoError",
+      "doc": "`EACCES` — caller lacks permission for the operation.",
       "source_path": "lang/std/io/error.ks"
     },
     {
       "kind": "function",
       "name": "wouldBlock",
       "anchor": "function-wouldBlock",
-      "signature": "public func wouldBlock() -> Error",
-      "doc": "Creates a \"would block\" error (EAGAIN).",
+      "signature": "public func wouldBlock() -> IoError",
+      "doc": "`EAGAIN` — non-blocking call would have blocked.",
       "source_path": "lang/std/io/error.ks"
     }
   ]

@@ -544,7 +544,7 @@ func splitWhitespace(s: String) -> Array[String] {
     let len = s.byteCount;
 
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         let isSpace = b == 32 or b == 9 or b == 10 or b == 13;
         if isSpace {
             if start >= 0 {
@@ -570,7 +570,7 @@ func splitWhitespace(s: String) -> Array[String] {
 func quoteArg(s: String) -> String {
     var i: Int64 = 0;
     while i < s.byteCount {
-        if s.byteAtUnchecked(i) == 32 {
+        if s.bytes(unchecked: i) == 32 {
             var q = String(); q.append("\""); q.append(s); q.append("\"");
             return q
         }
@@ -589,14 +589,14 @@ func lastPathComponent(path: String) -> String {
     let len = path.byteCount;
     // Skip trailing slash
     var end = len;
-    if end > 0 and path.byteAtUnchecked(end - 1) == 47 {
+    if end > 0 and path.bytes(unchecked: end - 1) == 47 {
         end = end - 1
     }
 
     // Find last slash
     var i = end - 1;
     while i >= 0 {
-        if path.byteAtUnchecked(i) == 47 { // '/'
+        if path.bytes(unchecked: i) == 47 { // '/'
             return path.substringBytes(from: i + 1, to: end)
         }
         i = i - 1
@@ -610,7 +610,7 @@ func trimWhitespace(s: String) -> String {
     let len = s.byteCount;
     var start: Int64 = 0;
     while start < len {
-        let b = s.byteAtUnchecked(start);
+        let b = s.bytes(unchecked: start);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             start = start + 1
         } else {
@@ -619,7 +619,7 @@ func trimWhitespace(s: String) -> String {
     }
     var end = len;
     while end > start {
-        let b = s.byteAtUnchecked(end - 1);
+        let b = s.bytes(unchecked: end - 1);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {

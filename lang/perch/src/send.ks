@@ -55,7 +55,7 @@ func sendAllBytes(fd: Int32, s: String) -> Result[(), Error] {
     var buf = Array[UInt8](capacity: len);
     var i: Int64 = 0;
     while i < len {
-        buf.append(s.byteAtUnchecked(i));
+        buf.append(s.bytes(unchecked: i));
         i = i + 1
     }
 

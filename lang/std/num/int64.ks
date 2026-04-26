@@ -834,7 +834,7 @@ public struct Int64:
         var isNegative = false;
 
         // Check for sign
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {  // '-'
             isNegative = true;
@@ -853,7 +853,7 @@ public struct Int64:
         let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
 
         while index < len {
-            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             // Check if digit (0-9 = 48-57)
@@ -918,7 +918,7 @@ public struct Int64:
         var isNegative = false;
 
         // Check for sign
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {  // '-'
             isNegative = true;
@@ -942,7 +942,7 @@ public struct Int64:
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {
@@ -1070,7 +1070,7 @@ public struct Int64:
         // Append digits in correct order (reverse)
         var i = digits.byteCount - 1;
         while i >= 0 {
-            result.appendByte(digits.byteAtUnchecked(i));
+            result.appendByte(digits.bytes(unchecked: i));
             i = i - 1
         }
 

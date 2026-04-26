@@ -367,7 +367,7 @@ func sendAllString[S](stream: S, s: String) -> Result[(), Error] where S: Write 
     var buf = Array[UInt8](capacity: len);
     var i: Int64 = 0;
     while i < len {
-        buf.append(s.byteAtUnchecked(i));
+        buf.append(s.bytes(unchecked: i));
         i = i + 1
     }
 

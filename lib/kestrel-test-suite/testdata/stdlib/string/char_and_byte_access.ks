@@ -21,33 +21,33 @@ module Test
             if empty.first().isSome() { return 5 }
             if empty.last().isSome() { return 6 }
 
-            // Test char(at:)
-            let c0 = s.char(at: 0);
+            // Test chars()(i)
+            let c0 = s.chars(0);
             if c0.equals('h') == false { return 7 }
-            let c4 = s.char(at: 4);
+            let c4 = s.chars(4);
             if c4.equals('o') == false { return 8 }
 
-            // Test char(checked:)
-            let checked = s.char(checked: 2);
+            // Test chars()(checked: i)
+            let checked = s.chars(checked: 2);
             if checked.isNone() { return 9 }
             if checked.unwrap().equals('l') == false { return 10 }
 
-            // Test char(checked:) out of bounds
-            let oob = s.char(checked: 100);
+            // Test chars()(checked: i) out of bounds
+            let oob = s.chars(checked: 100);
             if oob.isSome() { return 11 }
 
-            // Test byteAt()
-            let b0 = s.byteAt(0);
+            // Test bytes()(checked: i)
+            let b0 = s.bytes(checked: 0);
             if b0.isNone() { return 12 }
             // 'h' is ASCII 104
             if b0.unwrap() != std.num.UInt8(intLiteral: 104) { return 13 }
 
-            // Test byteAt() out of bounds
-            let bOob = s.byteAt(100);
+            // Test bytes()(checked: i) out of bounds
+            let bOob = s.bytes(checked: 100);
             if bOob.isSome() { return 14 }
 
-            // Test byteAtUnchecked()
-            let bu = s.byteAtUnchecked(1);
+            // Test bytes()(unchecked: i)
+            let bu = s.bytes(unchecked: 1);
             // 'e' is ASCII 101
             if bu != std.num.UInt8(intLiteral: 101) { return 15 }
 

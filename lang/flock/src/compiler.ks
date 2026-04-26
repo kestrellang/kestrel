@@ -170,7 +170,7 @@ func quoteArg(s: String) -> String {
 func containsSpace(s: String) -> Bool {
     var i: Int64 = 0;
     while i < s.byteCount {
-        if s.byteAtUnchecked(i) == 32 { // space
+        if s.bytes(unchecked: i) == 32 { // space
             return true
         }
         i = i + 1

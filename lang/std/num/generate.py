@@ -549,7 +549,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         // Append digits in correct order (reverse)
         var i = digits.byteCount - 1;
         while i >= 0 {{
-            result.appendByte(digits.byteAtUnchecked(i));
+            result.appendByte(digits.bytes(unchecked: i));
             i = i - 1
         }}
 
@@ -644,7 +644,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var isNegative = false;
 
         // Check for sign
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {{  // '-'
             isNegative = true;
@@ -663,7 +663,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
 
         while index < len {{
-            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             // Check if digit (0-9 = 48-57)
@@ -736,7 +736,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var isNegative = false;
 
         // Check for sign
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {{  // '-'
             isNegative = true;
@@ -760,7 +760,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var result: UInt64 = 0;
 
         while index < len {{
-            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {{
@@ -823,7 +823,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var index: Int64 = 0;
 
         // Check for optional + sign
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {{  // '+'
             index = 1
@@ -842,7 +842,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         let maxVal: UInt64 = {max_val_expr};
 
         while index < len {{
-            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = UInt64(from: byte);
 
             // Check if digit (0-9 = 48-57)
@@ -905,7 +905,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var index: Int64 = 0;
 
         // Optional `+`; reject leading `-` outright.
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {{
             index = 1
@@ -924,7 +924,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var result: UInt64 = 0;
 
         while index < len {{
-            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {{
@@ -1271,9 +1271,9 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         // Check for special values
         // "nan"
         if len == 3 {
-            let b0: UInt8 = string.byteAtUnchecked(0);
-            let b1: UInt8 = string.byteAtUnchecked(1);
-            let b2: UInt8 = string.byteAtUnchecked(2);
+            let b0: UInt8 = string.bytes(unchecked: 0);
+            let b1: UInt8 = string.bytes(unchecked: 1);
+            let b2: UInt8 = string.bytes(unchecked: 2);
             // 'n' or 'N' = 110 or 78
             // 'a' or 'A' = 97 or 65
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
@@ -1286,9 +1286,9 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
 
         // "inf"
         if len == 3 {
-            let b0: UInt8 = string.byteAtUnchecked(0);
-            let b1: UInt8 = string.byteAtUnchecked(1);
-            let b2: UInt8 = string.byteAtUnchecked(2);
+            let b0: UInt8 = string.bytes(unchecked: 0);
+            let b1: UInt8 = string.bytes(unchecked: 1);
+            let b2: UInt8 = string.bytes(unchecked: 2);
             // 'i' or 'I' = 105 or 73
             // 'n' or 'N' = 110 or 78
             // 'f' or 'F' = 102 or 70
@@ -1302,10 +1302,10 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
 
         // "-inf"
         if len == 4 {
-            let b0: UInt8 = string.byteAtUnchecked(0);
-            let b1: UInt8 = string.byteAtUnchecked(1);
-            let b2: UInt8 = string.byteAtUnchecked(2);
-            let b3: UInt8 = string.byteAtUnchecked(3);
+            let b0: UInt8 = string.bytes(unchecked: 0);
+            let b1: UInt8 = string.bytes(unchecked: 1);
+            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b3: UInt8 = string.bytes(unchecked: 3);
             let isMinus = Int64(from: b0) == 45;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -1317,10 +1317,10 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
 
         // "+inf"
         if len == 4 {
-            let b0: UInt8 = string.byteAtUnchecked(0);
-            let b1: UInt8 = string.byteAtUnchecked(1);
-            let b2: UInt8 = string.byteAtUnchecked(2);
-            let b3: UInt8 = string.byteAtUnchecked(3);
+            let b0: UInt8 = string.bytes(unchecked: 0);
+            let b1: UInt8 = string.bytes(unchecked: 1);
+            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b3: UInt8 = string.bytes(unchecked: 3);
             let isPlus = Int64(from: b0) == 43;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -1333,14 +1333,14 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         // "infinity"
         if len == 8 {
             // Check for "infinity" (case insensitive)
-            let b0: UInt8 = string.byteAtUnchecked(0);
-            let b1: UInt8 = string.byteAtUnchecked(1);
-            let b2: UInt8 = string.byteAtUnchecked(2);
-            let b3: UInt8 = string.byteAtUnchecked(3);
-            let b4: UInt8 = string.byteAtUnchecked(4);
-            let b5: UInt8 = string.byteAtUnchecked(5);
-            let b6: UInt8 = string.byteAtUnchecked(6);
-            let b7: UInt8 = string.byteAtUnchecked(7);
+            let b0: UInt8 = string.bytes(unchecked: 0);
+            let b1: UInt8 = string.bytes(unchecked: 1);
+            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b4: UInt8 = string.bytes(unchecked: 4);
+            let b5: UInt8 = string.bytes(unchecked: 5);
+            let b6: UInt8 = string.bytes(unchecked: 6);
+            let b7: UInt8 = string.bytes(unchecked: 7);
             let isI0 = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN1 = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF2 = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -1359,7 +1359,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         var isNegative = false;
 
         // Check for sign
-        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {  // '-'
             isNegative = true;
@@ -1376,7 +1376,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         // Parse integer part - inline digit check (48='0', 57='9')
         var integerPart: __TYPE_NAME__ = 0.0;
         var hasIntegerPart = false;
-        var currentByte: Int64 = Int64(from: string.byteAtUnchecked(index));
+        var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
             let digit = __TYPE_NAME__(from: currentByte - 48);
@@ -1384,7 +1384,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             hasIntegerPart = true;
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.byteAtUnchecked(index))
+                currentByte = Int64(from: string.bytes(unchecked: index))
             }
         }
 
@@ -1397,7 +1397,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             var divisor: __TYPE_NAME__ = 10.0;
 
             if index < len {
-                currentByte = Int64(from: string.byteAtUnchecked(index));
+                currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
                     let digit = __TYPE_NAME__(from: currentByte - 48);
                     fractionalPart = fractionalPart + digit / divisor;
@@ -1405,7 +1405,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                     hasFractionalPart = true;
                     index = index + 1;
                     if index < len {
-                        currentByte = Int64(from: string.byteAtUnchecked(index))
+                        currentByte = Int64(from: string.bytes(unchecked: index))
                     }
                 }
             }
@@ -1427,18 +1427,18 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
 
             var expNegative = false;
-            currentByte = Int64(from: string.byteAtUnchecked(index));
+            currentByte = Int64(from: string.bytes(unchecked: index));
 
             if currentByte == 45 {  // '-'
                 expNegative = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.byteAtUnchecked(index))
+                    currentByte = Int64(from: string.bytes(unchecked: index))
                 }
             } else if currentByte == 43 {  // '+'
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.byteAtUnchecked(index))
+                    currentByte = Int64(from: string.bytes(unchecked: index))
                 }
             }
 
@@ -1454,7 +1454,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.byteAtUnchecked(index))
+                    currentByte = Int64(from: string.bytes(unchecked: index))
                 }
             }
 
@@ -1611,7 +1611,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                     }
                     var i = digits.byteCount - 1;
                     while i >= 0 {
-                        number.appendByte(digits.byteAtUnchecked(i));
+                        number.appendByte(digits.bytes(unchecked: i));
                         i = i - 1
                     }
                 }
@@ -1654,7 +1654,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                     }
                     var i = digits.byteCount - 1;
                     while i >= 0 {
-                        number.appendByte(digits.byteAtUnchecked(i));
+                        number.appendByte(digits.bytes(unchecked: i));
                         i = i - 1
                     }
                 }
@@ -1685,7 +1685,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                     }
                     var i = digits.byteCount - 1;
                     while i >= 0 {
-                        number.appendByte(digits.byteAtUnchecked(i));
+                        number.appendByte(digits.bytes(unchecked: i));
                         i = i - 1
                     }
                 }
@@ -1727,7 +1727,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             var expIndex: Int64 = -1;
             var i: Int64 = 0;
             while i < len {
-                let b = number.byteAtUnchecked(i);
+                let b = number.bytes(unchecked: i);
                 let v = Int64(from: b);
                 if v == 46 {  // '.'
                     dotIndex = i
@@ -1742,7 +1742,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                 let endIndex: Int64 = if expIndex >= 0 { expIndex } else { len };
                 var trimEnd = endIndex;
                 while trimEnd > dotIndex + 1 {
-                    let b = number.byteAtUnchecked(trimEnd - 1);
+                    let b = number.bytes(unchecked: trimEnd - 1);
                     if Int64(from: b) == 48 {
                         trimEnd = trimEnd - 1
                     } else {

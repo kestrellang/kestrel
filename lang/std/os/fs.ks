@@ -540,7 +540,7 @@ func findLastSlash(s: String) -> Int64 {
     let len = s.byteCount;
     var i: Int64 = len - 1;
     while i >= 0 {
-        if s.byteAtUnchecked(i) == UInt8(intLiteral: 47) {
+        if s.bytes(unchecked: i) == UInt8(intLiteral: 47) {
             return i
         }
         i = i - 1

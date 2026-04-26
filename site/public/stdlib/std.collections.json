@@ -8,7 +8,7 @@
       "name": "Array",
       "anchor": "struct-Array",
       "signature": "public struct Array[T] { /* private fields */ }",
-      "doc": "A dynamic, growable, contiguous-buffer array with copy-on-write storage.\n\n`Array[T]` is the standard ordered-collection type. It supports\nconstant-time random access, amortized constant-time `append`, and\narbitrary-position insert/remove via shifting. Storage is shared between\ncopies until one of them mutates, at which point that copy lazily clones\nthe buffer (see \"Memory Model\" below). For non-owning views over an\nexisting buffer use `Slice[T]`; for fixed-size or set-like collections\nsee `Slice[T]`, `Set`, or `Dictionary`.\n\n# Examples\n\n```\nlet evens = [2, 4, 6, 8];\nvar names = Array[String]();\nnames.append(\"Alice\");\nnames.append(\"Bob\");\n\nlet copy = names;      // O(1) — shares storage with `names`\nnames.append(\"Carol\"); // O(1) clone happens here, `copy` is unchanged\n\nfor n in names.iter() { ... }\nlet pivot = names.partition(by: { (n) in n.count > 3 });\n```\n\n# Indexing\n\nThe default subscript `arr(i)` panics on out-of-bounds. Variants exist\nfor every common policy: `arr(checked: i)` returns `T?`,\n`arr(unchecked: i)` skips the bounds check (UB on OOB),\n`arr(wrapping: i)` wraps with modulo (and supports negative indices),\nand `arr(clamping: i)` clamps to `[0, count-1]`. The same scheme\napplies to range subscripts (`arr(0..<3)`, `arr(checked: r)`,\n`arr(uncheckedRange: r)`, `arr(clampingRange: r)`) which return\n`Slice[T]`.\n\n# Capacity & Reallocation\n\n`count` is the number of elements; `capacity` is how many can fit\nwithout reallocating. When `append` would exceed capacity the buffer\ndoubles (starting from 4 if previously zero). Use\n`reserveCapacity(minimumCapacity:)` to pre-allocate, and\n`shrinkToFit()` to release excess.\n\n# Representation\n\nHolds a single `RcBox[ArrayStorage[T]]` field. The storage is a\n`(ptr, len, cap)` triple over a heap-allocated buffer.\n\n# Memory Model\n\nReference-counted storage with copy-on-write *value* semantics. Copying\nan `Array` is O(1) and shares the buffer; the next mutation on a shared\n`Array` triggers `makeUnique()`, which deep-clones the buffer so the\nmutation is invisible to other copies. The user-visible behavior is\nindistinguishable from deep-copying on assignment.\n\n# Guarantees\n\n- Elements are stored contiguously and are accessible via `asPointer()`\n  for FFI; the pointer is invalidated by any mutation that may\n  reallocate.\n- `count <= capacity` always.\n- Iteration order is insertion order.\n- Operations marked O(1) are amortized; growth is geometric.",
+      "doc": "",
       "source_path": "lang/std/collections/array.ks",
       "member_groups": [
         {
@@ -28,32 +28,16 @@
               "kind": "subscript",
               "name": "Checked Index",
               "anchor": "subscript-Checked-Index",
-              "signature": "public subscript(checked: Int64) -> T? { get }",
-              "doc": "Reads the element at `index`, returning `None` on out-of-bounds.\n\nThe non-panicking counterpart to `arr(i)`. Read-only; for fallible\nwrites pattern-match the result and assign through the default\nsubscript. Prefer this when `index` may come from untrusted input.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(checked: 0);   // Some(10)\narr(checked: 5);   // None\narr(checked: -1);  // None\n\nif let .Some(v) = arr(checked: i) {\n    // ...\n}\n```",
+              "signature": "public subscript[I](checked: I) -> I.ArrayYield? { get }",
+              "doc": "Reads at `index`, returning `None` on out-of-bounds.\n\nThe non-panicking counterpart to `arr(i)`. Read-only; for fallible\nwrites pattern-match the result and assign through the default\nsubscript. Single-element indexes return `T?`; range indexes\nreturn `Slice[T]?`. Prefer this when `index` may come from\nuntrusted input.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(checked: 0);       // Some(10)\narr(checked: 5);       // None\narr(checked: 0..<2);   // Some(Slice[10, 20])\narr(checked: 0..<10);  // None\n\nif let .Some(v) = arr(checked: i) {\n    // ...\n}\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
               "kind": "subscript",
-              "name": "Checked Range",
-              "anchor": "subscript-Checked-Range",
-              "signature": "public subscript(checkedRange: Range[Int64]) -> Slice[T]? { get }",
-              "doc": "Returns a `Slice[T]` for `range`, or `None` if any endpoint is out\nof bounds.\n\nThe non-panicking analogue of `arr(range: r)`. The returned slice\naliases the array's buffer; reallocation invalidates it.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(checkedRange: 0..<2);   // Some(Slice[10, 20])\narr(checkedRange: 0..<10);  // None — end out of bounds\narr(checkedRange: -1..<2);  // None — start out of bounds\n```",
-              "source_path": "lang/std/collections/array.ks"
-            },
-            {
-              "kind": "subscript",
-              "name": "Clamping Index",
-              "anchor": "subscript-Clamping-Index",
-              "signature": "public subscript(clamping: Int64) -> T? { get set }",
-              "doc": "Reads or writes the element with the index clamped to valid bounds.\n\nNegative indices clamp up to `0`; indices `>= count` clamp down to\n`count - 1`. Returns `None` (or no-ops on the setter) only for an\nempty array. Compare with `arr(wrapping: i)`, which wraps instead\nof saturating.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(clamping: -5);   // Some(10) — clamped to first\narr(clamping: 100);  // Some(30) — clamped to last\narr(clamping:  1);   // Some(20) — in range, normal access\n[](clamping: 0);     // None     — empty array\n```",
-              "source_path": "lang/std/collections/array.ks"
-            },
-            {
-              "kind": "subscript",
-              "name": "Clamping Range",
-              "anchor": "subscript-Clamping-Range",
-              "signature": "public subscript(clampingRange: Range[Int64]) -> Slice[T] { get }",
-              "doc": "Returns a `Slice[T]` for `range` with both endpoints clamped to\n`[0, count]`.\n\nNever panics. An inverted or fully-out-of-range request yields an\nempty slice. Useful when consuming user-provided ranges where you\nwant a \"best effort\" view rather than an error.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(clampingRange: -5..<100);  // Slice over the whole array\narr(clampingRange: -5..<1);    // Slice[10]\narr(clampingRange: 10..<20);   // empty Slice (both clamp to 3)\n```",
+              "name": "Clamping",
+              "anchor": "subscript-Clamping",
+              "signature": "public subscript[I](clamped: I) -> I.ArrayClampedYield { get set }",
+              "doc": "Reads or writes at `index` with bounds saturated to `[0, count)`.\n\nNever panics on out-of-bounds. For `Int64`, indices below `0`\nclamp up and indices `>= count` clamp down; an empty array yields\n`None`. For `Range[Int64]`, both endpoints clamp into `[0, count]`\nand the result is a (possibly empty) `Slice[T]`. Compare\n`arr(wrapped: i)`, which wraps instead of saturating.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(clamped: -5);          // Some(10) — clamped to first\narr(clamped: 100);         // Some(30) — clamped to last\narr(clamped: 1);           // Some(20) — in range\n[](clamped: 0);            // None     — empty array\n\narr(clamped: -5..<100);    // Slice over the whole array\narr(clamped: -5..<1);      // Slice[10]\narr(clamped: 10..<20);     // empty Slice (both clamp to 3)\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -84,8 +68,8 @@
               "kind": "subscript",
               "name": "Indexed",
               "anchor": "subscript-Indexed",
-              "signature": "public subscript(Int64) -> T { get set }",
-              "doc": "Reads or writes the element at `index`, panicking on out-of-bounds.\n\nThe default subscript: trades safety for ergonomics. Use\n`arr(checked: i)` for an `Optional` instead of a panic, or\n`arr(unchecked: i)` to skip the bounds check entirely. The setter\ntriggers COW; if storage is shared the buffer is cloned before the\nwrite lands.\n\n# Errors\n\nPanics with `\"Array index out of bounds\"` if `index < 0` or\n`index >= count`.\n\n# Examples\n\n```\nvar arr = [10, 20, 30];\narr(0);         // 10\narr(1) = 25;    // arr is now [10, 25, 30]\narr(5);         // PANIC: index out of bounds\narr(-1);        // PANIC: index out of bounds\n```",
+              "signature": "public subscript[I](I) -> I.ArrayYield { get set }",
+              "doc": "Reads or writes at `index`, panicking on out-of-bounds.\n\nThe default subscript: trades safety for ergonomics. Dispatches via\nthe `ArrayIndex[T]` protocol — `Int64` reads/writes a single\nelement, `Range[Int64]` and `ClosedRange[Int64]` read or replace a\n`Slice[T]`. Range writes require the source slice's length to\nmatch the range's length and panic otherwise. Use\n`arr(checked: i)` for an `Optional` instead of a panic, or\n`arr(unchecked: i)` to skip the bounds check entirely. Setters\ntrigger COW; if storage is shared the buffer is cloned before the\nwrite lands.\n\n# Errors\n\nPanics with `\"Array index out of bounds\"` (Int64) or\n`\"Array range out of bounds\"` (Range / ClosedRange) if the access\nfalls outside `[0, count)`. Range writes also panic if the source\nslice's length doesn't match the range's length.\n\n# Examples\n\n```\nvar arr = [10, 20, 30, 40, 50];\narr(0);                        // 10\narr(1) = 25;                   // [10, 25, 30, 40, 50]\narr(1..<4);                    // Slice[25, 30, 40]\narr(1..<4) = otherSlice3;      // splice in three elements\narr(5);                        // PANIC: index out of bounds\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -94,14 +78,6 @@
               "anchor": "initializer-Literal-Bridge",
               "signature": "public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64)",
               "doc": "Compiler-emitted bridge initializer for `[a, b, c]` array literals.\n\nNot called by user code directly — the parser lowers literal\nexpressions into a `(ptr, count)` pair which this constructor wraps\nin a `LiteralSlice` and forwards to `init(arrayLiteral:)`.\n\n# Safety\n\nThe compiler guarantees `_arrayLiteralPointer` points to exactly\n`_arrayLiteralCount` initialized elements of `T`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3];   // emitted by the compiler as a call to this init\n```",
-              "source_path": "lang/std/collections/array.ks"
-            },
-            {
-              "kind": "subscript",
-              "name": "Range",
-              "anchor": "subscript-Range",
-              "signature": "public subscript(range: Range[Int64]) -> Slice[T] { get }",
-              "doc": "Returns a `Slice[T]` borrowing the elements in `range`.\n\nThe returned slice aliases the array's buffer; reallocation\ninvalidates it. For a non-panicking variant use\n`arr(checked: r)`; for clamping see `arr(clampingRange: r)`.\n\n# Errors\n\nPanics with `\"Array range out of bounds\"` if `range.start < 0`,\n`range.end > count`, or `range.start > range.end`.\n\n# Examples\n\n```\nlet arr = [10, 20, 30, 40, 50];\narr(1..<4);  // Slice[20, 30, 40]\narr(0..<2);  // Slice[10, 20]\narr(0..<6);  // PANIC: range out of bounds\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -116,16 +92,8 @@
               "kind": "subscript",
               "name": "Unchecked Index",
               "anchor": "subscript-Unchecked-Index",
-              "signature": "public subscript(unchecked: Int64) -> T { get set }",
-              "doc": "Reads or writes the element at `index` without a bounds check.\n\nThe fastest accessor; intended for hot loops where the index has\nalready been validated (e.g. inside `0..<count`). The setter still\ntriggers COW, so semantics match the default subscript apart from\nthe missing bounds check.\n\n# Safety\n\nUndefined behavior if `index < 0` or `index >= count`. Always\nguard with `isValidIndex(index:)` or an enclosing `0..<count`\nloop.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\nfor i in arr.indices {\n        let v = arr(unchecked: i);   // safe — i is in range\n}\n\nif arr.isValidIndex(index: i) {\n        let v = arr(unchecked: i);   // safe — i checked above\n}\n```",
-              "source_path": "lang/std/collections/array.ks"
-            },
-            {
-              "kind": "subscript",
-              "name": "Unchecked Range",
-              "anchor": "subscript-Unchecked-Range",
-              "signature": "public subscript(uncheckedRange: Range[Int64]) -> Slice[T] { get }",
-              "doc": "Returns a `Slice[T]` for `range` with no bounds check.\n\nThe fastest range accessor; pair with explicit pre-validation.\n\n# Safety\n\nUndefined behavior if `range.start < 0`, `range.end > count`, or\n`range.start > range.end`. Always validate the endpoints before\ncalling.\n\n# Examples\n\n```\nlet arr = [10, 20, 30, 40, 50];\nif start >= 0 and end <= arr.count and start <= end {\n        let s = arr(uncheckedRange: start..<end);  // safe\n}\n```",
+              "signature": "public subscript[I](unchecked: I) -> I.ArrayYield { get set }",
+              "doc": "Reads or writes at `index` without a bounds check.\n\nThe fastest accessor; intended for hot loops where the index has\nalready been validated (e.g. inside `0..<count`). Setters trigger\nCOW. Range writes still panic on length mismatch — that's a\ndefinitional check, not a bounds check.\n\n# Safety\n\nUndefined behavior if the access is out of range. Always validate\nbefore calling.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\nfor i in arr.indices {\n    let v = arr(unchecked: i);   // safe — i is in range\n}\nlet s = arr(unchecked: 0..<2);   // Slice[10, 20]\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -138,10 +106,10 @@
             },
             {
               "kind": "subscript",
-              "name": "Wrapping Index",
-              "anchor": "subscript-Wrapping-Index",
-              "signature": "public subscript(wrapping: Int64) -> T? { get set }",
-              "doc": "Reads or writes the element using modulo-wrapping indexing.\n\nNegative indices count from the end (`-1` is the last element);\npositive indices >= `count` wrap around to the start. The only\ncase that returns `None` (or no-ops on the setter) is when the\narray is empty. Compare with `arr(clamping: i)`, which saturates\ninstead of wrapping.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(wrapping: -1);  // Some(30) — last element\narr(wrapping: -2);  // Some(20) — second to last\narr(wrapping:  3);  // Some(10) — wraps to index 0\narr(wrapping:  4);  // Some(20) — wraps to index 1\n[](wrapping: 0);    // None     — empty array\n```",
+              "name": "Wrapping",
+              "anchor": "subscript-Wrapping",
+              "signature": "public subscript[I](wrapped: I) -> I.ArrayWrappedYield { get set }",
+              "doc": "Reads or writes at `index` using modulo-wrapping indexing.\n\nNegative indices count from the end (`-1` is the last element);\npositive indices `>= count` wrap to the start. The only failure\nmode is an empty array, which yields `None` (and no-ops on the\nsetter). Compare `arr(clamped: i)`, which saturates instead of\nwrapping.\n\n# Examples\n\n```\nlet arr = [10, 20, 30];\narr(wrapped: -1);  // Some(30) — last element\narr(wrapped: -2);  // Some(20) — second to last\narr(wrapped:  3);  // Some(10) — wraps to index 0\narr(wrapped:  4);  // Some(20) — wraps to index 1\n[](wrapped: 0);    // None     — empty array\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -744,10 +712,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Array Literal",
+              "anchor": "initializer-Array-Literal",
               "signature": "init(LiteralSlice[Element])",
-              "doc": "Creates an instance from a literal slice of elements.",
+              "doc": "Builds an instance from a literal slice of elements.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -775,10 +743,10 @@
             },
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Literal Bridge",
+              "anchor": "initializer-Literal-Bridge",
               "signature": "init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)",
-              "doc": "Creates an instance from a raw pointer to elements and count.",
+              "doc": "Compiler-emitted init taking a raw pointer and count.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -805,10 +773,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -993,7 +961,7 @@
       "name": "DefaultHasher",
       "anchor": "struct-DefaultHasher",
       "signature": "public struct DefaultHasher { /* private fields */ }",
-      "doc": "The standard `Hasher` implementation, backed by the 64-bit FNV-1a\nalgorithm.\n\nUsed by `Dictionary` and `Set` whenever the user doesn't pick a\nspecific hasher. FNV-1a (Fowler-Noll-Vo) is a non-cryptographic\nhash with good distribution for short keys and trivial state (a\nsingle 64-bit word). It is **not** suitable for adversarial\ninputs — for HashDoS resistance, swap in a keyed hasher like\nSipHash by spelling out `Dictionary[K, V, SipHasher]` directly.\nConforms to `Hasher` (the `write`/`finish` protocol used by\n`Hash` implementations) and `Defaultable` (so generic code can\ninstantiate one with `H()`).\n\n# Examples\n\n```\nvar h = DefaultHasher();\n\"hello\".hash(into: h);\nlet hash = h.finish();  // 64-bit hash of \"hello\"\n\n// Used implicitly through the dictionary type alias:\nlet d: [String: Int64] = [\"a\": 1];   // DefaultHasher under the hood\n```\n\n# Algorithm\n\nFNV-1a starts from the 64-bit offset basis\n`0xcbf29ce484222325` and folds each byte by XOR-then-multiply\nwith the FNV prime `0x100000001b3`. The state stays a single\n`UInt64` throughout, and `finish()` returns it directly.\n\n# Representation\n\nOne `UInt64` field, `state`, holding the running FNV-1a digest.",
+      "doc": "The standard `Hasher` implementation, backed by a wyhash-derived\nper-byte mixer.\n\nUsed by `Dictionary` and `Set` whenever the user doesn't pick a\nspecific hasher. Each byte folds into a 64-bit running state via\n`state = (state ^ byte) * MULT`; `finish()` runs Murmur3's fmix64\nfinalizer to scramble the result so every input bit avalanches\nacross the output.\n\n**Not adversarially safe.** The mixer is unkeyed, so an attacker\nwho can choose keys can craft collisions. For HashDoS resistance,\nswap in a keyed hasher (planned: `SipHasher13`) by spelling out\n`Dictionary[K, V, SipHasher13]` directly. For non-adversarial\nworkloads — internal IDs, parser symbols, config values — this\nhasher is faster and has better distribution than FNV-1a.\n\n# Examples\n\n```\nvar h = DefaultHasher();\n\"hello\".hash(into: h);\nlet hash = h.finish();  // 64-bit hash of \"hello\"\n\n// Used implicitly through the dictionary type alias:\nlet d: [String: Int64] = [\"a\": 1];   // DefaultHasher under the hood\n```\n\n# Algorithm\n\nInitialization seeds `state` with the wyhash secret\n`0x9e3779b97f4a7c15` (the \"golden ratio\" constant SplitMix64 uses).\nEach byte updates the state with `state = (state ^ byte) *\n0x100000001b3`, which combines wyhash's mixing constant with\nFNV-1a's prime so every bit of the byte propagates across the\n64-bit state. `finish()` runs Murmur3's `fmix64` finalizer\n(xor-shift-multiply twice) so consecutive integer keys produce\nnon-clustered hashes.\n\n# Representation\n\nOne `UInt64` field, `state`, holding the running digest.",
       "source_path": "lang/std/collections/hashing.ks",
       "member_groups": [
         {
@@ -1006,7 +974,7 @@
               "name": "Empty",
               "anchor": "initializer-Empty",
               "signature": "public init()",
-              "doc": "Creates a fresh hasher initialized to the FNV-1a 64-bit offset\nbasis.\n\nThe starting `state` is `0xcbf29ce484222325` — the standard\nFNV-1a seed; the same input fed to two new hashers always\nproduces the same `finish()` value, so this hasher is\ndeterministic across runs (no random seeding).\n\n# Examples\n\n```\nvar h = DefaultHasher();\nh.finish();  // the offset basis itself, since nothing was written\n```",
+              "doc": "Creates a fresh hasher seeded with the SplitMix64 golden-ratio\nconstant `0x9e3779b97f4a7c15`.\n\nThe same input fed to two new hashers always produces the same\n`finish()` value — this hasher is deterministic across runs (no\nrandom seeding).",
               "source_path": "lang/std/collections/hashing.ks"
             }
           ]
@@ -1021,7 +989,7 @@
               "name": "finish",
               "anchor": "function-finish",
               "signature": "public mutating func finish() -> UInt64",
-              "doc": "Returns the current hash state as the final 64-bit digest.\n\nFNV-1a has no finalization step, so `finish()` simply reads\n`state` — calling it does not reset the hasher, so further\n`write()` calls would extend the same digest. Construct a\nfresh `DefaultHasher()` per logical hash to avoid accidental\nstate reuse.\n\n# Examples\n\n```\nvar h = DefaultHasher();\nh.write(bytes: \"x\".utf8Bytes());\nh.finish();  // 64-bit FNV-1a of \"x\"\n```",
+              "doc": "Returns the finalized 64-bit digest.\n\nRuns Murmur3's `fmix64` finalizer over the running state — two\nrounds of xor-shift-multiply that avalanche every input bit\nacross the output. Consecutive integer keys (a common bucket\nquery pattern) emerge well-distributed despite the simple\nmixer, which would otherwise leak the input's low-bit\nregularity into the bucket index.\n\n`finish()` mutates `state`; calling it twice on the same hasher\nis undefined — construct a fresh `DefaultHasher()` per logical\nhash.",
               "source_path": "lang/std/collections/hashing.ks"
             },
             {
@@ -1029,7 +997,7 @@
               "name": "write",
               "anchor": "function-write",
               "signature": "public mutating func write(Slice[UInt8])",
-              "doc": "Folds every byte of `bytes` into the running hash state.\n\nImplements the FNV-1a inner loop: `state = (state xor byte) *\nprime`. May be called any number of times before `finish()`;\nthe result is identical to having received all the bytes in a\nsingle call. Safe to call with an empty slice (no-op).\n\n# Examples\n\n```\nvar h = DefaultHasher();\nh.write(bytes: \"hello\".utf8Bytes());\nh.write(bytes: \" world\".utf8Bytes());\n// Equivalent to a single write of \"hello world\".utf8Bytes()\n```",
+              "doc": "Folds every byte of `bytes` into the running hash state.\n\nMay be called any number of times before `finish()`; the result\nis identical to having received all the bytes in a single call.\nSafe to call with an empty slice (no-op).\n\n# Examples\n\n```\nvar h = DefaultHasher();\nh.write(bytes: \"hello\".utf8Bytes());\nh.write(bytes: \" world\".utf8Bytes());\n// Equivalent to a single write of \"hello world\".utf8Bytes()\n```",
               "source_path": "lang/std/collections/hashing.ks"
             }
           ]
@@ -1041,10 +1009,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1093,7 +1061,7 @@
               "name": "Grouping",
               "anchor": "initializer-Grouping",
               "signature": "public init[I, E](grouping: I, by: (E) -> K) where I: Iterable, I.Item == E, V == Array[E]",
-              "doc": "Buckets each element of an iterable into an array under the key\nderived from `keyFunc`.\n\nThe value type is constrained to `Array[E]`: each bucket\naccumulates the elements that mapped to it, in insertion order\nwithin that bucket. Useful for building \"index-by\" tables from a\nflat collection. The `keyFunc` runs once per element.\n\n# Examples\n\n```\nlet words = [\"apple\", \"apricot\", \"banana\", \"blueberry\"];\nlet grouped = Dictionary(grouping: words, by: { (w) in w.chars.first().unwrap() });\n// [\"a\": [\"apple\", \"apricot\"], \"b\": [\"banana\", \"blueberry\"]]\n\nlet nums = [1, 2, 3, 4, 5];\nlet parity = Dictionary(grouping: nums, by: { (n) in n % 2 });\n// [0: [2, 4], 1: [1, 3, 5]]\n```",
+              "doc": "Buckets each element of an iterable into an array under the key\nderived from `keyFunc`.\n\nThe value type is constrained to `Array[E]`: each bucket\naccumulates the elements that mapped to it, in insertion order\nwithin that bucket. Useful for building \"index-by\" tables from a\nflat collection. The `keyFunc` runs once per element.\n\n# Examples\n\n```\nlet words = [\"apple\", \"apricot\", \"banana\", \"blueberry\"];\nlet grouped = Dictionary(grouping: words, by: { (w) in w.chars().first().unwrap() });\n// [\"a\": [\"apple\", \"apricot\"], \"b\": [\"banana\", \"blueberry\"]]\n\nlet nums = [1, 2, 3, 4, 5];\nlet parity = Dictionary(grouping: nums, by: { (n) in n % 2 });\n// [0: [2, 4], 1: [1, 3, 5]]\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
@@ -1484,20 +1452,20 @@
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
+              "kind": "initializer",
+              "name": "Literal Bridge",
+              "anchor": "initializer-Literal-Bridge",
+              "signature": "init(lang.ptr[(Key, Value)], lang.i64)",
+              "doc": "Compiler-emitted init taking a raw `(Key, Value)` pointer and count.",
+              "source_path": "lang/std/core/literals.ks"
+            },
+            {
               "kind": "typealias",
               "name": "Value",
               "anchor": "typealias-Value",
               "signature": "type Value = V",
               "doc": "Value type for the literal protocol — equals `V`.",
               "source_path": "lang/std/collections/dictionary.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(lang.ptr[(Key, Value)], lang.i64)",
-              "doc": "Creates an instance from a raw pointer to key-value pairs and count.",
-              "source_path": "lang/std/core/literals.ks"
             }
           ]
         },
@@ -1508,10 +1476,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Dictionary Literal",
+              "anchor": "initializer-Dictionary-Literal",
               "signature": "init(LiteralSlice[(Key, Value)])",
-              "doc": "Creates an instance from a literal slice of key-value pairs.",
+              "doc": "Builds an instance from a literal slice of key-value pairs.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1523,10 +1491,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -2055,7 +2023,7 @@
               "name": "sorted",
               "anchor": "function-sorted",
               "signature": "public func sorted() -> Array[T]",
-              "doc": "Returns the set's elements as an ascending-sorted `Array[T]`.\n\nConvenience for \"I want this set as an ordered list\". Note\nduplicates have already collapsed in the set, so the result\nhas no repeats. **Currently returns the array unsorted** —\nthe body has a TODO for hooking up `Array.sort()`. Treat the\nordering as unspecified until that's resolved.\n\n# Examples\n\n```\nSet([3, 1, 4, 1, 5]).sorted();  // [1, 3, 4, 5] — once Array.sort() is wired\n```",
+              "doc": "Returns the set's elements as an ascending-sorted `Array[T]`.\n\nConvenience for \"I want this set as an ordered list\". Duplicates\nhave already collapsed in the set, so the result has no repeats.\n\n# Examples\n\n```\nSet([3, 1, 4, 1, 5]).sorted();  // [1, 3, 4, 5]\n```",
               "source_path": "lang/std/collections/set.ks"
             },
             {
@@ -2175,10 +2143,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Array Literal",
+              "anchor": "initializer-Array-Literal",
               "signature": "init(LiteralSlice[Element])",
-              "doc": "Creates an instance from a literal slice of elements.",
+              "doc": "Builds an instance from a literal slice of elements.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]

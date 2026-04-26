@@ -160,7 +160,7 @@ func splitOnSlash(s: String) -> Array[String] {
     let len = s.byteCount;
 
     while i < len {
-        let byte = s.byteAtUnchecked(i);
+        let byte = s.bytes(unchecked: i);
         if byte == 47 { // '/'
             if i > start {
                 result.append(s.substringBytes(from: start, to: i))

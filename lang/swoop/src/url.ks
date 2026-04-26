@@ -94,7 +94,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     var pathStart = len;
     var si = afterScheme;
     while si < len {
-        if raw.byteAtUnchecked(si) == 47 { // '/'
+        if raw.bytes(unchecked: si) == 47 { // '/'
             pathStart = si;
             break
         }

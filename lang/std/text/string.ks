@@ -8,7 +8,7 @@ import std.num.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, Slice)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView, BytesIndex, BytesClampable, CharsIndex, CharsClampable)
+import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView)
 import std.text.unicode as unicode
 import std.ffi.(memcpy)
 
@@ -592,7 +592,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// String.fromUtf8(bytes: "héllo".bytes().asSlice());  // Some("héllo")
+    /// String.fromUtf8(bytes: "héllo".bytes.asSlice());  // Some("héllo")
     /// String.fromUtf8(bytes: badSlice);                 // None
     /// ```
     public static func fromUtf8(bytes: Slice[UInt8]) -> String? {
@@ -645,72 +645,22 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     // VIEW PROPERTIES
     // ========================================================================
 
-    /// @name Bytes View
-    /// `s.bytes()` — view over the raw UTF-8 bytes. O(1) byte indexing,
-    /// byte-level iteration. Implemented as a method (rather than a
-    /// property) so the same name can take an index for `s.bytes(i)` /
-    /// `s.bytes(checked: i)` / `s.bytes(0..<n)` style indexing.
-    public func bytes() -> BytesView {
+    /// `s.bytes` — view over the raw UTF-8 bytes. O(1) byte indexing,
+    /// byte-level iteration. Index via the view's subscripts:
+    /// `s.bytes(i)`, `s.bytes(checked: i)`, `s.bytes(0..<n)`.
+    public var bytes: BytesView {
         BytesView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
-    /// @name Indexed Byte / Substring
-    /// `s.bytes(i)` returns a single byte; `s.bytes(0..<5)` returns a substring.
-    public func bytes[I](index: I) -> I.BytesYield where I: BytesIndex {
-        let view: BytesView = self.bytes();
-        view(index)
-    }
-
-    /// @name Checked Byte / Substring
-    /// `s.bytes(checked: i)` — `None` if out of bounds.
-    public func bytes[I](checked index: I) -> I.BytesYield? where I: BytesIndex {
-        let view: BytesView = self.bytes();
-        view(checked: index)
-    }
-
-    /// @name Unchecked Byte / Substring
-    /// `s.bytes(unchecked: i)` — UB on out-of-bounds.
-    public func bytes[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
-        let view: BytesView = self.bytes();
-        view(unchecked: index)
-    }
-
-    /// @name Clamped Byte / Substring
-    /// `s.bytes(clamped: i)` — saturates to valid bounds, never panics.
-    public func bytes[I](clamped index: I) -> I.BytesClampedYield where I: BytesClampable {
-        let view: BytesView = self.bytes();
-        view(clamped: index)
-    }
-
-    /// @name Chars View
-    /// `s.chars()` — view over the Unicode code points. O(n) indexing,
-    /// scalar-level iteration. Method form (see `bytes()` above) so the
-    /// same name supports `s.chars(i)` / `s.chars(checked: i)`.
-    public func chars() -> CharsView {
+    /// `s.chars` — view over the Unicode code points. O(n) indexing,
+    /// scalar-level iteration. Index via the view's subscripts:
+    /// `s.chars(i)`, `s.chars(checked: i)`.
+    public var chars: CharsView {
         CharsView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
 
-    /// @name Indexed Char / Substring
-    public func chars[I](index: I) -> I.CharsYield where I: CharsIndex {
-        let view: CharsView = self.chars();
-        view(index)
-    }
-
-    /// @name Checked Char / Substring
-    /// `s.chars(checked: i)` — `None` if out of bounds.
-    public func chars[I](checked index: I) -> I.CharsYield? where I: CharsIndex {
-        let view: CharsView = self.chars();
-        view(checked: index)
-    }
-
-    /// @name Clamped Char / Substring
-    /// `s.chars(clamped: i)` — saturates to valid bounds, never panics.
-    public func chars[I](clamped index: I) -> I.CharsClampedYield where I: CharsClampable {
-        let view: CharsView = self.chars();
-        view(clamped: index)
-    }
-
-    /// A view over the user-perceived characters (UAX #29 grapheme clusters).
+    /// `s.graphemes` — view over user-perceived characters
+    /// (UAX #29 grapheme clusters). Iterate or count, no random access.
     public var graphemes: GraphemesView {
         GraphemesView(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len())
     }
@@ -822,152 +772,6 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         lastChar
     }
 
-    /// Returns the code point at code-point index `index`. Panics if out of bounds. O(n).
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"String index out of bounds"` if `index` is
-    /// negative or `>= count`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "héllo".char(at: 1);  // 'é'
-    /// ```
-    public func char(at index: Int64) -> Char {
-        match self.char(checked: index) {
-            .Some(c) => c,
-            .None => lang.panic("String index out of bounds")
-        }
-    }
-
-    /// Returns the code point at code-point index `index`, or `None` if out of bounds. O(n).
-    ///
-    /// Companion to `char(at:)`. Walks UTF-8 to find the right
-    /// character; the early `return` on the matching index keeps
-    /// average-case work proportional to `index`, not to `count`.
-    public func char(checked index: Int64) -> Char? {
-        let myLen = self.len();
-        let myPtr = self.ptr();
-        var charIndex: Int64 = Int64(intLiteral: 0);
-        var byteIndex: Int64 = Int64(intLiteral: 0);
-        while byteIndex < myLen {
-            if charIndex == index {
-                let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
-                let result = decodeUtf8(rawPtr, myLen, at: byteIndex);
-                if let .Some(decoded) = result {
-                    return .Some(decoded.char)
-                }
-                return .None
-            }
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](myPtr.asRaw().raw);
-            let result = decodeUtf8(rawPtr, myLen, at: byteIndex);
-            if let .Some(decoded) = result {
-                byteIndex = byteIndex + decoded.bytesConsumed;
-                charIndex = charIndex + Int64(intLiteral: 1)
-            } else {
-                byteIndex = byteIndex + Int64(intLiteral: 1)
-            }
-        }
-        .None
-    }
-
-    /// Returns the code point at code-point index `index` without bounds checking.
-    ///
-    /// Currently delegates to `char(at:)` which itself panics on
-    /// out-of-range, so this is not actually faster — exists for API
-    /// parity with `Array`'s indexing family.
-    ///
-    /// # Safety
-    ///
-    /// Caller must guarantee `0 <= index < count`.
-    public func char(unchecked index: Int64) -> Char {
-        self.char(at: index)
-    }
-
-    /// Returns the code point at `index` modulo `count`, supporting negative indices.
-    ///
-    /// Negative indices count from the end (`-1` is the last code
-    /// point). Equivalent to `char(at: ((index % count) + count) % count)`.
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"String is empty"` if the string contains no code
-    /// points.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "abc".char(wrapped: -1);  // 'c'
-    /// "abc".char(wrapped: 5);   // 'c'  (5 % 3 == 2)
-    /// ```
-    public func char(wrapped index: Int64) -> Char {
-        let charCount = self.count;
-        if charCount == Int64(intLiteral: 0) {
-            lang.panic("String is empty")
-        }
-        var idx = index;
-        while idx < Int64(intLiteral: 0) {
-            idx = idx + charCount
-        }
-        idx = idx % charCount;
-        self.char(at: idx)
-    }
-
-    /// Returns the code point at `index` clamped to `[0, count - 1]`.
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"String is empty"` if the string contains no code
-    /// points.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "abc".char(clamped: -1);  // 'a'
-    /// "abc".char(clamped: 99);  // 'c'
-    /// ```
-    public func char(clamped index: Int64) -> Char {
-        let charCount = self.count;
-        if charCount == Int64(intLiteral: 0) {
-            lang.panic("String is empty")
-        }
-        var idx = index;
-        if idx < Int64(intLiteral: 0) {
-            idx = Int64(intLiteral: 0)
-        }
-        if idx >= charCount {
-            idx = charCount - Int64(intLiteral: 1)
-        }
-        self.char(at: idx)
-    }
-
-    // ========================================================================
-    // BYTE ACCESS
-    // ========================================================================
-
-    /// Returns the byte at byte index `index`, or `None` if out of bounds. O(1).
-    ///
-    /// For unchecked access, use `byteAtUnchecked`. The byte is
-    /// returned as raw `UInt8` — multi-byte characters require the
-    /// caller to assemble them.
-    public func byteAt(index: Int64) -> UInt8? {
-        let myLen = self.len();
-        if index >= Int64(intLiteral: 0) and index < myLen {
-            .Some(self.ptr().offset(by: index).read())
-        } else {
-            .None
-        }
-    }
-
-    /// Returns the byte at `index` without bounds checking. O(1).
-    ///
-    /// # Safety
-    ///
-    /// Caller must guarantee `0 <= index < byteCount`.
-    public func byteAtUnchecked(index: Int64) -> UInt8 {
-        self.ptr().offset(by: index).read()
-    }
 
     // ========================================================================
     // CAPACITY MANAGEMENT (Internal)
@@ -1697,7 +1501,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
         // Full Unicode path
         var result = String();
-        for c in self.chars().iter() {
+        for c in self.chars.iter() {
             if unicode.hasLowercaseExpansion(c) {
                 result.append(unicode.lowercaseExpansion(c))
             } else {
@@ -1743,7 +1547,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
 
         // Full Unicode path
         var result = String();
-        for c in self.chars().iter() {
+        for c in self.chars.iter() {
             if unicode.hasUppercaseExpansion(c) {
                 result.append(unicode.uppercaseExpansion(c))
             } else {
@@ -1771,7 +1575,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         var result = String();
         var atWordStart = true;
 
-        for c in self.chars().iter() {
+        for c in self.chars.iter() {
             if c.isWhitespace() {
                 result.appendChar(c);
                 atWordStart = true
@@ -1808,8 +1612,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// ```
     public func equalsCaseInsensitive(other: String) -> Bool {
         // Compare case-folded versions
-        var selfIter = self.chars().iter();
-        var otherIter = other.chars().iter();
+        var selfIter = self.chars.iter();
+        var otherIter = other.chars.iter();
 
         while true {
             let selfChar = selfIter.next();

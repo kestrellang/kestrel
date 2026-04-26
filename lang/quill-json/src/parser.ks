@@ -28,7 +28,7 @@ struct JsonCursor: Cloneable {
     /// Returns the current byte, or None if at end.
     func peek() -> Optional[UInt8] {
         if self.pos < self.len {
-            self.source.byteAt(self.pos)
+            self.source.bytes(checked: self.pos)
         } else {
             .None
         }
@@ -37,7 +37,7 @@ struct JsonCursor: Cloneable {
     /// Returns the current byte and advances. Errors if at end.
     mutating func advance() -> Result[UInt8, JsonParseError] {
         if self.pos < self.len {
-            let b = self.source.byteAtUnchecked(self.pos);
+            let b = self.source.bytes(unchecked: self.pos);
             self.pos = self.pos + 1;
             .Ok(b)
         } else {
@@ -60,7 +60,7 @@ struct JsonCursor: Cloneable {
     /// Skips whitespace characters (space, tab, newline, carriage return).
     mutating func skipWhitespace() {
         while self.pos < self.len {
-            let b = self.source.byteAtUnchecked(self.pos);
+            let b = self.source.bytes(unchecked: self.pos);
             // space=32, tab=9, newline=10, carriage return=13
             if b == 32 or b == 9 or b == 10 or b == 13 {
                 self.pos = self.pos + 1;
@@ -88,8 +88,8 @@ struct JsonCursor: Cloneable {
             if self.pos >= self.len {
                 return .Err(JsonParseError("unexpected end of input, expected '" + expected + "'", startPos))
             }
-            let actual = self.source.byteAtUnchecked(self.pos);
-            let expectedByte = expected.byteAtUnchecked(i);
+            let actual = self.source.bytes(unchecked: self.pos);
+            let expectedByte = expected.bytes(unchecked: i);
             if actual != expectedByte {
                 return .Err(JsonParseError("expected '" + expected + "'", startPos))
             }
@@ -191,7 +191,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
             } else if b >= 49 and b <= 57 { // '1'-'9'
                 cursor.skip();
                 while cursor.pos < cursor.len {
-                    let d = cursor.source.byteAtUnchecked(cursor.pos);
+                    let d = cursor.source.bytes(unchecked: cursor.pos);
                     if d >= 48 and d <= 57 {
                         cursor.skip()
                     } else {
@@ -214,7 +214,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                 // Must have at least one digit after '.'
                 var hasDigit = false;
                 while cursor.pos < cursor.len {
-                    let d = cursor.source.byteAtUnchecked(cursor.pos);
+                    let d = cursor.source.bytes(unchecked: cursor.pos);
                     if d >= 48 and d <= 57 {
                         cursor.skip();
                         hasDigit = true
@@ -248,7 +248,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                 // Must have at least one digit
                 var hasDigit = false;
                 while cursor.pos < cursor.len {
-                    let d = cursor.source.byteAtUnchecked(cursor.pos);
+                    let d = cursor.source.bytes(unchecked: cursor.pos);
                     if d >= 48 and d <= 57 {
                         cursor.skip();
                         hasDigit = true
@@ -293,7 +293,7 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
         if cursor.atEnd() {
             return .Err(JsonParseError("unterminated string", cursor.pos))
         }
-        let b = cursor.source.byteAtUnchecked(cursor.pos);
+        let b = cursor.source.bytes(unchecked: cursor.pos);
 
         if b == 34 { // '"' - end of string
             cursor.skip();
@@ -481,7 +481,7 @@ func parseInt64(s: String) -> Optional[Int64] {
 
     var i: Int64 = 0;
     var negative = false;
-    let firstByte = s.byteAtUnchecked(0);
+    let firstByte = s.bytes(unchecked: 0);
     if firstByte == 45 { // '-'
         negative = true;
         i = 1
@@ -493,7 +493,7 @@ func parseInt64(s: String) -> Optional[Int64] {
 
     var result: Int64 = 0;
     while i < len {
-        let b = Int64(from: s.byteAtUnchecked(i));
+        let b = Int64(from: s.bytes(unchecked: i));
         if b < 48 or b > 57 {
             return .None
         }
@@ -518,7 +518,7 @@ func parseFloat64(s: String) -> Optional[Float64] {
 
     var i: Int64 = 0;
     var negative = false;
-    let firstByte = s.byteAtUnchecked(0);
+    let firstByte = s.bytes(unchecked: 0);
     if firstByte == 45 { // '-'
         negative = true;
         i = 1
@@ -531,7 +531,7 @@ func parseFloat64(s: String) -> Optional[Float64] {
     // Integer part
     var intPart: Float64 = 0.0;
     while i < len {
-        let b = Int64(from: s.byteAtUnchecked(i));
+        let b = Int64(from: s.bytes(unchecked: i));
         if b >= 48 and b <= 57 {
             intPart = intPart * 10.0 + Float64(from: b - 48);
             i = i + 1
@@ -544,11 +544,11 @@ func parseFloat64(s: String) -> Optional[Float64] {
     var fracPart: Float64 = 0.0;
     var fracDiv: Float64 = 1.0;
     if i < len {
-        let dotByte = s.byteAtUnchecked(i);
+        let dotByte = s.bytes(unchecked: i);
         if dotByte == 46 { // '.'
             i = i + 1;
             while i < len {
-                let b = Int64(from: s.byteAtUnchecked(i));
+                let b = Int64(from: s.bytes(unchecked: i));
                 if b >= 48 and b <= 57 {
                     fracPart = fracPart * 10.0 + Float64(from: b - 48);
                     fracDiv = fracDiv * 10.0;
@@ -564,12 +564,12 @@ func parseFloat64(s: String) -> Optional[Float64] {
 
     // Exponent part
     if i < len {
-        let eByte = s.byteAtUnchecked(i);
+        let eByte = s.bytes(unchecked: i);
         if eByte == 101 or eByte == 69 { // 'e' or 'E'
             i = i + 1;
             var expNeg = false;
             if i < len {
-                let signByte = s.byteAtUnchecked(i);
+                let signByte = s.bytes(unchecked: i);
                 if signByte == 43 { // '+'
                     i = i + 1
                 } else if signByte == 45 { // '-'
@@ -579,7 +579,7 @@ func parseFloat64(s: String) -> Optional[Float64] {
             }
             var exp: Float64 = 0.0;
             while i < len {
-                let b = Int64(from: s.byteAtUnchecked(i));
+                let b = Int64(from: s.bytes(unchecked: i));
                 if b >= 48 and b <= 57 {
                     exp = exp * 10.0 + Float64(from: b - 48);
                     i = i + 1

@@ -242,7 +242,7 @@ extend TcpStream {
         var hostBuf = Array[UInt8]();
         var hci: Int64 = 0;
         while hci < host.byteCount {
-            hostBuf.append(host.byteAtUnchecked(hci));
+            hostBuf.append(host.bytes(unchecked: hci));
             hci = hci + 1
         }
         hostBuf.append(0);
@@ -250,7 +250,7 @@ extend TcpStream {
         var portBuf = Array[UInt8]();
         var pci: Int64 = 0;
         while pci < portStr.byteCount {
-            portBuf.append(portStr.byteAtUnchecked(pci));
+            portBuf.append(portStr.bytes(unchecked: pci));
             pci = pci + 1
         }
         portBuf.append(0);

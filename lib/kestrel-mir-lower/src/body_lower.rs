@@ -1,6 +1,6 @@
 //! Function body lowering — HirExpr/HirStmt → MIR basic blocks.
 //!
-//! Handles: literals, locals, assignments, return, if/else, loops,
+//! Handles literals, locals, assignments, return, if/else, loops,
 //! break/continue, blocks, field access, tuple index, calls (direct,
 //! method, protocol/witness).
 
@@ -1488,9 +1488,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .collect();
                 return self.substitute_mir_type(&field.ty, &subst);
             }
-            // Struct is known but field isn't — shouldn't happen for
-            // well-typed programs; fall through to unit as a safe default.
-            return MirTy::unit();
+            // Struct is known but the name isn't a stored field. It might be
+            // a computed property (lowered separately as a getter, not a
+            // struct field) — consult the ECS before giving up.
+            return self.resolve_field_type_via_ecs(*entity, type_args, field_name);
         }
 
         // Struct hasn't been lowered yet (cross-module body references an
@@ -1506,17 +1507,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         type_args: &[MirTy],
         field_name: &str,
     ) -> MirTy {
-        use kestrel_ast_builder::{Callable, Name, NodeKind, Static, TypeParams};
+        use kestrel_ast_builder::{Name, NodeKind, Static, TypeParams};
 
         let children: Vec<Entity> = self.ctx.world.children_of(struct_entity).to_vec();
         for child in children {
             if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Field) {
                 continue;
             }
-            // Skip computed properties and statics — matches struct_lower.
-            if self.ctx.world.get::<Callable>(child).is_some()
-                || self.ctx.world.get::<Static>(child).is_some()
-            {
+            // Skip statics — matches struct_lower. Computed properties are
+            // resolved here too: their `Callable` getter returns the
+            // annotated type, which is exactly what callers want when
+            // dispatching `obj.computedProp(...)` as a subscript.
+            if self.ctx.world.get::<Static>(child).is_some() {
                 continue;
             }
             let name_matches = self
@@ -2380,31 +2382,82 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 };
                 // Only decompose if subscript belongs to a different type than the receiver
                 if subscript_parent != receiver_entity && subscript_parent.is_some() {
-                    let field_ty = self.resolve_field_type(&receiver_ty, method_name);
-                    let receiver_val = self.lower_expr(receiver_expr);
-                    let field_place = match receiver_val {
-                        Value::Place(p) => p.field(method_name.to_string()),
-                        _ => {
-                            let temp = self.fresh_temp(receiver_ty.clone());
-                            self.emit_stmt(Statement::new(StatementKind::Assign {
-                                dest: Place::local(temp),
-                                rvalue: value_to_rvalue(receiver_val),
-                            }));
-                            Place::local(temp).field(method_name.to_string())
-                        },
-                    };
-                    // Call the subscript with the field as receiver
-                    let receiver_arg = if field_ty.is_trivially_copyable() {
-                        CallArg::copy(Value::Place(field_place))
+                    // Locate the field/property on the receiver type so we
+                    // can tell stored-field access apart from a computed
+                    // property getter call. Computed properties carry a
+                    // `Callable` component; stored fields don't.
+                    let prefix_entity = receiver_entity.and_then(|recv| {
+                        self.ctx
+                            .world
+                            .children_of(recv)
+                            .iter()
+                            .copied()
+                            .find(|&c| {
+                                self.ctx.world.get::<kestrel_ast_builder::NodeKind>(c)
+                                    == Some(&kestrel_ast_builder::NodeKind::Field)
+                                    && self
+                                        .ctx
+                                        .world
+                                        .get::<kestrel_ast_builder::Name>(c)
+                                        .map_or(false, |n| n.0 == method_name)
+                            })
+                    });
+                    let is_computed_property = prefix_entity.map_or(false, |e| {
+                        self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_some()
+                    });
+
+                    let (subscript_receiver_ty, subscript_receiver_val) = if is_computed_property
+                    {
+                        // Call the getter to materialize the property's value,
+                        // then subscript that. Mirrors the HirExpr::Field
+                        // computed-property path above.
+                        let getter_entity = prefix_entity.unwrap();
+                        self.ctx.register_name(getter_entity);
+                        let getter_result_ty = self.resolve_field_type(&receiver_ty, method_name);
+                        let base_val = self.lower_expr(receiver_expr);
+                        let getter_receiver_arg = CallArg::borrow(base_val);
+                        let getter_type_args =
+                            self.prepend_receiver_type_args(&receiver_ty, vec![]);
+                        let getter_callee = Callee::method(
+                            getter_entity,
+                            getter_type_args,
+                            receiver_ty.clone(),
+                        );
+                        let value = self.emit_call(
+                            getter_callee,
+                            vec![getter_receiver_arg],
+                            getter_result_ty.clone(),
+                        );
+                        (getter_result_ty, value)
                     } else {
-                        CallArg::borrow(Value::Place(field_place))
+                        let field_ty = self.resolve_field_type(&receiver_ty, method_name);
+                        let receiver_val = self.lower_expr(receiver_expr);
+                        let field_place = match receiver_val {
+                            Value::Place(p) => p.field(method_name.to_string()),
+                            _ => {
+                                let temp = self.fresh_temp(receiver_ty.clone());
+                                self.emit_stmt(Statement::new(StatementKind::Assign {
+                                    dest: Place::local(temp),
+                                    rvalue: value_to_rvalue(receiver_val),
+                                }));
+                                Place::local(temp).field(method_name.to_string())
+                            },
+                        };
+                        (field_ty, Value::Place(field_place))
+                    };
+
+                    // Call the subscript with the materialized value as receiver
+                    let receiver_arg = if subscript_receiver_ty.is_trivially_copyable() {
+                        CallArg::copy(subscript_receiver_val)
+                    } else {
+                        CallArg::borrow(subscript_receiver_val)
                     };
                     let mut call_args = vec![receiver_arg];
                     call_args.extend(self.lower_call_args(args));
                     let method_type_args = self.resolve_method_type_args(expr_id, hir_type_args);
                     return self.emit_method_dispatch(
                         resolved_entity,
-                        field_ty,
+                        subscript_receiver_ty,
                         method_type_args,
                         call_args,
                         result_ty,

@@ -34,7 +34,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
             lineNum = lineNum + 1;
             continue
         }
-        let firstByte = line.byteAtUnchecked(0);
+        let firstByte = line.bytes(unchecked: 0);
         if firstByte == 35 {
             lineNum = lineNum + 1;
             continue
@@ -44,7 +44,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
         if firstByte == 91 {
             // Check for array of tables [[
             if line.byteCount > 1 {
-                let secondByte = line.byteAtUnchecked(1);
+                let secondByte = line.bytes(unchecked: 1);
                 if secondByte == 91 {
                     return .Err(TomlParseError("array of tables [[...]] not supported", lineNum))
                 }
@@ -53,7 +53,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
             var endPos: Int64 = 1;
             let lineLen = line.byteCount;
             while endPos < lineLen {
-                let b = line.byteAtUnchecked(endPos);
+                let b = line.bytes(unchecked: endPos);
                 if b == 93 {
                     break
                 }
@@ -100,7 +100,7 @@ func splitLines(s: String) -> Array[String] {
     let len = s.byteCount;
 
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 10 {
             lines.append(s.substringBytes(from: start, to: i));
             start = i + 1
@@ -108,7 +108,7 @@ func splitLines(s: String) -> Array[String] {
             lines.append(s.substringBytes(from: start, to: i));
             // Handle \r\n
             if i + 1 < len {
-                let next = s.byteAtUnchecked(i + 1);
+                let next = s.bytes(unchecked: i + 1);
                 if next == 10 {
                     i = i + 1
                 }
@@ -138,7 +138,7 @@ func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), Toml
     var inQuote = false;
 
     while eqPos < len {
-        let b = line.byteAtUnchecked(eqPos);
+        let b = line.bytes(unchecked: eqPos);
         if b == 34 {
             inQuote = inQuote == false
         }
@@ -172,8 +172,8 @@ func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), Toml
 func parseKey(s: String) -> String {
     let len = s.byteCount;
     if len >= 2 {
-        let first = s.byteAtUnchecked(0);
-        let last = s.byteAtUnchecked(len - 1);
+        let first = s.bytes(unchecked: 0);
+        let last = s.bytes(unchecked: len - 1);
         if first == 34 and last == 34 { // quoted key
             return s.substringBytes(from: 1, to: len - 1)
         }
@@ -187,7 +187,7 @@ func stripInlineComment(s: String) -> String {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 34 {
             inQuote = inQuote == false;
         }
@@ -209,7 +209,7 @@ func parseTomlValue(s: String, lineNum: Int64) -> Result[Value, TomlParseError] 
         return .Err(TomlParseError("empty value", lineNum))
     }
 
-    let firstByte = s.byteAtUnchecked(0);
+    let firstByte = s.bytes(unchecked: 0);
 
     // String: "..."
     if firstByte == 34 {
@@ -244,7 +244,7 @@ func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError
     if len < 2 {
         return .Err(TomlParseError("unterminated string", lineNum))
     }
-    let last = s.byteAtUnchecked(len - 1);
+    let last = s.bytes(unchecked: len - 1);
     if last != 34 {
         return .Err(TomlParseError("unterminated string", lineNum))
     }
@@ -254,13 +254,13 @@ func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError
     let end = len - 1;
 
     while i < end {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 92 {
             i = i + 1;
             if i >= end {
                 return .Err(TomlParseError("unterminated escape in string", lineNum))
             }
-            let esc = s.byteAtUnchecked(i);
+            let esc = s.bytes(unchecked: i);
             if esc == 34 { // \"
                 result.appendByte(34)
             } else if esc == 92 { // \\
@@ -289,7 +289,7 @@ func parseTomlNumber(s: String, lineNum: Int64) -> Result[Value, TomlParseError]
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 46 or b == 101 or b == 69 {
             isFloat = true
         }
@@ -312,7 +312,7 @@ func parseTomlNumber(s: String, lineNum: Int64) -> Result[Value, TomlParseError]
 func parseTomlArray(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
     let len = s.byteCount;
     // Verify brackets
-    let lastByte = s.byteAtUnchecked(len - 1);
+    let lastByte = s.bytes(unchecked: len - 1);
     if lastByte != 93 {
         return .Err(TomlParseError("unterminated array", lineNum))
     }
@@ -341,7 +341,7 @@ func parseTomlArray(s: String, lineNum: Int64) -> Result[Value, TomlParseError] 
 /// Parses an inline table: { key = value, key2 = value2 }
 func parseInlineTable(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
     let len = s.byteCount;
-    let lastByte = s.byteAtUnchecked(len - 1);
+    let lastByte = s.bytes(unchecked: len - 1);
     if lastByte != 125 {
         return .Err(TomlParseError("unterminated inline table", lineNum))
     }
@@ -377,7 +377,7 @@ func splitTomlArray(s: String) -> Array[String] {
     let len = s.byteCount;
 
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 34 {
             inQuote = inQuote == false
         } else if inQuote == false {
@@ -452,7 +452,7 @@ func trimWhitespace(s: String) -> String {
 
     var start: Int64 = 0;
     while start < len {
-        let b = s.byteAtUnchecked(start);
+        let b = s.bytes(unchecked: start);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             start = start + 1
         } else {
@@ -462,7 +462,7 @@ func trimWhitespace(s: String) -> String {
 
     var end = len;
     while end > start {
-        let b = s.byteAtUnchecked(end - 1);
+        let b = s.bytes(unchecked: end - 1);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {
@@ -490,7 +490,7 @@ func tomlParseInt(s: String) -> Optional[Int64] {
 
     var i: Int64 = 0;
     var negative = false;
-    let first = Int64(from: s.byteAtUnchecked(0));
+    let first = Int64(from: s.bytes(unchecked: 0));
     if first == 45 { // '-'
         negative = true;
         i = 1
@@ -504,7 +504,7 @@ func tomlParseInt(s: String) -> Optional[Int64] {
 
     var result: Int64 = 0;
     while i < len {
-        let b = Int64(from: s.byteAtUnchecked(i));
+        let b = Int64(from: s.bytes(unchecked: i));
         if b == 95 { // '_' - TOML allows underscores in numbers
             i = i + 1;
             continue
@@ -541,7 +541,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b != 95 {
             cleaned.appendByte(b)
         }
@@ -556,7 +556,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
 
     var pos: Int64 = 0;
     var negative = false;
-    let firstByte = Int64(from: cleaned.byteAtUnchecked(0));
+    let firstByte = Int64(from: cleaned.bytes(unchecked: 0));
     if firstByte == 45 { // '-'
         negative = true;
         pos = 1
@@ -567,7 +567,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
     // Integer part
     var intPart: Float64 = 0.0;
     while pos < cLen {
-        let b = Int64(from: cleaned.byteAtUnchecked(pos));
+        let b = Int64(from: cleaned.bytes(unchecked: pos));
         if b >= 48 and b <= 57 {
             intPart = intPart * 10.0 + Float64(from: b - 48);
             pos = pos + 1
@@ -580,11 +580,11 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
     var fracPart: Float64 = 0.0;
     var fracDiv: Float64 = 1.0;
     if pos < cLen {
-        let dotByte = Int64(from: cleaned.byteAtUnchecked(pos));
+        let dotByte = Int64(from: cleaned.bytes(unchecked: pos));
         if dotByte == 46 {
             pos = pos + 1;
             while pos < cLen {
-                let b = Int64(from: cleaned.byteAtUnchecked(pos));
+                let b = Int64(from: cleaned.bytes(unchecked: pos));
                 if b >= 48 and b <= 57 {
                     fracPart = fracPart * 10.0 + Float64(from: b - 48);
                     fracDiv = fracDiv * 10.0;
@@ -600,12 +600,12 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
 
     // Exponent
     if pos < cLen {
-        let eByte = Int64(from: cleaned.byteAtUnchecked(pos));
+        let eByte = Int64(from: cleaned.bytes(unchecked: pos));
         if eByte == 101 or eByte == 69 {
             pos = pos + 1;
             var expNeg = false;
             if pos < cLen {
-                let signByte = Int64(from: cleaned.byteAtUnchecked(pos));
+                let signByte = Int64(from: cleaned.bytes(unchecked: pos));
                 if signByte == 43 {
                     pos = pos + 1
                 } else if signByte == 45 {
@@ -615,7 +615,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
             }
             var exp: Float64 = 0.0;
             while pos < cLen {
-                let b = Int64(from: cleaned.byteAtUnchecked(pos));
+                let b = Int64(from: cleaned.bytes(unchecked: pos));
                 if b >= 48 and b <= 57 {
                     exp = exp * 10.0 + Float64(from: b - 48);
                     pos = pos + 1

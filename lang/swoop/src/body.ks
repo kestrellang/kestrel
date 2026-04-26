@@ -78,7 +78,7 @@ func percentEncode(s: String) -> String {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let byte = s.byteAtUnchecked(i);
+        let byte = s.bytes(unchecked: i);
         let b = Int64(from: byte);
         // Unreserved characters: A-Z, a-z, 0-9, -, _, ., ~
         if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57)
@@ -110,7 +110,7 @@ func stringToBytes(s: String) -> Array[UInt8] {
     var buf = Array[UInt8](capacity: s.byteCount);
     var i: Int64 = 0;
     while i < s.byteCount {
-        buf.append(s.byteAtUnchecked(i));
+        buf.append(s.bytes(unchecked: i));
         i = i + 1
     }
     buf

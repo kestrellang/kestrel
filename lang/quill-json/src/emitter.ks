@@ -155,7 +155,7 @@ func emitString(s: String, mutating buf: String) {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 34 {
             buf.append("\\\"")
         } else if b == 92 {
@@ -206,7 +206,7 @@ func emitFloat(f: Float64, mutating buf: String) {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 46 or b == 101 or b == 69 {
             hasDot = true
         }

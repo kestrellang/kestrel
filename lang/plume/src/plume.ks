@@ -18,7 +18,7 @@ func escapeHtml(s: String) -> String {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 38 {        // &
             out.append("&amp;")
         } else if b == 60 { // <
@@ -78,10 +78,10 @@ public struct Template: Cloneable {
         var runStart: Int64 = 0;
 
         while i < len {
-            let b = pattern.byteAtUnchecked(i);
+            let b = pattern.bytes(unchecked: i);
 
             if b == 123 { // {
-                if i + 1 < len and pattern.byteAtUnchecked(i + 1) == 123 {
+                if i + 1 < len and pattern.bytes(unchecked: i + 1) == 123 {
                     // {{ => literal {
                     if i > runStart {
                         out.append(pattern.substringBytes(from: runStart, to: i))
@@ -96,7 +96,7 @@ public struct Template: Cloneable {
                     };
                     let keyStart = i + 1;
                     var j = keyStart;
-                    while j < len and pattern.byteAtUnchecked(j) != 125 {
+                    while j < len and pattern.bytes(unchecked: j) != 125 {
                         j = j + 1
                     }
                     if j < len {
@@ -112,7 +112,7 @@ public struct Template: Cloneable {
                     runStart = i
                 }
             } else if b == 125 { // }
-                if i + 1 < len and pattern.byteAtUnchecked(i + 1) == 125 {
+                if i + 1 < len and pattern.bytes(unchecked: i + 1) == 125 {
                     // }} => literal }
                     if i > runStart {
                         out.append(pattern.substringBytes(from: runStart, to: i))

@@ -163,7 +163,7 @@ extend TlsStream {
         var hostBuf = Array[UInt8]();
         var i: Int64 = 0;
         while i < host.byteCount {
-            hostBuf.append(host.byteAtUnchecked(i));
+            hostBuf.append(host.bytes(unchecked: i));
             i = i + 1
         }
         hostBuf.append(0);

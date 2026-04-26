@@ -10,7 +10,7 @@
       "name": "Alignment",
       "anchor": "enum-Alignment",
       "signature": "public enum Alignment",
-      "doc": "Text alignment for formatted output.",
+      "doc": "Horizontal alignment of formatted output within a fixed field width.\n\nPairs with `FormatOptions.width` and `FormatOptions.fill` to position\nshorter values inside the requested column. When the value is already at\nleast as wide as the field, alignment has no visible effect. The\nformatter for `String` is the canonical consumer; numeric and boolean\nformatters honour the same convention.\n\n# Examples\n\n```\nvar opts = FormatOptions();\nopts.width = .Some(8);\nopts.alignment = .Right;\n\"ab\".format(options: opts);  // \"      ab\"\nopts.alignment = .Center;\n\"ab\".format(options: opts);  // \"   ab   \"\n```",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -23,7 +23,7 @@
               "name": "Center",
               "anchor": "case-Center",
               "signature": "case Center",
-              "doc": "Center the text.",
+              "doc": "Pad on both sides; if the padding is odd, the extra space goes on the right.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -31,7 +31,7 @@
               "name": "Left",
               "anchor": "case-Left",
               "signature": "case Left",
-              "doc": "Align text to the left.",
+              "doc": "Pad on the right; the value sits flush against the left edge of the field.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -39,7 +39,7 @@
               "name": "Right",
               "anchor": "case-Right",
               "signature": "case Right",
-              "doc": "Align text to the right.",
+              "doc": "Pad on the left; the value sits flush against the right edge of the field.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -54,7 +54,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Alignment) -> Bool",
-              "doc": "Compares for equality.",
+              "doc": "Returns true if both cases are the same variant.\n\nEquality is structural — there are no payloads. Used by the\n`Equatable` conformance so `FormatOptions.equals` can fall through\nwithout payload comparisons.\n\n# Examples\n\n```\nAlignment.Left.equals(.Left);    // true\nAlignment.Left.equals(.Center);  // false\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -69,7 +69,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "public func matches(Alignment) -> Bool",
-              "doc": "Matches for pattern matching.",
+              "doc": "Pattern-match form of equality — delegates to `equals`.\n\nLets `Alignment` appear in `match` patterns against another value.\n\n# Examples\n\n```\nAlignment.Right.matches(.Right);  // true\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -81,7 +81,7 @@
       "name": "AsciiChars",
       "anchor": "struct-AsciiChars",
       "signature": "public struct AsciiChars { /* private fields */ }",
-      "doc": "Common ASCII characters as constants.",
+      "doc": "Namespace of common ASCII punctuation and whitespace characters.\n\nStatic factories rather than constants because Kestrel does not yet\nhave non-trivial `static let` initialisation; calls are cheap and\nfully constant-folded.\n\n# Examples\n\n```\nAsciiChars.space() == ' ';        // true\nAsciiChars.newline() == '\\n';     // true\nAsciiChars.colon() == ':';        // true\n```",
       "source_path": "lang/std/text/char.ks",
       "member_groups": [
         {
@@ -94,7 +94,7 @@
               "name": "apostrophe",
               "anchor": "function-apostrophe",
               "signature": "public static func apostrophe() -> Char",
-              "doc": "Single quote/apostrophe ('\\'').",
+              "doc": "The single-quote / apostrophe character `'\\''`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -102,7 +102,7 @@
               "name": "backslash",
               "anchor": "function-backslash",
               "signature": "public static func backslash() -> Char",
-              "doc": "Backslash ('\\\\').",
+              "doc": "The backslash character `'\\\\'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -110,7 +110,7 @@
               "name": "carriageReturn",
               "anchor": "function-carriageReturn",
               "signature": "public static func carriageReturn() -> Char",
-              "doc": "Carriage return character ('\\r').",
+              "doc": "The carriage return character `'\\r'` (`U+000D`).",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -118,7 +118,7 @@
               "name": "colon",
               "anchor": "function-colon",
               "signature": "public static func colon() -> Char",
-              "doc": "Colon (':').",
+              "doc": "The colon character `':'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -126,7 +126,7 @@
               "name": "comma",
               "anchor": "function-comma",
               "signature": "public static func comma() -> Char",
-              "doc": "Comma (',').",
+              "doc": "The comma character `','`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -134,7 +134,7 @@
               "name": "dot",
               "anchor": "function-dot",
               "signature": "public static func dot() -> Char",
-              "doc": "Period ('.').",
+              "doc": "The period character `'.'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -142,7 +142,7 @@
               "name": "newline",
               "anchor": "function-newline",
               "signature": "public static func newline() -> Char",
-              "doc": "Newline character ('\\n').",
+              "doc": "The newline character `'\\n'` (`U+000A`, line feed).",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -150,7 +150,7 @@
               "name": "nul",
               "anchor": "function-nul",
               "signature": "public static func nul() -> Char",
-              "doc": "Null character ('\\0').",
+              "doc": "The null character `'\\0'` (`U+0000`).",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -158,7 +158,7 @@
               "name": "quote",
               "anchor": "function-quote",
               "signature": "public static func quote() -> Char",
-              "doc": "Double quote ('\"').",
+              "doc": "The double-quote character `'\"'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -166,7 +166,7 @@
               "name": "semicolon",
               "anchor": "function-semicolon",
               "signature": "public static func semicolon() -> Char",
-              "doc": "Semicolon (';').",
+              "doc": "The semicolon character `';'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -174,7 +174,7 @@
               "name": "slash",
               "anchor": "function-slash",
               "signature": "public static func slash() -> Char",
-              "doc": "Forward slash ('/').",
+              "doc": "The forward-slash character `'/'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -182,7 +182,7 @@
               "name": "space",
               "anchor": "function-space",
               "signature": "public static func space() -> Char",
-              "doc": "Space character (' ').",
+              "doc": "The space character `' '` (`U+0020`).",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -190,7 +190,7 @@
               "name": "tab",
               "anchor": "function-tab",
               "signature": "public static func tab() -> Char",
-              "doc": "Tab character ('\\t').",
+              "doc": "The horizontal tab character `'\\t'` (`U+0009`).",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -202,7 +202,7 @@
       "name": "Byte",
       "anchor": "typealias-Byte",
       "signature": "public type Byte = UInt8",
-      "doc": "Alias for UInt8, representing a single UTF-8 byte.",
+      "doc": "One byte of UTF-8 (or any other) encoded text — alias for `UInt8`.",
       "source_path": "lang/std/text/char.ks"
     },
     {
@@ -210,7 +210,7 @@
       "name": "ByteIndex",
       "anchor": "struct-ByteIndex",
       "signature": "public struct ByteIndex { /* private fields */ }",
-      "doc": "An index into a string by byte position.",
+      "doc": "A typed wrapper for a byte position within a `String`.\n\n`ByteIndex` exists so that APIs taking string positions can refuse\nraw `Int64`s, which removes the \"is this a byte offset or a char\noffset?\" ambiguity at the call site. The wrapped `value` is a\nplain UTF-8 byte offset; arithmetic is the caller's responsibility.\n\n# Representation\n\nA single `Int64` field.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -220,10 +220,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Value",
+              "anchor": "initializer-From-Value",
               "signature": "public init(Int64)",
-              "doc": "Creates a byte index.",
+              "doc": "Wraps a raw byte offset.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -231,7 +231,7 @@
               "name": "value",
               "anchor": "field-value",
               "signature": "public var value: Int64",
-              "doc": "The byte offset value.",
+              "doc": "The wrapped byte offset.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -246,7 +246,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(ByteIndex) -> Bool",
-              "doc": "Compares two byte indices for equality.",
+              "doc": "Returns true if the two indices wrap the same byte offset.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -261,7 +261,7 @@
               "name": "compare",
               "anchor": "function-compare",
               "signature": "public func compare(ByteIndex) -> Ordering",
-              "doc": "Compares two byte indices for ordering.",
+              "doc": "Compares two byte indices by their wrapped offsets.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -273,7 +273,7 @@
       "name": "BytesIterator",
       "anchor": "struct-BytesIterator",
       "signature": "public struct BytesIterator { /* private fields */ }",
-      "doc": "Iterator over raw UTF-8 bytes.",
+      "doc": "Single-pass forward iterator over the raw UTF-8 bytes of a string.\n\nYielded by `BytesView.iter()`. Walks the underlying buffer one byte\nat a time and returns each as a `UInt8`. The iterator holds a raw\npointer into the source string's storage; do not mutate the source\nwhile iterating.\n\n# Examples\n\n```\nvar it = \"hi\".bytes().iter();\nit.next();  // Some(104)  // 'h'\nit.next();  // Some(105)  // 'i'\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, index)` triple: a raw pointer to the buffer plus\nthe cursor and total-length pair the iterator advances through.\n\n# Memory Model\n\nValue type. The pointer aliases string storage; do not retain the\niterator across mutations of the source `String`.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -283,10 +283,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, index: Int64)",
-              "doc": "Creates a bytes iterator.",
+              "doc": "Constructs a bytes iterator from a raw pointer, total byte count, and starting offset.\n\nPrefer `String.bytes().iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to at least `length` valid bytes; `index` must\nbe in `0..=length`.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -301,7 +301,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = UInt8",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `UInt8`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -309,7 +309,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> UInt8?",
-              "doc": "Returns the next byte, or None if exhausted.",
+              "doc": "Returns the next byte, or `None` once `index` reaches `length`.\n\nEach call reads one byte and advances the cursor by 1.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -321,7 +321,7 @@
       "name": "BytesView",
       "anchor": "struct-BytesView",
       "signature": "public struct BytesView { /* private fields */ }",
-      "doc": "A view over the raw UTF-8 bytes of a string.\n\nProvides O(1) indexing by byte position.",
+      "doc": "A read-only view over the raw UTF-8 bytes of a `String`.\n\nReturned by `String.bytes`. Provides O(1) byte indexing and\niteration; the bytes are returned as `UInt8` exactly as they sit\nin memory. The most common reason to reach for `BytesView` is to\nperform byte-level operations (substring searches, hashing) without\npaying the cost of UTF-8 decoding. For code-point or grapheme\niteration, see `CharsView` / `GraphemesView`.\n\n# Examples\n\n```\nlet s = \"hi\";\ns.bytes().count;               // 2\ns.bytes(checked: 0);         // Some(104)\ns.bytes(checked: 5);         // None (out of bounds)\n```\n\n# Representation\n\nA `(ptr, length)` pair pointing at the source string's UTF-8 buffer.\n\n# Memory Model\n\nBorrows the source string's storage; the view is invalidated by any\nmutation that reallocates that buffer. Copy out to a new `String`\n(e.g. via `substring`) if you need an independent value.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -330,43 +330,59 @@
           "source_path": null,
           "members": [
             {
-              "kind": "function",
-              "name": "asRaw",
-              "anchor": "function-asRaw",
-              "signature": "public func asRaw() -> lang.ptr[lang.i8]",
-              "doc": "Returns the raw pointer to the bytes.",
+              "kind": "subscript",
+              "name": "Checked Index",
+              "anchor": "subscript-Checked-Index",
+              "signature": "public subscript[I](checked: I) -> I.BytesYield? { get }",
+              "doc": "Reads at `index`, returning `.None` on out-of-bounds (or invalid\nUTF-8 boundary for range indexes).",
               "source_path": "lang/std/text/views.ks"
             },
             {
-              "kind": "function",
-              "name": "byteAt",
-              "anchor": "function-byteAt",
-              "signature": "public func byteAt(Int64) -> UInt8?",
-              "doc": "Returns the byte at the given index, or None if out of bounds.",
-              "source_path": "lang/std/text/views.ks"
-            },
-            {
-              "kind": "function",
-              "name": "byteAtUnchecked",
-              "anchor": "function-byteAtUnchecked",
-              "signature": "public func byteAtUnchecked(Int64) -> UInt8",
-              "doc": "Returns the byte at the given index without bounds checking.",
-              "source_path": "lang/std/text/views.ks"
-            },
-            {
-              "kind": "function",
-              "name": "count",
-              "anchor": "function-count",
-              "signature": "public func count() -> Int64",
-              "doc": "Returns the number of bytes.",
+              "kind": "subscript",
+              "name": "Clamping",
+              "anchor": "subscript-Clamping",
+              "signature": "public subscript[I](clamped: I) -> I.BytesClampedYield { get }",
+              "doc": "Reads at `index` with bounds saturated to `[0, count)`. Single-\nbyte indexes yield `UInt8?` (`None` on empty view); range indexes\nyield `String` (always valid, possibly empty).",
               "source_path": "lang/std/text/views.ks"
             },
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
-              "doc": "Creates a bytes view.",
+              "doc": "Constructs a bytes view from a raw pointer and a byte count.\n\nPrefer `someString.bytes` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid bytes that remain live for as\nlong as the view is used.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Indexed Byte / Substring",
+              "anchor": "subscript-Indexed-Byte---Substring",
+              "signature": "public subscript[I](I) -> I.BytesYield { get }",
+              "doc": "Reads a single byte (`UInt8`) for `Int64` indexes, or a substring\n(`String`) for `Range[Int64]` / `ClosedRange[Int64]`. Panics on\nout-of-bounds or UTF-8 boundary violations for ranges. Use\n`(checked:)` for an `Optional` instead of a panic.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Unchecked Index",
+              "anchor": "subscript-Unchecked-Index",
+              "signature": "public subscript[I](unchecked: I) -> I.BytesYield { get }",
+              "doc": "Reads at `index` with no bounds check.\n\n# Safety\n\nCaller must guarantee `0 <= index < count`. For ranges, both\nendpoints must be valid UTF-8 boundaries; otherwise the resulting\nstring contains malformed UTF-8.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "asRaw",
+              "anchor": "function-asRaw",
+              "signature": "public func asRaw() -> lang.ptr[lang.i8]",
+              "doc": "Returns the raw pointer to the underlying byte buffer.\n\nIntended for FFI bridges; the pointer is only valid as long as\nthe source string remains live and unmutated.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "field",
+              "name": "count",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
+              "doc": "Number of bytes in the view.\n\nO(1). This is **byte** count, not character count — see\n`CharsView.count` for the latter (which is O(n)).",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -374,23 +390,7 @@
               "name": "isEmpty",
               "anchor": "function-isEmpty",
               "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns true if the view is empty.",
-              "source_path": "lang/std/text/views.ks"
-            },
-            {
-              "kind": "function",
-              "name": "substring",
-              "anchor": "function-substring",
-              "signature": "public func substring(from: Int64, to: Int64) -> String",
-              "doc": "Returns a substring by byte indices. Panics if out of bounds or invalid UTF-8 boundary.",
-              "source_path": "lang/std/text/views.ks"
-            },
-            {
-              "kind": "function",
-              "name": "substring",
-              "anchor": "function-substring",
-              "signature": "public func substring(checked: Int64, to: Int64) -> String?",
-              "doc": "Returns a substring by byte indices, or None if out of bounds or invalid UTF-8 boundary.",
+              "doc": "Returns true if the view spans zero bytes.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -405,7 +405,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = UInt8",
-              "doc": "",
+              "doc": "The element type yielded by iteration — always `UInt8`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -413,7 +413,7 @@
               "name": "Iter",
               "anchor": "typealias-Iter",
               "signature": "type Iter = BytesIterator",
-              "doc": "",
+              "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -421,7 +421,7 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> BytesIterator",
-              "doc": "Returns an iterator over the bytes.",
+              "doc": "Returns a `BytesIterator` positioned at byte 0.\n\nRequired by `Iterable`. Each call produces a fresh iterator —\nthe view is reusable.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -433,7 +433,7 @@
       "name": "Char",
       "anchor": "struct-Char",
       "signature": "public struct Char { /* private fields */ }",
-      "doc": "A Unicode code point (scalar value from 0 to 0x10FFFF).\n\nSupports character literal syntax: 'a', '\\n', '\\u{1F600}'.",
+      "doc": "A single Unicode scalar value (code point in `0..=0x10FFFF`, surrogates excluded).\n\n`Char` is the unit yielded by `String.chars` / `CharsView`; iterating\ngraphemes (`String.graphemes`) instead returns `Grapheme` clusters\nthat may comprise multiple `Char`s. The character-literal syntax\nconstructs values directly: `'a'`, `'\\n'`, `'\\u{1F600}'`. For the\nraw byte representation, see `utf8Length()` and the free\n`encodeUtf8` / `decodeUtf8` functions.\n\n# Examples\n\n```\nlet a: Char = 'a';\na.isAlphabetic();    // true\na.utf8Length();      // 1\nlet smile: Char = '\\u{1F600}';\nsmile.utf8Length();  // 4\n```\n\n# Representation\n\nA single `UInt32` holding the scalar value. Comparison and hashing\noperate on that integer directly.",
       "source_path": "lang/std/text/char.ks",
       "member_groups": [
         {
@@ -442,11 +442,27 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "Char Literal",
+              "anchor": "initializer-Char-Literal",
+              "signature": "public init(charLiteral: lang.i32)",
+              "doc": "Compiler-emitted constructor for character literals.\n\nCalled when you write `'a'`, `'\\n'`, `'\\u{1F600}'`. Not intended\nfor direct use — `Char(value:)` is the user-facing constructor.\n\n# Examples\n\n```\nlet c: Char = 'a';  // lowers to Char(charLiteral: ...)\n```",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "From Value",
+              "anchor": "initializer-From-Value",
+              "signature": "public init(UInt32)",
+              "doc": "Wraps a raw `UInt32` scalar value as a `Char`.\n\nNo range or surrogate validation is performed; pass values you\nalready know are valid Unicode scalars. Prefer the literal syntax\n(`'a'`, `'\\u{...}'`) when the value is known at compile time.\n\n# Examples\n\n```\nlet c = Char(value: UInt32(intLiteral: 0x41));\nc == 'A';  // true\n```",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
               "kind": "function",
               "name": "digitValue",
               "anchor": "function-digitValue",
               "signature": "public func digitValue() -> UInt32?",
-              "doc": "Returns the digit value (0-9) if this is a digit, otherwise None.",
+              "doc": "Returns the numeric value `0`–`9` for ASCII digits, otherwise `None`.\n\nInverse of `fromDigit`. Non-ASCII digit characters return `None`\n— match `isDigit` semantics.\n\n# Examples\n\n```\n'7'.digitValue();  // Some(7)\n'a'.digitValue();  // None\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -454,7 +470,7 @@
               "name": "fromDigit",
               "anchor": "function-fromDigit",
               "signature": "public static func fromDigit(UInt32) -> Char?",
-              "doc": "Creates a Char from a digit value (0-9).",
+              "doc": "Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.\n\nInverse of `digitValue`. Values outside `0..=9` return `None`.\n\n# Examples\n\n```\nChar.fromDigit(d: UInt32(intLiteral: 7));   // Some('7')\nChar.fromDigit(d: UInt32(intLiteral: 12));  // None\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -462,7 +478,7 @@
               "name": "hasLowercaseExpansion",
               "anchor": "function-hasLowercaseExpansion",
               "signature": "public func hasLowercaseExpansion() -> Bool",
-              "doc": "Returns true if this character has a multi-char lowercase expansion.",
+              "doc": "Returns true if the lowercase form is multi-char.\n\nRare in practice but exists for full Unicode round-tripping.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -470,7 +486,7 @@
               "name": "hasTitlecaseExpansion",
               "anchor": "function-hasTitlecaseExpansion",
               "signature": "public func hasTitlecaseExpansion() -> Bool",
-              "doc": "Returns true if this character has a multi-char titlecase expansion.",
+              "doc": "Returns true if the titlecase form is multi-char.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -478,23 +494,7 @@
               "name": "hasUppercaseExpansion",
               "anchor": "function-hasUppercaseExpansion",
               "signature": "public func hasUppercaseExpansion() -> Bool",
-              "doc": "Returns true if this character has a multi-char uppercase expansion.\nFor example, German ß uppercases to \"SS\" (two characters).",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(UInt32)",
-              "doc": "Creates a Char from a Unicode code point value.",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(charLiteral: lang.i32)",
-              "doc": "Creates a Char from a character literal.",
+              "doc": "Returns true if the uppercase form is multi-char (e.g. `ß` → `SS`).\n\nWhen `true`, prefer `uppercaseExpansion()` over `uppercased()`\nto avoid silently dropping characters.\n\n# Examples\n\n```\n'\\u{00DF}'.hasUppercaseExpansion();  // true (ß)\n'a'.hasUppercaseExpansion();         // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -502,7 +502,7 @@
               "name": "isAlphabetic",
               "anchor": "function-isAlphabetic",
               "signature": "public func isAlphabetic() -> Bool",
-              "doc": "Returns true if this is an alphabetic character (a-z, A-Z).",
+              "doc": "Returns true for ASCII letters `A`–`Z` / `a`–`z`.\n\n**ASCII-only.** Non-ASCII letters (e.g. `é`, `Ω`, `日`) return\n`false` even though they are letters in Unicode. For the full\nUnicode test, use the property tables in `std.text.unicode`.\n\n# Examples\n\n```\n'A'.isAlphabetic();         // true\n'\\u{00E9}'.isAlphabetic();  // false (é — non-ASCII)\n'7'.isAlphabetic();         // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -510,7 +510,7 @@
               "name": "isAlphanumeric",
               "anchor": "function-isAlphanumeric",
               "signature": "public func isAlphanumeric() -> Bool",
-              "doc": "Returns true if this is alphanumeric.",
+              "doc": "Returns true for ASCII letters and ASCII digits.\n\nComposition of `isAlphabetic` and `isDigit`; same ASCII-only\ncaveats apply.\n\n# Examples\n\n```\n'a'.isAlphanumeric();  // true\n'7'.isAlphanumeric();  // true\n'_'.isAlphanumeric();  // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -518,7 +518,7 @@
               "name": "isAscii",
               "anchor": "function-isAscii",
               "signature": "public func isAscii() -> Bool",
-              "doc": "Returns true if this is an ASCII character (< 128).",
+              "doc": "Returns true if the scalar is in the ASCII range (`< 0x80`).\n\nCheap byte-range test; does not consult Unicode tables. For\n\"alphabetic by Unicode\" use `unicode.toLowercase` round-tripping\nor the property tables directly.\n\n# Examples\n\n```\n'A'.isAscii();          // true\n'\\u{00E9}'.isAscii();   // false (é)\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -526,7 +526,7 @@
               "name": "isControl",
               "anchor": "function-isControl",
               "signature": "public func isControl() -> Bool",
-              "doc": "Returns true if this is a control character.",
+              "doc": "Returns true for the C0 controls (`< U+0020`) and DEL (`U+007F`).\n\nDoes not include the C1 controls (`U+0080`–`U+009F`); add a\ndedicated test if you need them.\n\n# Examples\n\n```\n'\\n'.isControl();     // true\n'\\x7F'.isControl();   // true\n'a'.isControl();      // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -534,7 +534,7 @@
               "name": "isDigit",
               "anchor": "function-isDigit",
               "signature": "public func isDigit() -> Bool",
-              "doc": "Returns true if this is a digit (0-9).",
+              "doc": "Returns true for the ASCII digits `0`–`9`.\n\n**ASCII-only.** Other Unicode digit categories (Arabic-Indic,\nDevanagari, etc.) return `false`. See `digitValue()` for parsing\nto numeric value.\n\n# Examples\n\n```\n'7'.isDigit();   // true\n'a'.isDigit();   // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -542,7 +542,7 @@
               "name": "isLowercase",
               "anchor": "function-isLowercase",
               "signature": "public func isLowercase() -> Bool",
-              "doc": "Returns true if this is a lowercase letter (a-z).",
+              "doc": "Returns true for ASCII lowercase letters `a`–`z`.\n\n**ASCII-only.** Use `unicode.toLowercase` round-tripping for\ngeneral Unicode case tests.\n\n# Examples\n\n```\n'a'.isLowercase();   // true\n'A'.isLowercase();   // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -550,7 +550,7 @@
               "name": "isUppercase",
               "anchor": "function-isUppercase",
               "signature": "public func isUppercase() -> Bool",
-              "doc": "Returns true if this is an uppercase letter (A-Z).",
+              "doc": "Returns true for ASCII uppercase letters `A`–`Z`.\n\n**ASCII-only.** Use `unicode.toUppercase` round-tripping for\ngeneral Unicode case tests.\n\n# Examples\n\n```\n'A'.isUppercase();         // true\n'a'.isUppercase();         // false\n'\\u{00C9}'.isUppercase();  // false (É — non-ASCII)\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -558,7 +558,7 @@
               "name": "isWhitespace",
               "anchor": "function-isWhitespace",
               "signature": "public func isWhitespace() -> Bool",
-              "doc": "Returns true if this is whitespace (space, tab, newline, etc.).",
+              "doc": "Returns true for the common ASCII whitespace set: space, tab, LF, CR, form feed.\n\nDoes not include Unicode whitespace such as `U+00A0` (no-break\nspace) or `U+2028` (line separator). For Unicode-aware\nwhitespace, consult the property tables.\n\n# Examples\n\n```\n' '.isWhitespace();    // true\n'\\t'.isWhitespace();   // true\n'\\n'.isWhitespace();   // true\n'a'.isWhitespace();    // false\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -566,7 +566,15 @@
               "name": "lowercaseExpansion",
               "anchor": "function-lowercaseExpansion",
               "signature": "public func lowercaseExpansion() -> String",
-              "doc": "Returns the multi-character lowercase expansion for this character.",
+              "doc": "Returns the multi-char lowercase form as a `String`.\n\nEmpty string if no expansion exists.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "lowercased",
+              "anchor": "function-lowercased",
+              "signature": "public func lowercased() -> Char",
+              "doc": "Returns the lowercase form, using full Unicode case-mapping tables.\n\nLocale-independent. For characters with multi-char lowercase\nexpansions, see `lowercaseExpansion()`.\n\n# Examples\n\n```\n'A'.lowercased();         // 'a'\n'\\u{0130}'.lowercased();  // 'i' (Turkish dotted I — first char only)\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -574,31 +582,15 @@
               "name": "titlecaseExpansion",
               "anchor": "function-titlecaseExpansion",
               "signature": "public func titlecaseExpansion() -> String",
-              "doc": "Returns the multi-character titlecase expansion for this character.",
+              "doc": "Returns the multi-char titlecase form as a `String`.\n\nEmpty string if no expansion exists.",
               "source_path": "lang/std/text/char.ks"
             },
             {
               "kind": "function",
-              "name": "toLowercase",
-              "anchor": "function-toLowercase",
-              "signature": "public func toLowercase() -> Char",
-              "doc": "Returns the lowercase version of this character.\nUses full Unicode case mapping tables.",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "function",
-              "name": "toTitlecase",
-              "anchor": "function-toTitlecase",
-              "signature": "public func toTitlecase() -> Char",
-              "doc": "Returns the titlecase version of this character.\nTitlecase differs from uppercase for some characters (e.g., ligatures).",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "function",
-              "name": "toUppercase",
-              "anchor": "function-toUppercase",
-              "signature": "public func toUppercase() -> Char",
-              "doc": "Returns the uppercase version of this character.\nUses full Unicode case mapping tables.\nFor characters with multi-char expansions (e.g., ß → SS), returns the first char.\nUse hasUppercaseExpansion() and uppercaseExpansion() for full support.",
+              "name": "titlecased",
+              "anchor": "function-titlecased",
+              "signature": "public func titlecased() -> Char",
+              "doc": "Returns the titlecase form, using full Unicode case-mapping tables.\n\nTitlecase differs from uppercase for some characters — e.g.\nligatures like `ǳ` titlecase to `ǲ` (capital plus small) rather\nthan `Ǳ` (full uppercase).\n\n# Examples\n\n```\n'a'.titlecased();   // 'A'\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -606,7 +598,15 @@
               "name": "uppercaseExpansion",
               "anchor": "function-uppercaseExpansion",
               "signature": "public func uppercaseExpansion() -> String",
-              "doc": "Returns the multi-character uppercase expansion for this character.\nReturns empty string if no expansion exists.",
+              "doc": "Returns the multi-char uppercase form as a `String`.\n\nFor characters without an expansion this returns the empty\nstring; use `hasUppercaseExpansion()` first to distinguish.\n\n# Examples\n\n```\n'\\u{00DF}'.uppercaseExpansion();  // \"SS\"\n'a'.uppercaseExpansion();         // \"\"\n```",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "function",
+              "name": "uppercased",
+              "anchor": "function-uppercased",
+              "signature": "public func uppercased() -> Char",
+              "doc": "Returns the uppercase form, using full Unicode case-mapping tables.\n\nFor characters whose uppercase form is multiple `Char`s (e.g.\nGerman `ß` → `SS`), this returns only the first `Char`. Use\n`hasUppercaseExpansion()` plus `uppercaseExpansion()` to handle\nthose cases correctly. Locale-independent — does not perform\nTurkish / Azeri tailoring.\n\n# Examples\n\n```\n'a'.uppercased();         // 'A'\n'\\u{00DF}'.uppercased();  // 'S' (first char of \"SS\"; see hasUppercaseExpansion)\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -614,7 +614,7 @@
               "name": "utf8Length",
               "anchor": "function-utf8Length",
               "signature": "public func utf8Length() -> Int64",
-              "doc": "Returns the number of bytes needed to encode this char in UTF-8 (1-4).",
+              "doc": "Returns how many UTF-8 bytes are required to encode this character (1–4).\n\nConstant time — branches on the scalar value alone. Use this to\nsize buffers before calling `encodeUtf8`.\n\n# Examples\n\n```\n'a'.utf8Length();          // 1\n'\\u{00E9}'.utf8Length();   // 2 (é)\n'\\u{20AC}'.utf8Length();   // 3 (€)\n'\\u{1F600}'.utf8Length();  // 4 (😀)\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -622,7 +622,7 @@
               "name": "value",
               "anchor": "function-value",
               "signature": "public func value() -> UInt32",
-              "doc": "Returns the Unicode code point value.",
+              "doc": "Returns the raw Unicode scalar as a `UInt32`.\n\nUseful for arithmetic on code points (e.g. `digitValue`'s offset\ntrick) or interop with APIs that take a numeric code point.\n\n# Examples\n\n```\n'A'.value();  // 65\n'\\u{1F600}'.value();  // 128512\n```",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -637,7 +637,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Char) -> Bool",
-              "doc": "Compares two characters for equality.",
+              "doc": "Returns true if both characters are the same Unicode scalar.\n\nPure scalar-value equality — no case folding, no normalization.\n\n# Examples\n\n```\n'a'.equals('a');  // true\n'a'.equals('A');  // false\n```",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -652,7 +652,7 @@
               "name": "compare",
               "anchor": "function-compare",
               "signature": "public func compare(Char) -> Ordering",
-              "doc": "Compares two characters for ordering.",
+              "doc": "Compares two characters by scalar value.\n\nYields code-point order, which agrees with byte order in UTF-8\n(UTF-8 is order-preserving). Not the same as locale-aware\ncollation.\n\n# Examples\n\n```\n'a'.compare('b');  // Less\n'b'.compare('a');  // Greater\n'a'.compare('a');  // Equal\n```",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -667,7 +667,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "public func matches(Char) -> Bool",
-              "doc": "Matches two characters for pattern matching.",
+              "doc": "Pattern-match form of equality — delegates to `equals`.",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -679,10 +679,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Char Literal",
+              "anchor": "initializer-Char-Literal",
               "signature": "init(charLiteral: lang.i32)",
-              "doc": "Creates an instance from a character literal.",
+              "doc": "Builds an instance from a character literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -697,7 +697,7 @@
               "name": "hash",
               "anchor": "function-hash",
               "signature": "public func hash[H](into: mutating H) where H: Hasher",
-              "doc": "Hashes this character.",
+              "doc": "Hashes this character by writing its 4-byte scalar value to the hasher.\n\nUses native byte order — fine for in-process hash maps; do not\nuse the result for content-addressed storage.",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -712,7 +712,7 @@
               "name": "isAtLeast",
               "anchor": "function-isAtLeast",
               "signature": "public func isAtLeast(Char) -> Bool",
-              "doc": "Returns true if self >= bound (for range pattern matching).",
+              "doc": "Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -720,7 +720,7 @@
               "name": "isAtMost",
               "anchor": "function-isAtMost",
               "signature": "public func isAtMost(Char) -> Bool",
-              "doc": "Returns true if self <= bound (for range pattern matching).",
+              "doc": "Returns true if `self <= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -728,7 +728,7 @@
               "name": "isBelow",
               "anchor": "function-isBelow",
               "signature": "public func isBelow(Char) -> Bool",
-              "doc": "Returns true if self < bound (for range pattern matching).",
+              "doc": "Returns true if `self < bound`. Used by `RangeMatchable` for half-open patterns.",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -740,7 +740,7 @@
       "name": "CharIndex",
       "anchor": "struct-CharIndex",
       "signature": "public struct CharIndex { /* private fields */ }",
-      "doc": "An index into a string by character position.",
+      "doc": "A typed wrapper for a character position within a `String`.\n\nUnlike `ByteIndex`, `CharIndex` carries the byte offset of the\nunderlying character — code-point indexing is O(n), so this\npre-resolved offset is what gets stored. Construct one by walking\nthe string yourself; the type is purely a tag for clarity.\n\n# Representation\n\nA single `Int64` field holding the byte offset of the character.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -749,19 +749,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Offset",
+              "anchor": "initializer-From-Offset",
+              "signature": "public init(Int64)",
+              "doc": "Wraps a pre-resolved byte offset for a character position.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
               "kind": "field",
               "name": "byteOffset",
               "anchor": "field-byteOffset",
               "signature": "public var byteOffset: Int64",
-              "doc": "The byte offset of this character.",
-              "source_path": "lang/std/text/views.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(Int64)",
-              "doc": "Creates a char index.",
+              "doc": "The byte offset where the indexed character begins.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -776,7 +776,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(CharIndex) -> Bool",
-              "doc": "Compares two char indices for equality.",
+              "doc": "Returns true if the two indices point at the same byte offset.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -788,7 +788,7 @@
       "name": "CharsIterator",
       "anchor": "struct-CharsIterator",
       "signature": "public struct CharsIterator { /* private fields */ }",
-      "doc": "Iterator over Unicode code points.",
+      "doc": "Single-pass forward iterator over Unicode code points (`Char`).\n\nYielded by `CharsView.iter()` and consumed by `GraphemesIterator`.\nOn each `next()` call, decodes one UTF-8 character starting at the\ncurrent cursor and advances by its byte length. Invalid bytes are\nskipped one at a time and surfaced as `U+FFFD` (the Unicode\nreplacement character) so the iteration always makes progress.\n\n# Examples\n\n```\nvar it = \"hi\".chars().iter();\nit.next();  // Some('h')\nit.next();  // Some('i')\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, byteIndex)` triple. `byteIndex` walks the buffer\nin variable-width steps according to the UTF-8 encoding.\n\n# Memory Model\n\nValue type that aliases the source string's buffer. Do not retain\nacross mutations of the source `String`.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -798,10 +798,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64)",
-              "doc": "Creates a chars iterator.",
+              "doc": "Constructs a chars iterator from a raw pointer, byte length, and starting byte offset.\n\nPrefer `String.chars().iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes; `byteIndex` must\nbe `0` or land on a UTF-8 boundary.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -816,7 +816,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = Char",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `Char`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -824,7 +824,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> Char?",
-              "doc": "Returns the next character, or None if exhausted.",
+              "doc": "Returns the next code point, or `None` when the buffer is exhausted.\n\nOn invalid UTF-8 the iterator yields the replacement character\n`U+FFFD` and advances by one byte; this guarantees forward\nprogress without aborting.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -836,7 +836,7 @@
       "name": "CharsView",
       "anchor": "struct-CharsView",
       "signature": "public struct CharsView { /* private fields */ }",
-      "doc": "A view over the Unicode code points in a string.\n\nIteration is O(1) per character, but indexing is O(n).",
+      "doc": "A view over the Unicode code points in a `String`.\n\nReturned by `String.chars`. Iteration is O(1) per code point but\n`count()` is O(n) because UTF-8 is variable-width. Likewise,\nrange subscripts on this view are O(n) — to index in O(1), use\n`BytesView` and convert byte offsets back yourself.\n\n# Examples\n\n```\nlet s = \"héllo\";\ns.chars().count;                  // 5 (code points)\ns.bytes().count;                  // 6 (bytes — 'é' is 2 bytes)\ns.chars(0..<4);                 // \"héll\"\n```\n\n# Representation\n\nA `(ptr, length)` pair, plus the on-demand UTF-8 decoder.\n\n# Memory Model\n\nBorrows the source string's buffer. Invalidated by any mutation\nthat reallocates the storage.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -845,35 +845,43 @@
           "source_path": null,
           "members": [
             {
-              "kind": "function",
-              "name": "count",
-              "anchor": "function-count",
-              "signature": "public func count() -> Int64",
-              "doc": "Returns the number of characters (O(n) - must decode all).",
+              "kind": "subscript",
+              "name": "Checked Index",
+              "anchor": "subscript-Checked-Index",
+              "signature": "public subscript[I](checked: I) -> I.CharsYield? { get }",
+              "doc": "Reads at `index`, returning `.None` on out-of-bounds.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Clamping",
+              "anchor": "subscript-Clamping",
+              "signature": "public subscript[I](clamped: I) -> I.CharsClampedYield { get }",
+              "doc": "Reads at `index` with bounds saturated to `[0, count)`. Single-\nchar indexes yield `Char?` (`None` on empty view); range indexes\nyield `String` (always valid, possibly empty).",
               "source_path": "lang/std/text/views.ks"
             },
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
-              "doc": "Creates a chars view.",
+              "doc": "Constructs a chars view from a raw pointer and a byte length.\n\nPrefer `someString.chars` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes that remain live\nfor the view's lifetime.",
               "source_path": "lang/std/text/views.ks"
             },
             {
-              "kind": "function",
-              "name": "substring",
-              "anchor": "function-substring",
-              "signature": "public func substring(from: Int64, to: Int64) -> String",
-              "doc": "Returns a substring by character indices (O(n)). Panics if out of bounds.",
+              "kind": "subscript",
+              "name": "Indexed Char / Substring",
+              "anchor": "subscript-Indexed-Char---Substring",
+              "signature": "public subscript[I](I) -> I.CharsYield { get }",
+              "doc": "Reads a single code point (`Char`) for `Int64` indexes, or a\nsubstring (`String`) for `Range[Int64]` / `ClosedRange[Int64]`.\nAll access is O(n) because UTF-8 is variable-width. Panics on\nout-of-bounds.",
               "source_path": "lang/std/text/views.ks"
             },
             {
-              "kind": "function",
-              "name": "substring",
-              "anchor": "function-substring",
-              "signature": "public func substring(checked: Int64, to: Int64) -> String?",
-              "doc": "Returns a substring by character indices (O(n)), or None if out of bounds.",
+              "kind": "field",
+              "name": "count",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
+              "doc": "Number of code points. **O(n)** — walks the buffer counting\nUTF-8 leading bytes (those whose top two bits are not `10`). For\nASCII strings this equals `byteCount`. Cache the result if you\nneed it more than once; each access re-walks the string.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -888,7 +896,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = Char",
-              "doc": "",
+              "doc": "The element type yielded by iteration — always `Char`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -896,7 +904,7 @@
               "name": "Iter",
               "anchor": "typealias-Iter",
               "signature": "type Iter = CharsIterator",
-              "doc": "",
+              "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -904,7 +912,7 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> CharsIterator",
-              "doc": "Returns an iterator over the characters.",
+              "doc": "Returns a `CharsIterator` positioned at byte 0.\n\nEach call returns a fresh iterator; the view itself is reusable.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -916,7 +924,7 @@
       "name": "DefaultStringInterpolation",
       "anchor": "struct-DefaultStringInterpolation",
       "signature": "public struct DefaultStringInterpolation { /* private fields */ }",
-      "doc": "Default implementation of StringInterpolationProtocol for String.",
+      "doc": "The default `StringInterpolationProtocol` accumulator used for `String` interpolation.\n\nStores each literal and each formatted interpolation as a separate\n`String` part, then concatenates them in `build()`. The two-pass\ndesign lets `build()` size the result buffer exactly, avoiding the\nrepeated reallocation cost a single-buffer accumulator would pay.\n\n# Examples\n\n```\nvar acc = DefaultStringInterpolation(literalCapacity: 7, interpolationCount: 1);\nacc.appendLiteral(\"hello, \");\nacc.appendInterpolation(\"world\", options: FormatOptions.default());\nacc.build();  // \"hello, world\"\n```\n\n# Representation\n\nA single `Array[String]` of accumulated parts. Empty literal pieces\nare dropped on append.",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -929,14 +937,14 @@
               "name": "build",
               "anchor": "function-build",
               "signature": "public func build() -> String",
-              "doc": "Build the final string by concatenating all parts.",
+              "doc": "Concatenates all recorded parts into the final `String`.\n\nFast paths the zero-part and one-part cases. For the multi-part\ncase, computes the exact total byte length first, allocates once\nat that size, then appends — no growth churn.\n\n# Examples\n\n```\nvar acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);\nacc.appendLiteral(\"a\");\nacc.appendLiteral(\"b\");\nacc.build();  // \"ab\"\n```",
               "source_path": "lang/std/text/format.ks"
             },
             {
               "kind": "initializer",
               "name": "init",
               "anchor": "initializer-init",
-              "signature": "public init(Int64, Int64)",
+              "signature": "public init(literalCapacity: Int64, interpolationCount: Int64)",
               "doc": "",
               "source_path": "lang/std/text/format.ks"
             }
@@ -948,11 +956,19 @@
           "source_path": "std.text.StringInterpolationProtocol",
           "members": [
             {
+              "kind": "initializer",
+              "name": "With Capacity",
+              "anchor": "initializer-With-Capacity",
+              "signature": "init(Int64, Int64)",
+              "doc": "Constructs an empty accumulator with capacity hints derived from the literal at compile time.\n\n`literalCapacity` is the total byte count of the static segments;\n`interpolationCount` is the number of `\\{...}` holes. Implementors\ncan use these to preallocate.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
               "kind": "function",
               "name": "appendInterpolation",
               "anchor": "function-appendInterpolation",
               "signature": "public mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable",
-              "doc": "Append a formatted value with options.",
+              "doc": "Records one interpolation hole, eagerly formatted with `options`.\n\nCalls `value.format(options)` immediately so the resulting\n`String` is what gets stored — `value` is not retained past this\ncall. Default `options` matches `FormatOptions.default()`.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -960,15 +976,7 @@
               "name": "appendLiteral",
               "anchor": "function-appendLiteral",
               "signature": "public mutating func appendLiteral(String)",
-              "doc": "Append a literal string segment.",
-              "source_path": "lang/std/text/format.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(Int64, Int64)",
-              "doc": "Initialize with capacity hints for optimization.",
+              "doc": "Records one static literal segment.\n\nEmpty literals are dropped — they would force `build()` to do\nextra work without changing the result. Non-empty literals are\nappended verbatim with no copying beyond the `String`'s own COW.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -983,7 +991,7 @@
               "name": "clone",
               "anchor": "function-clone",
               "signature": "public func clone() -> DefaultStringInterpolation",
-              "doc": "",
+              "doc": "Returns a shallow copy with cloned `parts`.\n\n`String` is COW so the part clone is itself shallow; mutating\neither copy after this call does not affect the other.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -995,7 +1003,7 @@
       "name": "ExpressibleByStringInterpolation",
       "anchor": "protocol-ExpressibleByStringInterpolation",
       "signature": "public protocol ExpressibleByStringInterpolation",
-      "doc": "Protocol for types that can be created from string interpolation.",
+      "doc": "Marker protocol for types constructible from a completed string interpolation.\n\nRefines `ExpressibleByStringLiteral` so a single conformance covers\nboth pure-literal `\"abc\"` and interpolated `\"a\\{x}b\"` forms. The\ncompiler picks `Interpolation` as the accumulator type, drives it via\n`StringInterpolationProtocol`, then hands it to `init(interpolation:)`.",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1004,19 +1012,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Interpolation",
+              "anchor": "initializer-From-Interpolation",
+              "signature": "init(Interpolation)",
+              "doc": "Constructs `Self` from a fully built interpolation accumulator.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
               "kind": "typealias",
               "name": "Interpolation",
               "anchor": "typealias-Interpolation",
               "signature": "type Interpolation",
-              "doc": "The type used to accumulate interpolation parts.",
-              "source_path": "lang/std/text/format.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(Interpolation)",
-              "doc": "Create from a completed interpolation.",
+              "doc": "The accumulator type used to build interpolated values of `Self`.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1028,10 +1036,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "String Literal",
+              "anchor": "initializer-String-Literal",
               "signature": "init(stringLiteral: lang.str)",
-              "doc": "Creates an instance from a string literal.",
+              "doc": "Builds an instance from a string literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1043,7 +1051,7 @@
       "name": "FloatStyle",
       "anchor": "enum-FloatStyle",
       "signature": "public enum FloatStyle",
-      "doc": "Float display style.",
+      "doc": "How a floating-point value should be rendered.\n\nSelected by the `:f` / `:e` / `:E` / `:%` type slots in the format\nmini-language and read by the `Float32` / `Float64` formatters. Choice\nof style is independent of `precision` — `Auto` honours precision as\n\"max significant digits\", `Fixed` and `Scientific` treat it as\n\"decimal places\". The non-`Auto` variants always emit a decimal point.\n\n# Examples\n\n```\nvar opts = FormatOptions();\nopts.precision = .Some(2);\nopts.floatStyle = .Fixed;\n(3.14159).format(options: opts);       // \"3.14\"\nopts.floatStyle = .Scientific;\n(3.14159).format(options: opts);       // \"3.14e0\"\nopts.floatStyle = .Percent;\n(0.5).format(options: opts);           // \"50.00%\"\n```",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1056,7 +1064,7 @@
               "name": "Auto",
               "anchor": "case-Auto",
               "signature": "case Auto",
-              "doc": "Default: use shortest representation.",
+              "doc": "Shortest round-trippable representation; switches to scientific for very large or very small magnitudes.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1064,7 +1072,7 @@
               "name": "Fixed",
               "anchor": "case-Fixed",
               "signature": "case Fixed",
-              "doc": "Fixed-point notation (e.g., \"3.14\").",
+              "doc": "Fixed-point — `precision` controls decimal places.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1072,7 +1080,7 @@
               "name": "Percent",
               "anchor": "case-Percent",
               "signature": "case Percent",
-              "doc": "Percentage (multiplies by 100, adds '%').",
+              "doc": "Multiplies by 100 and appends `%`.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1080,7 +1088,7 @@
               "name": "Scientific",
               "anchor": "case-Scientific",
               "signature": "case Scientific",
-              "doc": "Scientific notation with lowercase 'e' (e.g., \"3.14e0\").",
+              "doc": "Scientific notation with lowercase `e` exponent marker.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1088,7 +1096,7 @@
               "name": "ScientificUpper",
               "anchor": "case-ScientificUpper",
               "signature": "case ScientificUpper",
-              "doc": "Scientific notation with uppercase 'E' (e.g., \"3.14E0\").",
+              "doc": "Scientific notation with uppercase `E` exponent marker.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1103,7 +1111,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(FloatStyle) -> Bool",
-              "doc": "Compares for equality.",
+              "doc": "Returns true if both cases are the same variant.\n\nAll cases are payload-less, so equality is purely structural.\n\n# Examples\n\n```\nFloatStyle.Fixed.equals(.Fixed);       // true\nFloatStyle.Fixed.equals(.Scientific);  // false\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1118,7 +1126,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "public func matches(FloatStyle) -> Bool",
-              "doc": "Matches for pattern matching.",
+              "doc": "Pattern-match form of equality — delegates to `equals`.\n\n# Examples\n\n```\nFloatStyle.Auto.matches(.Auto);  // true\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1130,7 +1138,7 @@
       "name": "FormatOptions",
       "anchor": "struct-FormatOptions",
       "signature": "public struct FormatOptions { /* private fields */ }",
-      "doc": "Options for controlling formatted output.\nUsed by Formattable and string interpolation syntax: \"\\{expr:spec}\"\n\nFormat spec mini-language:\n  [[fill]align][sign][#][0][width][.precision][type]\n\nWhere type is one of:\n  Integers: 'b' (binary), 'o' (octal), 'x' (hex lower), 'X' (hex upper)\n  Floats:   'f' (fixed), 'e' (scientific), 'E' (scientific upper), '%' (percent)\n  Any:      '?' (debug)\n\nExamples:\n  \"\\{n:>8}\"      right-align, width 8\n  \"\\{n:08x}\"     zero-pad, width 8, hex\n  \"\\{n:#X}\"      hex upper with 0x prefix\n  \"\\{pi:.2}\"     precision 2 decimal places\n  \"\\{pi:.2e}\"    scientific with 2 decimal places\n  \"\\{ratio:%}\"   as percentage (0.5 -> \"50%\")\n  \"\\{name:^10}\"  center, width 10\n  \"\\{value:?}\"   debug format",
+      "doc": "Mutable bag of formatting knobs threaded through every `Formattable.format` call.\n\n`FormatOptions` is the parsed form of the format-spec mini-language.\nString interpolation `\"\\{expr:spec}\"` constructs one of these from the\ntrailing spec, then hands it to the formatter for `expr`'s type. Each\nformatter reads only the fields that apply to it: integers ignore\n`floatStyle`, strings ignore `radix`, and so on.\n\n# Format spec mini-language\n\n`[[fill]align][sign][#][0][width][.precision][type]`\n\nWhere `type` is one of:\n  - Integers: `b` (binary), `o` (octal), `x` (hex lower), `X` (hex upper)\n  - Floats:   `f` (fixed), `e` (scientific), `E` (scientific upper), `%` (percent)\n  - Any:      `?` (debug)\n\n# Examples\n\n```\n\"\\{n:>8}\";      // right-align, width 8\n\"\\{n:08x}\";     // zero-pad, width 8, hex\n\"\\{n:#X}\";      // hex upper with 0x prefix\n\"\\{pi:.2}\";     // precision 2 decimal places\n\"\\{pi:.2e}\";    // scientific with 2 decimal places\n\"\\{ratio:%}\";   // as percentage (0.5 -> \"50%\")\n\"\\{name:^10}\";  // center, width 10\n\"\\{value:?}\";   // debug format\n```\n\n# Representation\n\nA flat record of independent fields — no validation across them. Each\nformatter is responsible for ignoring fields outside its domain and\napplying its own defaults when an option is absent.",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1139,11 +1147,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "Default",
+              "anchor": "initializer-Default",
+              "signature": "public init()",
+              "doc": "Creates a `FormatOptions` with every field at its default value.\n\nDefaults: no `width` or `precision`, left alignment, space fill,\ndecimal radix, lowercase hex, negative-only sign, no alternate form,\n`Auto` float style, debug off.\n\n# Examples\n\n```\nvar opts = FormatOptions();\nopts.width = .Some(6);\nopts.alignment = .Right;\n\"hi\".format(options: opts);  // \"    hi\"\n```",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
               "kind": "field",
               "name": "alignment",
               "anchor": "field-alignment",
               "signature": "public var alignment: Alignment",
-              "doc": "Text alignment within the field width.",
+              "doc": "How to position the value inside `width` when padding is required.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1151,7 +1167,7 @@
               "name": "alternate",
               "anchor": "field-alternate",
               "signature": "public var alternate: Bool",
-              "doc": "Alternate form: show 0x/0b/0o prefix for non-decimal radix.",
+              "doc": "Alternate form: emit the conventional radix prefix (`0b`, `0o`, `0x`/`0X`) for non-decimal integers.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1159,7 +1175,7 @@
               "name": "debug",
               "anchor": "field-debug",
               "signature": "public var debug: Bool",
-              "doc": "Debug mode: show structural representation.",
+              "doc": "When `true`, formatters should produce a structural / debug representation rather than a user-facing one.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1167,7 +1183,7 @@
               "name": "default",
               "anchor": "function-default",
               "signature": "public static func default() -> FormatOptions",
-              "doc": "Default format options.",
+              "doc": "Returns a fresh `FormatOptions` with all fields at their default values.\n\nEquivalent to calling `FormatOptions()`; provided as a static so\ncallers that want defaults without spelling out the constructor\n(e.g. default-arg expressions) have a clean call site.\n\n# Examples\n\n```\nlet opts = FormatOptions.default();\n(42).format(options: opts);  // \"42\"\n```",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1175,7 +1191,7 @@
               "name": "fill",
               "anchor": "field-fill",
               "signature": "public var fill: Char",
-              "doc": "Character used for padding (default: ' ').",
+              "doc": "Padding character — defaults to `' '`. Only applies when `width` is set and the value is shorter.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1183,15 +1199,7 @@
               "name": "floatStyle",
               "anchor": "field-floatStyle",
               "signature": "public var floatStyle: FloatStyle",
-              "doc": "Float display style (fixed, scientific, percent).",
-              "source_path": "lang/std/text/format.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init()",
-              "doc": "Creates default format options.",
+              "doc": "Float rendering style (fixed, scientific, percent, auto).",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1199,7 +1207,7 @@
               "name": "precision",
               "anchor": "field-precision",
               "signature": "public var precision: Int64?",
-              "doc": "For floats: decimal places. For strings: max characters.",
+              "doc": "For floats: number of decimal places (or significant digits in `Auto` mode). For strings: maximum character count.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1207,7 +1215,7 @@
               "name": "radix",
               "anchor": "field-radix",
               "signature": "public var radix: Int64",
-              "doc": "Numeric base: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).",
+              "doc": "Numeric base for integer formatting: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1215,7 +1223,7 @@
               "name": "sign",
               "anchor": "field-sign",
               "signature": "public var sign: Sign",
-              "doc": "How to display the sign for numbers.",
+              "doc": "Sign-display strategy for numeric formatters.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1223,7 +1231,7 @@
               "name": "uppercase",
               "anchor": "field-uppercase",
               "signature": "public var uppercase: Bool",
-              "doc": "Use uppercase for hex digits (A-F vs a-f).",
+              "doc": "When `true`, integer hex digits are emitted as `A`–`F` rather than `a`–`f`.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1231,7 +1239,7 @@
               "name": "width",
               "anchor": "field-width",
               "signature": "public var width: Int64?",
-              "doc": "Minimum field width.",
+              "doc": "Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1246,7 +1254,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(FormatOptions) -> Bool",
-              "doc": "Compares two format options for equality.",
+              "doc": "Returns true if all fields are equal between the two options.\n\n`width` and `precision` are not compared — they typically reflect\nper-call overrides rather than logical identity. Compare them\nexplicitly if needed.\n\n# Examples\n\n```\nlet a = FormatOptions();\nlet b = FormatOptions();\na.equals(b);  // true\nvar c = FormatOptions();\nc.alternate = true;\na.equals(c);  // false\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1258,7 +1266,7 @@
       "name": "Formattable",
       "anchor": "protocol-Formattable",
       "signature": "public protocol Formattable",
-      "doc": "Protocol for types that can be formatted as a string.\nUsed by print functions and string interpolation.\n\nString interpolation syntax:\n  \"\\{expr}\"        uses default formatting\n  \"\\{expr:spec}\"   uses format spec (parsed into FormatOptions)\n\nExamples:\n  \"\\{name}\"        \"Alice\"\n  \"\\{name:>10}\"    \"     Alice\"\n  \"\\{n:08x}\"       \"0000002a\"\n  \"\\{pi:.2}\"       \"3.14\"\n  \"\\{value:?}\"     debug representation",
+      "doc": "Protocol for types that can render themselves as a `String` under a `FormatOptions`.\n\nPrint routines and string interpolation `\"\\{expr}\"` and `\"\\{expr:spec}\"`\nboth ultimately bottom out in `format`. Implementors should honour\nevery `FormatOptions` field that is meaningful for their domain\n(alignment and width are universal; `radix` only applies to integers,\n`floatStyle` only to floats) and silently ignore fields that aren't.\n\n# Examples\n\n```\n\"\\{name}\";         // \"Alice\"          (default formatting)\n\"\\{name:>10}\";     // \"     Alice\"     (right-align, width 10)\n\"\\{n:08x}\";        // \"0000002a\"       (zero-pad, hex, width 8)\n\"\\{pi:.2}\";        // \"3.14\"           (precision 2)\n\"\\{value:?}\";      // debug representation\n```",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1271,7 +1279,7 @@
               "name": "format",
               "anchor": "function-format",
               "signature": "func format(FormatOptions) -> String",
-              "doc": "Returns this value formatted as a string with the given options.",
+              "doc": "Returns this value rendered as a `String` under the supplied options.\n\nDefault arg uses `FormatOptions.default()` so unsuffixed calls\nbehave like the bare `\"\\{expr}\"` interpolation form.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1283,7 +1291,7 @@
       "name": "Grapheme",
       "anchor": "struct-Grapheme",
       "signature": "public struct Grapheme { /* private fields */ }",
-      "doc": "An extended grapheme cluster (user-perceived character).\n\nMay consist of multiple code points (e.g., emoji sequences).",
+      "doc": "An extended grapheme cluster — what users perceive as a single character.\n\nA grapheme may comprise one `Char` (e.g. `'a'`) or several\n(combining marks, regional-indicator country flags, ZWJ-joined emoji\nsequences). `String.graphemes` is the canonical producer; iteration\nuses UAX #29 segmentation. Treat `Grapheme` as the right unit for\nany user-visible operation (cursor movement, selection, truncation\nfor display).\n\n# Examples\n\n```\nlet g = Grapheme(char: 'a');\ng.charCount();   // 1\ng.isAscii();     // true\ng.utf8Length();  // 1\n```\n\n# Representation\n\nAn `Array[Char]` of the constituent code points in scalar order.",
       "source_path": "lang/std/text/char.ks",
       "member_groups": [
         {
@@ -1292,11 +1300,27 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Chars",
+              "anchor": "initializer-From-Chars",
+              "signature": "public init(chars: Array[Char])",
+              "doc": "Constructs a grapheme from a sequence of `Char`s.\n\nThe caller is responsible for the chars actually forming a\nsingle UAX #29 cluster — the constructor does not segment or\nvalidate. `GraphemesIterator` is the canonical producer of valid\nclusters.\n\n# Examples\n\n```\nvar chars = Array[Char]();\nchars.append('e');\nchars.append('\\u{0301}');  // combining acute\nlet g = Grapheme(chars: chars);\ng.charCount();  // 2\n```",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "Single Char",
+              "anchor": "initializer-Single-Char",
+              "signature": "public init(char: Char)",
+              "doc": "Constructs a one-`Char` grapheme.\n\nConvenience for the common single-scalar case so callers don't\nhave to build an `Array[Char]` first.\n\n# Examples\n\n```\nlet g = Grapheme(char: 'a');\ng.charCount();  // 1\n```",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
               "kind": "function",
               "name": "charCount",
               "anchor": "function-charCount",
               "signature": "public func charCount() -> Int64",
-              "doc": "Returns the number of code points.",
+              "doc": "Returns the number of `Char`s in this cluster — `1` for plain ASCII, more for combining sequences and ZWJ-joined emoji.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1304,7 +1328,7 @@
               "name": "chars",
               "anchor": "function-chars",
               "signature": "public func chars() -> Array[Char]",
-              "doc": "Returns the code points in this grapheme.",
+              "doc": "Returns the constituent code points in scalar order.\n\nThe returned array is a clone of the internal storage; mutating\nit does not affect the grapheme.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1312,23 +1336,7 @@
               "name": "firstChar",
               "anchor": "function-firstChar",
               "signature": "public func firstChar() -> Char?",
-              "doc": "Returns the first code point, or None if empty.",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(char: Char)",
-              "doc": "Creates a Grapheme from a single Char.",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(chars: Array[Char])",
-              "doc": "Creates a Grapheme from multiple Chars.",
+              "doc": "Returns the first `Char` of the cluster, or `None` if the grapheme is empty.\n\nUseful as a cheap \"what kind of grapheme is this?\" check\n(alphabetic, digit, emoji-base, …) without inspecting the full\ncluster.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1336,7 +1344,7 @@
               "name": "isAscii",
               "anchor": "function-isAscii",
               "signature": "public func isAscii() -> Bool",
-              "doc": "Returns true if this is a single ASCII character.",
+              "doc": "Returns true iff the cluster is exactly one ASCII `Char`.\n\nA single-`Char` non-ASCII grapheme (e.g. `é` as the precomposed\n`U+00E9`) returns `false`. Multi-`Char` clusters always return\n`false` even if every component is ASCII.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1344,7 +1352,7 @@
               "name": "utf8Length",
               "anchor": "function-utf8Length",
               "signature": "public func utf8Length() -> Int64",
-              "doc": "Returns the byte length when encoded as UTF-8.",
+              "doc": "Returns the total UTF-8 byte length of all constituent `Char`s.\n\nSum of each `Char.utf8Length()`. Use this to size a buffer\nbefore re-encoding the cluster.",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -1359,7 +1367,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Grapheme) -> Bool",
-              "doc": "Compares two graphemes for equality.",
+              "doc": "Returns true if the two graphemes are the same length and every `Char` is equal pairwise.\n\n**Not** Unicode normalization-aware: precomposed `é` (`U+00E9`)\nand decomposed `e` + `U+0301` are not equal under this check\neven though they represent the same user-perceived character.\nNormalize both sides first if you need that.\n\n# Examples\n\n```\nlet a = Grapheme(char: 'a');\nlet b = Grapheme(char: 'a');\na.equals(b);  // true\n```",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -1374,7 +1382,7 @@
               "name": "clone",
               "anchor": "function-clone",
               "signature": "public func clone() -> Grapheme",
-              "doc": "",
+              "doc": "Returns a deep copy of this grapheme (clones the underlying char array).",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -1386,7 +1394,7 @@
       "name": "GraphemeIndex",
       "anchor": "struct-GraphemeIndex",
       "signature": "public struct GraphemeIndex { /* private fields */ }",
-      "doc": "An index into a string by grapheme cluster position.",
+      "doc": "A typed wrapper for a grapheme-cluster position within a `String`.\n\nLike `CharIndex` but ranges over UAX #29 clusters rather than\ncode points. Stores the byte offset of the cluster's first byte;\nresolving requires walking the segmenter.\n\n# Representation\n\nA single `Int64` field holding the byte offset of the grapheme.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1395,19 +1403,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Offset",
+              "anchor": "initializer-From-Offset",
+              "signature": "public init(Int64)",
+              "doc": "Wraps a pre-resolved byte offset for a grapheme position.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
               "kind": "field",
               "name": "byteOffset",
               "anchor": "field-byteOffset",
               "signature": "public var byteOffset: Int64",
-              "doc": "The byte offset of this grapheme.",
-              "source_path": "lang/std/text/views.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(Int64)",
-              "doc": "Creates a grapheme index.",
+              "doc": "The byte offset where the indexed grapheme begins.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1422,7 +1430,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(GraphemeIndex) -> Bool",
-              "doc": "Compares two grapheme indices for equality.",
+              "doc": "Returns true if the two indices point at the same byte offset.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1434,7 +1442,7 @@
       "name": "GraphemesIterator",
       "anchor": "struct-GraphemesIterator",
       "signature": "public struct GraphemesIterator { /* private fields */ }",
-      "doc": "Iterator over grapheme clusters using UAX #29 segmentation.",
+      "doc": "Iterator over extended grapheme clusters under UAX #29 segmentation.\n\nWraps a `CharsIterator` and consults the Unicode grapheme-break\nproperty tables on each step. Buffers one look-ahead `Char` so it\ncan decide whether the next code point starts a new cluster; that\npending char is yielded as the start of the *next* cluster on the\nfollowing call. Handles ZWJ-joined sequences and regional-indicator\nflag pairs.\n\n# Examples\n\n```\nvar it = \"a\\u{0301}b\".graphemes.iter();\nit.next();  // Some(Grapheme: ['a', U+0301])\nit.next();  // Some(Grapheme: ['b'])\nit.next();  // None\n```\n\n# Representation\n\nWraps a `CharsIterator` plus a small amount of state machine: the\npending look-ahead char, the previous break property, the\n\"previous-previous was Regional Indicator\" flag (for flag pairs),\nand a `started` marker.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1444,10 +1452,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Chars",
+              "anchor": "initializer-From-Chars",
               "signature": "public init(CharsIterator)",
-              "doc": "Creates a graphemes iterator.",
+              "doc": "Wraps a `CharsIterator` to produce graphemes via UAX #29 segmentation.\n\nPrefer `someString.graphemes.iter()` over calling this directly.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1462,7 +1470,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = Grapheme",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `Grapheme`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1470,7 +1478,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> Grapheme?",
-              "doc": "Returns the next grapheme cluster, or None if exhausted.",
+              "doc": "Returns the next grapheme cluster, or `None` when the source is exhausted.\n\nAccumulates code points until `shouldBreakBetween` reports a\nboundary, then returns them as a `Grapheme`. The look-ahead\nchar that triggered the break is held back for the next call.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1482,7 +1490,7 @@
       "name": "GraphemesView",
       "anchor": "struct-GraphemesView",
       "signature": "public struct GraphemesView { /* private fields */ }",
-      "doc": "A view over the extended grapheme clusters in a string.\nUses UAX #29 grapheme cluster segmentation.",
+      "doc": "A view over the user-perceived characters (extended grapheme clusters) of a `String`.\n\nReturned by `String.graphemes`. Use this — not `chars` — when you\nneed the unit a user thinks of as a single character: emoji\nsequences, accented forms, country flags, etc. Both iteration and\n`count()` are O(n) because each cluster requires consulting the\nUAX #29 break tables.\n\n# Examples\n\n```\nlet flag = \"\\u{1F1FA}\\u{1F1F8}\";  // 🇺🇸\nflag.chars().count;        // 2 (regional indicators)\nflag.graphemes.count;    // 1 (one flag)\n```\n\n# Representation\n\nA `(ptr, length)` pair; iteration is delegated to a wrapped\n`CharsIterator` plus the UAX #29 segmenter state machine.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1491,19 +1499,19 @@
           "source_path": null,
           "members": [
             {
-              "kind": "function",
-              "name": "count",
-              "anchor": "function-count",
-              "signature": "public func count() -> Int64",
-              "doc": "Returns the number of grapheme clusters (O(n)).",
+              "kind": "initializer",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
+              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
+              "doc": "Constructs a graphemes view from a raw pointer and a byte length.\n\nPrefer `someString.graphemes` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes that remain live\nfor the view's lifetime.",
               "source_path": "lang/std/text/views.ks"
             },
             {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
-              "doc": "Creates a graphemes view.",
+              "kind": "field",
+              "name": "count",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
+              "doc": "Number of grapheme clusters. **O(n)** — walks the entire string\nthrough the UAX #29 segmenter. Cache the result if you need it\nmore than once; each access re-walks the string.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1518,7 +1526,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = Grapheme",
-              "doc": "",
+              "doc": "The element type yielded by iteration — always `Grapheme`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1526,7 +1534,7 @@
               "name": "Iter",
               "anchor": "typealias-Iter",
               "signature": "type Iter = GraphemesIterator",
-              "doc": "",
+              "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1534,7 +1542,7 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> GraphemesIterator",
-              "doc": "Returns an iterator over the grapheme clusters.",
+              "doc": "Returns a `GraphemesIterator` positioned at byte 0.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1546,7 +1554,7 @@
       "name": "LinesIterator",
       "anchor": "struct-LinesIterator",
       "signature": "public struct LinesIterator { /* private fields */ }",
-      "doc": "Iterator over lines in a string.",
+      "doc": "Iterator that yields each line of a string as a `String`.\n\nRecognises both `\\n` (LF) and `\\r\\n` (CRLF) as line terminators\nand a lone `\\r` (CR) as a terminator on its own. The terminator\nitself is **not** included in the yielded line. A trailing line\nwithout a terminator is still emitted; an empty input emits no\nlines.\n\n# Examples\n\n```\nvar it = \"a\\nb\\r\\nc\".lines.iter();\nit.next();  // Some(\"a\")\nit.next();  // Some(\"b\")\nit.next();  // Some(\"c\")\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, byteIndex, done)` quadruple. `done` flips to true\nafter the trailing-no-terminator case has been emitted, so further\ncalls return `None`.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1556,10 +1564,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64, done: Bool)",
-              "doc": "Creates a lines iterator.",
+              "doc": "Constructs a lines iterator from a raw pointer, total byte count, starting byte offset, and `done` flag.\n\nPrefer `someString.lines.iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes; `byteIndex`\nmust be `0` or sit at a UTF-8 boundary.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1574,7 +1582,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = String",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `String`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1582,7 +1590,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> String?",
-              "doc": "Returns the next line, or None if exhausted.",
+              "doc": "Returns the next line, or `None` once exhausted.\n\nScans byte-by-byte for `\\n` or `\\r`, treating `\\r\\n` as a\nsingle terminator. The yielded string contains the bytes up\nto but not including the terminator.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1594,7 +1602,7 @@
       "name": "LinesView",
       "anchor": "struct-LinesView",
       "signature": "public struct LinesView { /* private fields */ }",
-      "doc": "A view that iterates over lines in a string.\n\nHandles both \\n and \\r\\n line endings.",
+      "doc": "A view over the lines of a `String`, split on `\\n`, `\\r\\n`, or `\\r`.\n\nReturned by `String.lines`. The yielded strings do not include\nthe terminator; a trailing line without a terminator is still\nemitted. To re-join with a specific separator, collect the\niterator output and use `String.append`.\n\n# Examples\n\n```\nvar lines = Array[String]();\nfor line in \"a\\nb\\nc\".lines {\n    lines.append(line);\n}\nlines.count;  // 3\n```\n\n# Representation\n\nA `(ptr, length)` pair pointing into the source string.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1604,10 +1612,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
-              "doc": "Creates a lines view.",
+              "doc": "Constructs a lines view from a raw pointer and a byte length.\n\nPrefer `someString.lines` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid bytes that remain live for\nthe view's lifetime.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1622,7 +1630,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = String",
-              "doc": "",
+              "doc": "The element type yielded by iteration — always `String`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1630,7 +1638,7 @@
               "name": "Iter",
               "anchor": "typealias-Iter",
               "signature": "type Iter = LinesIterator",
-              "doc": "",
+              "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1638,7 +1646,7 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> LinesIterator",
-              "doc": "Returns an iterator over the lines.",
+              "doc": "Returns a `LinesIterator` positioned at byte 0.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1650,7 +1658,7 @@
       "name": "Sign",
       "anchor": "enum-Sign",
       "signature": "public enum Sign",
-      "doc": "Sign display mode for numeric formatting.",
+      "doc": "How the sign of a numeric value should be rendered.\n\nRead by integer and float formatters before emitting the magnitude.\n`Negative` is the conventional default — only `-` for negative values,\nnothing for non-negatives. `Always` is useful for diffs or coordinates\nwhere every value should carry an explicit sign; `Space` reserves a\ncolumn so columns of mixed signs line up.\n\n# Examples\n\n```\nvar opts = FormatOptions();\nopts.sign = .Always;\n(3).format(options: opts);   // \"+3\"\n(-3).format(options: opts);  // \"-3\"\nopts.sign = .Space;\n(3).format(options: opts);   // \" 3\"\n```",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1663,7 +1671,7 @@
               "name": "Always",
               "anchor": "case-Always",
               "signature": "case Always",
-              "doc": "Always show sign (+ or -).",
+              "doc": "Always show a sign — `+` for non-negative, `-` for negative.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1671,7 +1679,7 @@
               "name": "Negative",
               "anchor": "case-Negative",
               "signature": "case Negative",
-              "doc": "Only show sign for negative numbers (default).",
+              "doc": "Show `-` for negative values, no prefix for zero or positive (default).",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -1679,7 +1687,7 @@
               "name": "Space",
               "anchor": "case-Space",
               "signature": "case Space",
-              "doc": "Show space for positive, minus for negative.",
+              "doc": "Use a leading space for non-negative, `-` for negative; keeps mixed-sign columns aligned.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1694,7 +1702,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(Sign) -> Bool",
-              "doc": "Compares for equality.",
+              "doc": "Returns true if both cases are the same variant.\n\nUsed by `Equatable` to lift case identity into a `Bool` for\ncomposite comparisons (see `FormatOptions.equals`).\n\n# Examples\n\n```\nSign.Always.equals(.Always);     // true\nSign.Negative.equals(.Always);   // false\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1709,7 +1717,7 @@
               "name": "matches",
               "anchor": "function-matches",
               "signature": "public func matches(Sign) -> Bool",
-              "doc": "Matches for pattern matching.",
+              "doc": "Pattern-match form of equality — delegates to `equals`.\n\n# Examples\n\n```\nSign.Space.matches(.Space);  // true\n```",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -1721,7 +1729,7 @@
       "name": "SplitIterator",
       "anchor": "struct-SplitIterator",
       "signature": "public struct SplitIterator { /* private fields */ }",
-      "doc": "Iterator that splits a string on a separator.",
+      "doc": "Iterator that yields the segments produced by splitting a string on a fixed-byte separator.\n\nProduced by `String.split(separator:)`. Walks the source byte-by-byte\nlooking for an exact match of the separator's bytes (no UTF-8\nawareness needed — the separator itself is UTF-8 so its byte\npattern can never align inside a multi-byte sequence). The empty\nseparator is treated specially: it splits per code point.\n\n# Examples\n\n```\nvar it = \"a,b,c\".split(separator: \",\");\nit.next();  // Some(\"a\")\nit.next();  // Some(\"b\")\nit.next();  // Some(\"c\")\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, sepPtr, sepLen, index, done)` record. `done` flips\nonce the trailing remainder has been emitted.\n\n# Memory Model\n\nValue type. Borrows both the source and the separator buffers; do\nnot retain across mutations of either.",
       "source_path": "lang/std/text/string.ks",
       "member_groups": [
         {
@@ -1731,10 +1739,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointers",
+              "anchor": "initializer-From-Pointers",
               "signature": "public init(ptr: Pointer[UInt8], length: Int64, sepPtr: Pointer[UInt8], sepLen: Int64)",
-              "doc": "Creates a split iterator.",
+              "doc": "Constructs a split iterator from source and separator byte buffers.\n\nPrefer `someString.split(separator:)` over calling this directly.\n\n# Safety\n\nBoth pointers must remain valid for `length` and `sepLen` bytes\nrespectively for the iterator's lifetime.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -1749,7 +1757,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = String",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `String`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1757,7 +1765,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> String?",
-              "doc": "Returns the next split segment, or None if exhausted.",
+              "doc": "Returns the next segment, or `None` when the source is exhausted.\n\nWith a non-empty separator, returns each piece between matches\nand finally the trailing remainder. With the empty separator,\nreturns one code point per call.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -1769,7 +1777,7 @@
       "name": "SplitWhereIterator",
       "anchor": "struct-SplitWhereIterator",
       "signature": "public struct SplitWhereIterator { /* private fields */ }",
-      "doc": "Iterator that splits a string where a predicate returns true.",
+      "doc": "Iterator that splits a string at every code point matching a predicate.\n\nProduced by `String.split(matching:)`. Decodes the source one\n`Char` at a time and breaks the string at each character for which\nthe predicate returns `true`; the matching character itself is not\nincluded in any segment.\n\n# Examples\n\n```\nvar it = \"a1b2c\".split(matching: |c| c.isDigit());\nit.next();  // Some(\"a\")\nit.next();  // Some(\"b\")\nit.next();  // Some(\"c\")\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, predicate, index, done)` record.",
       "source_path": "lang/std/text/string.ks",
       "member_groups": [
         {
@@ -1779,10 +1787,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Predicate",
+              "anchor": "initializer-From-Predicate",
               "signature": "public init(ptr: Pointer[UInt8], length: Int64, predicate: (Char) -> Bool)",
-              "doc": "Creates a split-where iterator.",
+              "doc": "Constructs a split-where iterator from a buffer pointer and a `Char` predicate.\n\nPrefer `someString.split(matching:)` over calling this directly.\n\n# Safety\n\n`ptr` must remain valid for `length` bytes for the iterator's\nlifetime.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -1797,7 +1805,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = String",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `String`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1805,7 +1813,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> String?",
-              "doc": "Returns the next split segment, or None if exhausted.",
+              "doc": "Returns the next segment, or `None` when the source is exhausted.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -1817,7 +1825,7 @@
       "name": "String",
       "anchor": "struct-String",
       "signature": "public struct String { /* private fields */ }",
-      "doc": "A UTF-8 encoded, dynamically sized string with copy-on-write semantics.\n\nStrings are immutable by default; mutations create a new copy if shared.",
+      "doc": "A UTF-8 encoded, dynamically sized string with copy-on-write semantics.\n\n`String` is the standard text type. The bytes are always valid\nUTF-8 except after the unsafe internal `appendByte` path, which is\nonly intended for callers (such as substring helpers) that already\nknow the bytes are valid. Storage is shared between clones via an\n`RcBox`; mutating a `String` whose storage is referenced elsewhere\ntriggers a copy. Three different views (`bytes`, `chars`,\n`graphemes`) plus a `lines` view expose different units of\niteration over the same buffer.\n\n# Examples\n\n```\nvar s = \"hello\";\ns.append(\", world\");\ns.byteCount;            // 12\ns.contains(substring: \",\");  // true\nfor line in \"a\\nb\".lines { /* ... */ }\n```\n\n# UTF-8\n\nAll public mutators preserve UTF-8 validity. The `bytes` view\nreturns raw `UInt8`s for hashing and FFI; the `chars` view decodes\ncode points; the `graphemes` view applies UAX #29 segmentation for\nuser-perceived characters. Choose the view that matches your unit:\nbyte-level work uses `bytes`, scalar-level work uses `chars`, and\nanything user-visible (cursor movement, truncation) uses `graphemes`.\n\n# Representation\n\nA single `RcBox[StringStorage]` field. The storage record carries\n`(ptr, len, cap)`; the empty string uses a null pointer with both\ncounts zero.\n\n# Memory Model\n\nReference-counted, copy-on-write. Cloning is O(1); the first\nmutation after a shared clone allocates and copies the bytes. The\nraw byte pointer returned from `bytes` aliases the live buffer;\nretain strings, not pointers.\n\n# Guarantees\n\n- Bytes are valid UTF-8 after every public mutator.\n- `byteCount`, `capacity`, and `isEmpty` are O(1); `count` (code\n  points) is O(n).\n- Clones do not share mutation; `s.clone()` and `s` will diverge as\n  soon as either is mutated.",
       "source_path": "lang/std/text/string.ks",
       "member_groups": [
         {
@@ -1826,11 +1834,43 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "Empty",
+              "anchor": "initializer-Empty",
+              "signature": "public init()",
+              "doc": "Constructs an empty string.\n\nAllocates no buffer; the empty string is represented by a null\npointer with zero length and capacity. Required by\n`Defaultable`.\n\n# Examples\n\n```\nlet s = String();\ns.isEmpty;     // true\ns.byteCount;   // 0\n```",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "From CString",
+              "anchor": "initializer-From-CString",
+              "signature": "public init(from: CString)",
+              "doc": "Builds a `String` by copying the bytes out of `cstring`, excluding the null terminator.\n\nO(n) — `cstring.length` walks to the terminator and the byte\ncopy is linear. Empty `CString`s (length zero) yield the\ndefault empty `String` without touching the pointer.\n\n# Safety\n\n`cstring.raw` must be valid for at least `length` readable\nbytes plus a terminator. The conversion does not free the\n`CString`'s buffer — caller still owns it.\n\n# Examples\n\n```\nlet cstr = CString(raw: somePtr);\nlet s = String(from: cstr);\n```",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "String Literal",
+              "anchor": "initializer-String-Literal",
+              "signature": "public init(stringLiteral: lang.ptr[lang.i8], lang.i64)",
+              "doc": "Compiler-emitted constructor for string literals.\n\nReceives a static byte pointer and length, then memcpys into a\nfresh heap allocation so the resulting `String` owns its bytes\n(and can be mutated independently of the literal pool).\n\n# Errors\n\nPanics with `\"String allocation failed\"` if the system\nallocator returns null.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "With Capacity",
+              "anchor": "initializer-With-Capacity",
+              "signature": "public init(capacity: Int64)",
+              "doc": "Constructs an empty string with at least `capacity` bytes preallocated.\n\nUseful before a series of appends whose total byte count is\nknown: avoids the geometric-growth reallocations the default\nconstructor would incur. A non-positive `capacity` is treated\nas zero.\n\n# Errors\n\nPanics with `\"String allocation failed\"` if the system\nallocator returns null.\n\n# Examples\n\n```\nvar s = String(capacity: 64);\ns.byteCount;  // 0\ns.capacity;   // 64\n```",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
               "kind": "function",
               "name": "append",
               "anchor": "function-append",
               "signature": "public mutating func append(String)",
-              "doc": "Appends another string to this one.",
+              "doc": "Appends `other`'s bytes to this string. COW.\n\nTriggers a copy if storage is shared. Empty appends are a fast\nno-op.\n\n# Examples\n\n```\nvar s = \"hello\";\ns.append(\", world\");\ns;  // \"hello, world\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1838,7 +1878,7 @@
               "name": "appendByte",
               "anchor": "function-appendByte",
               "signature": "public mutating func appendByte(UInt8)",
-              "doc": "Appends a raw byte (caller must ensure valid UTF-8).",
+              "doc": "Appends a raw byte to the buffer.\n\n**Unsafe** with respect to the UTF-8 invariant — the caller\nmust ensure the resulting byte sequence is still valid UTF-8.\nUsed primarily by substring helpers that copy whole UTF-8\nsequences in.\n\n# Safety\n\nThe string must remain valid UTF-8 after the append; do not\nuse this to inject continuation bytes into the middle of a\nsequence.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1846,7 +1886,7 @@
               "name": "appendChar",
               "anchor": "function-appendChar",
               "signature": "public mutating func appendChar(Char)",
-              "doc": "Appends a character to this string.",
+              "doc": "Appends a single code point, encoding it as UTF-8.\n\nSizes the buffer for the encoded length (1–4 bytes) before\nwriting.\n\n# Examples\n\n```\nvar s = \"h\";\ns.appendChar('i');\ns.appendChar('\\u{1F600}');\ns;  // \"hi😀\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1854,7 +1894,7 @@
               "name": "byteAt",
               "anchor": "function-byteAt",
               "signature": "public func byteAt(Int64) -> UInt8?",
-              "doc": "Returns the byte at the given index, or None if out of bounds.",
+              "doc": "Returns the byte at byte index `index`, or `None` if out of bounds. O(1).\n\nFor unchecked access, use `byteAtUnchecked`. The byte is\nreturned as raw `UInt8` — multi-byte characters require the\ncaller to assemble them.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1862,7 +1902,7 @@
               "name": "byteAtUnchecked",
               "anchor": "function-byteAtUnchecked",
               "signature": "public func byteAtUnchecked(Int64) -> UInt8",
-              "doc": "Returns the byte at the given index without bounds checking.",
+              "doc": "Returns the byte at `index` without bounds checking. O(1).\n\n# Safety\n\nCaller must guarantee `0 <= index < byteCount`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1870,15 +1910,47 @@
               "name": "byteCount",
               "anchor": "field-byteCount",
               "signature": "public var byteCount: Int64 { get }",
-              "doc": "The number of bytes (not characters).",
+              "doc": "The number of UTF-8 bytes in the string. O(1).\n\nThis is **not** the character count — see `count` for that.\nPure ASCII strings have `byteCount == count`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
-              "kind": "field",
+              "kind": "function",
               "name": "bytes",
-              "anchor": "field-bytes",
-              "signature": "public var bytes: BytesView { get }",
-              "doc": "A view over the raw UTF-8 bytes.",
+              "anchor": "function-bytes",
+              "signature": "public func bytes() -> BytesView",
+              "doc": "`s.bytes()` — view over the raw UTF-8 bytes. O(1) byte indexing,\nbyte-level iteration. Implemented as a method (rather than a\nproperty) so the same name can take an index for `s.bytes(i)` /\n`s.bytes(checked: i)` / `s.bytes(0..<n)` style indexing.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "bytes",
+              "anchor": "function-bytes",
+              "signature": "public func bytes[I](I) -> I.BytesYield where I: BytesIndex",
+              "doc": "`s.bytes(i)` returns a single byte; `s.bytes(0..<5)` returns a substring.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "bytes",
+              "anchor": "function-bytes",
+              "signature": "public func bytes[I](checked: I) -> I.BytesYield? where I: BytesIndex",
+              "doc": "`s.bytes(checked: i)` — `None` if out of bounds.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "bytes",
+              "anchor": "function-bytes",
+              "signature": "public func bytes[I](unchecked: I) -> I.BytesYield where I: BytesIndex",
+              "doc": "`s.bytes(unchecked: i)` — UB on out-of-bounds.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "bytes",
+              "anchor": "function-bytes",
+              "signature": "public func bytes[I](clamped: I) -> I.BytesClampedYield where I: BytesClampable",
+              "doc": "`s.bytes(clamped: i)` — saturates to valid bounds, never panics.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1886,7 +1958,7 @@
               "name": "capacity",
               "anchor": "field-capacity",
               "signature": "public var capacity: Int64 { get }",
-              "doc": "The allocated capacity in bytes.",
+              "doc": "The number of bytes the storage buffer can hold without reallocating. O(1).",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1894,7 +1966,7 @@
               "name": "char",
               "anchor": "function-char",
               "signature": "public func char(at: Int64) -> Char",
-              "doc": "Returns the character at the given index. Panics if out of bounds.",
+              "doc": "Returns the code point at code-point index `index`. Panics if out of bounds. O(n).\n\n# Errors\n\nPanics with `\"String index out of bounds\"` if `index` is\nnegative or `>= count`.\n\n# Examples\n\n```\n\"héllo\".char(at: 1);  // 'é'\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1902,7 +1974,7 @@
               "name": "char",
               "anchor": "function-char",
               "signature": "public func char(checked: Int64) -> Char?",
-              "doc": "Returns the character at the given index, or None if out of bounds.",
+              "doc": "Returns the code point at code-point index `index`, or `None` if out of bounds. O(n).\n\nCompanion to `char(at:)`. Walks UTF-8 to find the right\ncharacter; the early `return` on the matching index keeps\naverage-case work proportional to `index`, not to `count`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1910,31 +1982,55 @@
               "name": "char",
               "anchor": "function-char",
               "signature": "public func char(unchecked: Int64) -> Char",
-              "doc": "Returns the character at the given index without bounds checking.",
+              "doc": "Returns the code point at code-point index `index` without bounds checking.\n\nCurrently delegates to `char(at:)` which itself panics on\nout-of-range, so this is not actually faster — exists for API\nparity with `Array`'s indexing family.\n\n# Safety\n\nCaller must guarantee `0 <= index < count`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
               "kind": "function",
               "name": "char",
               "anchor": "function-char",
-              "signature": "public func char(wrapping: Int64) -> Char",
-              "doc": "Returns the character at the given index, wrapping around (-1 = last).",
+              "signature": "public func char(wrapped: Int64) -> Char",
+              "doc": "Returns the code point at `index` modulo `count`, supporting negative indices.\n\nNegative indices count from the end (`-1` is the last code\npoint). Equivalent to `char(at: ((index % count) + count) % count)`.\n\n# Errors\n\nPanics with `\"String is empty\"` if the string contains no code\npoints.\n\n# Examples\n\n```\n\"abc\".char(wrapped: -1);  // 'c'\n\"abc\".char(wrapped: 5);   // 'c'  (5 % 3 == 2)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
               "kind": "function",
               "name": "char",
               "anchor": "function-char",
-              "signature": "public func char(clamping: Int64) -> Char",
-              "doc": "Returns the character at the given index, clamped to valid range.",
+              "signature": "public func char(clamped: Int64) -> Char",
+              "doc": "Returns the code point at `index` clamped to `[0, count - 1]`.\n\n# Errors\n\nPanics with `\"String is empty\"` if the string contains no code\npoints.\n\n# Examples\n\n```\n\"abc\".char(clamped: -1);  // 'a'\n\"abc\".char(clamped: 99);  // 'c'\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
-              "kind": "field",
+              "kind": "function",
               "name": "chars",
-              "anchor": "field-chars",
-              "signature": "public var chars: CharsView { get }",
-              "doc": "A view over the Unicode code points.",
+              "anchor": "function-chars",
+              "signature": "public func chars() -> CharsView",
+              "doc": "`s.chars()` — view over the Unicode code points. O(n) indexing,\nscalar-level iteration. Method form (see `bytes()` above) so the\nsame name supports `s.chars(i)` / `s.chars(checked: i)`.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "chars",
+              "anchor": "function-chars",
+              "signature": "public func chars[I](I) -> I.CharsYield where I: CharsIndex",
+              "doc": "",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "chars",
+              "anchor": "function-chars",
+              "signature": "public func chars[I](checked: I) -> I.CharsYield? where I: CharsIndex",
+              "doc": "`s.chars(checked: i)` — `None` if out of bounds.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "chars",
+              "anchor": "function-chars",
+              "signature": "public func chars[I](clamped: I) -> I.CharsClampedYield where I: CharsClampable",
+              "doc": "`s.chars(clamped: i)` — saturates to valid bounds, never panics.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1942,7 +2038,7 @@
               "name": "clear",
               "anchor": "function-clear",
               "signature": "public mutating func clear()",
-              "doc": "Removes all characters from the string.",
+              "doc": "Truncates the string to length zero, keeping the allocated buffer.\n\nCapacity is unchanged, so this is the right primitive for\nreusing a buffer in a hot loop.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1950,7 +2046,7 @@
               "name": "contains",
               "anchor": "function-contains",
               "signature": "public func contains(String) -> Bool",
-              "doc": "Returns true if the string contains the substring.",
+              "doc": "Returns true if `substring` appears anywhere in this string.\n\nEquivalent to `find(substring).isSome()`. The empty substring\nalways matches.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1958,7 +2054,7 @@
               "name": "contains",
               "anchor": "function-contains",
               "signature": "public func contains(matching: (Char) -> Bool) -> Bool",
-              "doc": "Returns true if any character matches the predicate.",
+              "doc": "Returns true if any code point matches `predicate`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1966,7 +2062,7 @@
               "name": "count",
               "anchor": "field-count",
               "signature": "public var count: Int64 { get }",
-              "doc": "The number of Unicode code points (O(n)).",
+              "doc": "The number of Unicode code points. O(n).\n\nWalks the buffer counting UTF-8 leading bytes (those whose top\ntwo bits are not `10`). Cache the result if you need it more\nthan once.\n\n# Examples\n\n```\n\"hi\".count;     // 2\n\"héllo\".count;  // 5 (code points; bytes is 6)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1974,7 +2070,7 @@
               "name": "ends",
               "anchor": "function-ends",
               "signature": "public func ends(with: String) -> Bool",
-              "doc": "Returns true if the string ends with the suffix.",
+              "doc": "Returns true if the string ends with `suffix`. O(suffix length).\n\n# Examples\n\n```\n\"hello\".ends(with: \"lo\");  // true\n\"hello\".ends(with: \"he\");  // false\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1982,7 +2078,7 @@
               "name": "equalsCaseInsensitive",
               "anchor": "function-equalsCaseInsensitive",
               "signature": "public func equalsCaseInsensitive(String) -> Bool",
-              "doc": "Compares two strings for equality, ignoring case.\nUses Unicode case folding for locale-independent comparison.",
+              "doc": "Compares two strings for equality after Unicode case folding.\n\nWalks both `chars` iterators in lockstep, folding each pair of\ncode points before comparing. Note: this is not normalization\naware — `é` (`U+00E9`) and `e\\u{0301}` are still considered\ndifferent. Normalize both sides first if you need that.\n\n# Examples\n\n```\n\"Hello\".equalsCaseInsensitive(\"HELLO\");  // true\n\"Hello\".equalsCaseInsensitive(\"World\");  // false\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1990,7 +2086,7 @@
               "name": "find",
               "anchor": "function-find",
               "signature": "public func find(String) -> Int64?",
-              "doc": "Returns the byte index of the first occurrence of substring, or None.",
+              "doc": "Returns the byte offset of the first occurrence of `substring`, or `None`.\n\nNaïve byte-by-byte search; O(n·m) in the worst case where m is\nthe substring length. The empty substring matches at offset\n`0`.\n\n# Examples\n\n```\n\"hello\".find(\"ll\");      // Some(2)\n\"hello\".find(\"xyz\");     // None\n\"hello\".find(\"\");        // Some(0)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1998,7 +2094,7 @@
               "name": "find",
               "anchor": "function-find",
               "signature": "public func find(matching: (Char) -> Bool) -> Int64?",
-              "doc": "Returns the byte index of the first character matching the predicate, or None.",
+              "doc": "Returns the byte offset of the first code point matching `predicate`, or `None`.\n\nDecodes UTF-8 as it scans so the predicate sees real `Char`s\nand the offset returned lands on a valid character boundary.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2006,7 +2102,7 @@
               "name": "first",
               "anchor": "function-first",
               "signature": "public func first() -> Char?",
-              "doc": "Returns the first character, or None if empty.",
+              "doc": "Returns the first code point, or `None` if the string is empty. O(1) for the common case.\n\n# Examples\n\n```\n\"hi\".first();  // Some('h')\n\"\".first();    // None\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2014,7 +2110,15 @@
               "name": "fromBytesUnchecked",
               "anchor": "function-fromBytesUnchecked",
               "signature": "static func fromBytesUnchecked(Pointer[UInt8], Int64) -> String",
-              "doc": "Internal: create from bytes without validation (for split).",
+              "doc": "Constructs a string by copying `count` bytes starting at `ptr`, without UTF-8 validation.\n\nInternal helper used by split iterators and substring helpers\nthat already know the byte range falls on UTF-8 boundaries.\n\n# Safety\n\n`ptr` must reference at least `count` valid UTF-8 bytes; the\nrange starting at `ptr` and ending at `ptr + count` must not\nsplit a multi-byte sequence.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromUtf8",
+              "anchor": "function-fromUtf8",
+              "signature": "public static func fromUtf8(Slice[UInt8]) -> String?",
+              "doc": "Constructs a string by copying validated UTF-8 bytes from `bytes`,\nreturning `.None` if the slice is not valid UTF-8.\n\nWalks the slice end-to-end with `decodeUtf8`; any malformed,\ntruncated, or overlong sequence produces `.None`. The empty slice\nis valid and yields the empty string. On success the bytes are\ncopied into a fresh heap allocation, so the returned `String`\nowns its storage independently of `bytes`.\n\n# Errors\n\nPanics with `\"String allocation failed\"` if the system allocator\nreturns null. Returns `.None` only for invalid UTF-8 — the\nallocation case is unrecoverable.\n\n# Examples\n\n```\nString.fromUtf8(bytes: \"héllo\".bytes().asSlice());  // Some(\"héllo\")\nString.fromUtf8(bytes: badSlice);                 // None\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2022,47 +2126,15 @@
               "name": "graphemes",
               "anchor": "field-graphemes",
               "signature": "public var graphemes: GraphemesView { get }",
-              "doc": "A view over the extended grapheme clusters.",
+              "doc": "A view over the user-perceived characters (UAX #29 grapheme clusters).",
               "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init()",
-              "doc": "Creates an empty string.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(capacity: Int64)",
-              "doc": "Creates an empty string with the specified capacity.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(stringLiteral: lang.ptr[lang.i8], lang.i64)",
-              "doc": "Creates a string from a string literal.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(from: CString)",
-              "doc": "Creates a String from a CString by copying the bytes.\n\nThis copies the null-terminated bytes from the CString into a new\nKestrel String (excluding the null terminator).\n\nExample:\n  let cstr = CString(raw: somePtr, length: Int64(intLiteral: 5))\n  let s = String(from: cstr)",
-              "source_path": "lang/std/ffi/cstring.ks"
             },
             {
               "kind": "field",
               "name": "isEmpty",
               "anchor": "field-isEmpty",
               "signature": "public var isEmpty: Bool { get }",
-              "doc": "True if the string is empty.",
+              "doc": "True if the string holds zero bytes. O(1).",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2070,7 +2142,7 @@
               "name": "last",
               "anchor": "function-last",
               "signature": "public func last() -> Char?",
-              "doc": "Returns the last character, or None if empty.",
+              "doc": "Returns the last code point, or `None` if the string is empty. O(n).\n\nHas to scan from the start to identify the final UTF-8 sequence\n— there is no way to read backwards through variable-width\nUTF-8 without a separate index.\n\n# Examples\n\n```\n\"hi\".last();  // Some('i')\n\"\".last();    // None\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2078,7 +2150,7 @@
               "name": "lines",
               "anchor": "field-lines",
               "signature": "public var lines: LinesView { get }",
-              "doc": "A view over the lines in the string.",
+              "doc": "A view over the lines of the string, recognising `\\n`, `\\r\\n`, and `\\r`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2086,7 +2158,7 @@
               "name": "lowercase",
               "anchor": "function-lowercase",
               "signature": "public mutating func lowercase()",
-              "doc": "Converts all characters to lowercase using Unicode case mapping in place.\nHandles locale-independent case folding including multi-character expansions.",
+              "doc": "Replaces this string with its lowercase form using full Unicode case mapping.\n\nLocale-independent. Handles multi-character expansions\n(rare in lowercasing). Implemented as `self = self.lowercased()`,\nso a transient new buffer is allocated.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2094,7 +2166,7 @@
               "name": "lowercaseAscii",
               "anchor": "function-lowercaseAscii",
               "signature": "public mutating func lowercaseAscii()",
-              "doc": "Converts ASCII characters to lowercase in place.",
+              "doc": "Lowercases ASCII letters in place; non-ASCII bytes are left untouched.\n\nCheap byte-level scan with no Unicode tables. For locale-\nindependent Unicode case folding, use `lowercase`.\n\n# Examples\n\n```\nvar s = \"HéLLO\";\ns.lowercaseAscii();\ns;  // \"héllo\" — only ASCII letters touched\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2102,7 +2174,7 @@
               "name": "lowercased",
               "anchor": "function-lowercased",
               "signature": "public func lowercased() -> String",
-              "doc": "Returns a string with all characters converted to lowercase using Unicode case mapping.\nHandles locale-independent case folding including multi-character expansions.",
+              "doc": "Returns the lowercase form using full Unicode case mapping.\n\nTwo fast paths: an all-ASCII string with no uppercase letters\nis returned cloned (no allocation beyond the COW share); an\nall-ASCII string with uppercase letters routes to\n`lowercasedAscii`. The slow path uses the Unicode tables and\nhonours multi-char expansions.\n\n# Examples\n\n```\n\"Hello\".lowercased();      // \"hello\"\n\"\\u{0130}\".lowercased();   // \"i\\u{0307}\" (Turkish dotted I expansion)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2110,7 +2182,7 @@
               "name": "lowercasedAscii",
               "anchor": "function-lowercasedAscii",
               "signature": "public func lowercasedAscii() -> String",
-              "doc": "Returns a string with ASCII characters converted to lowercase.",
+              "doc": "Returns a copy with ASCII letters lowercased; non-ASCII bytes pass through unchanged.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2118,7 +2190,7 @@
               "name": "pad",
               "anchor": "function-pad",
               "signature": "public func pad(start: Int64, with: Char) -> String",
-              "doc": "Returns a string padded at the start to the specified length.",
+              "doc": "Returns the string padded at the start with `char` so the total *code-point* count is `length`.\n\nIf the string is already at least `length` code points long,\nreturns a clone. Compare with `pad(end:with:)` for trailing\npadding.\n\n# Examples\n\n```\n\"42\".pad(start: 5, with: '0');  // \"00042\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2126,7 +2198,7 @@
               "name": "pad",
               "anchor": "function-pad",
               "signature": "public func pad(end: Int64, with: Char) -> String",
-              "doc": "Returns a string padded at the end to the specified length.",
+              "doc": "Returns the string padded at the end with `char` so the total *code-point* count is `length`.\n\n# Examples\n\n```\n\"42\".pad(end: 5, with: '.');  // \"42...\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2134,7 +2206,7 @@
               "name": "repeated",
               "anchor": "function-repeated",
               "signature": "public func repeated(Int64) -> String",
-              "doc": "Returns the string repeated the specified number of times.",
+              "doc": "Returns this string concatenated with itself `count` times.\n\nNon-positive `count` returns the empty string. Sizes the\nresult buffer for the exact final length to avoid growth.\n\n# Examples\n\n```\n\"ab\".repeated(count: 3);  // \"ababab\"\n\"ab\".repeated(count: 0);  // \"\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2142,7 +2214,7 @@
               "name": "replace",
               "anchor": "function-replace",
               "signature": "public mutating func replace(String, with: String)",
-              "doc": "Replaces all occurrences of pattern with replacement in place.",
+              "doc": "Replaces every occurrence of `pattern` with `replacement`, in place.\n\nAllocates a fresh string under the hood; the in-place form is\nfor ergonomics, not buffer reuse.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2150,7 +2222,7 @@
               "name": "replaced",
               "anchor": "function-replaced",
               "signature": "public func replaced(String, with: String) -> String",
-              "doc": "Returns a string with all occurrences of pattern replaced.",
+              "doc": "Returns a copy with every occurrence of `pattern` replaced by `replacement`.\n\nEmpty `pattern` is a no-op (returns a clone). Searches greedily\nfrom the left and skips past each replacement so substituted\ntext is not re-matched.\n\n# Examples\n\n```\n\"hello world\".replaced(\"o\", with: \"0\");      // \"hell0 w0rld\"\n\"abcabc\".replaced(\"ab\", with: \"ABCD\");       // \"ABCDcABCDc\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2158,7 +2230,7 @@
               "name": "reverseFind",
               "anchor": "function-reverseFind",
               "signature": "public func reverseFind(String) -> Int64?",
-              "doc": "Returns the byte index of the last occurrence of substring, or None.",
+              "doc": "Returns the byte offset of the *last* occurrence of `substring`, or `None`.\n\nScans from the right but with the same naïve byte comparison\nas `find`. The empty substring matches at offset `byteCount`.\n\n# Examples\n\n```\n\"abcabc\".reverseFind(\"abc\");  // Some(3)\n\"abcabc\".reverseFind(\"\");     // Some(6)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2166,7 +2238,7 @@
               "name": "split",
               "anchor": "function-split",
               "signature": "public func split(String) -> SplitIterator",
-              "doc": "Returns an iterator that splits the string on the separator.",
+              "doc": "Returns an iterator that splits this string on `separator` (byte-exact).\n\nThe empty separator is special-cased to split per code point.\nSee `SplitIterator` for the iteration shape.\n\n# Examples\n\n```\nvar parts = Array[String]();\nfor p in \"a,b,c\".split(separator: \",\") { parts.append(p); }\nparts.count;  // 3\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2174,7 +2246,7 @@
               "name": "split",
               "anchor": "function-split",
               "signature": "public func split(matching: (Char) -> Bool) -> SplitWhereIterator",
-              "doc": "Returns an iterator that splits the string where the predicate returns true.",
+              "doc": "Returns an iterator that splits at every code point matching `predicate`.\n\nThe matching characters are not included in any segment.\n\n# Examples\n\n```\nvar parts = Array[String]();\nfor p in \"a 1 b 2 c\".split(matching: |c| c.isDigit() or c.isWhitespace()) {\n    if p.isEmpty == false { parts.append(p); }\n}\n// parts: [\"a\", \"b\", \"c\"]\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2182,7 +2254,7 @@
               "name": "starts",
               "anchor": "function-starts",
               "signature": "public func starts(with: String) -> Bool",
-              "doc": "Returns true if the string starts with the prefix.",
+              "doc": "Returns true if the string begins with `prefix`. O(prefix length).\n\n# Examples\n\n```\n\"hello\".starts(with: \"he\");   // true\n\"hello\".starts(with: \"lo\");   // false\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2190,7 +2262,7 @@
               "name": "substringBytes",
               "anchor": "function-substringBytes",
               "signature": "public func substringBytes(from: Int64, to: Int64) -> String",
-              "doc": "Returns a substring by byte indices.",
+              "doc": "Returns the substring spanning byte indices `[start, end)`.\n\nOut-of-range, inverted, or empty ranges return the empty\nstring rather than panicking. The caller is responsible for\nensuring the bounds fall on UTF-8 boundaries — use\n`s.bytes(checked: range)` for a validated alternative.\n\n# Examples\n\n```\n\"hello\".substringBytes(from: 1, to: 4);   // \"ell\"\n\"hello\".substringBytes(from: 4, to: 1);   // \"\"    (inverted)\n\"hello\".substringBytes(from: 0, to: 99);  // \"\"    (out of range)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2198,7 +2270,7 @@
               "name": "titlecased",
               "anchor": "function-titlecased",
               "signature": "public func titlecased() -> String",
-              "doc": "Returns a string with all characters converted to titlecase using Unicode case mapping.\nTitlecase converts the first character of each word to titlecase and the rest to lowercase.",
+              "doc": "Returns the titlecase form using full Unicode case mapping.\n\nWord boundaries are detected by `Char.isWhitespace`; the first\nnon-space character of each run is titlecased and the rest\nlowercased. This is a coarse model — it doesn't handle\nhyphenated names or apostrophe-internal capitals — but works\nfor plain whitespace-separated text.\n\n# Examples\n\n```\n\"hello world\".titlecased();  // \"Hello World\"\n\"FOO BAR\".titlecased();      // \"Foo Bar\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2206,7 +2278,7 @@
               "name": "toCString",
               "anchor": "function-toCString",
               "signature": "public func toCString() -> CString",
-              "doc": "Creates a CString with a null-terminated copy of this string.\nCaller must free the memory: cstr.free()",
+              "doc": "Allocates a fresh null-terminated copy of this string and returns it as a `CString`.\n\nSizes the buffer to `byteCount + 1`, copies the source bytes\nvia `memcpy`, and writes the trailing `\\0`. The caller takes\nownership and must release the buffer with `cstr.free()`.\n\n# Safety\n\nThe returned `CString` aliases freshly allocated memory; do\nnot pass it to a C function that takes ownership of the\npointer (it will then be double-freed) and do not forget to\nfree it.\n\n# Examples\n\n```\nlet cstr = \"Hello, C!\".toCString();\nlet _ = puts(cstr);\ncstr.free();\n```",
               "source_path": "lang/std/ffi/cstring.ks"
             },
             {
@@ -2214,7 +2286,7 @@
               "name": "trim",
               "anchor": "function-trim",
               "signature": "public mutating func trim()",
-              "doc": "Removes leading and trailing whitespace in place.",
+              "doc": "Removes leading and trailing ASCII whitespace in place.\n\nRecognises space, tab, LF, CR — same set as `Char.isWhitespace`\nminus form feed (which `Char.isWhitespace` accepts but the\ntrim helpers do not). For Unicode-aware trimming, use the\n`(matching:)` overloads with a custom predicate. Non-mutating\nmirrors live under `trimmed*`.\n\n# Examples\n\n```\nvar s = \"  hi  \";\ns.trim();\ns;  // \"hi\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2222,7 +2294,7 @@
               "name": "trim",
               "anchor": "function-trim",
               "signature": "public mutating func trim(matching: (Char) -> Bool)",
-              "doc": "Removes leading and trailing characters matching the predicate in place.",
+              "doc": "Removes leading and trailing code points matching `predicate`, in place.\n\n# Examples\n\n```\nvar s = \"***hi***\";\ns.trim(matching: |c| c == '*');\ns;  // \"hi\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2230,7 +2302,7 @@
               "name": "trimEnd",
               "anchor": "function-trimEnd",
               "signature": "public mutating func trimEnd()",
-              "doc": "Removes trailing whitespace in place.",
+              "doc": "Removes trailing ASCII whitespace in place.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2238,7 +2310,7 @@
               "name": "trimEnd",
               "anchor": "function-trimEnd",
               "signature": "public mutating func trimEnd(matching: (Char) -> Bool)",
-              "doc": "Removes trailing characters matching the predicate in place.",
+              "doc": "Removes trailing code points matching `predicate`, in place.\n\nImplemented by a forward scan that tracks the byte offset of\nthe last non-matching character — UTF-8 is awkward to walk\nbackwards without a side index.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2246,7 +2318,7 @@
               "name": "trimStart",
               "anchor": "function-trimStart",
               "signature": "public mutating func trimStart()",
-              "doc": "Removes leading whitespace in place.",
+              "doc": "Removes leading ASCII whitespace in place.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2254,7 +2326,7 @@
               "name": "trimStart",
               "anchor": "function-trimStart",
               "signature": "public mutating func trimStart(matching: (Char) -> Bool)",
-              "doc": "Removes leading characters matching the predicate in place.",
+              "doc": "Removes leading code points matching `predicate`, in place.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2262,7 +2334,7 @@
               "name": "trimmed",
               "anchor": "function-trimmed",
               "signature": "public func trimmed() -> String",
-              "doc": "Returns a string with leading and trailing whitespace removed.",
+              "doc": "Returns a copy with leading and trailing ASCII whitespace removed.\n\nNon-mutating mirror of `trim()`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2270,7 +2342,7 @@
               "name": "trimmed",
               "anchor": "function-trimmed",
               "signature": "public func trimmed(matching: (Char) -> Bool) -> String",
-              "doc": "Returns a string with leading and trailing characters matching the predicate removed.",
+              "doc": "Returns a copy with leading and trailing code points matching `predicate` removed.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2278,7 +2350,7 @@
               "name": "trimmedEnd",
               "anchor": "function-trimmedEnd",
               "signature": "public func trimmedEnd() -> String",
-              "doc": "Returns a string with trailing whitespace removed.",
+              "doc": "Returns a copy with trailing ASCII whitespace removed.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2286,7 +2358,7 @@
               "name": "trimmedEnd",
               "anchor": "function-trimmedEnd",
               "signature": "public func trimmedEnd(matching: (Char) -> Bool) -> String",
-              "doc": "Returns a string with trailing characters matching the predicate removed.",
+              "doc": "Returns a copy with trailing code points matching `predicate` removed.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2294,7 +2366,7 @@
               "name": "trimmedStart",
               "anchor": "function-trimmedStart",
               "signature": "public func trimmedStart() -> String",
-              "doc": "Returns a string with leading whitespace removed.",
+              "doc": "Returns a copy with leading ASCII whitespace removed.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2302,7 +2374,7 @@
               "name": "trimmedStart",
               "anchor": "function-trimmedStart",
               "signature": "public func trimmedStart(matching: (Char) -> Bool) -> String",
-              "doc": "Returns a string with leading characters matching the predicate removed.",
+              "doc": "Returns a copy with leading code points matching `predicate` removed.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2310,7 +2382,7 @@
               "name": "uppercase",
               "anchor": "function-uppercase",
               "signature": "public mutating func uppercase()",
-              "doc": "Converts all characters to uppercase using Unicode case mapping in place.\nHandles locale-independent case folding including multi-character expansions\n(e.g., German 'ß' uppercase becomes \"SS\").",
+              "doc": "Replaces this string with its uppercase form using full Unicode case mapping.\n\nLocale-independent. Handles multi-character expansions —\ne.g. German `ß` → `SS`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2318,7 +2390,7 @@
               "name": "uppercaseAscii",
               "anchor": "function-uppercaseAscii",
               "signature": "public mutating func uppercaseAscii()",
-              "doc": "Converts ASCII characters to uppercase in place.",
+              "doc": "Uppercases ASCII letters in place; non-ASCII bytes are left untouched.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2326,7 +2398,7 @@
               "name": "uppercased",
               "anchor": "function-uppercased",
               "signature": "public func uppercased() -> String",
-              "doc": "Returns a string with all characters converted to uppercase using Unicode case mapping.\nHandles locale-independent case folding including multi-character expansions.",
+              "doc": "Returns the uppercase form using full Unicode case mapping.\n\nSymmetric to `lowercased`; the same ASCII fast paths apply.\nMulti-char expansions (e.g. `ß` → `SS`) are honoured.\n\n# Examples\n\n```\n\"hello\".uppercased();      // \"HELLO\"\n\"stra\\u{00DF}e\".uppercased();  // \"STRASSE\" (ß expands to SS)\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2334,7 +2406,7 @@
               "name": "uppercasedAscii",
               "anchor": "function-uppercasedAscii",
               "signature": "public func uppercasedAscii() -> String",
-              "doc": "Returns a string with ASCII characters converted to uppercase.",
+              "doc": "Returns a copy with ASCII letters uppercased; non-ASCII bytes pass through unchanged.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2349,7 +2421,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = Char",
-              "doc": "",
+              "doc": "The element type yielded by iteration — always `Char`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2357,7 +2429,7 @@
               "name": "Iter",
               "anchor": "typealias-Iter",
               "signature": "type Iter = StringIterator",
-              "doc": "",
+              "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2365,7 +2437,7 @@
               "name": "iter",
               "anchor": "function-iter",
               "signature": "public func iter() -> StringIterator",
-              "doc": "Returns an iterator over the Unicode code points.",
+              "doc": "Returns a `StringIterator` over the code points starting at byte 0.\n\nRequired by `Iterable`. Each call returns a fresh iterator;\nthe string itself is reusable.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2380,7 +2452,7 @@
               "name": "equals",
               "anchor": "function-equals",
               "signature": "public func equals(String) -> Bool",
-              "doc": "Compares two strings for equality.",
+              "doc": "Returns true if both strings have the same byte sequence.\n\nPure byte-wise equality — not normalization-aware. For\ncase-insensitive comparison, see `equalsCaseInsensitive`.\n\n# Examples\n\n```\n\"abc\".equals(\"abc\");  // true\n\"abc\".equals(\"ABC\");  // false\n```",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2395,7 +2467,7 @@
               "name": "compare",
               "anchor": "function-compare",
               "signature": "public func compare(String) -> Ordering",
-              "doc": "Compares two strings lexicographically.",
+              "doc": "Lexicographic byte-wise comparison.\n\nReturns `Less` / `Equal` / `Greater` according to the first\ndiffering byte; if one string is a prefix of the other, the\nshorter is less. Byte order coincides with code-point order\nbecause UTF-8 is order-preserving — this is *not* the same as\nlocale-aware collation.\n\n# Examples\n\n```\n\"abc\".compare(\"abd\");  // Less\n\"abc\".compare(\"ab\");   // Greater\n\"abc\".compare(\"abc\");  // Equal\n```",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2410,7 +2482,7 @@
               "name": "clone",
               "anchor": "function-clone",
               "signature": "public func clone() -> String",
-              "doc": "Creates a shallow clone (COW - copy deferred until mutation).",
+              "doc": "Returns a shallow clone — storage is shared until either side mutates.\n\nO(1). Mutation triggers `makeUnique` which performs a deep\ncopy.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2425,7 +2497,7 @@
               "name": "format",
               "anchor": "function-format",
               "signature": "public func format(FormatOptions) -> String",
-              "doc": "Returns the string formatted with the given options.\n\nSupports width and alignment formatting.\n\nExample:\n    \"test\".format(options: .{width: .Some(10), alignment: .Left})   // \"test      \"\n    \"test\".format(options: .{width: .Some(10), alignment: .Right})  // \"      test\"\n    \"test\".format(options: .{width: .Some(10), alignment: .Center}) // \"   test   \"",
+              "doc": "Renders this string under the supplied `FormatOptions`.\n\nHonours `width`, `alignment`, and `fill`. `precision` /\n`radix` / `floatStyle` / `sign` are ignored — they don't apply\nto strings. Aligned padding is measured in *code points*, not\nbytes, so multi-byte characters count as one column for\nalignment purposes (display width still depends on font).\n\n# Examples\n\n```\nvar opts = FormatOptions();\nopts.width = .Some(10);\nopts.alignment = .Left;\n\"test\".format(options: opts);   // \"test      \"\nopts.alignment = .Right;\n\"test\".format(options: opts);   // \"      test\"\nopts.alignment = .Center;\n\"test\".format(options: opts);   // \"   test   \"\n```",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2440,7 +2512,7 @@
               "name": "Output",
               "anchor": "typealias-Output",
               "signature": "type Output = String",
-              "doc": "",
+              "doc": "The output type of `+` (concatenation) — always `String`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2448,7 +2520,7 @@
               "name": "add",
               "anchor": "function-add",
               "signature": "public func add(String) -> String",
-              "doc": "Concatenates two strings.",
+              "doc": "Returns the concatenation `self + other`. Required by `Addable`.\n\nEquivalent to cloning `self` and appending `other`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2456,7 +2528,7 @@
               "name": "zero",
               "anchor": "field-zero",
               "signature": "public static var zero: String { get }",
-              "doc": "The additive identity for strings (empty string).",
+              "doc": "The additive identity for strings — the empty string `\"\"`.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2468,10 +2540,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "String Literal",
+              "anchor": "initializer-String-Literal",
               "signature": "init(stringLiteral: lang.str)",
-              "doc": "Creates an instance from a string literal.",
+              "doc": "Builds an instance from a string literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -2486,7 +2558,7 @@
               "name": "hash",
               "anchor": "function-hash",
               "signature": "public func hash[H](into: mutating H) where H: Hasher",
-              "doc": "Hashes the string's bytes.",
+              "doc": "Hashes the raw byte sequence into the supplied hasher.\n\nSends the whole buffer in a single `write` so the hasher gets\nto choose how to consume it.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2498,10 +2570,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -2513,10 +2585,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -2528,7 +2600,7 @@
       "name": "StringInterpolationProtocol",
       "anchor": "protocol-StringInterpolationProtocol",
       "signature": "public protocol StringInterpolationProtocol",
-      "doc": "Protocol for types that accumulate string interpolation parts.",
+      "doc": "Protocol for the accumulator type that string interpolation builds into.\n\nThe compiler lowers `\"hello, \\{name}!\"` to a sequence of\n`appendLiteral` and `appendInterpolation` calls on a fresh value of\nthe implementor's type, then reads the final string out (typically\nvia a `build()` method on the concrete accumulator). `String` ships\n`DefaultStringInterpolation` as its accumulator; custom string-like\ntypes can supply their own to intercept literal pieces or coerce\nformatted parts.",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -2537,11 +2609,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "With Capacity",
+              "anchor": "initializer-With-Capacity",
+              "signature": "init(Int64, Int64)",
+              "doc": "Constructs an empty accumulator with capacity hints derived from the literal at compile time.\n\n`literalCapacity` is the total byte count of the static segments;\n`interpolationCount` is the number of `\\{...}` holes. Implementors\ncan use these to preallocate.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
               "kind": "function",
               "name": "appendInterpolation",
               "anchor": "function-appendInterpolation",
               "signature": "mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable",
-              "doc": "Append a formatted value with options.",
+              "doc": "Appends one formatted interpolation hole.\n\nReceives the runtime `value`, the parsed `options` from the\ntrailing spec (or defaults if no spec was given), and a generic\nconstraint that the value is `Formattable`.",
               "source_path": "lang/std/text/format.ks"
             },
             {
@@ -2549,15 +2629,7 @@
               "name": "appendLiteral",
               "anchor": "function-appendLiteral",
               "signature": "mutating func appendLiteral(String)",
-              "doc": "Append a literal string segment.",
-              "source_path": "lang/std/text/format.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(Int64, Int64)",
-              "doc": "Initialize with capacity hints for optimization.",
+              "doc": "Appends a static literal segment.\n\nCalled once per run of literal text between `\\{...}` holes. May be\ncalled with the empty string; implementors should be cheap in\nthat case.",
               "source_path": "lang/std/text/format.ks"
             }
           ]
@@ -2569,7 +2641,7 @@
       "name": "StringIterator",
       "anchor": "struct-StringIterator",
       "signature": "public struct StringIterator { /* private fields */ }",
-      "doc": "Iterator over the Unicode code points (Char) in a string.",
+      "doc": "Single-pass forward iterator over the Unicode code points of a `String`.\n\nProduced by `String.iter()`. Decodes one UTF-8 character at a time,\nadvancing the cursor by the encoded byte length. On invalid UTF-8\nthe iterator returns `None` and skips one byte so the next call\ncan make progress; this differs from `CharsIterator` which yields\n`U+FFFD` on bad input.\n\n# Examples\n\n```\nvar it = \"hi\".iter();\nit.next();  // Some('h')\nit.next();  // Some('i')\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, index)` triple. `index` advances in variable-width\nsteps according to the UTF-8 encoding.\n\n# Memory Model\n\nValue type. The pointer aliases the source string's storage; do not\nretain across mutations of the source `String`.",
       "source_path": "lang/std/text/string.ks",
       "member_groups": [
         {
@@ -2579,10 +2651,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: Pointer[UInt8], length: Int64)",
-              "doc": "Creates a string iterator from a pointer and length.",
+              "doc": "Constructs a string iterator from a buffer pointer and total byte count.\n\nPrefer `someString.iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes that remain live\nfor the iterator's lifetime.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2597,7 +2669,7 @@
               "name": "Item",
               "anchor": "typealias-Item",
               "signature": "type Item = Char",
-              "doc": "",
+              "doc": "The element type yielded by `next()` — always `Char`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2605,7 +2677,7 @@
               "name": "next",
               "anchor": "function-next",
               "signature": "public mutating func next() -> Char?",
-              "doc": "Returns the next character, or None if exhausted.",
+              "doc": "Returns the next code point, or `None` when the buffer is exhausted.\n\nOn invalid UTF-8 the iterator returns `None` and advances by one\nbyte to guarantee forward progress on subsequent calls.",
               "source_path": "lang/std/text/string.ks"
             }
           ]
@@ -2617,7 +2689,7 @@
       "name": "Utf8DecodeResult",
       "anchor": "struct-Utf8DecodeResult",
       "signature": "public struct Utf8DecodeResult { /* private fields */ }",
-      "doc": "Result of decoding a UTF-8 character.",
+      "doc": "The output of decoding one UTF-8 character from a byte buffer.\n\nCarries both the decoded `Char` and the number of bytes consumed,\nso the caller can advance their cursor without re-running\n`utf8Length()`. Returned as `Some` from `decodeUtf8`; `None`\nindicates an invalid or truncated sequence.\n\n# Examples\n\n```\nlet r = Utf8DecodeResult(char: 'a', bytesConsumed: 1);\nr.char;           // 'a'\nr.bytesConsumed;  // 1\n```\n\n# Representation\n\nA plain pair `(char: Char, bytesConsumed: Int64)`. Both fields are\npublic to keep the type cheap to inspect.",
       "source_path": "lang/std/text/char.ks",
       "member_groups": [
         {
@@ -2626,11 +2698,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Fields",
+              "anchor": "initializer-From-Fields",
+              "signature": "public init(char: Char, bytesConsumed: Int64)",
+              "doc": "Constructs a decode result from an already-decoded char and byte length.\n\nMainly used by `decodeUtf8` itself; user code rarely needs to\nbuild one directly.",
+              "source_path": "lang/std/text/char.ks"
+            },
+            {
               "kind": "field",
               "name": "bytesConsumed",
               "anchor": "field-bytesConsumed",
               "signature": "public var bytesConsumed: Int64",
-              "doc": "Number of bytes consumed from the input.",
+              "doc": "How many bytes the encoded form occupied (1–4).",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -2639,14 +2719,6 @@
               "anchor": "field-char",
               "signature": "public var char: Char",
               "doc": "The decoded character.",
-              "source_path": "lang/std/text/char.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(char: Char, bytesConsumed: Int64)",
-              "doc": "Creates a decode result.",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -2658,7 +2730,7 @@
       "name": "decodeUtf8",
       "anchor": "function-decodeUtf8",
       "signature": "public func decodeUtf8(lang.ptr[lang.i8], Int64, at: Int64) -> Utf8DecodeResult?",
-      "doc": "Decodes a single UTF-8 character from raw bytes.\n\nReturns None if the encoding is invalid.",
+      "doc": "Decodes one UTF-8 character starting at `index` inside the buffer of `length` bytes pointed to by `ptr`.\n\nReturns `Some(Utf8DecodeResult)` on success, where `bytesConsumed`\nis `1`–`4`. Returns `None` for any of the malformed-input cases:\ntruncated multi-byte sequence, continuation byte where a leading\nbyte was expected, or invalid leading byte (`0xF8`–`0xFF`).\n**Does not** validate against overlong encodings or surrogate-range\nscalars — feed only well-formed UTF-8 if those matter.\n\n# Safety\n\n`ptr` must be valid for `length` bytes. The function bounds-checks\n`index` and any continuation bytes against `length`.\n\n# Examples\n\n```\nvar result = String(\"hé\");\n// Conceptually:\n// decodeUtf8(rawPtr, 3, at: 0)  // Some(char: 'h', bytesConsumed: 1)\n// decodeUtf8(rawPtr, 3, at: 1)  // Some(char: 'é', bytesConsumed: 2)\n// decodeUtf8(rawPtr, 3, at: 3)  // None (past the end)\n```",
       "source_path": "lang/std/text/char.ks"
     },
     {
@@ -2666,7 +2738,7 @@
       "name": "encodeUtf8",
       "anchor": "function-encodeUtf8",
       "signature": "public func encodeUtf8(Char, lang.ptr[lang.i8], at: Int64) -> Int64",
-      "doc": "Encodes a character to UTF-8, writing to a buffer.\n\nReturns the number of bytes written (1-4).",
+      "doc": "Encodes `c` as UTF-8 starting at `ptr + index`, returning the number of bytes written (1–4).\n\nCompanion of `decodeUtf8`. `c.utf8Length()` predicts the same byte\ncount without writing — call it first to ensure the buffer has\nroom.\n\n# Safety\n\n`ptr + index` through `ptr + index + utf8Length() - 1` must lie\nwithin an allocated, writable region. No bounds checking happens\nhere.\n\n# Examples\n\n```\n// Conceptually, given a buffer `buf` of length 4:\n// encodeUtf8(c: 'a',         ptr: buf, at: 0);  // 1\n// encodeUtf8(c: '\\u{1F600}', ptr: buf, at: 0);  // 4\n```",
       "source_path": "lang/std/text/char.ks"
     }
   ]

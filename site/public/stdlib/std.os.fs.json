@@ -7,8 +7,8 @@
       "kind": "function",
       "name": "chmod",
       "anchor": "function-chmod",
-      "signature": "public func chmod(String, Int32) -> Result[(), Error]",
-      "doc": "Changes the permissions of a file or directory.",
+      "signature": "public func chmod(String, Int32) -> Result[(), IoError]",
+      "doc": "Changes the mode bits of `path` to `mode`.\n\nWraps `chmod(2)`. `mode` is the raw POSIX mode bits (e.g.\n`0o755`); pass it as `Int32`. Resolves symlinks (use `lchmod`\nequivalent if you need to change a link itself — not currently\nexposed).\n\n# Errors\n\nReturns `Err(IoError)` on any libc failure; `errno` is captured.\n\n# Examples\n\n```\nchmod(path: \"/tmp/script.sh\", mode: Int32(intLiteral: 0o755));\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
@@ -16,7 +16,7 @@
       "name": "fileExists",
       "anchor": "function-fileExists",
       "signature": "public func fileExists(String) -> Bool",
-      "doc": "Returns true if a file or directory exists at the given path.",
+      "doc": "Returns true if any filesystem entry exists at `path`.\n\nWraps `access(path, F_OK)`. Does not distinguish files from\ndirectories or symlinks (a dangling symlink reports as\nnonexistent because `access` follows symlinks). For the type,\nfollow up with `isFile` / `isDirectory`.\n\n# Examples\n\n```\nif fileExists(path: \"/tmp/foo\") {\n    // ...\n}\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
@@ -24,7 +24,7 @@
       "name": "getcwd",
       "anchor": "function-getcwd",
       "signature": "public func getcwd() -> String",
-      "doc": "Returns the current working directory.",
+      "doc": "Returns the calling process's current working directory.\n\nWraps `getcwd(2)` with a 1 KiB buffer. Returns the empty string if\nthe cwd has been deleted, is longer than 1 KiB, or any other\n`getcwd` failure occurs — the function does not surface the\nerror code.\n\n# Examples\n\n```\nlet here = getcwd();\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
@@ -32,7 +32,7 @@
       "name": "isDirectory",
       "anchor": "function-isDirectory",
       "signature": "public func isDirectory(String) -> Bool",
-      "doc": "Returns true if the path is a directory.",
+      "doc": "Returns true if `path` exists and is a directory.\n\nResolves symlinks (uses `stat`, not `lstat`). Returns `false` for\nnonexistent paths or any non-directory file type.\n\n# Examples\n\n```\nisDirectory(path: \"/tmp\");      // true\nisDirectory(path: \"/etc/hosts\"); // false\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
@@ -40,7 +40,7 @@
       "name": "isFile",
       "anchor": "function-isFile",
       "signature": "public func isFile(String) -> Bool",
-      "doc": "Returns true if the path is a regular file.",
+      "doc": "Returns true if `path` exists and is a regular file.\n\nResolves symlinks. Returns `false` for directories, sockets,\nFIFOs, devices, and nonexistent paths.",
       "source_path": "lang/std/os/fs.ks"
     },
     {
@@ -48,63 +48,63 @@
       "name": "listDir",
       "anchor": "function-listDir",
       "signature": "public func listDir(String) -> Array[String]",
-      "doc": "Lists all entries in a directory (excluding \".\" and \"..\").\nReturns an empty array if the directory cannot be opened.",
+      "doc": "Returns the names of the entries inside `path`, excluding `.` and `..`.\n\nWraps `opendir`/`readdir`/`closedir`. The returned names are\nrelative to `path`; join with `path` yourself if you need full\npaths. On failure to open the directory (missing path, permission\ndenied, etc.), returns an empty array — the function does not\ndistinguish \"empty directory\" from \"open failed\".\n\n# Examples\n\n```\nfor entry in listDir(path: \"/tmp\") {\n    print(entry);\n}\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "mkdir",
       "anchor": "function-mkdir",
-      "signature": "public func mkdir(String) -> Result[(), Error]",
-      "doc": "Creates a directory at the given path.",
+      "signature": "public func mkdir(String) -> Result[(), IoError]",
+      "doc": "Creates a single directory at `path` with mode `0o755`.\n\nWraps `mkdir(2)`. Fails if `path` already exists or any parent\ncomponent is missing — use `mkdirAll` to create intermediate\ndirectories.\n\n# Errors\n\nReturns `Err(IoError)` on any libc failure; `errno` is captured and\nsurfaced via the error's `kind`. Common cases: `EEXIST` (path exists),\n`ENOENT` (missing parent), `EACCES` (permission denied).\n\n# Examples\n\n```\nmatch mkdir(path: \"/tmp/foo\") {\n    .Ok(_)  => print(\"created\"),\n    .Err(e) => print(e.message)\n}\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "mkdirAll",
       "anchor": "function-mkdirAll",
-      "signature": "public func mkdirAll(String) -> Result[(), Error]",
-      "doc": "Creates a directory and all parent directories as needed.",
+      "signature": "public func mkdirAll(String) -> Result[(), IoError]",
+      "doc": "Creates `path` and any missing parent directories.\n\nWalks back from the deepest non-existent component, recursing on\nthe parent first. If `path` already exists and is a directory, the\ncall is a no-op success; if it exists and is **not** a directory,\nreturns `Err(IoError(kind: .AlreadyExists))` (`EEXIST`) without disturbing the file.\nEach created intermediate uses the default mode `0o755`.\n\n# Errors\n\nForwards any `mkdir` failure verbatim. Specific to this function:\n`Err(IoError(kind: .AlreadyExists))` when `path` exists as a non-directory.\n\n# Examples\n\n```\nmkdirAll(path: \"/tmp/foo/bar/baz\");  // creates all three levels\n```",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "readlink",
       "anchor": "function-readlink",
-      "signature": "public func readlink(String) -> Result[String, Error]",
-      "doc": "Reads the target of a symbolic link.",
+      "signature": "public func readlink(String) -> Result[String, IoError]",
+      "doc": "Returns the target stored in the symlink at `path`.\n\nWraps `readlink(2)` with a 1 KiB buffer. `readlink` does not null-\nterminate, so this function copies exactly the returned byte\ncount into the result string. Targets longer than 1 KiB are\nsilently truncated — the syscall returns a partial result rather\nthan failing.\n\n# Errors\n\nReturns `Err(IoError)` if `path` is not a symlink (`EINVAL`),\nmissing (`ENOENT`), or any other libc failure.",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "remove",
       "anchor": "function-remove",
-      "signature": "public func remove(String) -> Result[(), Error]",
-      "doc": "Deletes a file.",
+      "signature": "public func remove(String) -> Result[(), IoError]",
+      "doc": "Deletes the file at `path`.\n\nWraps `unlink(2)`. Does not work on directories — use `removeDir`\nfor those. If `path` is the last link to an open file, the file's\nblocks remain allocated until every descriptor is closed.\n\n# Errors\n\nReturns `Err(IoError)` on any libc failure; `errno` is captured.",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "removeDir",
       "anchor": "function-removeDir",
-      "signature": "public func removeDir(String) -> Result[(), Error]",
-      "doc": "Removes an empty directory.",
+      "signature": "public func removeDir(String) -> Result[(), IoError]",
+      "doc": "Removes an empty directory at `path`.\n\nWraps `rmdir(2)`. Fails with `ENOTEMPTY` if the directory still\nhas entries — list and remove its contents first if you need a\nrecursive remove.\n\n# Errors\n\nReturns `Err(IoError)` on any libc failure; `errno` is captured.",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "rename",
       "anchor": "function-rename",
-      "signature": "public func rename(String, String) -> Result[(), Error]",
-      "doc": "Renames or moves a file or directory.",
+      "signature": "public func rename(String, String) -> Result[(), IoError]",
+      "doc": "Renames or moves `from` to `to`.\n\nWraps `rename(2)`. Atomic within a single filesystem; cross-\nfilesystem moves return `EXDEV` and require a copy + delete\ninstead. If `to` exists, it is replaced (subject to type-match\nrules — file replaces file, directory replaces empty directory).\n\n# Errors\n\nReturns `Err(IoError)` on any libc failure; `errno` is captured.",
       "source_path": "lang/std/os/fs.ks"
     },
     {
       "kind": "function",
       "name": "symlink",
       "anchor": "function-symlink",
-      "signature": "public func symlink(String, String) -> Result[(), Error]",
-      "doc": "Creates a symbolic link at linkPath pointing to target.",
+      "signature": "public func symlink(String, String) -> Result[(), IoError]",
+      "doc": "Creates a symbolic link at `path` pointing to `target`.\n\nWraps `symlink(2)`. The target is stored verbatim — it is not\nresolved or validated, so dangling links are allowed and relative\ntargets resolve relative to the directory containing the link.\n\n# Errors\n\nReturns `Err(IoError)` on any libc failure; `errno` is captured.",
       "source_path": "lang/std/os/fs.ks"
     }
   ]

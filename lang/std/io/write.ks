@@ -229,7 +229,7 @@ public func writeStr[W](mutating writer: W, s: String) -> Result[(), IoError] wh
     // Note: String stores bytes internally, we need to access them
     var i: Int64 = 0;
     while i < byteCount {
-        let byte = s.byteAtUnchecked(i);
+        let byte = s.bytes(unchecked: i);
         try writeByte(writer, byte);
         i = i + 1
     };

@@ -63,10 +63,10 @@ public func percentDecode(s: String) -> String {
     let len = s.byteCount;
     var i: Int64 = 0;
     while i < len {
-        let byte = s.byteAtUnchecked(i);
+        let byte = s.bytes(unchecked: i);
         if byte == 37 and i + 2 < len { // '%'
-            let hi = hexDigit(s.byteAtUnchecked(i + 1));
-            let lo = hexDigit(s.byteAtUnchecked(i + 2));
+            let hi = hexDigit(s.bytes(unchecked: i + 1));
+            let lo = hexDigit(s.bytes(unchecked: i + 2));
             if hi >= 0 and lo >= 0 {
                 let decoded = hi * 16 + lo;
                 result.appendByte(UInt8(from: decoded));

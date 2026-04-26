@@ -99,7 +99,7 @@ public struct File: Read, Write, not Copyable {
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
-            pathBuf.append(path.byteAtUnchecked(i));
+            pathBuf.append(path.bytes(unchecked: i));
             i = i + 1
         }
         pathBuf.append(0); // null terminator
@@ -125,7 +125,7 @@ public struct File: Read, Write, not Copyable {
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
-            pathBuf.append(path.byteAtUnchecked(i));
+            pathBuf.append(path.bytes(unchecked: i));
             i = i + 1
         }
         pathBuf.append(0);
@@ -147,7 +147,7 @@ public struct File: Read, Write, not Copyable {
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
-            pathBuf.append(path.byteAtUnchecked(i));
+            pathBuf.append(path.bytes(unchecked: i));
             i = i + 1
         }
         pathBuf.append(0);
@@ -168,7 +168,7 @@ public struct File: Read, Write, not Copyable {
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
-            pathBuf.append(path.byteAtUnchecked(i));
+            pathBuf.append(path.bytes(unchecked: i));
             i = i + 1
         }
         pathBuf.append(0);
@@ -201,7 +201,7 @@ public struct File: Read, Write, not Copyable {
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
-            pathBuf.append(path.byteAtUnchecked(i));
+            pathBuf.append(path.bytes(unchecked: i));
             i = i + 1
         }
         pathBuf.append(0);

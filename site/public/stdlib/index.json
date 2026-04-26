@@ -8,12 +8,12 @@
     {
       "path": "std.collections",
       "name": "collections",
-      "item_count": 256
+      "item_count": 252
     },
     {
       "path": "std.core",
       "name": "core",
-      "item_count": 246
+      "item_count": 294
     },
     {
       "path": "std.ffi",
@@ -28,7 +28,7 @@
     {
       "path": "std.io.error",
       "name": "error",
-      "item_count": 13
+      "item_count": 33
     },
     {
       "path": "std.io.file",
@@ -63,7 +63,7 @@
     {
       "path": "std.memory",
       "name": "memory",
-      "item_count": 96
+      "item_count": 100
     },
     {
       "path": "std.net",
@@ -83,7 +83,7 @@
     {
       "path": "std.num",
       "name": "num",
-      "item_count": 1038
+      "item_count": 1122
     },
     {
       "path": "std.os",
@@ -113,7 +113,7 @@
     {
       "path": "std.text",
       "name": "text",
-      "item_count": 265
+      "item_count": 274
     },
     {
       "path": "std.text.unicode",

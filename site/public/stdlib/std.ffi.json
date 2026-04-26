@@ -8,7 +8,7 @@
       "name": "CString",
       "anchor": "struct-CString",
       "signature": "public struct CString { /* private fields */ }",
-      "doc": "A null-terminated C string suitable for FFI.\n\nCString is an unsafe, non-owning wrapper around a pointer to null-terminated bytes.\nIt does NOT manage memory - the caller is responsible for ensuring the pointer\nremains valid for the lifetime of the CString and for freeing memory when appropriate.\n\nConforms to FFISafe, so it can be used as a parameter or return type\nin @extern(.C) function declarations.\n\n# Safety\n\n- The pointer must remain valid for the lifetime of the CString\n- The pointer must point to null-terminated memory\n- The length must match the actual string length (excluding null terminator)\n- Caller is responsible for memory allocation and deallocation",
+      "doc": "A null-terminated, non-owning byte pointer suitable for `@extern(.C)` boundaries.\n\n`CString` is an FFI shim — it carries a `Pointer[UInt8]` that\nthe C side will treat as `const char *`, but it does **not** own\nthe memory. The pointer's lifetime, validity, and disposal are\nentirely the caller's responsibility. Two common ownership\npatterns: (1) the C side returns a pointer into static or\n`environ` memory — wrap it in a `CString` and read, but never\nfree; (2) the Kestrel side allocates via `String.toCString()` —\nthe caller must `free()` the result.\n\n# Examples\n\n```\n@extern(.C, mangleName: \"puts\")\nfunc puts(s: CString) -> Int32\n\nlet cstr = \"Hello, C!\".toCString();\nlet _ = puts(cstr);\ncstr.free();\n```\n\n# Safety\n\n- The pointer must remain valid for as long as the `CString` is used.\n- The pointed-to bytes must end with a `0` terminator.\n- `length` is computed by scanning to the terminator — quadratic\n  if you build long strings by repeated reads of `length`.\n- The caller chooses whether `free()` is appropriate (yes for\n  self-allocated, no for borrowed pointers).\n\n# Representation\n\nA single `Pointer[UInt8]` field. No length is cached.\n\n# Memory Model\n\nNon-owning. Conforms to `FFISafe` so it passes through\n`@extern(.C)` signatures unchanged.",
       "source_path": "lang/std/ffi/cstring.ks",
       "member_groups": [
         {
@@ -17,19 +17,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Pointer",
+              "anchor": "initializer-From-Pointer",
+              "signature": "public init(raw: Pointer[UInt8])",
+              "doc": "Wraps an existing pointer as a `CString`.\n\nPerforms no validation — the caller affirms that the pointer\nis null or points at null-terminated memory.\n\n# Safety\n\n- `rawPtr` must be null or point at a null-terminated byte\n  sequence.\n- The pointed-to bytes must remain valid for the lifetime of\n  the `CString`.\n- The caller decides whether `free()` is later appropriate.",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
               "kind": "function",
               "name": "free",
               "anchor": "function-free",
               "signature": "public func free()",
-              "doc": "Frees the memory pointed to by this CString.\n\nWARNING: This is unsafe. Only call this if you allocated the memory\nyourself (e.g., via toCString()). Do not call on CStrings wrapping\nexternal pointers unless you know it's safe to free them.\n\nAfter calling free(), the CString should not be used.",
-              "source_path": "lang/std/ffi/cstring.ks"
-            },
-            {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(raw: Pointer[UInt8])",
-              "doc": "Creates a CString from a pointer.\n\nWARNING: This is unsafe. The caller is responsible for:\n- Ensuring the pointer is valid and remains valid\n- Ensuring the pointer points to null-terminated memory\n- Managing the memory lifecycle (allocation and deallocation)",
+              "doc": "Frees the buffer pointed to by this `CString` via libc `free`.\n\nNo-op when the pointer is null. After this call the `CString`\nis dangling — do not read its bytes or call any other method\nthat touches the pointer.\n\n# Safety\n\nOnly call this on `CString`s whose pointer was produced by a\nprior `malloc` (e.g. via `String.toCString()`). Calling on a\nborrowed pointer (returned by `getenv`, a string literal,\netc.) is undefined behaviour.",
               "source_path": "lang/std/ffi/cstring.ks"
             },
             {
@@ -37,7 +37,7 @@
               "name": "isNull",
               "anchor": "field-isNull",
               "signature": "public var isNull: Bool { get }",
-              "doc": "Returns true if this CString's pointer is null.",
+              "doc": "True if the wrapped pointer is null.\n\nA null `CString` should not be passed to a C function that\nexpects a string; check this before calling.",
               "source_path": "lang/std/ffi/cstring.ks"
             },
             {
@@ -45,7 +45,7 @@
               "name": "length",
               "anchor": "field-length",
               "signature": "public var length: Int64 { get }",
-              "doc": "The length of the string in bytes (not including the null terminator).\nComputed by scanning for the null terminator.",
+              "doc": "Length of the string in bytes, **excluding** the null terminator.\n\nComputed by linear scan — O(n). Cache the result if you\nneed it more than once. Returns `0` for a null pointer\n(defensive: avoids dereferencing).",
               "source_path": "lang/std/ffi/cstring.ks"
             },
             {
@@ -65,7 +65,7 @@
       "name": "FFISafe",
       "anchor": "protocol-FFISafe",
       "signature": "public protocol FFISafe",
-      "doc": "Marker protocol for types that can safely cross FFI boundaries.\nTypes must have a well-defined memory layout compatible with C.\nPrimitive types and pointers to FFISafe types conform automatically.\nCustom structs can conform if all their fields are FFISafe.",
+      "doc": "Marker protocol for types that can cross an `@extern(.C)` boundary.\n\n`FFISafe` is empty — conformance is purely a contract that the\ntype's in-memory layout matches what a C function expects.\nConformance is *not* automatically transitive at the type level:\nthe compiler checks `FFISafe` constraints separately on each\ngeneric instantiation. The conformance rules:\n\n  - Primitive numeric types and `Bool` conform automatically.\n  - `Pointer[T]` conforms iff `T: FFISafe`.\n  - Tuples of `FFISafe` types conform.\n  - User structs may opt in (`struct Foo: FFISafe`); every field\n    must itself be `FFISafe`.\n\nString and other heap-managed types do **not** conform — convert\nat the boundary with `String.toCString()` and pass `CString`.\n\n# Examples\n\n```\nstruct Point: FFISafe { var x: Int32; var y: Int32 }\n\n@extern(.C, mangleName: \"process_point\")\nfunc processPoint(p: Point) -> Int32\n```",
       "source_path": "lang/std/ffi/ffi.ks"
     },
     {
@@ -81,7 +81,7 @@
       "name": "malloc",
       "anchor": "function-malloc",
       "signature": "public func malloc(consuming lang.i64) -> lang.ptr[lang.i8]",
-      "doc": "Allocates size bytes of uninitialized memory.\nReturns a pointer to the allocated memory, or null on failure.",
+      "doc": "Wraps `malloc(3)` — allocates `size` bytes of uninitialised memory.\n\nReturns a pointer to the start of the block, or null on failure.\nThe memory is **uninitialised** — read it only after writing\nevery byte you intend to use, or follow up with `memset` /\n`calloc` (not exposed here). Free with `free`.\n\n# Safety\n\nThe returned pointer is raw. Callers are responsible for not\nreading uninitialised bytes, not exceeding `size`, and pairing\nevery successful call with exactly one `free`.\n\n# Examples\n\n```\nlet buf = malloc(1024);\n// ... use buf ...\nfree(buf);\n```",
       "source_path": "lang/std/ffi/libc.ks"
     },
     {
@@ -113,7 +113,7 @@
       "name": "realloc",
       "anchor": "function-realloc",
       "signature": "public func realloc(consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
-      "doc": "Changes the size of a memory block.\nReturns a pointer to the reallocated memory, or null on failure.\nThe original pointer becomes invalid after this call.",
+      "doc": "Wraps `realloc(3)` — resizes a previously-`malloc`'d block.\n\nMay return the same pointer or a new one; either way, the original\npointer becomes invalid. Returns null on failure, in which case\nthe original block is **not** freed — capture the return value\nbefore reassigning. Bytes beyond the old size in a grown block\nare uninitialised.\n\n# Safety\n\n`ptr` must be null or a pointer from a previous `malloc` /\n`realloc`. After a successful call, only the returned pointer is\nvalid; after a failed call, only the original pointer is valid.\n\n# Examples\n\n```\nvar buf = malloc(64);\nlet bigger = realloc(buf, 256);\n// buf is no longer valid; use bigger\n```",
       "source_path": "lang/std/ffi/libc.ks"
     }
   ]

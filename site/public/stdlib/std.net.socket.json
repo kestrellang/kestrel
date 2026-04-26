@@ -8,7 +8,7 @@
       "name": "TcpListener",
       "anchor": "struct-TcpListener",
       "signature": "public struct TcpListener { /* private fields */ }",
-      "doc": "",
+      "doc": "A bound, listening TCP server socket.\n\nCreated by `TcpListener.bind(port:)` — sets `SO_REUSEADDR`,\nbinds to `INADDR_ANY:port`, and calls `listen(2)` with backlog\n`128`. Accept connections via `accept()`, which blocks until\nthe next client arrives. The owned fd is closed by the deinit.\n\n# Examples\n\n```\nlet listener = match TcpListener.bind(port: UInt16(intLiteral: 8080)) {\n    .Ok(l) => l,\n    .Err(e) => return .Err(e)\n};\nwhile true {\n    match listener.accept() {\n        .Ok(stream) => /* handle stream */ {},\n        .Err(e) => break\n    }\n}\n```\n\n# Representation\n\nA single `Int32` field — the listening socket fd.\n\n# Memory Model\n\nOwns its fd; closed on drop.",
       "source_path": "lang/std/net/socket.ks",
       "member_groups": [
         {
@@ -17,19 +17,27 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Fd",
+              "anchor": "initializer-From-Fd",
+              "signature": "init(Int32)",
+              "doc": "Internal — wraps an existing fd. Callers should use `bind(port:)`.",
+              "source_path": "lang/std/net/socket.ks"
+            },
+            {
               "kind": "function",
               "name": "accept",
               "anchor": "function-accept",
-              "signature": "public func accept() -> Result[TcpStream, Error]",
-              "doc": "",
+              "signature": "public func accept() -> Result[TcpStream, IoError]",
+              "doc": "Blocks until the next client connects, then returns it as a `TcpStream`.\n\nDiscards the client's address — pass non-null pointers to\n`libc.accept` directly if you need it. Each accepted\nconnection has its own fd, independent of the listener.\n\n# Errors\n\nReturns `Err(IoError.last())` if `accept(2)` fails — common\ncauses include `EINTR` (interrupted by signal) and\n`EMFILE` (per-process fd limit).",
               "source_path": "lang/std/net/socket.ks"
             },
             {
               "kind": "function",
               "name": "bind",
               "anchor": "function-bind",
-              "signature": "public static func bind(UInt16) -> Result[TcpListener, Error]",
-              "doc": "",
+              "signature": "public static func bind(UInt16) -> Result[TcpListener, IoError]",
+              "doc": "Creates a server socket bound to `0.0.0.0:port` with `SO_REUSEADDR` and a backlog of 128.\n\nWalks the full setup — `socket` → `setsockopt` → `bind` →\n`listen` — and cleans up the partial fd on any failure.\n\n# Errors\n\nReturns `Err(IoError.last())` (captured `errno`) at any of the\nfour steps; the most common case is `EADDRINUSE` if another\nprocess holds the port and `SO_REUSEADDR` is not enough.\n\n# Examples\n\n```\nlet listener = TcpListener.bind(port: UInt16(intLiteral: 8080));\n```",
               "source_path": "lang/std/net/socket.ks"
             },
             {
@@ -41,19 +49,11 @@
               "source_path": "lang/std/net/socket.ks"
             },
             {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "init(Int32)",
-              "doc": "",
-              "source_path": "lang/std/net/socket.ks"
-            },
-            {
               "kind": "function",
               "name": "rawFd",
               "anchor": "function-rawFd",
               "signature": "public func rawFd() -> Int32",
-              "doc": "",
+              "doc": "Returns the underlying listening fd without giving up ownership.",
               "source_path": "lang/std/net/socket.ks"
             }
           ]
@@ -65,7 +65,7 @@
       "name": "TcpStream",
       "anchor": "struct-TcpStream",
       "signature": "public struct TcpStream { /* private fields */ }",
-      "doc": "",
+      "doc": "A connected TCP byte stream — implements `Read` and `Write` on top of a POSIX socket fd.\n\nReturned by `TcpListener.accept()` (server side) and\n`TcpStream.connect(host:port:)` (client side). Reads and writes\ngo directly through `recv(2)` / `send(2)`; partial reads/writes\nare surfaced — the caller is responsible for looping. The owned\nfd is closed automatically by the deinit unless `detachFd` has\nbeen called first.\n\n# Examples\n\n```\nvar stream = match TcpStream.connect(host: \"example.com\", port: UInt16(intLiteral: 80)) {\n    .Ok(s) => s,\n    .Err(e) => return .Err(e)\n};\n// stream is Read + Write\n```\n\n# Representation\n\nA single `Int32` field holding the file descriptor; `-1` means\n\"detached, do not close on drop\".\n\n# Memory Model\n\nOwns its fd. Cloning is not provided — duplicate explicitly via\n`dup(2)` if you need it.",
       "source_path": "lang/std/net/socket.ks",
       "member_groups": [
         {
@@ -74,11 +74,19 @@
           "source_path": null,
           "members": [
             {
+              "kind": "initializer",
+              "name": "From Fd",
+              "anchor": "initializer-From-Fd",
+              "signature": "public init(Int32)",
+              "doc": "Wraps an existing socket fd as a `TcpStream`.\n\nThe stream takes ownership; the deinit will close the fd.\nCallers obtaining the fd from `accept` / `socket` should\nhand it over and stop using it directly.",
+              "source_path": "lang/std/net/socket.ks"
+            },
+            {
               "kind": "function",
               "name": "connect",
               "anchor": "function-connect",
-              "signature": "public static func connect(String, UInt16) -> Result[TcpStream, Error]",
-              "doc": "Connects to a remote host and port, returning a TcpStream.\nUses getaddrinfo for DNS resolution.",
+              "signature": "public static func connect(String, UInt16) -> Result[TcpStream, IoError]",
+              "doc": "Resolves `host`:`port` and returns a connected `TcpStream`.\n\nUses `getaddrinfo` for resolution and tries the first result.\nConstrained to IPv4 / TCP via the `hints` block. On any\nfailure the partially-built fd is closed and the resolver\nlist is freed before returning. Does not currently fall\nthrough to the next `addrinfo` entry on a failed\n`connect` — try one address.\n\n# Errors\n\n- Returns `Err(IoError(code: eai))` with the `EAI_*` resolver code if\n  `getaddrinfo` fails (note: this is a libc resolver code,\n  not an `errno`).\n- Returns `Err(IoError.last())` from `errno` if `socket()` or\n  `connect()` fail.\n\n# Examples\n\n```\nmatch TcpStream.connect(host: \"example.com\", port: UInt16(intLiteral: 80)) {\n    .Ok(stream) => /* use stream */ {},\n    .Err(e) => print(e.message)\n}\n```",
               "source_path": "lang/std/net/socket.ks"
             },
             {
@@ -86,7 +94,7 @@
               "name": "detachFd",
               "anchor": "function-detachFd",
               "signature": "public mutating func detachFd() -> Int32",
-              "doc": "Returns the file descriptor and detaches it from this stream.\nAfter calling this, the TcpStream will NOT close the fd on destruction.",
+              "doc": "Releases ownership of the fd and returns it.\n\nSets the internal fd to `-1` so the deinit becomes a no-op.\nThe caller takes responsibility for closing the returned fd.\nUse this when handing the fd to another owner (e.g. an event\nloop or a child process).",
               "source_path": "lang/std/net/socket.ks"
             },
             {
@@ -98,19 +106,11 @@
               "source_path": "lang/std/net/socket.ks"
             },
             {
-              "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(Int32)",
-              "doc": "",
-              "source_path": "lang/std/net/socket.ks"
-            },
-            {
               "kind": "function",
               "name": "rawFd",
               "anchor": "function-rawFd",
               "signature": "public func rawFd() -> Int32",
-              "doc": "",
+              "doc": "Returns the underlying fd without giving up ownership.\n\nUseful for passing the fd to syscalls that the wrapper does\nnot expose (`fcntl`, `setsockopt`, …). Do not close it\nyourself — the deinit still will.",
               "source_path": "lang/std/net/socket.ks"
             }
           ]
@@ -124,8 +124,8 @@
               "kind": "function",
               "name": "read",
               "anchor": "function-read",
-              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, Error]",
-              "doc": "",
+              "signature": "public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]",
+              "doc": "Reads up to `buf.count` bytes into `buf`. Returns the byte count actually read.\n\n`0` indicates the peer closed the connection cleanly. Required\nby the `Read` protocol.\n\n# Errors\n\nReturns `Err(IoError)` from the captured `errno` if `recv`\nreturns `-1`.",
               "source_path": "lang/std/net/socket.ks"
             }
           ]
@@ -139,16 +139,16 @@
               "kind": "function",
               "name": "flush",
               "anchor": "function-flush",
-              "signature": "public mutating func flush() -> Result[(), Error]",
-              "doc": "",
+              "signature": "public mutating func flush() -> Result[(), IoError]",
+              "doc": "No-op — TCP sockets do not have an application-level write buffer.\n\nAlways returns `Ok(())`. Provided to satisfy the `Write`\nprotocol so generic writers can call `flush` unconditionally.",
               "source_path": "lang/std/net/socket.ks"
             },
             {
               "kind": "function",
               "name": "write",
               "anchor": "function-write",
-              "signature": "public mutating func write(from: Slice[UInt8]) -> Result[Int64, Error]",
-              "doc": "",
+              "signature": "public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]",
+              "doc": "Writes up to `buf.count` bytes from `buf`. Returns the byte count actually written.\n\nMay write fewer bytes than requested under back-pressure;\nloop until the buffer is drained. Required by the `Write`\nprotocol.\n\n# Errors\n\nReturns `Err(IoError)` from the captured `errno` if `send`\nreturns `-1`.",
               "source_path": "lang/std/net/socket.ks"
             }
           ]

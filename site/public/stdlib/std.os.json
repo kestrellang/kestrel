@@ -12,7 +12,7 @@
       "name": "platform",
       "anchor": "function-platform",
       "signature": "public func platform() -> String",
-      "doc": "Returns the current platform identifier.",
+      "doc": "Returns a short identifier for the host operating system.\n\nOne of `\"darwin\"` or `\"linux\"` — the string is fixed at compile\ntime via `@platform` selection of two distinct definitions, so the\ncall is effectively a constant. Use this for one-off platform\nbranches; for repeated checks consider `@platform` on your own\nfunctions instead.\n\n# Examples\n\n```\nif platform() == \"darwin\" {\n    // macOS-specific path\n}\n```",
       "source_path": "lang/std/os/platform.ks"
     }
   ]

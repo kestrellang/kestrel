@@ -24,7 +24,7 @@ import std.collections.(Array)
 /// # Examples
 ///
 /// ```
-/// var it = "hi".bytes().iter();
+/// var it = "hi".bytes.iter();
 /// it.next();  // Some(104)  // 'h'
 /// it.next();  // Some(105)  // 'i'
 /// it.next();  // None
@@ -50,7 +50,7 @@ public struct BytesIterator: Iterator {
     /// @name From Pointer
     /// Constructs a bytes iterator from a raw pointer, total byte count, and starting offset.
     ///
-    /// Prefer `String.bytes().iter()` over calling this directly.
+    /// Prefer `String.bytes.iter()` over calling this directly.
     ///
     /// # Safety
     ///
@@ -91,7 +91,7 @@ public struct BytesIterator: Iterator {
 ///
 /// ```
 /// let s = "hi";
-/// s.bytes().count;               // 2
+/// s.bytes.count;               // 2
 /// s.bytes(checked: 0);         // Some(104)
 /// s.bytes(checked: 5);         // None (out of bounds)
 /// ```
@@ -212,7 +212,7 @@ public struct BytesView: Iterable {
 /// # Examples
 ///
 /// ```
-/// var it = "hi".chars().iter();
+/// var it = "hi".chars.iter();
 /// it.next();  // Some('h')
 /// it.next();  // Some('i')
 /// it.next();  // None
@@ -238,7 +238,7 @@ public struct CharsIterator: Iterator {
     /// @name From Pointer
     /// Constructs a chars iterator from a raw pointer, byte length, and starting byte offset.
     ///
-    /// Prefer `String.chars().iter()` over calling this directly.
+    /// Prefer `String.chars.iter()` over calling this directly.
     ///
     /// # Safety
     ///
@@ -284,8 +284,8 @@ public struct CharsIterator: Iterator {
 ///
 /// ```
 /// let s = "héllo";
-/// s.chars().count;                  // 5 (code points)
-/// s.bytes().count;                  // 6 (bytes — 'é' is 2 bytes)
+/// s.chars.count;                  // 5 (code points)
+/// s.bytes.count;                  // 6 (bytes — 'é' is 2 bytes)
 /// s.chars(0..<4);                 // "héll"
 /// ```
 ///
@@ -554,7 +554,7 @@ public struct GraphemesIterator: Iterator {
 ///
 /// ```
 /// let flag = "\u{1F1FA}\u{1F1F8}";  // 🇺🇸
-/// flag.chars().count;        // 2 (regional indicators)
+/// flag.chars.count;        // 2 (regional indicators)
 /// flag.graphemes.count;    // 1 (one flag)
 /// ```
 ///
@@ -599,6 +599,79 @@ public struct GraphemesView: Iterable {
             n = n + Int64(intLiteral: 1)
         }
         n
+    }
+
+    /// @name Indexed Grapheme / Substring
+    /// `Int64` reads a single cluster; `Range[Int64]` /
+    /// `ClosedRange[Int64]` read a substring across cluster
+    /// boundaries. **O(n)** — walks the segmenter from the start.
+    /// Panics on out-of-bounds.
+    public subscript[I](index: I) -> I.GraphemesYield where I: GraphemesIndex {
+        get { index.readGraphemes(from: self) }
+    }
+
+    /// @name Checked Index
+    /// Reads at `index`, returning `.None` on out-of-bounds.
+    public subscript[I](checked index: I) -> I.GraphemesYield? where I: GraphemesIndex {
+        get { index.readGraphemesChecked(from: self) }
+    }
+
+    /// @name Clamping
+    /// Reads at `index` saturated to `[0, count)`. Yields `Grapheme?`
+    /// (`.None` only when the view is empty).
+    public subscript[I](clamped index: I) -> I.GraphemesClampedYield where I: GraphemesClampable {
+        get { index.readGraphemesClamped(from: self) }
+    }
+
+    /// Internal: walk the segmenter to grapheme index `graphemeIndex`,
+    /// summing the UTF-8 byte length of each cluster. Returns the byte
+    /// offset of that grapheme's start and `true` if found, or
+    /// `(byteIdx, false)` for an out-of-range index. `graphemeIndex == 0`
+    /// returns `(0, true)`; `graphemeIndex == count` returns `(length, true)`.
+    fileprivate func _byteOffsetForGraphemeIndex(graphemeIndex graphemeIndex: Int64) -> (Int64, Bool) {
+        if graphemeIndex < Int64(intLiteral: 0) {
+            return (Int64(intLiteral: 0), false)
+        }
+        if graphemeIndex == Int64(intLiteral: 0) {
+            return (Int64(intLiteral: 0), true)
+        }
+        var gi: Int64 = Int64(intLiteral: 0);
+        var byteIdx: Int64 = Int64(intLiteral: 0);
+        var it = self.iter();
+        while true {
+            let next = it.next();
+            if let .Some(g) = next {
+                byteIdx = byteIdx + g.utf8Length();
+                gi = gi + Int64(intLiteral: 1);
+                if gi == graphemeIndex {
+                    return (byteIdx, true)
+                }
+            } else {
+                break
+            }
+        }
+        // graphemeIndex == count is a valid endpoint (one-past-the-end).
+        if gi == graphemeIndex {
+            (byteIdx, true)
+        } else {
+            (byteIdx, false)
+        }
+    }
+
+    /// Internal: build a `String` covering byte range `[startByte, endByte)`.
+    fileprivate func _substringFromByteRange(startByte startByte: Int64, endByte endByte: Int64) -> String {
+        let count = endByte - startByte;
+        if count <= Int64(intLiteral: 0) {
+            return String()
+        }
+        var result = String(capacity: count);
+        for i in startByte..<endByte {
+            let rawOffset: lang.i64 = i.raw;
+            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+            result.appendByte(UInt8(raw: signedByte))
+        }
+        result
     }
 }
 
@@ -1188,6 +1261,158 @@ extend ClosedRange[Int64]: CharsIndex {
         }
         let (startByte, foundStart) = view._byteOffsetForCharIndex(charIndex: s);
         let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: endExclusive);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+    }
+}
+
+// ============================================================================
+// GRAPHEMES VIEW INDEX PROTOCOLS
+// ============================================================================
+
+/// Stdlib-internal index types for `GraphemesView` subscripts.
+///
+/// `Int64` reads a single cluster (`Grapheme`); range types read a
+/// substring (`String`). All access is O(n) — every cluster boundary
+/// is found by walking the UAX #29 segmenter from the start.
+internal protocol GraphemesIndex {
+    type GraphemesYield
+    func readGraphemes(from view: GraphemesView) -> GraphemesYield
+    func readGraphemesChecked(from view: GraphemesView) -> GraphemesYield?
+}
+
+internal protocol GraphemesClampable {
+    type GraphemesClampedYield
+    func readGraphemesClamped(from view: GraphemesView) -> GraphemesClampedYield
+}
+
+// Internal: walk the segmenter to grapheme index `i` and return that
+// cluster, or `.None` if `i` is past the end (or negative).
+fileprivate func _graphemesViewAt(view view: GraphemesView, graphemeIndex graphemeIndex: Int64) -> Grapheme? {
+    if graphemeIndex < Int64(intLiteral: 0) {
+        return .None
+    }
+    var gi: Int64 = Int64(intLiteral: 0);
+    var it = view.iter();
+    while true {
+        let next = it.next();
+        if let .Some(g) = next {
+            if gi == graphemeIndex {
+                return .Some(g)
+            }
+            gi = gi + Int64(intLiteral: 1)
+        } else {
+            return .None
+        }
+    }
+    .None
+}
+
+extend Int64: GraphemesIndex {
+    type GraphemesYield = Grapheme
+
+    public func readGraphemes(from view: GraphemesView) -> Grapheme {
+        match _graphemesViewAt(view: view, graphemeIndex: self) {
+            .Some(g) => g,
+            .None => lang.panic("GraphemesView index out of bounds")
+        }
+    }
+
+    public func readGraphemesChecked(from view: GraphemesView) -> Grapheme? {
+        _graphemesViewAt(view: view, graphemeIndex: self)
+    }
+}
+
+extend Int64: GraphemesClampable {
+    type GraphemesClampedYield = Grapheme?
+
+    public func readGraphemesClamped(from view: GraphemesView) -> Grapheme? {
+        let n = view.count;
+        if n == Int64(intLiteral: 0) {
+            return .None
+        }
+        var idx = self;
+        if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
+        if idx >= n { idx = n - Int64(intLiteral: 1) }
+        _graphemesViewAt(view: view, graphemeIndex: idx)
+    }
+}
+
+extend Range[Int64]: GraphemesIndex {
+    type GraphemesYield = String
+
+    public func readGraphemes(from view: GraphemesView) -> String {
+        let s = self.start;
+        let e = self.end;
+        if s < Int64(intLiteral: 0) or s > e {
+            lang.panic("GraphemesView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        if foundStart == false or foundEnd == false {
+            lang.panic("GraphemesView range out of bounds")
+        }
+        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+    }
+
+    public func readGraphemesChecked(from view: GraphemesView) -> String? {
+        let s = self.start;
+        let e = self.end;
+        if s < Int64(intLiteral: 0) or s > e {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend Range[Int64]: GraphemesClampable {
+    type GraphemesClampedYield = String
+
+    public func readGraphemesClamped(from view: GraphemesView) -> String {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end;
+        if s < Int64(intLiteral: 0) { s = Int64(intLiteral: 0) }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend ClosedRange[Int64]: GraphemesIndex {
+    type GraphemesYield = String
+
+    public func readGraphemes(from view: GraphemesView) -> String {
+        let s = self.start;
+        let endExclusive = self.end + Int64(intLiteral: 1);
+        if s < Int64(intLiteral: 0) or s > endExclusive {
+            lang.panic("GraphemesView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: endExclusive);
+        if foundStart == false or foundEnd == false {
+            lang.panic("GraphemesView range out of bounds")
+        }
+        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+    }
+
+    public func readGraphemesChecked(from view: GraphemesView) -> String? {
+        let s = self.start;
+        let endExclusive = self.end + Int64(intLiteral: 1);
+        if s < Int64(intLiteral: 0) or s > endExclusive {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: endExclusive);
         if foundStart == false or foundEnd == false {
             return .None
         }

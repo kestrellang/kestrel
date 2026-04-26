@@ -1253,6 +1253,15 @@ impl WorldResolver<'_> {
     /// Check if a callable's parameter labels match the given argument labels.
     /// Handles arity with default parameters.
     fn matches_labels(&self, entity: Entity, arg_labels: &[Option<&str>]) -> bool {
+        // Fields and computed properties carry `Callable { params: [] }` for
+        // the getter's signature, but for member-resolution purposes they are
+        // value accesses, not function calls. Trailing `(args)` after a
+        // property is the property's value being called/subscripted — which
+        // the solver handles in the field-as-call path. Match any args here
+        // and let downstream dispatch decide.
+        if self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::Field) {
+            return true;
+        }
         let Some(callable) = self.ctx.get::<Callable>(entity) else {
             // Non-callable members (fields, properties) match if no args
             return arg_labels.is_empty();
@@ -1288,6 +1297,11 @@ impl WorldResolver<'_> {
     /// solver handles the "field used as call" pattern (e.g., `self.data(idx)`
     /// where `data: Array[T]` and `(idx)` is an Array subscript) downstream.
     fn matches_arity(&self, entity: Entity, arg_count: usize) -> bool {
+        // See matches_labels: fields/properties are value accesses regardless
+        // of the synthesized 0-arity Callable on computed properties.
+        if self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::Field) {
+            return true;
+        }
         let Some(callable) = self.ctx.get::<Callable>(entity) else {
             return true;
         };

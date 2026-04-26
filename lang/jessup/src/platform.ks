@@ -87,7 +87,7 @@ func trimWhitespace(s: String) -> String {
     let len = s.byteCount;
     var end = len;
     while end > 0 {
-        let b = s.byteAtUnchecked(end - 1);
+        let b = s.bytes(unchecked: end - 1);
         // space=32, tab=9, newline=10, carriage return=13
         if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1

@@ -809,10 +809,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Float Literal",
+              "anchor": "initializer-Float-Literal",
               "signature": "init(floatLiteral: lang.f64)",
-              "doc": "Creates an instance from a floating-point literal.",
+              "doc": "Builds an instance from a floating-point literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -824,10 +824,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -839,10 +839,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -854,10 +854,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -1662,10 +1662,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Float Literal",
+              "anchor": "initializer-Float-Literal",
               "signature": "init(floatLiteral: lang.f64)",
-              "doc": "Creates an instance from a floating-point literal.",
+              "doc": "Builds an instance from a floating-point literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1677,10 +1677,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -1692,10 +1692,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -1707,10 +1707,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -1900,6 +1900,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> Int16?",
+              "doc": "Reassembles a `Int16` from 2 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 2 bytes long.",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int16?",
+              "doc": "Reassembles a `Int16` from 2 bytes in big-endian order.\nReturns `None` if the input is not exactly 2 bytes long.",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int16?",
+              "doc": "Reassembles a `Int16` from 2 bytes in little-endian order.\nReturns `None` if the input is not exactly 2 bytes long.",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(Int16) -> Int16",
@@ -2012,6 +2036,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> Int16?",
+              "doc": "Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are\ncase-insensitive and represent digit values 10–35. Returns `None`\nfor an out-of-range radix, an empty string, an unrecognised digit,\nor a value that overflows `Int16`.\n\n# Examples\n\n```\nInt16.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nInt16.parse(string: \"101010\", radix: 2);  // Some(42)\nInt16.parse(string: \"z\", radix: 36);      // Some(35)\n```",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> Int16",
@@ -2067,6 +2099,30 @@
               "source_path": "lang/std/num/int16.ks"
             },
             {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 2 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = Int16.maxValue.toBytes();   // 2 bytes, host order\n```",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 2 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 2 bytes in little-endian order (least\nsignificant byte first).",
+              "source_path": "lang/std/num/int16.ks"
+            },
+            {
               "kind": "field",
               "name": "trailingZeros",
               "anchor": "field-trailingZeros",
@@ -2086,7 +2142,7 @@
               "name": "abs",
               "anchor": "function-abs",
               "signature": "public func abs() -> Int16",
-              "doc": "",
+              "doc": "Absolute value. Wraps at the minimum value\n(`Int16.minValue.abs() == Int16.minValue`); use\n`absChecked` if that's a problem.",
               "source_path": "lang/std/num/int16.ks"
             }
           ]
@@ -2442,7 +2498,7 @@
               "name": "negate",
               "anchor": "function-negate",
               "signature": "public func negate() -> Int16",
-              "doc": "",
+              "doc": "Two's-complement negation. Wraps at the minimum value:\n`Int16.minValue.negate() == Int16.minValue`. Use\n`negateChecked` to surface the overflow.",
               "source_path": "lang/std/num/int16.ks"
             }
           ]
@@ -2742,10 +2798,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -2757,10 +2813,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -2818,10 +2874,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -3003,6 +3059,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> Int32?",
+              "doc": "Reassembles a `Int32` from 4 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 4 bytes long.",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int32?",
+              "doc": "Reassembles a `Int32` from 4 bytes in big-endian order.\nReturns `None` if the input is not exactly 4 bytes long.",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int32?",
+              "doc": "Reassembles a `Int32` from 4 bytes in little-endian order.\nReturns `None` if the input is not exactly 4 bytes long.",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(Int32) -> Int32",
@@ -3115,6 +3195,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> Int32?",
+              "doc": "Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are\ncase-insensitive and represent digit values 10–35. Returns `None`\nfor an out-of-range radix, an empty string, an unrecognised digit,\nor a value that overflows `Int32`.\n\n# Examples\n\n```\nInt32.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nInt32.parse(string: \"101010\", radix: 2);  // Some(42)\nInt32.parse(string: \"z\", radix: 36);      // Some(35)\n```",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> Int32",
@@ -3170,6 +3258,30 @@
               "source_path": "lang/std/num/int32.ks"
             },
             {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 4 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = Int32.maxValue.toBytes();   // 4 bytes, host order\n```",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 4 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 4 bytes in little-endian order (least\nsignificant byte first).",
+              "source_path": "lang/std/num/int32.ks"
+            },
+            {
               "kind": "field",
               "name": "trailingZeros",
               "anchor": "field-trailingZeros",
@@ -3189,7 +3301,7 @@
               "name": "abs",
               "anchor": "function-abs",
               "signature": "public func abs() -> Int32",
-              "doc": "",
+              "doc": "Absolute value. Wraps at the minimum value\n(`Int32.minValue.abs() == Int32.minValue`); use\n`absChecked` if that's a problem.",
               "source_path": "lang/std/num/int32.ks"
             }
           ]
@@ -3545,7 +3657,7 @@
               "name": "negate",
               "anchor": "function-negate",
               "signature": "public func negate() -> Int32",
-              "doc": "",
+              "doc": "Two's-complement negation. Wraps at the minimum value:\n`Int32.minValue.negate() == Int32.minValue`. Use\n`negateChecked` to surface the overflow.",
               "source_path": "lang/std/num/int32.ks"
             }
           ]
@@ -3845,10 +3957,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -3860,10 +3972,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -3921,10 +4033,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -4109,7 +4221,7 @@
               "name": "fromBytes",
               "anchor": "function-fromBytes",
               "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> Int64?",
-              "doc": "Reassembles an `Int64` from 8 bytes in native (host) byte order.\nReturns `None` if the input is not exactly 8 bytes long.\n\n# Examples\n\n```\nInt64.fromBytes(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);\n```",
+              "doc": "Reassembles a `Int64` from 8 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 8 bytes long.",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4117,7 +4229,7 @@
               "name": "fromBytesBigEndian",
               "anchor": "function-fromBytesBigEndian",
               "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int64?",
-              "doc": "Reassembles an `Int64` from 8 bytes in big-endian order. Returns\n`None` if the input is not exactly 8 bytes long.\n\n# Examples\n\n```\nInt64.fromBytesBigEndian(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);\n```",
+              "doc": "Reassembles a `Int64` from 8 bytes in big-endian order.\nReturns `None` if the input is not exactly 8 bytes long.",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4125,7 +4237,7 @@
               "name": "fromBytesLittleEndian",
               "anchor": "function-fromBytesLittleEndian",
               "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int64?",
-              "doc": "Reassembles an `Int64` from 8 bytes in little-endian order. Returns\n`None` if the input is not exactly 8 bytes long.\n\n# Examples\n\n```\nInt64.fromBytesLittleEndian(bytes: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);\n```",
+              "doc": "Reassembles a `Int64` from 8 bytes in little-endian order.\nReturns `None` if the input is not exactly 8 bytes long.",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4245,7 +4357,7 @@
               "name": "parse",
               "anchor": "function-parse",
               "signature": "public static func parse(String, Int64) -> Int64?",
-              "doc": "Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are\ncase-insensitive and represent digit values 10–35. Returns `None`\nfor an out-of-range radix, an empty string, an unrecognised digit,\nor a value that overflows `Int64`.\n\n# Examples\n\n```\nInt64.parse(string: \"ff\", radix: 16);     // Some(255)\nInt64.parse(string: \"FF\", radix: 16);     // Some(255)\nInt64.parse(string: \"101010\", radix: 2);  // Some(42)\nInt64.parse(string: \"z\", radix: 36);      // Some(35)\n```",
+              "doc": "Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are\ncase-insensitive and represent digit values 10–35. Returns `None`\nfor an out-of-range radix, an empty string, an unrecognised digit,\nor a value that overflows `Int64`.\n\n# Examples\n\n```\nInt64.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nInt64.parse(string: \"101010\", radix: 2);  // Some(42)\nInt64.parse(string: \"z\", radix: 36);      // Some(35)\n```",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4309,7 +4421,7 @@
               "name": "toBytes",
               "anchor": "function-toBytes",
               "signature": "public func toBytes() -> std.collections.Array[UInt8]",
-              "doc": "Splits this integer into 8 bytes in *native* (host) byte order. Use\n`toBytesBigEndian` / `toBytesLittleEndian` when serialising for a\nfixed wire format.\n\n# Examples\n\n```\nlet bytes = (0x0102030405060708).toBytes();\n// little-endian host: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]\n// big-endian host:    [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]\n```",
+              "doc": "Splits this integer into 8 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = Int64.maxValue.toBytes();   // 8 bytes, host order\n```",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4317,7 +4429,7 @@
               "name": "toBytesBigEndian",
               "anchor": "function-toBytesBigEndian",
               "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
-              "doc": "Splits this integer into 8 bytes in big-endian order (most significant\nbyte first — i.e. network byte order).\n\n# Examples\n\n```\n(0x0102030405060708).toBytesBigEndian();\n// [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]\n```",
+              "doc": "Splits this integer into 8 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4325,7 +4437,7 @@
               "name": "toBytesLittleEndian",
               "anchor": "function-toBytesLittleEndian",
               "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
-              "doc": "Splits this integer into 8 bytes in little-endian order (least\nsignificant byte first).\n\n# Examples\n\n```\n(0x0102030405060708).toBytesLittleEndian();\n// [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]\n```",
+              "doc": "Splits this integer into 8 bytes in little-endian order (least\nsignificant byte first).",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -4348,7 +4460,7 @@
               "name": "abs",
               "anchor": "function-abs",
               "signature": "public func abs() -> Int64",
-              "doc": "",
+              "doc": "Absolute value. Wraps at the minimum value\n(`Int64.minValue.abs() == Int64.minValue`); use\n`absChecked` if that's a problem.",
               "source_path": "lang/std/num/int64.ks"
             }
           ]
@@ -4704,7 +4816,7 @@
               "name": "negate",
               "anchor": "function-negate",
               "signature": "public func negate() -> Int64",
-              "doc": "",
+              "doc": "Two's-complement negation. Wraps at the minimum value:\n`Int64.minValue.negate() == Int64.minValue`. Use\n`negateChecked` to surface the overflow.",
               "source_path": "lang/std/num/int64.ks"
             }
           ]
@@ -5004,10 +5116,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -5019,10 +5131,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -5080,11 +5192,361 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayIndex",
+          "source_path": "std.collections.ArrayIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "ArrayYield",
+              "anchor": "typealias-ArrayYield",
+              "signature": "type ArrayYield = T",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArray",
+              "anchor": "function-readArray",
+              "signature": "public func readArray(from: Array[T]) -> T",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayChecked",
+              "anchor": "function-readArrayChecked",
+              "signature": "public func readArrayChecked(from: Array[T]) -> T?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayUnchecked",
+              "anchor": "function-readArrayUnchecked",
+              "signature": "public func readArrayUnchecked(from: Array[T]) -> T",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArray",
+              "anchor": "function-writeArray",
+              "signature": "public func writeArray(to: mutating Array[T], value: T)",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArrayUnchecked",
+              "anchor": "function-writeArrayUnchecked",
+              "signature": "public func writeArrayUnchecked(to: mutating Array[T], value: T)",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayClampable",
+          "source_path": "std.collections.ArrayClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "ArrayClampedYield",
+              "anchor": "typealias-ArrayClampedYield",
+              "signature": "type ArrayClampedYield = T?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayClamped",
+              "anchor": "function-readArrayClamped",
+              "signature": "public func readArrayClamped(from: Array[T]) -> T?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArrayClamped",
+              "anchor": "function-writeArrayClamped",
+              "signature": "public func writeArrayClamped(to: mutating Array[T], value: T?)",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "ArrayWrappable",
+          "source_path": "std.collections.ArrayWrappable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "ArrayWrappedYield",
+              "anchor": "typealias-ArrayWrappedYield",
+              "signature": "type ArrayWrappedYield = T?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readArrayWrapped",
+              "anchor": "function-readArrayWrapped",
+              "signature": "public func readArrayWrapped(from: Array[T]) -> T?",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeArrayWrapped",
+              "anchor": "function-writeArrayWrapped",
+              "signature": "public func writeArrayWrapped(to: mutating Array[T], value: T?)",
+              "doc": "",
+              "source_path": "lang/std/collections/array.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "SliceIndex",
+          "source_path": "std.memory.SliceIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "SliceYield",
+              "anchor": "typealias-SliceYield",
+              "signature": "type SliceYield = T",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSlice",
+              "anchor": "function-readSlice",
+              "signature": "public func readSlice(from: Slice[T]) -> T",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceChecked",
+              "anchor": "function-readSliceChecked",
+              "signature": "public func readSliceChecked(from: Slice[T]) -> T?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceUnchecked",
+              "anchor": "function-readSliceUnchecked",
+              "signature": "public func readSliceUnchecked(from: Slice[T]) -> T",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSlice",
+              "anchor": "function-writeSlice",
+              "signature": "public func writeSlice(to: Slice[T], value: T)",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSliceUnchecked",
+              "anchor": "function-writeSliceUnchecked",
+              "signature": "public func writeSliceUnchecked(to: Slice[T], value: T)",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "SliceClampable",
+          "source_path": "std.memory.SliceClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "SliceClampedYield",
+              "anchor": "typealias-SliceClampedYield",
+              "signature": "type SliceClampedYield = T?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceClamped",
+              "anchor": "function-readSliceClamped",
+              "signature": "public func readSliceClamped(from: Slice[T]) -> T?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSliceClamped",
+              "anchor": "function-writeSliceClamped",
+              "signature": "public func writeSliceClamped(to: Slice[T], value: T?)",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "SliceWrappable",
+          "source_path": "std.memory.SliceWrappable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "SliceWrappedYield",
+              "anchor": "typealias-SliceWrappedYield",
+              "signature": "type SliceWrappedYield = T?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readSliceWrapped",
+              "anchor": "function-readSliceWrapped",
+              "signature": "public func readSliceWrapped(from: Slice[T]) -> T?",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            },
+            {
+              "kind": "function",
+              "name": "writeSliceWrapped",
+              "anchor": "function-writeSliceWrapped",
+              "signature": "public func writeSliceWrapped(to: Slice[T], value: T?)",
+              "doc": "",
+              "source_path": "lang/std/memory/pointer.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "BytesIndex",
+          "source_path": "std.text.BytesIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "BytesYield",
+              "anchor": "typealias-BytesYield",
+              "signature": "type BytesYield = UInt8",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytes",
+              "anchor": "function-readBytes",
+              "signature": "public func readBytes(from: BytesView) -> UInt8",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesChecked",
+              "anchor": "function-readBytesChecked",
+              "signature": "public func readBytesChecked(from: BytesView) -> UInt8?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesUnchecked",
+              "anchor": "function-readBytesUnchecked",
+              "signature": "public func readBytesUnchecked(from: BytesView) -> UInt8",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "BytesClampable",
+          "source_path": "std.text.BytesClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "BytesClampedYield",
+              "anchor": "typealias-BytesClampedYield",
+              "signature": "type BytesClampedYield = UInt8?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readBytesClamped",
+              "anchor": "function-readBytesClamped",
+              "signature": "public func readBytesClamped(from: BytesView) -> UInt8?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "CharsIndex",
+          "source_path": "std.text.CharsIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "CharsYield",
+              "anchor": "typealias-CharsYield",
+              "signature": "type CharsYield = Char",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readChars",
+              "anchor": "function-readChars",
+              "signature": "public func readChars(from: CharsView) -> Char",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readCharsChecked",
+              "anchor": "function-readCharsChecked",
+              "signature": "public func readCharsChecked(from: CharsView) -> Char?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "CharsClampable",
+          "source_path": "std.text.CharsClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "CharsClampedYield",
+              "anchor": "typealias-CharsClampedYield",
+              "signature": "type CharsClampedYield = Char?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readCharsClamped",
+              "anchor": "function-readCharsClamped",
+              "signature": "public func readCharsClamped(from: CharsView) -> Char?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
             }
           ]
         }
@@ -5265,6 +5727,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> Int8?",
+              "doc": "Reassembles a `Int8` from 1 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 1 bytes long.",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int8?",
+              "doc": "Reassembles a `Int8` from 1 bytes in big-endian order.\nReturns `None` if the input is not exactly 1 bytes long.",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int8?",
+              "doc": "Reassembles a `Int8` from 1 bytes in little-endian order.\nReturns `None` if the input is not exactly 1 bytes long.",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(Int8) -> Int8",
@@ -5377,6 +5863,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> Int8?",
+              "doc": "Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are\ncase-insensitive and represent digit values 10–35. Returns `None`\nfor an out-of-range radix, an empty string, an unrecognised digit,\nor a value that overflows `Int8`.\n\n# Examples\n\n```\nInt8.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nInt8.parse(string: \"101010\", radix: 2);  // Some(42)\nInt8.parse(string: \"z\", radix: 36);      // Some(35)\n```",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> Int8",
@@ -5432,6 +5926,30 @@
               "source_path": "lang/std/num/int8.ks"
             },
             {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 1 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = Int8.maxValue.toBytes();   // 1 bytes, host order\n```",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 1 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 1 bytes in little-endian order (least\nsignificant byte first).",
+              "source_path": "lang/std/num/int8.ks"
+            },
+            {
               "kind": "field",
               "name": "trailingZeros",
               "anchor": "field-trailingZeros",
@@ -5451,7 +5969,7 @@
               "name": "abs",
               "anchor": "function-abs",
               "signature": "public func abs() -> Int8",
-              "doc": "",
+              "doc": "Absolute value. Wraps at the minimum value\n(`Int8.minValue.abs() == Int8.minValue`); use\n`absChecked` if that's a problem.",
               "source_path": "lang/std/num/int8.ks"
             }
           ]
@@ -5807,7 +6325,7 @@
               "name": "negate",
               "anchor": "function-negate",
               "signature": "public func negate() -> Int8",
-              "doc": "",
+              "doc": "Two's-complement negation. Wraps at the minimum value:\n`Int8.minValue.negate() == Int8.minValue`. Use\n`negateChecked` to surface the overflow.",
               "source_path": "lang/std/num/int8.ks"
             }
           ]
@@ -6107,10 +6625,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -6122,10 +6640,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -6183,10 +6701,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -6198,7 +6716,7 @@
       "name": "Lcg64",
       "anchor": "struct-Lcg64",
       "signature": "public struct Lcg64 { /* private fields */ }",
-      "doc": "A simple linear congruential generator (LCG) for random numbers.\n\nUses the constants from Numerical Recipes (period 2^64):\n  a = 6364136223846793005\n  c = 1442695040888963407\n\nThis is suitable for non-cryptographic uses like shuffling.\nFor cryptographic randomness, use a system RNG.\n\nExample:\n    var rng = Lcg64(seed: 12345)\n    let value = rng.nextUInt64()",
+      "doc": "A 64-bit linear congruential generator. Cheap, allocation-free, and\nadequate for shuffling, fuzz seeds, and simulation noise — *not* for\ncryptographic use, key generation, or anything an adversary observes.\n\nConstants come from Numerical Recipes and give a full period of `2^64`:\n\n- multiplier `a = 6364136223846793005`\n- increment  `c = 1442695040888963407`\n\nThe state update is `state = state * a + c`, returning the new state.\n\n# Examples\n\n```\nvar rng = Lcg64(seed: 12345);\nlet v1 = rng.nextUInt64();\nlet v2 = rng.nextUInt64();   // distinct from v1\n```\n\n# Representation\n\nOne `UInt64` field — the mutable generator state.",
       "source_path": "lang/std/num/random.ks",
       "member_groups": [
         {
@@ -6208,18 +6726,18 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init(seed: UInt64)",
-              "doc": "Creates an LCG with the given seed.\n\nDifferent seeds produce different sequences.\n\nExample:\n    var rng = Lcg64(seed: 42)",
+              "name": "Default",
+              "anchor": "initializer-Default",
+              "signature": "public init()",
+              "doc": "Creates a generator with a hard-coded default seed\n(`88172645463325252`). Always produces the same stream — provide an\nexplicit seed via `init(seed:)` when you need variation between runs.",
               "source_path": "lang/std/num/random.ks"
             },
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
-              "signature": "public init()",
-              "doc": "Creates an LCG with a default seed.\n\nNote: This always produces the same sequence. For different\nsequences, provide different seeds via init(seed:).",
+              "name": "Seeded",
+              "anchor": "initializer-Seeded",
+              "signature": "public init(seed: UInt64)",
+              "doc": "Creates a generator initialised with `seed`. Different seeds produce\nindependent streams; the same seed always reproduces the same stream\n(useful for deterministic tests).\n\n# Examples\n\n```\nvar rng = Lcg64(seed: 42);\n```",
               "source_path": "lang/std/num/random.ks"
             }
           ]
@@ -6234,7 +6752,7 @@
               "name": "nextUInt64",
               "anchor": "function-nextUInt64",
               "signature": "public mutating func nextUInt64() -> UInt64",
-              "doc": "Returns the next random value and advances the state.",
+              "doc": "Advances the state once and returns the new value. `O(1)` and\nallocation-free.",
               "source_path": "lang/std/num/random.ks"
             }
           ]
@@ -6246,10 +6764,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -6261,7 +6779,7 @@
       "name": "RandomNumberGenerator",
       "anchor": "protocol-RandomNumberGenerator",
       "signature": "public protocol RandomNumberGenerator",
-      "doc": "Protocol for types that can generate random numbers.\n\nUsed by shuffling algorithms and other randomized operations.\nImplementations should provide uniformly distributed values.\n\nExample:\n    struct MyRng: RandomNumberGenerator {\n        var state: UInt64\n\n        mutating func nextUInt64() -> UInt64 {\n            // Update state and return value\n        }\n    }",
+      "doc": "A source of pseudo-random `UInt64` values. Implementers expose a single\nraw-uniform primitive; the extension on this protocol layers ergonomic\nhelpers on top.\n\nConformers are free to choose any algorithm they like — the protocol\nmakes no statement about cryptographic strength, period, or bias. Pick\n`Lcg64` for cheap non-cryptographic randomness; bring your own type for\nanything stronger.\n\n# Examples\n\n```\nstruct MyRng: RandomNumberGenerator {\n    var state: UInt64;\n\n    mutating func nextUInt64() -> UInt64 {\n        // mix state, return a fresh value\n    }\n}\n```",
       "source_path": "lang/std/num/random.ks",
       "member_groups": [
         {
@@ -6274,7 +6792,7 @@
               "name": "nextInt",
               "anchor": "function-nextInt",
               "signature": "public mutating func nextInt(below: Int64) -> Int64",
-              "doc": "Returns a random integer in the range [0, upperBound).\n\nUses modulo for simplicity. For very large bounds approaching UInt64.max,\nthis may have slight bias.\n\nExample:\n    var rng = Lcg64()\n    let roll = rng.nextInt(below: 6)  // 0..5",
+              "doc": "Returns a uniformly distributed integer in `[0, upperBound)`.\nReturns `0` when `upperBound <= 0` rather than panicking.\n\nUses naive modulo for simplicity — for `upperBound` close to\n`UInt64.maxValue` the result has slight bias toward smaller values.\nIf you need exact uniformity, sample `nextUInt64()` and reject.\n\n# Examples\n\n```\nvar rng = Lcg64(seed: 42);\nlet roll = rng.nextInt(below: 6);   // 0..5\n```",
               "source_path": "lang/std/num/random.ks"
             },
             {
@@ -6282,7 +6800,7 @@
               "name": "nextUInt64",
               "anchor": "function-nextUInt64",
               "signature": "mutating func nextUInt64() -> UInt64",
-              "doc": "Returns a random 64-bit unsigned integer.\n\nEach call should return a new value from a uniform distribution\nover all possible UInt64 values.",
+              "doc": "Returns the next `UInt64` from the stream and advances internal\nstate. Each call should be independent and uniformly distributed\nover the full `UInt64` range — implementers that can't promise\nuniformity (e.g. very small periods) should document the bias.",
               "source_path": "lang/std/num/random.ks"
             }
           ]
@@ -6294,7 +6812,7 @@
       "name": "SignedInteger",
       "anchor": "protocol-SignedInteger",
       "signature": "public protocol SignedInteger",
-      "doc": "",
+      "doc": "Marker protocol for signed integer types. The `abs()` requirement is\nwhat justifies treating these uniformly in generic code — unsigned\nintegers can't satisfy it without changing semantics.",
       "source_path": "lang/std/num/numeric.ks",
       "member_groups": [
         {
@@ -6307,7 +6825,7 @@
               "name": "abs",
               "anchor": "function-abs",
               "signature": "func abs() -> Self",
-              "doc": "",
+              "doc": "Absolute value. For two's-complement types this can overflow at\n`minValue`; consumers that need a total function should use\n`absChecked()` from the concrete type instead.",
               "source_path": "lang/std/num/numeric.ks"
             }
           ]
@@ -6319,7 +6837,7 @@
       "name": "Steppable",
       "anchor": "protocol-Steppable",
       "signature": "public protocol Steppable",
-      "doc": "",
+      "doc": "A type whose values can be stepped one position at a time. Underpins\n`for-in` over integer ranges and any other \"next/previous\" walk where\nthe step size is implicit (`1` for integers).\n\n`successor` and `predecessor` should be inverses for every interior\nvalue; behaviour at the type's edges (`Int64.maxValue.successor()`,\nfor example) follows the same wrapping rules as `add`/`subtract`.",
       "source_path": "lang/std/num/numeric.ks",
       "member_groups": [
         {
@@ -6332,7 +6850,7 @@
               "name": "predecessor",
               "anchor": "function-predecessor",
               "signature": "func predecessor() -> Self",
-              "doc": "",
+              "doc": "The previous value in the sequence. For integers this is `self - 1`.",
               "source_path": "lang/std/num/numeric.ks"
             },
             {
@@ -6340,7 +6858,7 @@
               "name": "successor",
               "anchor": "function-successor",
               "signature": "func successor() -> Self",
-              "doc": "",
+              "doc": "The next value in the sequence. For integers this is `self + 1`.",
               "source_path": "lang/std/num/numeric.ks"
             }
           ]
@@ -6514,6 +7032,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> UInt16?",
+              "doc": "Reassembles a `UInt16` from 2 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 2 bytes long.",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt16?",
+              "doc": "Reassembles a `UInt16` from 2 bytes in big-endian order.\nReturns `None` if the input is not exactly 2 bytes long.",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt16?",
+              "doc": "Reassembles a `UInt16` from 2 bytes in little-endian order.\nReturns `None` if the input is not exactly 2 bytes long.",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(UInt16) -> UInt16",
@@ -6610,6 +7152,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> UInt16?",
+              "doc": "Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters\na–z are case-insensitive and represent digit values 10–35. A\nleading `+` is allowed but a leading `-` is rejected. Returns\n`None` for an out-of-range radix, an empty string, an\nunrecognised digit, or a value that overflows `UInt16`.\n\n# Examples\n\n```\nUInt16.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nUInt16.parse(string: \"101010\", radix: 2);  // Some(42)\n```",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> UInt16",
@@ -6662,6 +7212,30 @@
               "anchor": "function-subtractSaturating",
               "signature": "public func subtractSaturating(UInt16) -> UInt16",
               "doc": "Subtraction that clamps to `0` on underflow (unsigned types cannot\nrepresent negative results).",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 2 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = UInt16.maxValue.toBytes();   // 2 bytes, host order\n```",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 2 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/uint16.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 2 bytes in little-endian order (least\nsignificant byte first).",
               "source_path": "lang/std/num/uint16.ks"
             },
             {
@@ -7294,10 +7868,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -7309,10 +7883,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -7370,10 +7944,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -7539,6 +8113,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> UInt32?",
+              "doc": "Reassembles a `UInt32` from 4 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 4 bytes long.",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt32?",
+              "doc": "Reassembles a `UInt32` from 4 bytes in big-endian order.\nReturns `None` if the input is not exactly 4 bytes long.",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt32?",
+              "doc": "Reassembles a `UInt32` from 4 bytes in little-endian order.\nReturns `None` if the input is not exactly 4 bytes long.",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(UInt32) -> UInt32",
@@ -7635,6 +8233,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> UInt32?",
+              "doc": "Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters\na–z are case-insensitive and represent digit values 10–35. A\nleading `+` is allowed but a leading `-` is rejected. Returns\n`None` for an out-of-range radix, an empty string, an\nunrecognised digit, or a value that overflows `UInt32`.\n\n# Examples\n\n```\nUInt32.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nUInt32.parse(string: \"101010\", radix: 2);  // Some(42)\n```",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> UInt32",
@@ -7687,6 +8293,30 @@
               "anchor": "function-subtractSaturating",
               "signature": "public func subtractSaturating(UInt32) -> UInt32",
               "doc": "Subtraction that clamps to `0` on underflow (unsigned types cannot\nrepresent negative results).",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 4 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = UInt32.maxValue.toBytes();   // 4 bytes, host order\n```",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 4 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/uint32.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 4 bytes in little-endian order (least\nsignificant byte first).",
               "source_path": "lang/std/num/uint32.ks"
             },
             {
@@ -8319,10 +8949,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -8334,10 +8964,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -8395,10 +9025,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -8564,6 +9194,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> UInt64?",
+              "doc": "Reassembles a `UInt64` from 8 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 8 bytes long.",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt64?",
+              "doc": "Reassembles a `UInt64` from 8 bytes in big-endian order.\nReturns `None` if the input is not exactly 8 bytes long.",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt64?",
+              "doc": "Reassembles a `UInt64` from 8 bytes in little-endian order.\nReturns `None` if the input is not exactly 8 bytes long.",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(UInt64) -> UInt64",
@@ -8660,6 +9314,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> UInt64?",
+              "doc": "Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters\na–z are case-insensitive and represent digit values 10–35. A\nleading `+` is allowed but a leading `-` is rejected. Returns\n`None` for an out-of-range radix, an empty string, an\nunrecognised digit, or a value that overflows `UInt64`.\n\n# Examples\n\n```\nUInt64.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nUInt64.parse(string: \"101010\", radix: 2);  // Some(42)\n```",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> UInt64",
@@ -8712,6 +9374,30 @@
               "anchor": "function-subtractSaturating",
               "signature": "public func subtractSaturating(UInt64) -> UInt64",
               "doc": "Subtraction that clamps to `0` on underflow (unsigned types cannot\nrepresent negative results).",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 8 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = UInt64.maxValue.toBytes();   // 8 bytes, host order\n```",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 8 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/uint64.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 8 bytes in little-endian order (least\nsignificant byte first).",
               "source_path": "lang/std/num/uint64.ks"
             },
             {
@@ -9344,10 +10030,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -9359,10 +10045,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -9420,10 +10106,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -9589,6 +10275,30 @@
             },
             {
               "kind": "function",
+              "name": "fromBytes",
+              "anchor": "function-fromBytes",
+              "signature": "public static func fromBytes(std.collections.Array[UInt8]) -> UInt8?",
+              "doc": "Reassembles a `UInt8` from 1 bytes in native (host) byte\norder. Returns `None` if the input is not exactly 1 bytes long.",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesBigEndian",
+              "anchor": "function-fromBytesBigEndian",
+              "signature": "public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt8?",
+              "doc": "Reassembles a `UInt8` from 1 bytes in big-endian order.\nReturns `None` if the input is not exactly 1 bytes long.",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromBytesLittleEndian",
+              "anchor": "function-fromBytesLittleEndian",
+              "signature": "public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt8?",
+              "doc": "Reassembles a `UInt8` from 1 bytes in little-endian order.\nReturns `None` if the input is not exactly 1 bytes long.",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
               "name": "gcd",
               "anchor": "function-gcd",
               "signature": "public func gcd(UInt8) -> UInt8",
@@ -9685,6 +10395,14 @@
             },
             {
               "kind": "function",
+              "name": "parse",
+              "anchor": "function-parse",
+              "signature": "public static func parse(String, Int64) -> UInt8?",
+              "doc": "Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters\na–z are case-insensitive and represent digit values 10–35. A\nleading `+` is allowed but a leading `-` is rejected. Returns\n`None` for an out-of-range radix, an empty string, an\nunrecognised digit, or a value that overflows `UInt8`.\n\n# Examples\n\n```\nUInt8.parse(string: \"ff\", radix: 16);     // Some(255 if it fits, else None)\nUInt8.parse(string: \"101010\", radix: 2);  // Some(42)\n```",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
               "name": "pow",
               "anchor": "function-pow",
               "signature": "public func pow(Int64) -> UInt8",
@@ -9737,6 +10455,30 @@
               "anchor": "function-subtractSaturating",
               "signature": "public func subtractSaturating(UInt8) -> UInt8",
               "doc": "Subtraction that clamps to `0` on underflow (unsigned types cannot\nrepresent negative results).",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytes",
+              "anchor": "function-toBytes",
+              "signature": "public func toBytes() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 1 bytes in *native* (host) byte order.\nUse `toBytesBigEndian` / `toBytesLittleEndian` when serialising for\na fixed wire format.\n\n# Examples\n\n```\nlet bytes = UInt8.maxValue.toBytes();   // 1 bytes, host order\n```",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesBigEndian",
+              "anchor": "function-toBytesBigEndian",
+              "signature": "public func toBytesBigEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 1 bytes in big-endian order (most\nsignificant byte first — i.e. network byte order).",
+              "source_path": "lang/std/num/uint8.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toBytesLittleEndian",
+              "anchor": "function-toBytesLittleEndian",
+              "signature": "public func toBytesLittleEndian() -> std.collections.Array[UInt8]",
+              "doc": "Splits this integer into 1 bytes in little-endian order (least\nsignificant byte first).",
               "source_path": "lang/std/num/uint8.ks"
             },
             {
@@ -10369,10 +11111,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Int Literal",
+              "anchor": "initializer-Int-Literal",
               "signature": "init(intLiteral: lang.i64)",
-              "doc": "Creates an instance from an integer literal.",
+              "doc": "Builds an instance from an integer literal.",
               "source_path": "lang/std/core/literals.ks"
             }
           ]
@@ -10384,10 +11126,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "Default",
+              "anchor": "initializer-Default",
               "signature": "init()",
-              "doc": "Creates an instance with the default value.",
+              "doc": "Builds the default-valued instance.",
               "source_path": "lang/std/core/protocols.ks"
             }
           ]
@@ -10445,10 +11187,10 @@
           "members": [
             {
               "kind": "initializer",
-              "name": "init",
-              "anchor": "initializer-init",
+              "name": "From Source",
+              "anchor": "initializer-From-Source",
               "signature": "init(from: From)",
-              "doc": "Creates an instance of this type from a value of another type.",
+              "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
             }
           ]
@@ -10460,7 +11202,7 @@
       "name": "UnsignedInteger",
       "anchor": "protocol-UnsignedInteger",
       "signature": "public protocol UnsignedInteger",
-      "doc": "",
+      "doc": "Marker protocol for unsigned integer types. Carries no requirements —\nit exists so generic code can constrain on signedness without naming\nevery concrete `UInt*` type.",
       "source_path": "lang/std/num/numeric.ks"
     }
   ]
