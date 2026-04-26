@@ -34,6 +34,17 @@ extend Point: Hashable {
 
 Anywhere a function takes a `Hashable`, your `Point` now works.
 
+If the protocol you're conforming to is generic, its type arguments can introduce free type parameters on the conformance line — no keyword-side declaration:
+
+```swift
+extend Int: ArrayIndex[T] {
+    type ArrayIndex[T].Output = T
+    public func loadFrom(array: Array[T]) -> T { array(unchecked: self) }
+}
+```
+
+`T` is bound by the conformance, not by `Int`. Reads as "for all `T`, `Int` conforms to `ArrayIndex[T]`."
+
 For protocol-side extensions (adding behavior to all conformers of a protocol), see [Protocols → Extending](protocols/extending.md).
 
 ## Type aliases

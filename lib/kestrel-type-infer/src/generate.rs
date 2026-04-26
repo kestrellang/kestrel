@@ -1402,10 +1402,19 @@ fn emit_where_clause_constraints_with_subs(
     for clause in where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
-                param, protocol, ..
+                param,
+                protocol,
+                protocol_type_args,
             } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
                     ctx.conforms(tv, protocol, site_span.clone());
+                    let arg_tvs: Vec<TyVar> = protocol_type_args
+                        .iter()
+                        .map(|hir_ty| lower_hir_ty_with_subs(ctx, hir_ty, subs))
+                        .collect();
+                    if !arg_tvs.is_empty() {
+                        ctx.record_witness_args(tv, protocol, arg_tvs);
+                    }
                 }
             },
             crate::resolve::WhereClause::TypeEquality {

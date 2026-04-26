@@ -124,6 +124,13 @@ pub struct InferCtx<'a> {
     /// through unification so that any TyVar unified with a wildcard is also
     /// treated as one.
     pub(crate) wildcard_tvars: HashSet<TyVar>,
+
+    /// Witness protocol args, keyed by `(canonical container TyVar, protocol)`.
+    /// Populated when a `where T: Proto[Args]` clause emits its Conforms
+    /// constraint — the args lower to TyVars and get cached here. Read by
+    /// `solve_associated` to substitute the extension's free TypeParams when
+    /// projecting through an `extend ConcreteType: Proto[FreeParams]` binding.
+    pub(crate) witness_protocol_args: HashMap<(TyVar, Entity), Vec<TyVar>>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -172,7 +179,21 @@ impl<'a> InferCtx<'a> {
             expected_array_elem: None,
             expected_dict_entry: None,
             wildcard_tvars: HashSet::new(),
+            witness_protocol_args: HashMap::new(),
         }
+    }
+
+    /// Record protocol args for a `(container, protocol)` witness pair.
+    /// Keyed by the container's canonical TyVar (after redirects) so lookups
+    /// in `solve_associated` use the same canonical form.
+    pub(crate) fn record_witness_args(
+        &mut self,
+        tv: TyVar,
+        protocol: Entity,
+        args: Vec<TyVar>,
+    ) {
+        let key = (self.resolve(tv), protocol);
+        self.witness_protocol_args.insert(key, args);
     }
 
     /// Walk the owner's container chain to find the protocol for which `Self`

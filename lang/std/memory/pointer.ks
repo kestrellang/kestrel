@@ -85,10 +85,24 @@ public struct RawPointer: Equatable, FFISafe, Hash {
         self.address == other.address
     }
 
-    /// Hashes the underlying address bytes.
+    /// Hashes the underlying address.
+    ///
+    /// Heap allocations cluster on alignment boundaries, so the raw
+    /// address has predictable low bits. We run the address through
+    /// Murmur3's `fmix64` finalizer (two rounds of `xor-shift /
+    /// multiply`) before hashing so every input bit avalanches across
+    /// the 64-bit output. Without this, pointer-keyed maps see
+    /// collision clustering driven by the allocator's stride.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let addr = self.address;
-        hasher.write(Slice(pointer: Pointer(to: addr).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
+        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        var x = self.address;
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m1);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m2);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
     }
 }
 
@@ -205,10 +219,24 @@ public struct Pointer[T]: Equatable, Hash {
         self.address == other.address
     }
 
-    /// Hashes the underlying address bytes.
+    /// Hashes the underlying address.
+    ///
+    /// Heap allocations cluster on alignment boundaries, so the raw
+    /// address has predictable low bits. We run the address through
+    /// Murmur3's `fmix64` finalizer (two rounds of `xor-shift /
+    /// multiply`) before hashing so every input bit avalanches across
+    /// the 64-bit output. Without this, pointer-keyed maps see
+    /// collision clustering driven by the allocator's stride.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let addr = self.address;
-        hasher.write(Slice(pointer: Pointer(to: addr).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
+        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        var x = self.address;
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m1);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        x = x.multiply(m2);
+        x = x.bitwiseXor(x.shiftRight(by: 33));
+        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
     }
 }
 

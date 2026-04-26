@@ -8,7 +8,7 @@ import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
-import std.io.error.(Error, brokenPipe)
+import std.io.error.(IoError, brokenPipe)
 
 // ============================================================================
 // WRITE PROTOCOL
@@ -26,11 +26,11 @@ import std.io.error.(Error, brokenPipe)
 /// ```
 /// public struct CountingSink: Write {
 ///     var written: Int64 = 0
-///     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+///     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
 ///         self.written = self.written + buf.count;
 ///         .Ok(buf.count)
 ///     }
-///     public mutating func flush() -> Result[(), Error] { .Ok(()) }
+///     public mutating func flush() -> Result[(), IoError] { .Ok(()) }
 /// }
 /// ```
 public protocol Write {
@@ -38,13 +38,13 @@ public protocol Write {
     /// `.Ok(0)` indicates the sink could accept no more right now (full
     /// buffer / would-block); other amounts are partial successes that
     /// the caller may retry.
-    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error]
+    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError]
 
     /// Pushes any internally buffered bytes to the underlying destination.
     /// Unbuffered writers may implement this as a no-op. Errors here can
     /// surface conditions deferred from earlier `write` calls (broken
     /// pipe, disk full).
-    mutating func flush() -> Result[(), Error]
+    mutating func flush() -> Result[(), IoError]
 }
 
 // ============================================================================
@@ -63,12 +63,12 @@ public struct Sink: Write {
     public init() {}
 
     /// Returns `.Ok(buf.count)` without storing the bytes.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         .Ok(buf.count)
     }
 
     /// No-op; always succeeds.
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 }
@@ -119,7 +119,7 @@ public struct Buffer: Write, Cloneable {
     }
 
     /// Appends every byte from `buf`. Always succeeds with `.Ok(buf.count)`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         var i: Int64 = 0;
         while i < buf.count {
             self.data.append(buf.pointer.offset(by: i).read());
@@ -129,7 +129,7 @@ public struct Buffer: Write, Cloneable {
     }
 
     /// No-op; bytes are already "in" the buffer.
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 
@@ -194,7 +194,7 @@ public struct Buffer: Write, Cloneable {
 /// var file = try File.create("output.bin");
 /// try writeAll(file, from: data.asSlice());
 /// ```
-public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), Error] where W: Write {
+public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), IoError] where W: Write {
     var written: Int64 = 0;
     while written < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
@@ -208,7 +208,7 @@ public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[()
 }
 
 /// Writes a single byte, looping internally until it lands.
-public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), Error] where W: Write {
+public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Write {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
     let slice = Slice(pointer: buf.asPointer(), count: 1);
@@ -219,7 +219,7 @@ public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), Error] w
 /// emits one byte per call into the writer — fine for buffered sinks like
 /// `Buffer`, expensive for raw `File`/`Stdout` (TODO: collect into a slice
 /// first).
-public func writeStr[W](mutating writer: W, s: String) -> Result[(), Error] where W: Write {
+public func writeStr[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Write {
     // Get the byte count and pointer from string
     let byteCount = s.byteCount;
     if byteCount == 0 {
@@ -238,7 +238,7 @@ public func writeStr[W](mutating writer: W, s: String) -> Result[(), Error] wher
 
 /// Writes `s` followed by a single `\n`. Does not append `\r` on any
 /// platform — Kestrel writes Unix line endings everywhere by default.
-public func writeLine[W](mutating writer: W, s: String) -> Result[(), Error] where W: Write {
+public func writeLine[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Write {
     try writeStr(writer, s);
     writeByte(writer, 10)  // '\n'
 }

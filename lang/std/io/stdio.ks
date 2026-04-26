@@ -9,7 +9,7 @@ import std.collections.(Array)
 import std.text.(String, Formattable)
 import std.core.(Bool)
 import std.io.libc
-import std.io.error.(Error)
+import std.io.error.(IoError)
 import std.io.read.(Read)
 import std.io.write.(Write, writeStr, writeByte, writeLine)
 
@@ -33,10 +33,10 @@ public struct Stdin: Read {
 
     /// Calls `read(2)` on `STDIN_FILENO`. Returns `0` on EOF (e.g. after
     /// the user types Ctrl-D in a terminal).
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
@@ -61,16 +61,16 @@ public struct Stdout: Write {
     public init() {}
 
     /// Calls `write(2)` on `STDOUT_FILENO`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
 
     /// No-op; stdout does no internal buffering at this layer.
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 }
@@ -94,16 +94,16 @@ public struct Stderr: Write {
     public init() {}
 
     /// Calls `write(2)` on `STDERR_FILENO`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
 
     /// No-op; stderr is unbuffered at this layer.
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 }
@@ -140,32 +140,32 @@ public func stderr() -> Stderr {
 /// try print("count: ");
 /// try println(42);
 /// ```
-public func print[F](value: F) -> Result[(), Error] where F: Formattable {
+public func print[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
     writeStr(out, value.format())
 }
 
 /// Like `print`, plus a trailing `\n`.
-public func println[F](value: F) -> Result[(), Error] where F: Formattable {
+public func println[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
     writeLine(out, value.format())
 }
 
 /// Writes a single newline to stdout — the no-argument form of `println`.
-public func printlnEmpty() -> Result[(), Error] {
+public func printlnEmpty() -> Result[(), IoError] {
     var out = stdout();
     writeByte(out, 10)
 }
 
 /// Stderr counterpart to `print`. Useful for diagnostics that must not
 /// pollute a piped stdout.
-public func eprint[F](value: F) -> Result[(), Error] where F: Formattable {
+public func eprint[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
     writeStr(err, value.format())
 }
 
 /// Stderr counterpart to `println`.
-public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
+public func eprintln[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
     writeLine(err, value.format())
 }
@@ -181,7 +181,7 @@ public func eprintln[F](value: F) -> Result[(), Error] where F: Formattable {
 /// TODO: the trailing-bytes are collected but the returned `String` is
 /// currently empty — see the comment in the body about
 /// `String.fromUtf8Bytes`.
-public func readLine() -> Result[String, Error] {
+public func readLine() -> Result[String, IoError] {
     var input = stdin();
     var bytes = Array[UInt8]();
 
@@ -225,7 +225,7 @@ public func readLine() -> Result[String, Error] {
 /// let name = try prompt("Name: ");
 /// try println("Hello, " + name);
 /// ```
-public func prompt(message: String) -> Result[String, Error] {
+public func prompt(message: String) -> Result[String, IoError] {
     var out = stdout();
     try writeStr(out, message);
     try out.flush();

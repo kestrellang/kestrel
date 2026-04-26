@@ -9,7 +9,7 @@ import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool, Copyable)
 import std.io.libc
-import std.io.error.(Error)
+import std.io.error.(IoError)
 import std.io.read.(Read, readAll)
 import std.io.write.(Write, writeAll, writeStr)
 
@@ -90,9 +90,9 @@ public struct File: Read, Write, not Copyable {
 
     /// @name Open
     /// Opens an existing file for reading. The file must exist; missing
-    /// paths surface as `Err(Error.last())` carrying `ENOENT`, and
+    /// paths surface as `Err(IoError.last())` carrying `ENOENT`, and
     /// permission failures as `EACCES`.
-    public static func open(path: String) -> Result[File, Error] {
+    public static func open(path: String) -> Result[File, IoError] {
         // Get pointer to string bytes (need null-terminated for libc)
         // For now, we'll copy to a buffer with null terminator
         let len = path.byteCount;
@@ -106,7 +106,7 @@ public struct File: Read, Write, not Copyable {
 
         let fd = libc.open(pathBuf.asPointer(), libc.O_RDONLY(), 0);
         if fd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(File(fd))
     }
@@ -120,7 +120,7 @@ public struct File: Read, Write, not Copyable {
     /// var file = try File.create("output.txt");
     /// try writeStr(file, "New content");
     /// ```
-    public static func create(path: String) -> Result[File, Error] {
+    public static func create(path: String) -> Result[File, IoError] {
         let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
@@ -133,7 +133,7 @@ public struct File: Read, Write, not Copyable {
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_TRUNC();
         let fd = libc.open(pathBuf.asPointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(File(fd))
     }
@@ -142,7 +142,7 @@ public struct File: Read, Write, not Copyable {
     /// in-place modification of a file that already exists; for "create
     /// or open" semantics combine with `create` / `createNew` as
     /// appropriate.
-    public static func openReadWrite(path: String) -> Result[File, Error] {
+    public static func openReadWrite(path: String) -> Result[File, IoError] {
         let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
@@ -154,7 +154,7 @@ public struct File: Read, Write, not Copyable {
 
         let fd = libc.open(pathBuf.asPointer(), libc.O_RDWR(), 0);
         if fd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(File(fd))
     }
@@ -163,7 +163,7 @@ public struct File: Read, Write, not Copyable {
     /// lands at the current end of file regardless of where `seek` last
     /// left the cursor — the standard idiom for log files and any
     /// concurrent appender.
-    public static func openAppend(path: String) -> Result[File, Error] {
+    public static func openAppend(path: String) -> Result[File, IoError] {
         let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
@@ -176,7 +176,7 @@ public struct File: Read, Write, not Copyable {
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_APPEND();
         let fd = libc.open(pathBuf.asPointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(File(fd))
     }
@@ -196,7 +196,7 @@ public struct File: Read, Write, not Copyable {
     ///     .Err(e) => /* somebody else has it */ retryLater()
     /// }
     /// ```
-    public static func createNew(path: String) -> Result[File, Error] {
+    public static func createNew(path: String) -> Result[File, IoError] {
         let len = path.byteCount;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
@@ -209,7 +209,7 @@ public struct File: Read, Write, not Copyable {
         let flags = libc.O_WRONLY() | libc.O_CREAT() | libc.O_EXCL();
         let fd = libc.open(pathBuf.asPointer(), flags, libc.MODE_DEFAULT());
         if fd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(File(fd))
     }
@@ -222,20 +222,20 @@ public struct File: Read, Write, not Copyable {
     /// returned. Short reads (`n < buf.count`) are normal — keep calling
     /// until `0` is returned (EOF) or an error fires. Use `readAll`/
     /// `readExact` from `std.io.read` when looping by hand isn't wanted.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.read(self.fd, buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
 
     /// Calls `write(2)`. May write fewer bytes than supplied — wrap with
     /// `writeAll` from `std.io.write` to loop until done.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(self.fd, buf.pointer, buf.count);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
@@ -244,7 +244,7 @@ public struct File: Read, Write, not Copyable {
     /// soon as `write` returns, but does not call `fsync` — durability
     /// across power loss requires a separate, currently-unwrapped libc
     /// call.
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 
@@ -265,7 +265,7 @@ public struct File: Read, Write, not Copyable {
     /// try file.seek(.Current(100));    // skip 100 bytes
     /// let size = try file.seek(.End(0));   // size of file
     /// ```
-    public mutating func seek(to pos: Seek) -> Result[Int64, Error] {
+    public mutating func seek(to pos: Seek) -> Result[Int64, IoError] {
         let pair = match pos {
             .Start(o) => (o, libc.SEEK_SET()),
             .Current(o) => (o, libc.SEEK_CUR()),
@@ -273,18 +273,18 @@ public struct File: Read, Write, not Copyable {
         };
         let result = libc.lseek(self.fd, pair.0, pair.1);
         if result < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(result)
     }
 
     /// Convenience for `seek(.Current(0))`.
-    public mutating func position() -> Result[Int64, Error] {
+    public mutating func position() -> Result[Int64, IoError] {
         self.seek(to: .Current(0))
     }
 
     /// Convenience for `seek(.Start(0))` that drops the returned offset.
-    public mutating func rewind() -> Result[(), Error] {
+    public mutating func rewind() -> Result[(), IoError] {
         try self.seek(to: .Start(0));
         .Ok(())
     }
@@ -328,7 +328,7 @@ public struct File: Read, Write, not Copyable {
 /// ```
 /// let cfg = try readFileString("config.json");
 /// ```
-public func readFileString(path: String) -> Result[String, Error] {
+public func readFileString(path: String) -> Result[String, IoError] {
     var file = try File.open(path);
     var bytes = Array[UInt8]();
     try readAll(file, into: bytes);
@@ -345,7 +345,7 @@ public func readFileString(path: String) -> Result[String, Error] {
 
 /// Reads `path` into an `Array[UInt8]`. The binary counterpart to
 /// `readFileString` — does no UTF-8 decoding.
-public func readFileBytes(path: String) -> Result[Array[UInt8], Error] {
+public func readFileBytes(path: String) -> Result[Array[UInt8], IoError] {
     var file = try File.open(path);
     var bytes = Array[UInt8]();
     try readAll(file, into: bytes);
@@ -354,14 +354,14 @@ public func readFileBytes(path: String) -> Result[Array[UInt8], Error] {
 
 /// Writes `content` to `path`, creating or truncating as needed. Bytes
 /// are the UTF-8 encoding of the string. The mirror of `readFileString`.
-public func writeFileString(path: String, content: String) -> Result[(), Error] {
+public func writeFileString(path: String, content: String) -> Result[(), IoError] {
     var file = try File.create(path);
     writeStr(file, content)
 }
 
 /// Writes `content` to `path`, creating or truncating as needed.
 /// Binary equivalent of `writeFileString`.
-public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), Error] {
+public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), IoError] {
     var file = try File.create(path);
     writeAll(file, from: content.asSlice())
 }
@@ -370,14 +370,14 @@ public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), Er
 /// Atomic per-write under POSIX `O_APPEND` semantics — safe to call from
 /// multiple writers without intermediate locking, though writes longer
 /// than `PIPE_BUF` may interleave.
-public func appendFileString(path: String, content: String) -> Result[(), Error] {
+public func appendFileString(path: String, content: String) -> Result[(), IoError] {
     var file = try File.openAppend(path);
     writeStr(file, content)
 }
 
 /// Appends bytes to `path`, creating if absent. Binary counterpart to
 /// `appendFileString`.
-public func appendFileBytes(path: String, content: Array[UInt8]) -> Result[(), Error] {
+public func appendFileBytes(path: String, content: Array[UInt8]) -> Result[(), IoError] {
     var file = try File.openAppend(path);
     writeAll(file, from: content.asSlice())
 }

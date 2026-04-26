@@ -352,7 +352,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// `Dictionary` copies that share the same `RcBox`. No-op when
     /// this is the only reference.
     private mutating func makeUnique() {
-        if self.storage.isUnique() == false {
+        if not self.storage.isUnique() {
             self.storage = RcBox(self.storage.getValue().clone())
         }
     }
@@ -867,7 +867,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                         let mod: UInt64 = hashValue.modulo(newCapU);
                         var slotIndex: Int64 = Int64(from: mod);
                         var foundSlot: Bool = false;
-                        while foundSlot == false {
+                        while not foundSlot {
                             let slotBucket = newBuckets.offset(by: slotIndex).read();
                             match slotBucket {
                                 .Empty => {
@@ -934,7 +934,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                         let mod: UInt64 = hashValue.modulo(newCapU);
                         var slotIndex: Int64 = Int64(from: mod);
                         var foundSlot: Bool = false;
-                        while foundSlot == false {
+                        while not foundSlot {
                             let slotBucket = newBuckets.offset(by: slotIndex).read();
                             match slotBucket {
                                 .Empty => {
@@ -1234,7 +1234,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    if predicate(key, value) == false {
+                    if not predicate(key, value) {
                         keysToRemove.append(key);
                     }
                 },
@@ -1261,7 +1261,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.removeAll(matching: { (k, v) in v < 2 });  // ["b": 2, "c": 3]
     /// ```
     public mutating func removeAll(matching predicate: (K, V) -> Bool) {
-        self.retain(matching: { (k, v) in predicate(k, v) == false })
+        self.retain(matching: { (k, v) in not predicate(k, v) })
     }
 
     /// Grows the bucket array so at least `minimumCapacity` entries
@@ -1427,7 +1427,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    if predicate(key, value) == false {
+                    if not predicate(key, value) {
                         return false
                     }
                 },
@@ -1671,7 +1671,7 @@ extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H:
                 .Occupied(key, value, _) => {
                     let otherValue = other(key);
                     if let .Some(v) = otherValue {
-                        if value.equals(v) == false {
+                        if not value.equals(v) {
                             return false
                         }
                     } else {

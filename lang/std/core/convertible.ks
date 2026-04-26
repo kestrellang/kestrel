@@ -17,6 +17,7 @@ module std.core
 /// let u = UInt32(from: i);   // explicit narrowing conversion
 /// ```
 public protocol Convertible[From] {
+    /// @name From Source
     /// Creates an instance from `value`.
     init(from value: From)
 }

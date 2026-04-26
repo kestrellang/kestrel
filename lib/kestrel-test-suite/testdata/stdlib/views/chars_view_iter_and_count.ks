@@ -6,8 +6,8 @@ module Test
         func main() -> lang.i64 {
             let s: std.text.String = "hello";
 
-            // ---- chars.count() ----
-            if s.chars.count() != 5 { return 1 }
+            // ---- chars.count ----
+            if s.chars.count != 5 { return 1 }
 
             // ---- chars.iter() ----
             let charArr = s.chars.iter().collect();
@@ -17,7 +17,7 @@ module Test
 
             // Empty string
             let empty = std.text.String();
-            if empty.chars.count() != 0 { return 5 }
+            if empty.chars.count != 0 { return 5 }
 
             0
         }

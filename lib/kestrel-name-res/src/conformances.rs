@@ -85,10 +85,16 @@ pub struct ConformingProtocolInstantiations {
 }
 
 impl QueryFn for ConformingProtocolInstantiations {
-    type Output = Vec<(Entity, Vec<AstType>)>;
+    /// `(protocol, source, type_args)` where `source` is the entity that
+    /// declared the conformance (the type itself, or an extension that adds
+    /// it). Callers that need to lower the AST type args should use
+    /// `source` as the resolution context — extensions can introduce free
+    /// type params on the conformance RHS that aren't in scope of the
+    /// conforming type.
+    type Output = Vec<(Entity, Entity, Vec<AstType>)>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
-        let mut instantiations: Vec<(Entity, Vec<AstType>)> = Vec::new();
+        let mut instantiations: Vec<(Entity, Entity, Vec<AstType>)> = Vec::new();
         let mut visited: HashSet<(Entity, Vec<AstType>)> = HashSet::new();
 
         // Direct conformances on the type itself
@@ -115,7 +121,7 @@ impl QueryFn for ConformingProtocolInstantiations {
         let mut proto_expanded: HashSet<Entity> = HashSet::new();
         let mut i = 0;
         while i < instantiations.len() {
-            let (proto, _) = instantiations[i].clone();
+            let (proto, _, _) = instantiations[i].clone();
             if proto_expanded.insert(proto) {
                 gather_protocol_instantiations(
                     ctx,
@@ -150,13 +156,15 @@ impl QueryFn for ConformingProtocolInstantiations {
 }
 
 /// Gather `(protocol, type_args)` pairs from an entity's `Conformances`
-/// component. Mirrors `gather_protocol_conformances` but preserves the AST
-/// type args from each conformance path.
+/// component, attributing each conformance to the entity it lives on
+/// (a type or an extension) so callers can resolve type-arg names in the
+/// correct scope. Mirrors `gather_protocol_conformances` but preserves the
+/// AST type args from each conformance path.
 fn gather_protocol_instantiations(
     ctx: &QueryContext<'_>,
     entity: Entity,
     root: Entity,
-    instantiations: &mut Vec<(Entity, Vec<AstType>)>,
+    instantiations: &mut Vec<(Entity, Entity, Vec<AstType>)>,
     visited: &mut HashSet<(Entity, Vec<AstType>)>,
 ) {
     let Some(conformances) = ctx.get::<Conformances>(entity) else {
@@ -182,7 +190,7 @@ fn gather_protocol_instantiations(
             continue;
         }
 
-        instantiations.push((resolved, type_args));
+        instantiations.push((resolved, entity, type_args));
     }
 }
 

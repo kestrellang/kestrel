@@ -34,12 +34,29 @@ pub fn resolve_witness_call(
     // Find a witness that matches the self type and protocol, and has the method.
     // First try exact protocol, then any witness for this type that has the method
     // (handles protocol inheritance: Comparable witness contains Less.lessThan).
-    let (witness, bindings) =
+    let (witness, mut bindings) =
         find_witness_with_method(module, protocol, method, self_type, method_type_args)?;
 
     let method_binding = witness.method_bindings.get(method).unwrap();
     let proto_param_count = protocol_type_param_count(module, protocol);
     let concrete_method_type_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
+
+    // For `extend ConcreteType: Proto[FreeParams]`, the extension introduces
+    // free TypeParams on the conformance RHS that the implementing type's
+    // pattern doesn't bind (e.g., `extend Slot: Indexer[T]` — Slot has no
+    // params, so match_pattern leaves T_ext unbound). Recover those bindings
+    // by matching each witness `protocol_type_args` value against the
+    // corresponding call-site `method_type_args` slot. Pattern entries are
+    // typically `Param(T_ext)`; this binds T_ext to the call-site's concrete
+    // type so the Direct/Extension branches below see it in `bindings`.
+    if proto_param_count > 0 {
+        let proto_call_args = method_type_args.get(..proto_param_count).unwrap_or(&[]);
+        for (witness_arg, call_arg) in
+            witness.protocol_type_args.values().zip(proto_call_args.iter())
+        {
+            match_pattern(witness_arg, call_arg, &mut bindings);
+        }
+    }
 
     // Build the type args for the concrete function.
     //
@@ -67,8 +84,17 @@ pub fn resolve_witness_call(
             type_args.extend(concrete_method_type_args.iter().cloned());
         },
         MethodSource::Extension { .. } => {
-            // Extension method: only use method-level type args
-            // The self_type is passed separately for mangling
+            // Extension method: prepend bindings for the extension's own
+            // TypeParams (which include any free params introduced on the
+            // conformance RHS, e.g. `extend Slot: Indexer[T]`'s `T`), then
+            // append the method-level type args. Without this, the method
+            // dispatches with too few type_args and the monomorphizer
+            // rejects the instantiation.
+            for tp in &witness.type_params {
+                if let Some(bound) = bindings.get(&tp.entity) {
+                    type_args.push(bound.clone());
+                }
+            }
             type_args.extend(concrete_method_type_args.iter().cloned());
         },
     }
@@ -191,6 +217,7 @@ fn find_witness_with_method<'a>(
         },
         other => format!("{other:?}"),
     };
+
     Err(MonomorphizeError::MethodNotFound {
         protocol_name: module.resolve_name(protocol).to_string(),
         method: method.to_string(),
@@ -210,9 +237,14 @@ fn protocol_type_param_count(module: &MirModule, protocol: Entity) -> usize {
 }
 
 /// Compare a witness's `protocol_type_args` values (in declaration order)
-/// against `expected` by strict equality. Empty `expected` matches any
-/// witness (back-compat for non-generic protocols and callers that don't
-/// know the protocol args).
+/// against `expected`. Empty `expected` matches any witness (back-compat for
+/// non-generic protocols and callers that don't know the protocol args).
+///
+/// Witness args may contain `TypeParam` wildcards when the conformance was
+/// declared in an `extend ConcreteType: Proto[FreeParams]` block — the free
+/// param has no concrete value at witness-construction time, only at the
+/// call site. Treat those wildcards as matching anything; concrete args
+/// still require strict equality.
 fn witness_protocol_args_match(witness: &WitnessDef, expected: &[MirTy]) -> bool {
     if expected.is_empty() {
         return true;
@@ -224,7 +256,7 @@ fn witness_protocol_args_match(witness: &WitnessDef, expected: &[MirTy]) -> bool
         .protocol_type_args
         .values()
         .zip(expected.iter())
-        .all(|(w, e)| w == e)
+        .all(|(w, e)| matches!(w, MirTy::TypeParam(_)) || w == e)
 }
 
 fn protocol_inherits(module: &MirModule, candidate: Entity, target: Entity) -> bool {

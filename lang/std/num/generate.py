@@ -702,22 +702,27 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
         .Some({return_expr})
     }}'''
+        # Per-type magnitude bounds for the UInt64 accumulator.
         if type_name == "Int64":
-            radix_parse = f'''
+            pos_max_expr = "UInt64(from: Int64.maxValue)"
+            neg_max_expr = "UInt64(from: Int64.maxValue) + UInt64(intLiteral: 1)"
+        else:
+            pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
+            neg_max_expr = f"UInt64(from: {type_name}.maxValue) + UInt64(intLiteral: 1)"
+        radix_parse = f'''
     /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
     /// case-insensitive and represent digit values 10–35. Returns `None`
     /// for an out-of-range radix, an empty string, an unrecognised digit,
-    /// or a value that overflows `Int64`.
+    /// or a value that overflows `{type_name}`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Int64.parse(string: "ff", radix: 16);     // Some(255)
-    /// Int64.parse(string: "FF", radix: 16);     // Some(255)
-    /// Int64.parse(string: "101010", radix: 2);  // Some(42)
-    /// Int64.parse(string: "z", radix: 36);      // Some(35)
+    /// {type_name}.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// {type_name}.parse(string: "101010", radix: 2);  // Some(42)
+    /// {type_name}.parse(string: "z", radix: 36);      // Some(35)
     /// ```
-    public static func parse(string: String, radix: Int64) -> Int64? {{
+    public static func parse(string: String, radix: Int64) -> {type_name}? {{
         if radix < 2 or radix > 36 {{
             return .None
         }}
@@ -747,9 +752,9 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
         let radixU: UInt64 = UInt64(from: radix);
         let maxMagnitude: UInt64 = if isNegative {{
-            UInt64(from: Int64.maxValue) + UInt64(intLiteral: 1)
+            {neg_max_expr}
         }} else {{
-            UInt64(from: Int64.maxValue)
+            {pos_max_expr}
         }};
 
         var result: UInt64 = 0;
@@ -780,20 +785,24 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             index = index + 1
         }}
 
-        let signedResult = Int64(from: result);
+        // Magnitude fits — `result` ≤ maxMagnitude, which is `maxValue` for
+        // positives or `|minValue|` for negatives. For negatives we cast
+        // first (the `|minValue|` bit pattern reinterprets to `minValue`)
+        // then negate; two's-complement negation of `minValue` wraps back
+        // to `minValue`, so the boundary case lands correctly.
+        let typedResult = {type_name}(from: result);
         if isNegative {{
-            .Some(signedResult.negate())
+            .Some(typedResult.negate())
         }} else {{
-            .Some(signedResult)
+            .Some(typedResult)
         }}
     }}'''
-            return base_parse + radix_parse
-        return base_parse
+        return base_parse + radix_parse
     else:
         # Unsigned - no negative numbers allowed
         max_before_multiply = "1844674407370955161"  # UInt64.maxValue / 10
 
-        return f'''    /// Parses a base-10 unsigned integer literal, optionally prefixed
+        base_parse = f'''    /// Parses a base-10 unsigned integer literal, optionally prefixed
     /// with `+`. A leading `-` is rejected. Returns `None` for an empty
     /// string, a non-digit character, or a value that does not fit in
     /// `{type_name}`.
@@ -865,157 +874,204 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
         .Some({return_expr})
     }}'''
+        # Per-type max for the UInt64 accumulator (no sign bookkeeping).
+        if type_name == "UInt64":
+            max_expr = "UInt64.maxValue"
+        else:
+            max_expr = f"UInt64(from: {type_name}.maxValue)"
+        radix_parse = f'''
+    /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
+    /// a–z are case-insensitive and represent digit values 10–35. A
+    /// leading `+` is allowed but a leading `-` is rejected. Returns
+    /// `None` for an out-of-range radix, an empty string, an
+    /// unrecognised digit, or a value that overflows `{type_name}`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// {type_name}.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// {type_name}.parse(string: "101010", radix: 2);  // Some(42)
+    /// ```
+    public static func parse(string: String, radix: Int64) -> {type_name}? {{
+        if radix < 2 or radix > 36 {{
+            return .None
+        }}
+
+        let len = string.byteCount;
+        if len == 0 {{
+            return .None
+        }}
+
+        var index: Int64 = 0;
+
+        // Optional `+`; reject leading `-` outright.
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 43 {{
+            index = 1
+        }} else if firstByteVal == 45 {{
+            return .None
+        }}
+
+        // Must have at least one digit
+        if index >= len {{
+            return .None
+        }}
+
+        let radixU: UInt64 = UInt64(from: radix);
+        let maxVal: UInt64 = {max_expr};
+
+        var result: UInt64 = 0;
+
+        while index < len {{
+            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byteVal = Int64(from: byte);
+
+            let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {{
+                byteVal - 48
+            }} else if byteVal >= 65 and byteVal <= 90 {{
+                byteVal - 55
+            }} else if byteVal >= 97 and byteVal <= 122 {{
+                byteVal - 87
+            }} else {{
+                return .None
+            }};
+
+            if digit >= radix {{
+                return .None
+            }}
+
+            let digitU: UInt64 = UInt64(from: digit);
+            if result > (maxVal - digitU) / radixU {{
+                return .None
+            }}
+            result = result * radixU + digitU;
+            index = index + 1
+        }}
+
+        .Some({return_expr})
+    }}'''
+        return base_parse + radix_parse
 
 
 def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: bool) -> str:
-    if type_name != "Int64":
-        return f'''    // TODO: implement byte conversion methods
-    // These require Array from std.collections which creates circular import issues
-    // public func toBytes() -> Array[UInt8]
-    // public func toBytesBigEndian() -> Array[UInt8]
-    // public func toBytesLittleEndian() -> Array[UInt8]
-    // public static func fromBytes(bytes: Array[UInt8]) -> {type_name}?
-    // public static func fromBytesBigEndian(bytes: Array[UInt8]) -> {type_name}?
-    // public static func fromBytesLittleEndian(bytes: Array[UInt8]) -> {type_name}?'''
+    """Generate byte-conversion methods for any integer width.
 
-    return '''    /// Splits this integer into 8 bytes in *native* (host) byte order. Use
-    /// `toBytesBigEndian` / `toBytesLittleEndian` when serialising for a
-    /// fixed wire format.
+    `toBytes()` / `fromBytes()` use a raw-pointer cast and run for `bits / 8`
+    bytes, so they work for any width without per-width tweaks. The
+    big/little-endian forms widen `self` to `UInt64` (sign-extended for
+    signed types — high bits never appear in the output because the byte
+    extraction loop is bounded by the type's byte count), then mask-shift
+    out each byte.
+    """
+    byte_count = bits // 8
+    bc = f"Int64(intLiteral: {byte_count})"
+    # Same-width same-type means no Convertible[UInt64] conformance exists for
+    # UInt64 itself (no self-conversion); use plain identifiers in that case.
+    widen_self = "self" if type_name == "UInt64" else "UInt64(from: self)"
+    narrow_result = "result" if type_name == "UInt64" else f"{type_name}(from: result)"
+
+    return f'''    /// Splits this integer into {byte_count} bytes in *native* (host) byte order.
+    /// Use `toBytesBigEndian` / `toBytesLittleEndian` when serialising for
+    /// a fixed wire format.
     ///
     /// # Examples
     ///
     /// ```
-    /// let bytes = (0x0102030405060708).toBytes();
-    /// // little-endian host: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
-    /// // big-endian host:    [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    /// let bytes = {type_name}.maxValue.toBytes();   // {byte_count} bytes, host order
     /// ```
-    public func toBytes() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 8);
+    public func toBytes() -> std.collections.Array[UInt8] {{
+        var result = std.collections.Array[UInt8](capacity: {bc});
         let value = self;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 8 {
+        while i < {bc} {{
             result.append(ptr.offset(by: i).read());
             i = i + 1
-        }
+        }}
         result
-    }
+    }}
 
-    /// Splits this integer into 8 bytes in big-endian order (most significant
-    /// byte first — i.e. network byte order).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (0x0102030405060708).toBytesBigEndian();
-    /// // [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
-    /// ```
-    public func toBytesBigEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(raw: self.raw);
+    /// Splits this integer into {byte_count} bytes in big-endian order (most
+    /// significant byte first — i.e. network byte order).
+    public func toBytesBigEndian() -> std.collections.Array[UInt8] {{
+        var result = std.collections.Array[UInt8](capacity: {bc});
+        let value = {widen_self};
         let mask = UInt64(intLiteral: 255);
         var i: Int64 = 0;
-        while i < 8 {
-            let shift = (Int64(intLiteral: 7) - i) * Int64(intLiteral: 8);
+        while i < {bc} {{
+            let shift = ({bc} - Int64(intLiteral: 1) - i) * Int64(intLiteral: 8);
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
-        }
+        }}
         result
-    }
+    }}
 
-    /// Splits this integer into 8 bytes in little-endian order (least
+    /// Splits this integer into {byte_count} bytes in little-endian order (least
     /// significant byte first).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (0x0102030405060708).toBytesLittleEndian();
-    /// // [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
-    /// ```
-    public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(raw: self.raw);
+    public func toBytesLittleEndian() -> std.collections.Array[UInt8] {{
+        var result = std.collections.Array[UInt8](capacity: {bc});
+        let value = {widen_self};
         let mask = UInt64(intLiteral: 255);
         var i: Int64 = 0;
-        while i < 8 {
+        while i < {bc} {{
             let shift = i * Int64(intLiteral: 8);
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
-        }
+        }}
         result
-    }
+    }}
 
-    /// Reassembles an `Int64` from 8 bytes in native (host) byte order.
-    /// Returns `None` if the input is not exactly 8 bytes long.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Int64.fromBytes(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
-    /// ```
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int64? {
-        if bytes.count != Int64(intLiteral: 8) {
+    /// Reassembles a `{type_name}` from {byte_count} bytes in native (host) byte
+    /// order. Returns `None` if the input is not exactly {byte_count} bytes long.
+    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> {type_name}? {{
+        if bytes.count != {bc} {{
             return .None
-        }
-
-        var value = Int64(intLiteral: 0);
+        }}
+        var value = {type_name}.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 8 {
+        while i < {bc} {{
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
-        }
+        }}
         .Some(value)
-    }
+    }}
 
-    /// Reassembles an `Int64` from 8 bytes in big-endian order. Returns
-    /// `None` if the input is not exactly 8 bytes long.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Int64.fromBytesBigEndian(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
-    /// ```
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
-        if bytes.count != Int64(intLiteral: 8) {
+    /// Reassembles a `{type_name}` from {byte_count} bytes in big-endian order.
+    /// Returns `None` if the input is not exactly {byte_count} bytes long.
+    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> {type_name}? {{
+        if bytes.count != {bc} {{
             return .None
-        }
-
+        }}
         var result = UInt64(intLiteral: 0);
         var i: Int64 = 0;
-        while i < 8 {
+        while i < {bc} {{
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
             i = i + 1
-        }
-        .Some(Int64(from: result))
-    }
+        }}
+        .Some({narrow_result})
+    }}
 
-    /// Reassembles an `Int64` from 8 bytes in little-endian order. Returns
-    /// `None` if the input is not exactly 8 bytes long.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Int64.fromBytesLittleEndian(bytes: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
-    /// ```
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
-        if bytes.count != Int64(intLiteral: 8) {
+    /// Reassembles a `{type_name}` from {byte_count} bytes in little-endian order.
+    /// Returns `None` if the input is not exactly {byte_count} bytes long.
+    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> {type_name}? {{
+        if bytes.count != {bc} {{
             return .None
-        }
-
+        }}
         var result = UInt64(intLiteral: 0);
         var i: Int64 = 0;
-        while i < 8 {
+        while i < {bc} {{
             let shift = i * Int64(intLiteral: 8);
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
             i = i + 1
-        }
-        .Some(Int64(from: result))
-    }'''
+        }}
+        .Some({narrow_result})
+    }}'''
 
 
 def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) -> str:
@@ -1050,8 +1106,14 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         signed_prefix = "signed_"
         negatable = "Negatable,"
         negatable_output = f"type Negatable.Output = {type_name}"
-        negate_method = f"public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"
-        abs_method = f"public func abs() -> {type_name} {{ if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ self.negate() }} else {{ self }} }}"
+        negate_method = f"""/// Two's-complement negation. Wraps at the minimum value:
+    /// `{type_name}.minValue.negate() == {type_name}.minValue`. Use
+    /// `negateChecked` to surface the overflow.
+    public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
+        abs_method = f"""/// Absolute value. Wraps at the minimum value
+    /// (`{type_name}.minValue.abs() == {type_name}.minValue`); use
+    /// `absChecked` if that's a problem.
+    public func abs() -> {type_name} {{ if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ self.negate() }} else {{ self }} }}"""
         # For signed, compute minValue via shift left: 1 << (bits - 1)
         # This avoids literal overflow issues with large values like 9223372036854775808
         min_value_expr = f"{type_name}(raw: lang.{lang_type}_shl(1, {bits - 1}))"

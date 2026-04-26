@@ -51,9 +51,9 @@ After each file:
 - [x] `text/char.ks`
 - [x] `text/format.ks` — Formattable, FormatOptions
 - [x] `text/views.ks` — string views (chars, lines, etc.)
-- [ ] `text/unicode/case_tables.ks` — light docs; generated lookup tables
-- [ ] `text/unicode/case_folding.ks` — light docs; generated lookup tables
-- [ ] `text/unicode/grapheme_tables.ks` — light docs; generated lookup tables
+- [x] `text/unicode/case_tables.ks` — light docs; generated lookup tables
+- [x] `text/unicode/case_folding.ks` — light docs; generated lookup tables
+- [x] `text/unicode/grapheme_tables.ks` — light docs; generated lookup tables
 
 ## memory/
 

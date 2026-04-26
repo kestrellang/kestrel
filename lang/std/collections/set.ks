@@ -376,8 +376,21 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     public mutating func insert(element: T) -> Bool {
         let oldValue = self.dict.insert(element, Unit());
-        oldValue.isSome() == false
+        oldValue.isNone()
     }
+
+    // TODO: public mutating func update(element: T) -> Optional[T]
+    //
+    // Swift-style replacement insert: returns the previously stored equal
+    // element (or .None if newly inserted). Useful when T's equality is
+    // custom (e.g. interning, case-insensitive strings) and the caller
+    // wants the prior representative back.
+    //
+    // Blocked on a Dictionary primitive: the current
+    // `Dictionary.insert(key:, value:)` overwrites the bucket with the
+    // *new* key and only returns the prior `V`, dropping the prior `K`.
+    // Add `Dictionary.insertReplacingEntry(key:, value:) -> Optional[(K, V)]`
+    // (or similar) first, then this method becomes a one-liner.
 
     /// Inserts every element produced by an iterable; duplicates
     /// collapse silently.
@@ -473,7 +486,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         var toRemove: Array[T] = [];
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
-            if predicate(elem) == false {
+            if not predicate(elem) {
                 toRemove.append(elem);
             }
         }
@@ -523,7 +536,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         var toRemove: Array[T] = [];
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
-            if other.contains( elem) == false {
+            if not other.contains( elem) {
                 toRemove.append(elem);
             }
         }
@@ -585,7 +598,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         
         var otherIter = other.iter();
         while let .Some(elem) = otherIter.next() {
-            if self.contains( elem) == false {
+            if not self.contains( elem) {
                 toAdd.append(elem);
             }
         }
@@ -667,7 +680,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         var result = Set[T, H](capacity: selfCount);
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
-            if other.contains( elem) == false {
+            if not other.contains( elem) {
                 let _ = result.insert( elem);
             }
         }
@@ -697,7 +710,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         // Add elements in self but not other
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
-            if other.contains( elem) == false {
+            if not other.contains( elem) {
                 let _ = result.insert( elem);
             }
         }
@@ -705,7 +718,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         // Add elements in other but not self
         var otherIter = other.iter();
         while let .Some(elem) = otherIter.next() {
-            if self.contains( elem) == false {
+            if not self.contains( elem) {
                 let _ = result.insert( elem);
             }
         }
@@ -739,7 +752,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
         }
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
-            if other.contains( elem) == false {
+            if not other.contains( elem) {
                 return false
             }
         }
@@ -892,7 +905,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     public func all(satisfying predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
-            if predicate(elem) == false {
+            if not predicate(elem) {
                 return false
             }
         }
@@ -1215,7 +1228,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
         var first = true;
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
-            if first == false {
+            if not first {
                 result = result + ", ";
             }
             first = false;
@@ -1318,21 +1331,17 @@ extend Set[T, H] where T: Hash, T: Comparable, H: Hasher, H: Defaultable {
 
     /// Returns the set's elements as an ascending-sorted `Array[T]`.
     ///
-    /// Convenience for "I want this set as an ordered list". Note
-    /// duplicates have already collapsed in the set, so the result
-    /// has no repeats. **Currently returns the array unsorted** —
-    /// the body has a TODO for hooking up `Array.sort()`. Treat the
-    /// ordering as unspecified until that's resolved.
+    /// Convenience for "I want this set as an ordered list". Duplicates
+    /// have already collapsed in the set, so the result has no repeats.
     ///
     /// # Examples
     ///
     /// ```
-    /// Set([3, 1, 4, 1, 5]).sorted();  // [1, 3, 4, 5] — once Array.sort() is wired
+    /// Set([3, 1, 4, 1, 5]).sorted();  // [1, 3, 4, 5]
     /// ```
     public func sorted() -> Array[T] {
         var arr = self.toArray();
-        // TODO: Sort the array once Array.sort() is available
-        // For now, return unsorted
+        arr.sort();
         arr
     }
 }

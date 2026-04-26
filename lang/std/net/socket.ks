@@ -9,7 +9,7 @@ import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
 import std.net.libc
-import std.io.error.(Error)
+import std.io.error.(IoError)
 import std.io.read.(Read)
 import std.io.write.(Write)
 
@@ -126,12 +126,12 @@ public struct TcpStream: Read, Write {
     ///
     /// # Errors
     ///
-    /// Returns `Err(Error)` from the captured `errno` if `recv`
+    /// Returns `Err(IoError)` from the captured `errno` if `recv`
     /// returns `-1`.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.recv(self.fd, buf.pointer, buf.count, 0);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
@@ -144,12 +144,12 @@ public struct TcpStream: Read, Write {
     ///
     /// # Errors
     ///
-    /// Returns `Err(Error)` from the captured `errno` if `send`
+    /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.send(self.fd, buf.pointer, buf.count, 0);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(n)
     }
@@ -158,7 +158,7 @@ public struct TcpStream: Read, Write {
     ///
     /// Always returns `Ok(())`. Provided to satisfy the `Write`
     /// protocol so generic writers can call `flush` unconditionally.
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 
@@ -203,10 +203,10 @@ extend TcpStream {
     ///
     /// # Errors
     ///
-    /// - Returns `Err(Error(eai))` with the `EAI_*` resolver code if
+    /// - Returns `Err(IoError(code: eai))` with the `EAI_*` resolver code if
     ///   `getaddrinfo` fails (note: this is a libc resolver code,
     ///   not an `errno`).
-    /// - Returns `Err(Error.last())` from `errno` if `socket()` or
+    /// - Returns `Err(IoError.last())` from `errno` if `socket()` or
     ///   `connect()` fail.
     ///
     /// # Examples
@@ -217,7 +217,7 @@ extend TcpStream {
     ///     .Err(e) => print(e.message)
     /// }
     /// ```
-    public static func connect(host: String, port: UInt16) -> Result[TcpStream, Error] {
+    public static func connect(host: String, port: UInt16) -> Result[TcpStream, IoError] {
         // Build port string for getaddrinfo
         let port64 = Int64(from: port);
         let portStr = port64.format();
@@ -264,7 +264,7 @@ extend TcpStream {
             Pointer(to: resultPtr).cast[Pointer[UInt8]]()
         );
         if gaiResult != 0 {
-            return .Err(Error(gaiResult))
+            return .Err(IoError(code: gaiResult))
         }
 
         // Extract address info from first result
@@ -281,7 +281,7 @@ extend TcpStream {
         let fd = libc.socket(family, socktype, proto);
         if fd < 0 {
             libc.freeaddrinfo(resultPtr);
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
 
         // Connect
@@ -290,7 +290,7 @@ extend TcpStream {
 
         if connResult < 0 {
             let _ = libc.close(fd);
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
 
         .Ok(TcpStream(fd))
@@ -342,7 +342,7 @@ public struct TcpListener {
     ///
     /// # Errors
     ///
-    /// Returns `Err(Error.last())` (captured `errno`) at any of the
+    /// Returns `Err(IoError.last())` (captured `errno`) at any of the
     /// four steps; the most common case is `EADDRINUSE` if another
     /// process holds the port and `SO_REUSEADDR` is not enough.
     ///
@@ -351,10 +351,10 @@ public struct TcpListener {
     /// ```
     /// let listener = TcpListener.bind(port: UInt16(intLiteral: 8080));
     /// ```
-    public static func bind(port: UInt16) -> Result[TcpListener, Error] {
+    public static func bind(port: UInt16) -> Result[TcpListener, IoError] {
         let fd = libc.socket(libc.AF_INET(), libc.SOCK_STREAM(), libc.IPPROTO_TCP());
         if fd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
 
         // Set SO_REUSEADDR
@@ -363,7 +363,7 @@ public struct TcpListener {
         let optResult = libc.setsockopt(fd, libc.SOL_SOCKET(), libc.SO_REUSEADDR(), optPtr, 4);
         if optResult < 0 {
             let _ = libc.close(fd);
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
 
         // Build sockaddr_in (platform-specific layout, 16 bytes)
@@ -372,13 +372,13 @@ public struct TcpListener {
         let bindResult = libc.bind(fd, addr.asPointer(), libc.SOCKADDR_IN_SIZE());
         if bindResult < 0 {
             let _ = libc.close(fd);
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
 
         let listenResult = libc.listen(fd, 128);
         if listenResult < 0 {
             let _ = libc.close(fd);
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
 
         .Ok(TcpListener(fd))
@@ -392,13 +392,13 @@ public struct TcpListener {
     ///
     /// # Errors
     ///
-    /// Returns `Err(Error.last())` if `accept(2)` fails — common
+    /// Returns `Err(IoError.last())` if `accept(2)` fails — common
     /// causes include `EINTR` (interrupted by signal) and
     /// `EMFILE` (per-process fd limit).
-    public func accept() -> Result[TcpStream, Error] {
+    public func accept() -> Result[TcpStream, IoError] {
         let clientFd = libc.accept(self.fd, Pointer[UInt8].nullPointer(), Pointer[Int32].nullPointer());
         if clientFd < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(TcpStream(clientFd))
     }

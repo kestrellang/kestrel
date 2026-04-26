@@ -28,7 +28,7 @@ module std.io
 import std.io.libc
 
 // Error types
-import std.io.error.(Error)
+import std.io.error.(IoError)
 
 // Read protocol and implementations
 import std.io.read.(Read, Empty, Repeat, Cursor, readByte, readAll)

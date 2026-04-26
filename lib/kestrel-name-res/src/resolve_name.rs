@@ -162,20 +162,30 @@ fn check_ambiguity(ctx: &QueryContext<'_>, mut entities: Vec<Entity>) -> NameRes
     NameResolution::Found(entities)
 }
 
-/// Check if an extension's target type has type params matching the name.
+/// Check if an extension's target type or the extension itself has type
+/// params matching the name.
 ///
 /// For `extend Array[T]`, when looking up `T` inside the extension body,
-/// we find Array's type parameter `T`.
+/// we find Array's type parameter `T`. For `extend Int64: ArrayIndex[T]`,
+/// `T` is introduced by the extension itself (free RHS param) — we check
+/// the extension entity's own TypeParams component too.
 fn resolve_extension_type_param(
     ctx: &QueryContext<'_>,
     extension: Entity,
     name: &str,
     root: Entity,
 ) -> Option<Entity> {
-    // Resolve the extension's target to a type entity
-    let target_entity = ctx.query(ExtensionTargetEntity { extension, root })?;
+    // First, check the extension's own type parameters (free RHS params).
+    if let Some(ext_params) = ctx.get::<TypeParams>(extension) {
+        for &tp in &ext_params.0 {
+            if ctx.get::<Name>(tp).is_some_and(|n| n.0 == name) {
+                return Some(tp);
+            }
+        }
+    }
 
-    // Check the target type's type parameters
+    // Then check the target type's type parameters.
+    let target_entity = ctx.query(ExtensionTargetEntity { extension, root })?;
     let type_params = ctx.get::<TypeParams>(target_entity)?;
     for &tp in &type_params.0 {
         if ctx.get::<Name>(tp).is_some_and(|n| n.0 == name) {

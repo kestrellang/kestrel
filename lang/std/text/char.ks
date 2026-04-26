@@ -248,10 +248,10 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'a'.toUppercase();         // 'A'
-    /// '\u{00DF}'.toUppercase();  // 'S' (first char of "SS"; see hasUppercaseExpansion)
+    /// 'a'.uppercased();         // 'A'
+    /// '\u{00DF}'.uppercased();  // 'S' (first char of "SS"; see hasUppercaseExpansion)
     /// ```
-    public func toUppercase() -> Char {
+    public func uppercased() -> Char {
         unicode.toUppercase(self)
     }
 
@@ -263,10 +263,10 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'A'.toLowercase();         // 'a'
-    /// '\u{0130}'.toLowercase();  // 'i' (Turkish dotted I — first char only)
+    /// 'A'.lowercased();         // 'a'
+    /// '\u{0130}'.lowercased();  // 'i' (Turkish dotted I — first char only)
     /// ```
-    public func toLowercase() -> Char {
+    public func lowercased() -> Char {
         unicode.toLowercase(self)
     }
 
@@ -279,15 +279,15 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'a'.toTitlecase();   // 'A'
+    /// 'a'.titlecased();   // 'A'
     /// ```
-    public func toTitlecase() -> Char {
+    public func titlecased() -> Char {
         unicode.toTitlecase(self)
     }
 
     /// Returns true if the uppercase form is multi-char (e.g. `ß` → `SS`).
     ///
-    /// When `true`, prefer `uppercaseExpansion()` over `toUppercase()`
+    /// When `true`, prefer `uppercaseExpansion()` over `uppercased()`
     /// to avoid silently dropping characters.
     ///
     /// # Examples

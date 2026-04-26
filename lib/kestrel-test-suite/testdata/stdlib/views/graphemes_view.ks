@@ -6,8 +6,8 @@ module Test
         func main() -> lang.i64 {
             let s: std.text.String = "hello";
 
-            // ---- graphemes.count() ----
-            if s.graphemes.count() != 5 { return 1 }
+            // ---- graphemes.count ----
+            if s.graphemes.count != 5 { return 1 }
 
             // ---- graphemes.iter() ----
             let gs = s.graphemes.iter().collect();
@@ -23,7 +23,7 @@ module Test
 
             // Empty string
             let empty = std.text.String();
-            if empty.graphemes.count() != 0 { return 6 }
+            if empty.graphemes.count != 0 { return 6 }
 
             0
         }

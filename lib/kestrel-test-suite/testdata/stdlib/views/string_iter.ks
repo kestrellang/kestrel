@@ -13,7 +13,7 @@ module Test
             if chars(unchecked: 4).equals('o') == false { return 3 }
 
             // iter() with map
-            let upper = s.iter().map({ (c) in c.toUppercase() }).collect();
+            let upper = s.iter().map({ (c) in c.uppercased() }).collect();
             if upper.count != 5 { return 4 }
             if upper(unchecked: 0).equals('H') == false { return 5 }
 

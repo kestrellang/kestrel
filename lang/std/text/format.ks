@@ -383,6 +383,7 @@ public protocol Formattable {
 /// types can supply their own to intercept literal pieces or coerce
 /// formatted parts.
 public protocol StringInterpolationProtocol {
+    /// @name With Capacity
     /// Constructs an empty accumulator with capacity hints derived from the literal at compile time.
     ///
     /// `literalCapacity` is the total byte count of the static segments;
@@ -415,6 +416,7 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
     /// The accumulator type used to build interpolated values of `Self`.
     type Interpolation: StringInterpolationProtocol
 
+    /// @name From Interpolation
     /// Constructs `Self` from a fully built interpolation accumulator.
     init(interpolation: Interpolation)
 }

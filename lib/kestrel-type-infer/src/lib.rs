@@ -250,11 +250,26 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
     for clause in clauses {
         match clause {
             resolve::WhereClause::Bound {
-                param, protocol, ..
+                param,
+                protocol,
+                protocol_type_args,
             } => {
                 // Find or create a TyVar for this param
                 let tv = ctx.param(param);
                 ctx.conforms(tv, protocol, span.clone());
+                // Cache protocol args for solve_associated to use when projecting
+                // through `extend ConcreteType: Proto[FreeParams]` bindings.
+                let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
+                for &tp in type_params.iter().chain(parent_type_params.iter()) {
+                    subs.push((tp, ctx.param(tp)));
+                }
+                let arg_tvs: Vec<ty::TyVar> = protocol_type_args
+                    .iter()
+                    .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
+                    .collect();
+                if !arg_tvs.is_empty() {
+                    ctx.record_witness_args(tv, protocol, arg_tvs);
+                }
             },
             resolve::WhereClause::TypeEquality {
                 param,
@@ -358,7 +373,9 @@ fn emit_extension_where_clauses(
     for clause in clauses {
         match clause {
             resolve::WhereClause::Bound {
-                param, protocol, ..
+                param,
+                protocol,
+                protocol_type_args,
             } => {
                 let span = Span::synthetic(0);
                 let subject_tv = get_or_create_subject_tv(
@@ -371,6 +388,26 @@ fn emit_extension_where_clauses(
                     query_ctx,
                 );
                 ctx.conforms(subject_tv, protocol, span.clone());
+
+                // Cache protocol args so solve_associated can substitute
+                // extension free TypeParams when projecting through the witness.
+                let mut subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                    .iter()
+                    .zip(fresh_args.iter())
+                    .map(|(&tp, &tv)| (tp, tv))
+                    .collect();
+                for &tp in target_type_params.iter() {
+                    if !subs.iter().any(|(e, _)| *e == tp) {
+                        subs.push((tp, ctx.param(tp)));
+                    }
+                }
+                let arg_tvs: Vec<ty::TyVar> = protocol_type_args
+                    .iter()
+                    .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
+                    .collect();
+                if !arg_tvs.is_empty() {
+                    ctx.record_witness_args(subject_tv, protocol, arg_tvs);
+                }
 
                 // Propagate where clauses from the protocol's associated types.
                 // E.g., `type Iter: Iterator where Iter.Item = Item` on Iterable
@@ -501,9 +538,22 @@ fn emit_protocol_assoc_type_where_clauses(
             match clause {
                 resolve::WhereClause::Bound {
                     protocol: bound_proto,
+                    protocol_type_args,
                     ..
                 } => {
                     ctx.conforms(alias_tv, bound_proto, span.clone());
+                    let subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                        .iter()
+                        .zip(fresh_args.iter())
+                        .map(|(&tp, &tv)| (tp, tv))
+                        .collect();
+                    let arg_tvs: Vec<ty::TyVar> = protocol_type_args
+                        .iter()
+                        .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
+                        .collect();
+                    if !arg_tvs.is_empty() {
+                        ctx.record_witness_args(alias_tv, bound_proto, arg_tvs);
+                    }
                 },
                 resolve::WhereClause::TypeEquality {
                     assoc_name: inner_assoc,

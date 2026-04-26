@@ -1,4 +1,4 @@
-import { Github, Heart } from "lucide-react";
+import { Github } from "lucide-react";
 
 export default function Footer() {
   return (
@@ -10,12 +10,9 @@ export default function Footer() {
         <div className="flex flex-col md:flex-row justify-between items-center gap-8">
           {/* Brand */}
           <div className="text-center md:text-left">
-            <h3 className="font-serif text-3xl font-bold text-white mb-2">
+            <h3 className="font-serif text-3xl font-bold text-white">
               Kestrel
             </h3>
-            <p className="text-gray-400 font-serif italic text-sm max-w-xs">
-              A programming language for humans.
-            </p>
           </div>
 
           {/* GitHub CTA */}
@@ -30,11 +27,10 @@ export default function Footer() {
         {/* Bottom bar */}
         <div className="mt-10 pt-6 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-gray-500 font-mono text-xs">
-            © {new Date().getFullYear()} Kestrel. MIT License.
+            © {new Date().getFullYear()} Kestrel / MIT License
           </p>
-          <p className="text-gray-400 font-serif italic text-sm inline-flex items-center gap-1">
-            Made with <Heart className="w-3 h-3 text-red-400 fill-red-400" /> by
-            jkpdino
+          <p className="text-gray-400 font-mono text-xs">
+            Built by jkpdino
           </p>
         </div>
       </div>

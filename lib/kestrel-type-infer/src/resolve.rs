@@ -96,6 +96,13 @@ pub enum MemberError {
 pub struct AssociatedTypeResolution {
     /// The concrete type this associated type resolves to.
     pub resolved: HirTy,
+    /// The extension that supplied this binding, if any.
+    /// Set when an `extend ConcreteType: Proto[FreeParams]` block introduces
+    /// the binding — `solve_associated` reads this to substitute the
+    /// extension's free TypeParams with the call-site's protocol args.
+    /// `None` when resolved directly off the type, off a protocol's abstract
+    /// declaration, or off where-clause bounds.
+    pub source_extension: Option<Entity>,
 }
 
 /// Where clause on a declaration.
@@ -484,7 +491,11 @@ impl TypeResolver for WorldResolver<'_> {
                     root: self.root,
                 });
                 for ext in &extensions {
-                    if let Some(res) = self.find_associated_type_in_entity(*ext, name) {
+                    if let Some(mut res) = self.find_associated_type_in_entity(*ext, name) {
+                        // Record the source extension so solve_associated can
+                        // substitute the extension's free TypeParams with the
+                        // call-site's protocol args.
+                        res.source_extension = Some(*ext);
                         return Some(res);
                     }
                 }
@@ -861,7 +872,10 @@ impl WorldResolver<'_> {
                     entity: child,
                     root: self.root,
                 }) {
-                    return Some(AssociatedTypeResolution { resolved: hir_ty });
+                    return Some(AssociatedTypeResolution {
+                        resolved: hir_ty,
+                        source_extension: None,
+                    });
                 }
                 // Abstract associated type (no TypeAnnotation) — keep as AliasUse
                 // so the solver can detect the missing definition and dispatch via
@@ -873,6 +887,7 @@ impl WorldResolver<'_> {
                         args: vec![],
                         span: kestrel_span::Span::synthetic(0),
                     },
+                    source_extension: None,
                 });
             }
         }
@@ -918,7 +933,10 @@ impl WorldResolver<'_> {
                     entity: m.entity,
                     root: self.root,
                 }) {
-                    return Some(AssociatedTypeResolution { resolved: hir_ty });
+                    return Some(AssociatedTypeResolution {
+                        resolved: hir_ty,
+                        source_extension: None,
+                    });
                 }
                 // Abstract associated type — keep as AliasUse so the solver
                 // detects the missing definition and dispatches via bounds.
@@ -928,6 +946,7 @@ impl WorldResolver<'_> {
                         args: vec![],
                         span: kestrel_span::Span::synthetic(0),
                     },
+                    source_extension: None,
                 });
             }
         }
@@ -953,12 +972,28 @@ impl WorldResolver<'_> {
             _ => MemberKind::Method, // default to method
         };
 
-        // Get type parameters
-        let type_params: Vec<Entity> = self
+        // Get type parameters. When the member sits inside an extension
+        // that introduces its own free type params from the conformance RHS
+        // (e.g., `extend Int64: ArrayIndex[T]`), append those so the
+        // call-site gets fresh inferable TyVars for them — they can't be
+        // substituted from the receiver (concrete target like `Int64` carries
+        // no args).
+        let mut type_params: Vec<Entity> = self
             .ctx
             .get::<kestrel_ast_builder::TypeParams>(member)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
+        if let Some(parent) = self.ctx.parent_of(member) {
+            if matches!(self.ctx.get::<NodeKind>(parent), Some(NodeKind::Extension)) {
+                if let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent) {
+                    for &tp in &ext_params.0 {
+                        if !type_params.contains(&tp) {
+                            type_params.push(tp);
+                        }
+                    }
+                }
+            }
+        }
 
         // Build parameter types from Callable component + lowered types
         let lowered_param_tys = self.ctx.query(LowerCallableTypes {

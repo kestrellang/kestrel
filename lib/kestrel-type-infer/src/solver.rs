@@ -1402,6 +1402,52 @@ fn solve_associated(
                 _ => Vec::new(),
             };
 
+            // Extension free-param substitution: when the binding came from
+            // `extend ConcreteType: Proto[FreeParams]`, the resolved HirTy may
+            // reference TypeParams that live on the extension, not on the
+            // container. Pair them with the witness's protocol args (cached at
+            // where-clause emission time) so `lower_hir_ty_sub` substitutes
+            // them with the call-site's concrete types.
+            let extension_subs: Vec<(Entity, TyVar)> = (|| {
+                let ext = assoc.source_extension?;
+                // Recover the protocol from the extension's conformances —
+                // bindings inside `extend Type: Proto[...]` are scoped to
+                // the conformance protocol, not the extension's parent.
+                let proto = find_extension_conformance_protocol(ctx.query_ctx, ext, ctx.root)?;
+                let canonical = ctx.resolve(container);
+                // Direct lookup; fall back to scanning the cache for any key
+                // whose TyVar redirects to the same canonical (the where-clause
+                // emitter may have inserted before later unification redirected
+                // the container's TyVar).
+                let proto_args = ctx
+                    .witness_protocol_args
+                    .get(&(canonical, proto))
+                    .cloned()
+                    .or_else(|| {
+                        ctx.witness_protocol_args
+                            .iter()
+                            .find(|((k_tv, k_proto), _)| {
+                                *k_proto == proto && ctx.resolve(*k_tv) == canonical
+                            })
+                            .map(|(_, v)| v.clone())
+                    })?;
+                let ext_params: Vec<Entity> = ctx
+                    .query_ctx
+                    .get::<TypeParams>(ext)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                Some(
+                    ext_params
+                        .into_iter()
+                        .zip(proto_args)
+                        .collect::<Vec<_>>(),
+                )
+            })()
+            .unwrap_or_default();
+
+            let mut all_subs = container_subs;
+            all_subs.extend(extension_subs);
+
             // Check where_clause_assoc_subs first — if a where clause directly
             // equated this associated type (e.g., `where Item = Optional[T]`),
             // use that TyVar instead of creating a new one.
@@ -1462,7 +1508,7 @@ fn solve_associated(
                                 &assoc.resolved,
                                 container_entity,
                                 container,
-                                &container_subs,
+                                &all_subs,
                             )
                         }
                     } else {
@@ -1471,7 +1517,7 @@ fn solve_associated(
                             &assoc.resolved,
                             container_entity,
                             container,
-                            &container_subs,
+                            &all_subs,
                         )
                     }
                 } else {
@@ -1480,7 +1526,7 @@ fn solve_associated(
                         &assoc.resolved,
                         container_entity,
                         container,
-                        &container_subs,
+                        &all_subs,
                     )
                 };
 
@@ -1771,10 +1817,22 @@ fn emit_resolved_call(
     for clause in where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
-                param, protocol, ..
+                param,
+                protocol,
+                protocol_type_args,
             } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
                     ctx.conforms(tv, protocol, span.clone());
+                    // Cache the protocol args so solve_associated can substitute
+                    // an extension's free TypeParams when projecting through
+                    // `extend ConcreteType: Proto[FreeParams]`.
+                    let arg_tvs: Vec<TyVar> = protocol_type_args
+                        .iter()
+                        .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs))
+                        .collect();
+                    if !arg_tvs.is_empty() {
+                        ctx.record_witness_args(tv, protocol, arg_tvs);
+                    }
                 }
             },
             crate::resolve::WhereClause::TypeEquality {
@@ -2231,9 +2289,9 @@ fn solve_member(
         resolution.type_params.iter().map(|_| ctx.fresh()).collect()
     };
 
-    if !fresh_params.is_empty() {
-        ctx.record_type_args(expr, fresh_params.clone(), span.clone());
-    }
+    // Note: record_type_args is moved after subs is fully populated (below)
+    // so we can prepend protocol type args from the where clause / receiver
+    // — the MIR witness dispatch reads these as the leading type_args.
 
     // Build type param substitution map:
     // 1. Struct type params → receiver type args
@@ -2278,6 +2336,7 @@ fn solve_member(
     // Map protocol type params when member comes from a protocol.
     // If protocol_type_args are provided (from where clause, e.g., F: Factory[i64]),
     // use those. Otherwise default to receiver (e.g., Addable[Rhs = Self]).
+    let mut proto_type_args_tvs: Vec<TyVar> = Vec::new();
     if let Some(self_entity) = resolution.self_type {
         let proto_type_params: Vec<kestrel_hecs::Entity> = ctx
             .query_ctx
@@ -2285,16 +2344,30 @@ fn solve_member(
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
         for (i, &param) in proto_type_params.iter().enumerate() {
-            if !subs.iter().any(|(e, _)| *e == param) {
-                if let Some(hir_ty) = resolution.protocol_type_args.get(i) {
-                    // Use the explicit type arg from the where clause bound
-                    let tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
-                    subs.push((param, tv));
-                } else {
-                    subs.push((param, receiver));
-                }
-            }
+            let tv = if let Some(&(_, existing)) = subs.iter().find(|(e, _)| *e == param) {
+                existing
+            } else if let Some(hir_ty) = resolution.protocol_type_args.get(i) {
+                // Use the explicit type arg from the where clause bound
+                let tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                subs.push((param, tv));
+                tv
+            } else {
+                subs.push((param, receiver));
+                receiver
+            };
+            proto_type_args_tvs.push(tv);
         }
+    }
+
+    // Record type args for the MIR witness dispatch: protocol-level args come
+    // first (the dispatcher slices `method_type_args[..proto_count]` out as
+    // `expected_proto_args`), then the method's own fresh params. Without
+    // the proto args here, dispatch through `extend Type: Proto[FreeParams]`
+    // can't recover the extension's free TypeParams from the witness.
+    let mut recorded_type_args = proto_type_args_tvs;
+    recorded_type_args.extend(fresh_params.iter().copied());
+    if !recorded_type_args.is_empty() {
+        ctx.record_type_args(expr, recorded_type_args, span.clone());
     }
 
     // Emit where clause constraints.
@@ -2311,12 +2384,28 @@ fn solve_member(
     for clause in &resolution.where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
-                param, protocol, ..
+                param,
+                protocol,
+                protocol_type_args,
             } => {
-                if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
-                    ctx.conforms(fresh_params[idx], *protocol, span.clone());
-                } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
-                    ctx.conforms(tv, *protocol, span.clone());
+                let bound_tv =
+                    if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
+                        ctx.conforms(fresh_params[idx], *protocol, span.clone());
+                        Some(fresh_params[idx])
+                    } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
+                        ctx.conforms(tv, *protocol, span.clone());
+                        Some(tv)
+                    } else {
+                        None
+                    };
+                if let Some(tv) = bound_tv {
+                    let arg_tvs: Vec<TyVar> = protocol_type_args
+                        .iter()
+                        .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, self_entity, receiver, &subs))
+                        .collect();
+                    if !arg_tvs.is_empty() {
+                        ctx.record_witness_args(tv, *protocol, arg_tvs);
+                    }
                 }
             },
             crate::resolve::WhereClause::TypeEquality {
@@ -3018,6 +3107,40 @@ pub fn kind_to_tyvar_sub(
     }
 }
 
+/// Recover the protocol entity from an extension's first positive
+/// conformance. `extend Slot: Indexable[T]` returns Indexable's entity.
+/// Used by `solve_associated` to look up the witness's protocol args
+/// (cached by `(container, protocol)` key) when projecting through a
+/// binding declared inside an extension block.
+fn find_extension_conformance_protocol(
+    ctx: &kestrel_hecs::QueryContext<'_>,
+    extension: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    let confs = ctx.get::<kestrel_ast_builder::Conformances>(extension)?;
+    for item in &confs.0 {
+        let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, _) = item else {
+            continue;
+        };
+        let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
+            continue;
+        };
+        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+        if let kestrel_name_res::TypeResolution::Found(proto) =
+            ctx.query(kestrel_name_res::ResolveTypePath {
+                segments: seg_names,
+                context: extension,
+                root,
+            })
+        {
+            if matches!(ctx.get::<NodeKind>(proto), Some(NodeKind::Protocol)) {
+                return Some(proto);
+            }
+        }
+    }
+    None
+}
+
 /// Helper: get the TyKind of a TyVar (or return the TyVar as-is if unresolved).
 fn resolve_kind(ctx: &InferCtx<'_>, tv: TyVar) -> TyKind {
     let resolved = ctx.resolve(tv);
@@ -3048,9 +3171,22 @@ fn emit_type_alias_where_clauses(
     });
     for clause in clauses {
         match clause {
-            crate::resolve::WhereClause::Bound { protocol, .. } => {
+            crate::resolve::WhereClause::Bound {
+                protocol,
+                protocol_type_args,
+                ..
+            } => {
                 // Emit conformance: e.g., `Iter: Iterator` → Conforms(alias_tv, Iterator)
                 ctx.conforms(alias_tv, protocol, span.clone());
+                // Cache protocol args so projecting through this alias's bound
+                // protocol can substitute extension free TypeParams.
+                let arg_tvs: Vec<TyVar> = protocol_type_args
+                    .iter()
+                    .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &[]))
+                    .collect();
+                if !arg_tvs.is_empty() {
+                    ctx.record_witness_args(alias_tv, protocol, arg_tvs);
+                }
             },
             crate::resolve::WhereClause::TypeEquality {
                 assoc_name, rhs, ..

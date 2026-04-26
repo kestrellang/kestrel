@@ -573,6 +573,45 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
         self.storage = storage;
     }
 
+    /// @name From UTF-8
+    /// Constructs a string by copying validated UTF-8 bytes from `bytes`,
+    /// returning `.None` if the slice is not valid UTF-8.
+    ///
+    /// Walks the slice end-to-end with `decodeUtf8`; any malformed,
+    /// truncated, or overlong sequence produces `.None`. The empty slice
+    /// is valid and yields the empty string. On success the bytes are
+    /// copied into a fresh heap allocation, so the returned `String`
+    /// owns its storage independently of `bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"String allocation failed"` if the system allocator
+    /// returns null. Returns `.None` only for invalid UTF-8 — the
+    /// allocation case is unrecoverable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.fromUtf8(bytes: "héllo".bytes.asSlice());  // Some("héllo")
+    /// String.fromUtf8(bytes: badSlice);                 // None
+    /// ```
+    public static func fromUtf8(bytes: Slice[UInt8]) -> String? {
+        let count = bytes.count;
+        if count == Int64(intLiteral: 0) {
+            return .Some(String())
+        }
+        // Validate: walk the buffer with decodeUtf8 until exhausted.
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
+        var i: Int64 = Int64(intLiteral: 0);
+        while i < count {
+            match decodeUtf8(rawPtr, count, at: i) {
+                .Some(decoded) => i = i + decoded.bytesConsumed,
+                .None => return .None
+            }
+        }
+        .Some(String.fromBytesUnchecked(bytes.pointer, count))
+    }
+
     /// Constructs a string by copying `count` bytes starting at `ptr`, without UTF-8 validation.
     ///
     /// Internal helper used by split iterators and substring helpers

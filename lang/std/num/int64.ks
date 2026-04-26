@@ -399,7 +399,13 @@ public struct Int64:
     /// Traps on division by zero, like `divide`.
     public func modulo(other: Int64) -> Int64 { Int64(raw: lang.i64_signed_rem(self.raw, other.raw)) }
 
+    /// Two's-complement negation. Wraps at the minimum value:
+    /// `Int64.minValue.negate() == Int64.minValue`. Use
+    /// `negateChecked` to surface the overflow.
     public func negate() -> Int64 { Int64(raw: lang.i64_neg(self.raw)) }
+    /// Absolute value. Wraps at the minimum value
+    /// (`Int64.minValue.abs() == Int64.minValue`); use
+    /// `absChecked` if that's a problem.
     public func abs() -> Int64 { if Bool(boolLiteral: lang.i64_signed_lt(self.raw, 0)) { self.negate() } else { self } }
 
     // ========================================================================
@@ -700,45 +706,36 @@ public struct Int64:
     // BYTE CONVERSION
     // ========================================================================
 
-    /// Splits this integer into 8 bytes in *native* (host) byte order. Use
-    /// `toBytesBigEndian` / `toBytesLittleEndian` when serialising for a
-    /// fixed wire format.
+    /// Splits this integer into 8 bytes in *native* (host) byte order.
+    /// Use `toBytesBigEndian` / `toBytesLittleEndian` when serialising for
+    /// a fixed wire format.
     ///
     /// # Examples
     ///
     /// ```
-    /// let bytes = (0x0102030405060708).toBytes();
-    /// // little-endian host: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
-    /// // big-endian host:    [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    /// let bytes = Int64.maxValue.toBytes();   // 8 bytes, host order
     /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 8);
+        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 8));
         let value = self;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 8 {
+        while i < Int64(intLiteral: 8) {
             result.append(ptr.offset(by: i).read());
             i = i + 1
         }
         result
     }
 
-    /// Splits this integer into 8 bytes in big-endian order (most significant
-    /// byte first — i.e. network byte order).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (0x0102030405060708).toBytesBigEndian();
-    /// // [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
-    /// ```
+    /// Splits this integer into 8 bytes in big-endian order (most
+    /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(raw: self.raw);
+        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 8));
+        let value = UInt64(from: self);
         let mask = UInt64(intLiteral: 255);
         var i: Int64 = 0;
-        while i < 8 {
-            let shift = (Int64(intLiteral: 7) - i) * Int64(intLiteral: 8);
+        while i < Int64(intLiteral: 8) {
+            let shift = (Int64(intLiteral: 8) - Int64(intLiteral: 1) - i) * Int64(intLiteral: 8);
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -748,19 +745,12 @@ public struct Int64:
 
     /// Splits this integer into 8 bytes in little-endian order (least
     /// significant byte first).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (0x0102030405060708).toBytesLittleEndian();
-    /// // [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
-    /// ```
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(raw: self.raw);
+        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 8));
+        let value = UInt64(from: self);
         let mask = UInt64(intLiteral: 255);
         var i: Int64 = 0;
-        while i < 8 {
+        while i < Int64(intLiteral: 8) {
             let shift = i * Int64(intLiteral: 8);
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
@@ -769,45 +759,31 @@ public struct Int64:
         result
     }
 
-    /// Reassembles an `Int64` from 8 bytes in native (host) byte order.
-    /// Returns `None` if the input is not exactly 8 bytes long.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Int64.fromBytes(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
-    /// ```
+    /// Reassembles a `Int64` from 8 bytes in native (host) byte
+    /// order. Returns `None` if the input is not exactly 8 bytes long.
     public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int64? {
         if bytes.count != Int64(intLiteral: 8) {
             return .None
         }
-
-        var value = Int64(intLiteral: 0);
+        var value = Int64.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 8 {
+        while i < Int64(intLiteral: 8) {
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
         .Some(value)
     }
 
-    /// Reassembles an `Int64` from 8 bytes in big-endian order. Returns
-    /// `None` if the input is not exactly 8 bytes long.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Int64.fromBytesBigEndian(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
-    /// ```
+    /// Reassembles a `Int64` from 8 bytes in big-endian order.
+    /// Returns `None` if the input is not exactly 8 bytes long.
     public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
         if bytes.count != Int64(intLiteral: 8) {
             return .None
         }
-
         var result = UInt64(intLiteral: 0);
         var i: Int64 = 0;
-        while i < 8 {
+        while i < Int64(intLiteral: 8) {
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
             i = i + 1
@@ -815,22 +791,15 @@ public struct Int64:
         .Some(Int64(from: result))
     }
 
-    /// Reassembles an `Int64` from 8 bytes in little-endian order. Returns
-    /// `None` if the input is not exactly 8 bytes long.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Int64.fromBytesLittleEndian(bytes: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
-    /// ```
+    /// Reassembles a `Int64` from 8 bytes in little-endian order.
+    /// Returns `None` if the input is not exactly 8 bytes long.
     public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
         if bytes.count != Int64(intLiteral: 8) {
             return .None
         }
-
         var result = UInt64(intLiteral: 0);
         var i: Int64 = 0;
-        while i < 8 {
+        while i < Int64(intLiteral: 8) {
             let shift = i * Int64(intLiteral: 8);
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
@@ -931,8 +900,7 @@ public struct Int64:
     /// # Examples
     ///
     /// ```
-    /// Int64.parse(string: "ff", radix: 16);     // Some(255)
-    /// Int64.parse(string: "FF", radix: 16);     // Some(255)
+    /// Int64.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
     /// Int64.parse(string: "101010", radix: 2);  // Some(42)
     /// Int64.parse(string: "z", radix: 36);      // Some(35)
     /// ```
@@ -999,11 +967,16 @@ public struct Int64:
             index = index + 1
         }
 
-        let signedResult = Int64(from: result);
+        // Magnitude fits — `result` ≤ maxMagnitude, which is `maxValue` for
+        // positives or `|minValue|` for negatives. For negatives we cast
+        // first (the `|minValue|` bit pattern reinterprets to `minValue`)
+        // then negate; two's-complement negation of `minValue` wraps back
+        // to `minValue`, so the boundary case lands correctly.
+        let typedResult = Int64(from: result);
         if isNegative {
-            .Some(signedResult.negate())
+            .Some(typedResult.negate())
         } else {
-            .Some(signedResult)
+            .Some(typedResult)
         }
     }
 

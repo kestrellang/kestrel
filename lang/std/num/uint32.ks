@@ -650,14 +650,107 @@ public struct UInt32:
     // BYTE CONVERSION
     // ========================================================================
 
-    // TODO: implement byte conversion methods
-    // These require Array from std.collections which creates circular import issues
-    // public func toBytes() -> Array[UInt8]
-    // public func toBytesBigEndian() -> Array[UInt8]
-    // public func toBytesLittleEndian() -> Array[UInt8]
-    // public static func fromBytes(bytes: Array[UInt8]) -> UInt32?
-    // public static func fromBytesBigEndian(bytes: Array[UInt8]) -> UInt32?
-    // public static func fromBytesLittleEndian(bytes: Array[UInt8]) -> UInt32?
+    /// Splits this integer into 4 bytes in *native* (host) byte order.
+    /// Use `toBytesBigEndian` / `toBytesLittleEndian` when serialising for
+    /// a fixed wire format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = UInt32.maxValue.toBytes();   // 4 bytes, host order
+    /// ```
+    public func toBytes() -> std.collections.Array[UInt8] {
+        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 4));
+        let value = self;
+        let ptr = Pointer(to: value).asRaw().cast[UInt8]();
+        var i: Int64 = 0;
+        while i < Int64(intLiteral: 4) {
+            result.append(ptr.offset(by: i).read());
+            i = i + 1
+        }
+        result
+    }
+
+    /// Splits this integer into 4 bytes in big-endian order (most
+    /// significant byte first — i.e. network byte order).
+    public func toBytesBigEndian() -> std.collections.Array[UInt8] {
+        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 4));
+        let value = UInt64(from: self);
+        let mask = UInt64(intLiteral: 255);
+        var i: Int64 = 0;
+        while i < Int64(intLiteral: 4) {
+            let shift = (Int64(intLiteral: 4) - Int64(intLiteral: 1) - i) * Int64(intLiteral: 8);
+            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            result.append(UInt8(from: byteVal));
+            i = i + 1
+        }
+        result
+    }
+
+    /// Splits this integer into 4 bytes in little-endian order (least
+    /// significant byte first).
+    public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
+        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 4));
+        let value = UInt64(from: self);
+        let mask = UInt64(intLiteral: 255);
+        var i: Int64 = 0;
+        while i < Int64(intLiteral: 4) {
+            let shift = i * Int64(intLiteral: 8);
+            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            result.append(UInt8(from: byteVal));
+            i = i + 1
+        }
+        result
+    }
+
+    /// Reassembles a `UInt32` from 4 bytes in native (host) byte
+    /// order. Returns `None` if the input is not exactly 4 bytes long.
+    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt32? {
+        if bytes.count != Int64(intLiteral: 4) {
+            return .None
+        }
+        var value = UInt32.zero;
+        let ptr = Pointer(to: value).asRaw().cast[UInt8]();
+        var i: Int64 = 0;
+        while i < Int64(intLiteral: 4) {
+            ptr.offset(by: i).write(bytes(unchecked: i));
+            i = i + 1
+        }
+        .Some(value)
+    }
+
+    /// Reassembles a `UInt32` from 4 bytes in big-endian order.
+    /// Returns `None` if the input is not exactly 4 bytes long.
+    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt32? {
+        if bytes.count != Int64(intLiteral: 4) {
+            return .None
+        }
+        var result = UInt64(intLiteral: 0);
+        var i: Int64 = 0;
+        while i < Int64(intLiteral: 4) {
+            let byteVal = UInt64(from: bytes(unchecked: i));
+            result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
+            i = i + 1
+        }
+        .Some(UInt32(from: result))
+    }
+
+    /// Reassembles a `UInt32` from 4 bytes in little-endian order.
+    /// Returns `None` if the input is not exactly 4 bytes long.
+    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt32? {
+        if bytes.count != Int64(intLiteral: 4) {
+            return .None
+        }
+        var result = UInt64(intLiteral: 0);
+        var i: Int64 = 0;
+        while i < Int64(intLiteral: 4) {
+            let shift = i * Int64(intLiteral: 8);
+            let byteVal = UInt64(from: bytes(unchecked: i));
+            result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
+            i = i + 1
+        }
+        .Some(UInt32(from: result))
+    }
 
     // ========================================================================
     // PARSING
@@ -731,6 +824,77 @@ public struct UInt32:
         // Check bounds for target type
         if result > maxVal {
             return .None
+        }
+
+        .Some(UInt32(from: result))
+    }
+    /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
+    /// a–z are case-insensitive and represent digit values 10–35. A
+    /// leading `+` is allowed but a leading `-` is rejected. Returns
+    /// `None` for an out-of-range radix, an empty string, an
+    /// unrecognised digit, or a value that overflows `UInt32`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// UInt32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// UInt32.parse(string: "101010", radix: 2);  // Some(42)
+    /// ```
+    public static func parse(string: String, radix: Int64) -> UInt32? {
+        if radix < 2 or radix > 36 {
+            return .None
+        }
+
+        let len = string.byteCount;
+        if len == 0 {
+            return .None
+        }
+
+        var index: Int64 = 0;
+
+        // Optional `+`; reject leading `-` outright.
+        let firstByte: UInt8 = string.byteAtUnchecked(0);
+        let firstByteVal = Int64(from: firstByte);
+        if firstByteVal == 43 {
+            index = 1
+        } else if firstByteVal == 45 {
+            return .None
+        }
+
+        // Must have at least one digit
+        if index >= len {
+            return .None
+        }
+
+        let radixU: UInt64 = UInt64(from: radix);
+        let maxVal: UInt64 = UInt64(from: UInt32.maxValue);
+
+        var result: UInt64 = 0;
+
+        while index < len {
+            let byte: UInt8 = string.byteAtUnchecked(index);
+            let byteVal = Int64(from: byte);
+
+            let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {
+                byteVal - 48
+            } else if byteVal >= 65 and byteVal <= 90 {
+                byteVal - 55
+            } else if byteVal >= 97 and byteVal <= 122 {
+                byteVal - 87
+            } else {
+                return .None
+            };
+
+            if digit >= radix {
+                return .None
+            }
+
+            let digitU: UInt64 = UInt64(from: digit);
+            if result > (maxVal - digitU) / radixU {
+                return .None
+            }
+            result = result * radixU + digitU;
+            index = index + 1
         }
 
         .Some(UInt32(from: result))

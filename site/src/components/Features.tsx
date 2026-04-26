@@ -20,10 +20,10 @@ const features: Feature[] = [
   {
     Icon: Code2,
     title: "Powerful Generics",
-    tagline: "Write it once. Use it everywhere.",
+    tagline: "Reusable code, concrete performance",
     points: [
-      { text: "No copy-paste code—one function works for any type that fits" },
-      { text: "The compiler catches mistakes before production does" },
+      { text: "One function works across every type that satisfies its constraints" },
+      { text: "Type relationships stay explicit at the call site and in the signature" },
       { text: "Extend types you didn't write, even from dependencies" },
     ],
     color: "forest",
@@ -43,11 +43,11 @@ let names = users.map { it.name }`,
   {
     Icon: Cpu,
     title: "Zero-Cost Abstractions",
-    tagline: "Clean code that compiles to what you'd write by hand.",
+    tagline: "Clear intent, direct machine work",
     points: [
-      { text: "High-level APIs, low-level performance" },
+      { text: "High-level APIs stay close to the generated code" },
       { text: "Swap allocators or runtimes without rewriting business logic" },
-      { text: "No hidden overhead—pay only for what you use" },
+      { text: "No hidden overhead, only abstractions that earn their keep" },
     ],
     color: "rust",
     filename: "orders.ks",
@@ -63,10 +63,10 @@ let total = orders
   },
   {
     Icon: ShieldCheck,
-    title: "Error Handling Done Right",
-    tagline: "If it can fail, you'll know—and so will your code.",
+    title: "Explicit Failure",
+    tagline: "No null, no hidden exceptions",
     points: [
-      { text: "Null doesn't exist. Missing values are explicit with Option" },
+      { text: "Missing values are explicit with Optional" },
       { text: "Functions that fail say so in their signature" },
       { text: "The compiler won't let you forget a case" },
     ],
@@ -85,9 +85,9 @@ match findUser(id: 42) {
   {
     Icon: Lock,
     title: "Memory Safety",
-    tagline: "Ownership rules out the bugs. You ship the features.",
+    tagline: "Visible lifetimes without ceremony",
     points: [
-      { text: "No segfaults—use-after-free caught at compile time" },
+      { text: "Use-after-free caught at compile time" },
       { text: "Predictable cleanup when values go out of scope" },
       { text: "Safe defaults; opt into manual control when you need it" },
     ],
@@ -216,31 +216,35 @@ function tokenize(code: string): React.ReactNode[] {
 const colorMap = {
   forest: {
     bg: "bg-[#e8f0ec]",
+    codeBg: "bg-[#dce8e2] dark:bg-[#1c2d27]",
     accent: "text-[var(--color-forest)]",
     iconBg: "bg-[var(--color-forest)]/10",
     checkBg: "bg-[var(--color-forest)]/10",
   },
   rust: {
     bg: "bg-[#faf3f0]",
+    codeBg: "bg-[#f0e2dc] dark:bg-[#2b211e]",
     accent: "text-[var(--color-rust)]",
     iconBg: "bg-[var(--color-rust)]/10",
     checkBg: "bg-[var(--color-rust)]/10",
   },
   gold: {
     bg: "bg-[#faf8f0]",
+    codeBg: "bg-[#eee8d6] dark:bg-[#2b271d]",
     accent: "text-[var(--color-gold)]",
     iconBg: "bg-[var(--color-gold)]/15",
     checkBg: "bg-[var(--color-gold)]/15",
   },
   slate: {
     bg: "bg-[#f0f2f4]",
+    codeBg: "bg-[#e1e6ea] dark:bg-[#25282e]",
     accent: "text-[var(--color-slate)]",
     iconBg: "bg-[var(--color-slate)]/10",
     checkBg: "bg-[var(--color-slate)]/10",
   },
 };
 
-// Intro section - "Fundamentals, Done Right"
+// Intro section
 function FeaturesIntro() {
   const [isVisible, setIsVisible] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
@@ -267,26 +271,78 @@ function FeaturesIntro() {
       ref={sectionRef}
       className="scroll-section bg-[#f0ebe3]"
     >
-      {/* Hexagon pattern */}
-      <div className="absolute inset-0 opacity-[0.06]">
-        <svg className="absolute inset-0 w-full h-full">
+      {/* Watercolor flight-path layer */}
+      <div className="absolute inset-0 overflow-hidden">
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
           <defs>
-            <pattern id="hexagons-intro" width="56" height="100" patternUnits="userSpaceOnUse" patternTransform="scale(0.5)">
-              <path
-                d="M28 66L0 50L0 16L28 0L56 16L56 50L28 66L28 100"
-                fill="none"
-                stroke="#8b6914"
-                strokeWidth="1"
-              />
-              <path
-                d="M28 0L28 34L0 50L0 84L28 100L56 84L56 50L28 34"
-                fill="none"
-                stroke="#8b6914"
-                strokeWidth="1"
-              />
-            </pattern>
+            <filter id="features-ribbon-soften">
+              <feGaussianBlur stdDeviation="4.5" />
+            </filter>
+            <linearGradient id="features-ribbon-rust" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#c45a3b" stopOpacity="0" />
+              <stop offset="42%" stopColor="#c45a3b" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="#d4a844" stopOpacity="0.04" />
+            </linearGradient>
+            <linearGradient id="features-ribbon-olive" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#6f7f5d" stopOpacity="0" />
+              <stop offset="48%" stopColor="#6f7f5d" stopOpacity="0.14" />
+              <stop offset="100%" stopColor="#2d5a47" stopOpacity="0.03" />
+            </linearGradient>
+            <linearGradient id="features-ribbon-gold" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#d4a844" stopOpacity="0" />
+              <stop offset="45%" stopColor="#d4a844" stopOpacity="0.13" />
+              <stop offset="100%" stopColor="#c45a3b" stopOpacity="0.03" />
+            </linearGradient>
           </defs>
-          <rect width="100%" height="100%" fill="url(#hexagons-intro)" />
+
+          <g filter="url(#features-ribbon-soften)" opacity="0.55">
+            <path
+              d="M-180 620 C 160 500, 360 230, 700 290 C 950 334, 1138 482, 1580 230"
+              fill="none"
+              stroke="url(#features-ribbon-rust)"
+              strokeWidth="76"
+              strokeLinecap="round"
+            />
+            <path
+              d="M-150 735 C 190 650, 410 470, 680 410 C 960 348, 1190 560, 1580 438"
+              fill="none"
+              stroke="url(#features-ribbon-olive)"
+              strokeWidth="60"
+              strokeLinecap="round"
+            />
+            <path
+              d="M-190 360 C 150 310, 330 170, 610 230 C 840 280, 1040 390, 1560 94"
+              fill="none"
+              stroke="url(#features-ribbon-gold)"
+              strokeWidth="38"
+              strokeLinecap="round"
+            />
+          </g>
+
+          <g
+            fill="none"
+            stroke="#2c3e50"
+            strokeOpacity="0.1"
+            strokeWidth="1"
+            strokeDasharray="8 10"
+          >
+            <path d="M86 730 C 270 520, 402 412, 642 356" />
+            <path d="M212 190 C 452 260, 682 330, 958 244" />
+            <path d="M134 452 L 512 452 L 512 174" />
+            <circle cx="512" cy="452" r="118" />
+            <circle cx="512" cy="452" r="214" />
+          </g>
+          <g fill="#2c3e50" opacity="0.12">
+            <circle cx="134" cy="452" r="3" />
+            <circle cx="512" cy="452" r="3" />
+            <circle cx="512" cy="174" r="3" />
+            <circle cx="958" cy="244" r="3" />
+          </g>
         </svg>
       </div>
 
@@ -297,13 +353,13 @@ function FeaturesIntro() {
           }`}
         >
           <span className="font-mono text-[var(--color-forest)] text-sm uppercase tracking-widest">
-            Why Kestrel?
+            Why Kestrel
           </span>
           <h2 className="font-serif text-5xl md:text-6xl lg:text-7xl font-black text-[var(--color-slate)] mt-4 tracking-tight">
-            Systems Programming, <span className="text-[var(--color-rust)]">Refined.</span>
+            Control Without <span className="text-[var(--color-rust)]">Ceremony</span>
           </h2>
           <p className="mt-6 text-xl md:text-2xl text-[var(--color-slate-light)] font-mono max-w-2xl">
-            The good parts, without the baggage.
+            Fast, explicit, readable from the first line to the metal
           </p>
         </div>
 
@@ -333,6 +389,7 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
   const [isVisible, setIsVisible] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const colors = colorMap[feature.color];
+  const codeOnLeft = index % 2 === 0;
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -367,10 +424,43 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
         />
       </div>
 
-      <div className="relative z-10 min-h-full flex items-center px-6 md:px-12 lg:px-24 py-12 lg:py-0">
-        <div className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-center">
-          {/* Text content */}
-          <div className="space-y-6">
+      <div className="relative z-10 min-h-full grid grid-cols-1 lg:grid-cols-12">
+        {/* Code rail */}
+        <aside
+          className={`min-h-[42vh] lg:col-span-5 lg:min-h-screen ${colors.codeBg} flex items-center ${
+            codeOnLeft ? "lg:order-1" : "lg:order-2"
+          }`}
+        >
+          <div
+            className={`w-full px-6 md:px-12 lg:px-8 xl:px-10 py-12 transition-all duration-700 delay-300 ${
+              isVisible
+                ? "opacity-100 translate-x-0"
+                : codeOnLeft
+                  ? "opacity-0 -translate-x-10"
+                  : "opacity-0 translate-x-10"
+            }`}
+          >
+            <div className="mb-6 flex items-center justify-between border-b border-[var(--color-slate)]/10 dark:border-white/10 pb-3">
+              <span className="font-mono text-xs uppercase tracking-[0.24em] text-[var(--color-slate-light)] dark:text-white/40">
+                source
+              </span>
+              <span className="font-mono text-sm text-[var(--color-gold)]">
+                {feature.filename}
+              </span>
+            </div>
+            <pre className="font-mono text-xs md:text-sm leading-relaxed text-[var(--color-slate)] dark:text-gray-300 whitespace-pre overflow-x-auto">
+              {tokenize(feature.code)}
+            </pre>
+          </div>
+        </aside>
+
+        {/* Text content */}
+        <div
+          className={`lg:col-span-7 min-h-[58vh] lg:min-h-screen flex items-center px-6 md:px-12 lg:px-20 xl:px-24 py-12 lg:py-0 ${
+            codeOnLeft ? "lg:order-2" : "lg:order-1"
+          }`}
+        >
+          <div className="max-w-3xl space-y-6">
             {/* Icon + label */}
             <div
               className={`flex items-center gap-3 transition-all duration-700 ${
@@ -422,32 +512,6 @@ function FeatureSection({ feature, index }: { feature: Feature; index: number })
                 </li>
               ))}
             </ul>
-          </div>
-
-          {/* Code visual */}
-          <div
-            className={`mt-8 lg:mt-0 transition-all duration-700 delay-300 ${
-              isVisible ? "opacity-100 translate-x-0" : "opacity-0 translate-x-10"
-            }`}
-          >
-            <div className="bg-[#1a2a3a] rounded-2xl shadow-2xl overflow-hidden border border-[#0d1a24]">
-              {/* Window chrome */}
-              <div className="flex items-center pl-4 pr-3 py-2">
-                <div className="flex gap-2 mr-3">
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#ff5f57]" />
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#febc2e]" />
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#28c840]" />
-                </div>
-                <span className="px-3.5 py-2 font-mono text-sm text-white/40">{feature.filename}</span>
-              </div>
-
-              {/* Code */}
-              <div className="px-6 pb-6 font-mono text-sm leading-relaxed overflow-x-auto">
-                <pre className="text-gray-300 whitespace-pre">
-                  {tokenize(feature.code)}
-                </pre>
-              </div>
-            </div>
           </div>
         </div>
       </div>

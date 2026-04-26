@@ -95,10 +95,50 @@ public struct LiteralSlice[T]: Iterable {
         LiteralSliceIterator(ptr: self.ptr, remaining: self.len)
     }
 
+    /// @name Indexed
+    /// Reads element `index`, panicking on out-of-bounds.
+    ///
+    /// The default subscript: trades a single comparison for a guaranteed
+    /// trap on bad input. Use `(unchecked:)` inside compiler-emitted init
+    /// paths where the index is statically known in range, or
+    /// `(checked:)` to handle out-of-range without a panic.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"LiteralSlice index out of bounds"` if `index < 0`
+    /// or `index >= count`.
+    public subscript(index: Int64) -> T {
+        get {
+            if index < Int64(intLiteral: 0) or Bool(boolLiteral: lang.i64_signed_lt(self.len, index.raw)) or Bool(boolLiteral: lang.i64_eq(self.len, index.raw)) {
+                lang.panic("LiteralSlice index out of bounds")
+            }
+            let offset = lang.i64_mul(index.raw, lang.sizeof[T]());
+            lang.ptr_read(lang.ptr_offset[T](self.ptr, offset))
+        }
+    }
+
+    /// @name Checked Index
+    /// Reads element `index`, returning `.None` on out-of-bounds.
+    public subscript(checked index: Int64) -> T? {
+        get {
+            if index < Int64(intLiteral: 0) or Bool(boolLiteral: lang.i64_signed_lt(self.len, index.raw)) or Bool(boolLiteral: lang.i64_eq(self.len, index.raw)) {
+                .None
+            } else {
+                let offset = lang.i64_mul(index.raw, lang.sizeof[T]());
+                .Some(lang.ptr_read(lang.ptr_offset[T](self.ptr, offset)))
+            }
+        }
+    }
+
     /// @name Unchecked Index
-    /// Reads element `index` without bounds checking. The compiler-emitted
-    /// init paths that use this guarantee the index is in range; do not
-    /// expose this subscript to user input without checking `count` first.
+    /// Reads element `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Undefined behavior if `index < 0` or `index >= count`. Compiler-
+    /// emitted init paths that use this guarantee the index is in range;
+    /// do not expose this subscript to user input without checking
+    /// `count` first.
     public subscript(unchecked index: Int64) -> T {
         get {
             let offset = lang.i64_mul(index.raw, lang.sizeof[T]());

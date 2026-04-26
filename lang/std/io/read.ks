@@ -7,7 +7,7 @@ import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
 import std.core.(Bool)
-import std.io.error.(Error, invalidInput)
+import std.io.error.(IoError, invalidInput)
 
 // ============================================================================
 // READ PROTOCOL
@@ -26,7 +26,7 @@ import std.io.error.(Error, invalidInput)
 /// ```
 /// public struct DigitsReader: Read {
 ///     var next: UInt8
-///     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+///     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
 ///         if buf.count == 0 { return .Ok(0) }
 ///         buf.pointer.write(self.next);
 ///         self.next = self.next + 1;
@@ -37,7 +37,7 @@ import std.io.error.(Error, invalidInput)
 public protocol Read {
     /// Reads up to `buf.count` bytes; returns the number of bytes
     /// actually written, with `0` signalling EOF.
-    mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
+    mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError]
 }
 
 // ============================================================================
@@ -56,7 +56,7 @@ public struct Empty: Read {
     public init() {}
 
     /// Always returns `.Ok(0)`.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         .Ok(0)
     }
 }
@@ -81,7 +81,7 @@ public struct Repeat: Read {
     }
 
     /// Fills `buf` with the repeated byte; returns `.Ok(buf.count)`.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         var i: Int64 = 0;
         while i < buf.count {
             buf.pointer.offset(by: i).write(self.byte);
@@ -130,7 +130,7 @@ public struct Cursor: Read, Cloneable {
 
     /// Reads from the current position; returns `.Ok(0)` at EOF and
     /// advances the position by the byte count returned.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let available = self.data.count - self.pos;
         if available == 0 {
             return .Ok(0)
@@ -181,7 +181,7 @@ public struct Cursor: Read, Cloneable {
 ///     .None => /* EOF */ break
 /// }
 /// ```
-public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], Error] where R: Read {
+public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], IoError] where R: Read {
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
     let slice = Slice(pointer: buf.asPointer(), count: 1);
@@ -203,7 +203,7 @@ public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], Error] wh
 /// var file = try File.open("input.bin");
 /// let total = try readAll(file, into: bytes);
 /// ```
-public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
+public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> Result[Int64, IoError] where R: Read {
     var total: Int64 = 0;
     var chunk = Array[UInt8](capacity: 4096);
     // Initialize chunk with zeros
@@ -244,7 +244,7 @@ public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> R
 /// var header = Array[UInt8](repeating: 0, count: 16);
 /// try readExact(file, into: header.asSlice());   // must read 16 bytes
 /// ```
-public func readExact[R](mutating reader: R, into buf: Slice[UInt8]) -> Result[(), Error] where R: Read {
+public func readExact[R](mutating reader: R, into buf: Slice[UInt8]) -> Result[(), IoError] where R: Read {
     var filled: Int64 = 0;
     while filled < buf.count {
         let remaining = Slice(pointer: buf.pointer.offset(by: filled), count: buf.count - filled);

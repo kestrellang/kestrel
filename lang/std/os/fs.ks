@@ -14,7 +14,7 @@ import std.ffi.(CString)
 import std.ffi.(malloc, free, memset)
 import std.result.(Result)
 import std.result.(Optional)
-import std.io.error.(Error)
+import std.io.error.(IoError)
 
 // ============================================================================
 // RAW FFI BINDINGS
@@ -112,9 +112,9 @@ func fsErrno() -> Int32 {
     Int32(raw: lang.ptr_read(ptr))
 }
 
-/// Snapshots `errno` into a typed `Error`. Call this immediately after a failing libc call before any other syscall could perturb `errno`.
-func lastError() -> Error {
-    Error(fsErrno())
+/// Snapshots `errno` into a typed `IoError`. Call this immediately after a failing libc call before any other syscall could perturb `errno`.
+func lastError() -> IoError {
+    IoError(code: fsErrno())
 }
 
 // ============================================================================
@@ -223,8 +223,8 @@ func statMode(path: String) -> Optional[Int32] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` on any libc failure; `errno` is captured and
-/// surfaced via `Error`. Common cases: `EEXIST` (path exists),
+/// Returns `Err(IoError)` on any libc failure; `errno` is captured and
+/// surfaced via the error's `kind`. Common cases: `EEXIST` (path exists),
 /// `ENOENT` (missing parent), `EACCES` (permission denied).
 ///
 /// # Examples
@@ -235,7 +235,7 @@ func statMode(path: String) -> Optional[Int32] {
 ///     .Err(e) => print(e.message)
 /// }
 /// ```
-public func mkdir(path: String) -> Result[(), Error] {
+public func mkdir(path: String) -> Result[(), IoError] {
     let cpath = path.toCString();
     let result = libc_mkdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw), MODE_DIR_DEFAULT().raw);
     cpath.free();
@@ -251,25 +251,25 @@ public func mkdir(path: String) -> Result[(), Error] {
 /// Walks back from the deepest non-existent component, recursing on
 /// the parent first. If `path` already exists and is a directory, the
 /// call is a no-op success; if it exists and is **not** a directory,
-/// returns `Err(Error(17))` (`EEXIST`) without disturbing the file.
+/// returns `Err(IoError(kind: .AlreadyExists))` (`EEXIST`) without disturbing the file.
 /// Each created intermediate uses the default mode `0o755`.
 ///
 /// # Errors
 ///
 /// Forwards any `mkdir` failure verbatim. Specific to this function:
-/// `Err(Error(17))` when `path` exists as a non-directory.
+/// `Err(IoError(kind: .AlreadyExists))` when `path` exists as a non-directory.
 ///
 /// # Examples
 ///
 /// ```
 /// mkdirAll(path: "/tmp/foo/bar/baz");  // creates all three levels
 /// ```
-public func mkdirAll(path: String) -> Result[(), Error] {
+public func mkdirAll(path: String) -> Result[(), IoError] {
     if fileExists(path) {
         if isDirectory(path) {
             return .Ok(())
         }
-        return .Err(Error(17))
+        return .Err(IoError(kind: .AlreadyExists))
     }
 
     let lastSlash = findLastSlash(path);
@@ -293,8 +293,8 @@ public func mkdirAll(path: String) -> Result[(), Error] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` on any libc failure; `errno` is captured.
-public func removeDir(path: String) -> Result[(), Error] {
+/// Returns `Err(IoError)` on any libc failure; `errno` is captured.
+public func removeDir(path: String) -> Result[(), IoError] {
     let cpath = path.toCString();
     let result = libc_rmdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
     cpath.free();
@@ -363,8 +363,8 @@ public func listDir(path: String) -> Array[String] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` on any libc failure; `errno` is captured.
-public func remove(path: String) -> Result[(), Error] {
+/// Returns `Err(IoError)` on any libc failure; `errno` is captured.
+public func remove(path: String) -> Result[(), IoError] {
     let cpath = path.toCString();
     let result = libc_unlink(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
     cpath.free();
@@ -384,8 +384,8 @@ public func remove(path: String) -> Result[(), Error] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` on any libc failure; `errno` is captured.
-public func rename(from: String, to: String) -> Result[(), Error] {
+/// Returns `Err(IoError)` on any libc failure; `errno` is captured.
+public func rename(from: String, to: String) -> Result[(), IoError] {
     let cfrom = from.toCString();
     let cto = to.toCString();
     let result = libc_rename(lang.cast_ptr[_, lang.i8](cfrom.raw.raw), lang.cast_ptr[_, lang.i8](cto.raw.raw));
@@ -410,8 +410,8 @@ public func rename(from: String, to: String) -> Result[(), Error] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` on any libc failure; `errno` is captured.
-public func symlink(target: String, path: String) -> Result[(), Error] {
+/// Returns `Err(IoError)` on any libc failure; `errno` is captured.
+public func symlink(target: String, path: String) -> Result[(), IoError] {
     let ctarget = target.toCString();
     let cpath = path.toCString();
     let result = libc_symlink(lang.cast_ptr[_, lang.i8](ctarget.raw.raw), lang.cast_ptr[_, lang.i8](cpath.raw.raw));
@@ -434,9 +434,9 @@ public func symlink(target: String, path: String) -> Result[(), Error] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` if `path` is not a symlink (`EINVAL`),
+/// Returns `Err(IoError)` if `path` is not a symlink (`EINVAL`),
 /// missing (`ENOENT`), or any other libc failure.
-public func readlink(path: String) -> Result[String, Error] {
+public func readlink(path: String) -> Result[String, IoError] {
     let cpath = path.toCString();
     let bufsize: Int64 = 1024;
     let buf = malloc(bufsize.raw);
@@ -477,14 +477,14 @@ public func readlink(path: String) -> Result[String, Error] {
 ///
 /// # Errors
 ///
-/// Returns `Err(Error)` on any libc failure; `errno` is captured.
+/// Returns `Err(IoError)` on any libc failure; `errno` is captured.
 ///
 /// # Examples
 ///
 /// ```
 /// chmod(path: "/tmp/script.sh", mode: Int32(intLiteral: 0o755));
 /// ```
-public func chmod(path: String, mode: Int32) -> Result[(), Error] {
+public func chmod(path: String, mode: Int32) -> Result[(), IoError] {
     let cpath = path.toCString();
     let result = libc_chmod(lang.cast_ptr[_, lang.i8](cpath.raw.raw), mode.raw);
     cpath.free();

@@ -6,8 +6,8 @@ module Test
         func main() -> lang.i64 {
             let s: std.text.String = "hello";
 
-            // ---- bytes.count() ----
-            if s.bytes.count() != 5 { return 1 }
+            // ---- bytes.count ----
+            if s.bytes.count != 5 { return 1 }
 
             // ---- bytes.isEmpty() ----
             if s.bytes.isEmpty() { return 2 }
@@ -15,7 +15,7 @@ module Test
             // Empty string bytes view
             let empty = std.text.String();
             if empty.bytes.isEmpty() == false { return 3 }
-            if empty.bytes.count() != 0 { return 4 }
+            if empty.bytes.count != 0 { return 4 }
 
             // ---- bytes.byteAt() ----
             // 'h' = 104

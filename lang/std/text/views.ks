@@ -91,7 +91,7 @@ public struct BytesIterator: Iterator {
 ///
 /// ```
 /// let s = "hi";
-/// s.bytes.count();             // 2
+/// s.bytes.count;               // 2
 /// s.bytes.byteAt(index: 0);    // Some(104)
 /// s.bytes.byteAt(index: 5);    // None (out of bounds)
 /// ```
@@ -128,11 +128,11 @@ public struct BytesView: Iterable {
         self.length = length;
     }
 
-    /// Returns the number of bytes in the view.
+    /// Number of bytes in the view.
     ///
-    /// Constant time. Note this is **byte** count, not character count
-    /// — see `CharsView.count()` for the latter.
-    public func count() -> Int64 { self.length }
+    /// O(1). This is **byte** count, not character count — see
+    /// `CharsView.count` for the latter (which is O(n)).
+    public var count: Int64 { self.length }
 
     /// Returns true if the view spans zero bytes.
     public func isEmpty() -> Bool { self.length == Int64(intLiteral: 0) }
@@ -346,8 +346,8 @@ public struct CharsIterator: Iterator {
 ///
 /// ```
 /// let s = "héllo";
-/// s.chars.count();                       // 5 (code points)
-/// s.bytes.count();                       // 6 (bytes — 'é' is 2 bytes)
+/// s.chars.count;                         // 5 (code points)
+/// s.bytes.count;                         // 6 (bytes — 'é' is 2 bytes)
 /// s.chars.substring(from: 1, to: 4);     // "éll"
 /// ```
 ///
@@ -389,12 +389,11 @@ public struct CharsView: Iterable {
         CharsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0))
     }
 
-    /// Returns the number of code points (O(n)).
-    ///
-    /// Walks the buffer counting UTF-8 leading bytes (those whose top
-    /// two bits are not `10`). For ASCII strings this is exactly
-    /// `byteCount`. Cache the result if you need it more than once.
-    public func count() -> Int64 {
+    /// Number of code points. **O(n)** — walks the buffer counting
+    /// UTF-8 leading bytes (those whose top two bits are not `10`). For
+    /// ASCII strings this equals `byteCount`. Cache the result if you
+    /// need it more than once; each access re-walks the string.
+    public var count: Int64 {
         var n: Int64 = Int64(intLiteral: 0);
         for i in Int64(intLiteral: 0)..<self.length {
             // Count leading bytes only (not continuation bytes 10xxxxxx)
@@ -652,8 +651,8 @@ public struct GraphemesIterator: Iterator {
 ///
 /// ```
 /// let flag = "\u{1F1FA}\u{1F1F8}";  // 🇺🇸
-/// flag.chars.count();      // 2 (regional indicators)
-/// flag.graphemes.count();  // 1 (one flag)
+/// flag.chars.count;        // 2 (regional indicators)
+/// flag.graphemes.count;    // 1 (one flag)
 /// ```
 ///
 /// # Representation
@@ -688,11 +687,10 @@ public struct GraphemesView: Iterable {
         GraphemesIterator(CharsIterator(ptr: self.ptr, length: self.length, byteIndex: Int64(intLiteral: 0)))
     }
 
-    /// Returns the number of grapheme clusters (O(n)).
-    ///
-    /// Walks the entire string through the UAX #29 segmenter. Cache
-    /// the result if you need it more than once.
-    public func count() -> Int64 {
+    /// Number of grapheme clusters. **O(n)** — walks the entire string
+    /// through the UAX #29 segmenter. Cache the result if you need it
+    /// more than once; each access re-walks the string.
+    public var count: Int64 {
         var n: Int64 = Int64(intLiteral: 0);
         for _ in self.iter() {
             n = n + Int64(intLiteral: 1)

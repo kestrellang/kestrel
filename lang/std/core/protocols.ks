@@ -151,22 +151,28 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
     type GreaterOrEqual.Output = Bool
     type NotEqual.Output = Bool
 
+    /// `<` derived from `compare`.
     public func lessThan(other: Self) -> Bool {
         self.compare(other) == Ordering.Less
     }
 
+    /// `<=` derived from `compare`.
     public func lessThanOrEqual(other: Self) -> Bool {
         self.compare(other) != Ordering.Greater
     }
 
+    /// `>` derived from `compare`.
     public func greaterThan(other: Self) -> Bool {
         self.compare(other) == Ordering.Greater
     }
 
+    /// `>=` derived from `compare`.
     public func greaterThanOrEqual(other: Self) -> Bool {
         self.compare(other) != Ordering.Less
     }
 
+    /// `!=` derived from `compare`. Shadows the `Equatable` default with
+    /// a single dispatch.
     public func notEquals(other: Self) -> Bool {
         self.compare(other) != Ordering.Equal
     }
@@ -178,14 +184,17 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
 /// lookup loops during conformance checking — using `compare` keeps the
 /// derivation grounded.
 extend Comparable: RangeMatchable[Self] {
+    /// `start..` lower-bound check, derived from `compare`.
     public func isAtLeast(bound: Self) -> Bool {
         self.compare(bound) != Ordering.Less
     }
 
+    /// `..=end` upper-bound check, derived from `compare`.
     public func isAtMost(bound: Self) -> Bool {
         self.compare(bound) != Ordering.Greater
     }
 
+    /// `..<end` upper-bound check, derived from `compare`.
     public func isBelow(bound: Self) -> Bool {
         self.compare(bound) == Ordering.Less
     }

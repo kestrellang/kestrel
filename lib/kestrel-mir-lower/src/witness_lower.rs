@@ -88,8 +88,19 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
         root: ctx.root,
     });
 
-    for (protocol, ast_type_args) in &instantiations {
-        let proto_type_args = lower_protocol_type_args(ctx, type_entity, ast_type_args);
+    for (protocol, source, ast_type_args) in &instantiations {
+        // Use the conformance source as the hir-lower context when it's an
+        // extension introducing free type params on the protocol RHS
+        // (e.g., `extend Int64: ArrayIndex[T]`); otherwise fall back to
+        // `type_entity` so existing direct-conformance and inheritance
+        // paths keep their historical resolution scope.
+        let owner_for_args =
+            if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
+                *source
+            } else {
+                type_entity
+            };
+        let proto_type_args = lower_protocol_type_args(ctx, owner_for_args, ast_type_args);
 
         let mut witness = WitnessDef::new(impl_ty.clone(), *protocol);
         ctx.register_name(*protocol);
@@ -123,6 +134,30 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
                 witness
                     .type_params
                     .push(TypeParamDef::new(tp_entity, tp_name));
+            }
+        }
+
+        // When the conformance comes from an extension that introduces
+        // its own free type params (`extend Int64: ArrayIndex[T]`), those
+        // params live on the extension entity, not on the conforming type.
+        // Record them on the witness so monomorphization can substitute
+        // them from the call site's protocol type args.
+        if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
+            if let Some(tp) = ctx.world.get::<TypeParams>(*source) {
+                for &tp_entity in &tp.0 {
+                    if witness.type_params.iter().any(|t| t.entity == tp_entity) {
+                        continue;
+                    }
+                    ctx.register_name(tp_entity);
+                    let tp_name = ctx
+                        .world
+                        .get::<Name>(tp_entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_default();
+                    witness
+                        .type_params
+                        .push(TypeParamDef::new(tp_entity, tp_name));
+                }
             }
         }
 
