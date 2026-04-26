@@ -17,9 +17,35 @@ import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
 import std.num.(UInt8, Int64, UInt64)
 
-/// A 64-bit unsigned integer type.
-/// Supports arithmetic, bitwise, comparison, and formatting operations.
-/// FFI-safe for interoperability with C code.
+/// A 64-bit unsigned integer.
+///
+/// UInt64 is the 64-bit member of the integer family. The same surface
+/// area is provided across all widths; switch widths to trade range for memory
+/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
+/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
+/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// `lang.i64` so it can cross C boundaries unchanged.
+///
+/// # Examples
+///
+/// ```
+/// let a: Int64 = 100;
+/// let b = a + 50;        // 150
+/// let c = a * 2;         // 200
+/// let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
+/// ```
+///
+/// ```
+/// // Bit twiddling
+/// (0b1010).countOnes      // 2
+/// (1).shiftLeft(by: 4)    // 16
+/// (-1).leadingZeros       // 0  (all bits set)
+/// ```
+///
+/// # Representation
+///
+/// A single `lang.i64` field. No padding, no headers — bit-identical
+/// to the corresponding C type.
 public struct UInt64:
     UnsignedInteger,
     Steppable,
@@ -63,80 +89,125 @@ public struct UInt64:
     Convertible[UInt16],
     Convertible[UInt32]
 {
-    /// The underlying raw value.
-    ///
-    /// Direct access to the primitive `lang.i64` type. Useful for FFI
-    /// or low-level operations.
+    /// The underlying primitive `lang.i64` value. Exposed for FFI
+    /// and intrinsic use; prefer the typed surface for everything else.
     public var raw: lang.i64
 
     // ========================================================================
     // CONSTANTS
     // ========================================================================
 
-    /// The zero value (0).
+    /// The additive identity, `0`.
     public static var zero: UInt64 { UInt64(intLiteral: 0) }
 
-    /// The one value (1).
+    /// The multiplicative identity, `1`.
     public static var one: UInt64 { UInt64(intLiteral: 1) }
 
-    /// The minimum representable value.
+    /// The smallest representable value.
     /// This is always 0 for unsigned types.
+    /// Note that for signed types `minValue.negate()` overflows back to
+    /// itself; use `negateChecked()` if you need to detect that.
     public static var minValue: UInt64 { UInt64(intLiteral: 0) }
 
-    /// The maximum representable value.
+    /// The largest representable value.
     /// This is 2^64 - 1 (18_446_744_073_709_551_615).
     public static var maxValue: UInt64 { UInt64(intLiteral: 18446744073709551615) }
 
-    /// The number of bits in this integer type (64).
+    /// The width in bits (64). Useful for shift bounds and bit-walks.
     public static var bitWidth: Int64 { Int64(intLiteral: 64) }
 
     // ========================================================================
     // INITIALIZERS
     // ========================================================================
 
-    /// Creates a UInt64 from an integer literal.
+    /// @name Int Literal
+    /// Compiler-emitted bridge that turns an integer literal into a UInt64.
     ///
-    /// This initializer is called implicitly when using integer literals.
+    /// You will rarely call this directly — write the literal and let the
+    /// `ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
+    /// 64 bits the literal is truncated with `lang.cast_i64_i64`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: Int64 = 42;            // implicit
+    /// let m = Int64(intLiteral: 42);  // explicit
+    /// ```
     public init(intLiteral value: lang.i64) {
         self.raw = value
     }
 
-    /// Creates a UInt64 with the default value (zero).
+    /// @name Default
+    /// Creates the zero value, satisfying `Defaultable`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n = Int64();   // 0
+    /// ```
     public init() {
         self.init(intLiteral: 0)
     }
 
-    /// Creates a UInt64 from a raw `lang.i64` value.
+    /// @name From Raw
+    /// Wraps an existing `lang.i64` without conversion. Internal
+    /// constructor used by intrinsics; not part of the public API.
     init(raw value: lang.i64) {
         self.raw = value
     }
 
+    /// @name From Integer
+    /// Converts from `Int8`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: Int8) { self.raw = lang.cast_i8_i64(other.raw) }
+    /// @name From Integer
+    /// Converts from `Int16`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: Int16) { self.raw = lang.cast_i16_i64(other.raw) }
+    /// @name From Integer
+    /// Converts from `Int32`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: Int32) { self.raw = lang.cast_i32_i64(other.raw) }
+    /// @name From Integer
+    /// Converts from `Int64`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: Int64) { self.raw = other.raw }
+    /// @name From Integer
+    /// Converts from `UInt8`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i64(other.raw) }
+    /// @name From Integer
+    /// Converts from `UInt16`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: UInt16) { self.raw = lang.cast_u16_i64(other.raw) }
+    /// @name From Integer
+    /// Converts from `UInt32`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: UInt32) { self.raw = lang.cast_u32_i64(other.raw) }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
     // ========================================================================
 
+    /// Sign as a `UInt64`: `0` for zero, `1` otherwise (unsigned types
+    /// have no negative values).
     public var sign: UInt64 { get {
         if Bool(boolLiteral: lang.i64_eq(self.raw, 0)) { UInt64.zero }
         else { UInt64.one }
     }}
 
+    /// True when `self > 0`.
     public var isPositive: Bool { get {
         Bool(boolLiteral: lang.i64_unsigned_gt(self.raw, 0))
     }}
 
+    /// Always `false` — unsigned types cannot be negative.
     public var isNegative: Bool { get {
         // Unsigned types are never negative
         false
     }}
 
+    /// True when `self == 0`.
     public var isZero: Bool { get {
         Bool(boolLiteral: lang.i64_eq(self.raw, 0))
     }}
@@ -145,58 +216,67 @@ public struct UInt64:
     // BIT INSPECTION (Properties)
     // ========================================================================
 
-    /// Returns true if this value is a power of two.
+    /// True when the value is a positive power of two (`2^k` for `k >= 0`).
     ///
-    /// Zero and negative numbers are not powers of two.
+    /// Zero and negatives are excluded. Cheap branchless test built on
+    /// `x & (x - 1) == 0`.
     ///
-    /// Example:
-    ///     (1).isPowerOfTwo   // true  (2^0)
-    ///     (4).isPowerOfTwo   // true  (2^2)
-    ///     (3).isPowerOfTwo   // false
-    ///     (0).isPowerOfTwo   // false
+    /// # Examples
+    ///
+    /// ```
+    /// (1).isPowerOfTwo;   // true  (2^0)
+    /// (4).isPowerOfTwo;   // true  (2^2)
+    /// (3).isPowerOfTwo;   // false
+    /// (0).isPowerOfTwo;   // false
+    /// ```
     public var isPowerOfTwo: Bool { get {
         if Bool(boolLiteral: lang.i64_eq(self.raw, 0)) { false }
         else { Bool(boolLiteral: lang.i64_eq(lang.i64_and(self.raw, lang.i64_sub(self.raw, 1)), 0)) }
     }}
 
-    /// Returns the number of 1 bits in the binary representation.
+    /// Population count — the number of `1` bits in the binary representation.
     ///
-    /// Also known as "population count" or "Hamming weight".
+    /// Lowered to a `popcount` intrinsic where the target supports it.
     ///
-    /// Example:
-    ///     (0b1010).countOnes  // 2
-    ///     (0b1111).countOnes  // 4
-    ///     (0).countOnes       // 0
+    /// # Examples
+    ///
+    /// ```
+    /// (0b1010).countOnes;  // 2
+    /// (0b1111).countOnes;  // 4
+    /// (0).countOnes;       // 0
+    /// ```
     public var countOnes: Int64 { get {
         Int64(raw: lang.i64_popcount(self.raw))
     }}
 
-    /// Returns the number of 0 bits in the binary representation.
-    ///
-    /// Equal to `64 - countOnes`.
+    /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
     public var countZeros: Int64 { get {
         Int64(intLiteral: 64) - self.countOnes
     }}
 
-    /// Returns the number of leading zeros in the binary representation.
+    /// Number of leading zero bits, counting from the most-significant end.
     ///
-    /// Example:
-    ///     (1).leadingZeros   // 64 - 1
-    ///     (0).leadingZeros   // 64
+    /// For zero, returns `bitWidth`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1).leadingZeros;   // bitWidth - 1
+    /// (0).leadingZeros;   // bitWidth
+    /// ```
     public var leadingZeros: Int64 { get {
         Int64(raw: lang.i64_clz(self.raw))
     }}
 
-    /// Returns the number of trailing zeros in the binary representation.
-    ///
-    /// Useful for finding the largest power of 2 that divides this number.
+    /// Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
+    /// values; returns `bitWidth` for zero. Useful for finding the largest
+    /// power of two dividing the value.
     public var trailingZeros: Int64 { get {
         Int64(raw: lang.i64_ctz(self.raw))
     }}
 
-    /// Returns the value with its bytes in reversed order.
-    ///
-    /// Useful for converting between big-endian and little-endian byte orders.
+    /// Value with its byte order reversed. Use to convert between big- and
+    /// little-endian; lowered to a `bswap` intrinsic.
     public var byteSwapped: UInt64 { get {
         UInt64(raw: lang.i64_bswap(self.raw))
     }}
@@ -205,24 +285,33 @@ public struct UInt64:
     // COMPARISON
     // ========================================================================
 
-    /// Compares two values for equality.
+    /// Bit-for-bit equality. Backs the `==` operator.
     ///
-    /// Example:
-    ///     (42).equals(other: 42)  // true
-    ///     42 == 42                // true (operator form)
+    /// # Examples
+    ///
+    /// ```
+    /// (42).equals(other: 42);  // true
+    /// 42 == 42;                // true
+    /// ```
     public func equals(other: UInt64) -> Bool {
         Bool(boolLiteral: lang.i64_eq(self.raw, other.raw))
     }
 
-    /// Pattern matching support. Equivalent to `equals`.
+    /// Pattern-matching hook for `Matchable`. Identical to `equals`.
     public func matches(other: UInt64) -> Bool {
         Bool(boolLiteral: lang.i64_eq(self.raw, other.raw))
     }
 
-    /// Compares this value to another, returning an Ordering.
+    /// Three-way comparison returning an `Ordering`. Signed types compare
+    /// using two's-complement ordering; unsigned types use natural ordering.
     ///
-    /// Returns `.Less` if self < other, `.Greater` if self > other,
-    /// or `.Equal` if they are equal.
+    /// # Examples
+    ///
+    /// ```
+    /// (1).compare(other: 2);   // .Less
+    /// (2).compare(other: 2);   // .Equal
+    /// (3).compare(other: 2);   // .Greater
+    /// ```
     public func compare(other: UInt64) -> Ordering {
         if Bool(boolLiteral: lang.i64_unsigned_lt(self.raw, other.raw)) { .Less }
         else if Bool(boolLiteral: lang.i64_unsigned_gt(self.raw, other.raw)) { .Greater }
@@ -233,18 +322,19 @@ public struct UInt64:
     // STEPPING
     // ========================================================================
 
-    /// Returns the next value (self + 1).
+    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// integer ranges.
     public func successor() -> UInt64 { self.add(UInt64.one) }
 
-    /// Returns the previous value (self - 1).
+    /// Predecessor — `self - 1`. Wraps at `minValue`.
     public func predecessor() -> UInt64 { self.subtract(UInt64.one) }
 
-    /// Creates an exclusive range from self to end (self..<end).
+    /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
     public func exclusiveRange(to end: UInt64) -> Range[UInt64] {
         Range[UInt64](self, end)
     }
 
-    /// Creates an inclusive range from self to end (self..=end).
+    /// Builds a closed range `self..=end`. Sugar for the `..=` operator.
     public func inclusiveRange(to end: UInt64) -> ClosedRange[UInt64] {
         ClosedRange[UInt64](self, end)
     }
@@ -253,7 +343,8 @@ public struct UInt64:
     // HASHING
     // ========================================================================
 
-    /// Hashes this value into the given hasher.
+    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
+    /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
         hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: lang.sizeof[UInt64]())))
@@ -282,19 +373,31 @@ public struct UInt64:
     // ARITHMETIC (Wrapping - Default)
     // ========================================================================
 
-    /// Adds two values. Wraps on overflow.
+    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
+    /// `addSaturating` to clamp.
     public func add(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.raw, other.raw)) }
 
-    /// Subtracts two values. Wraps on overflow.
+    /// `self - other`, wrapping on overflow.
     public func subtract(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.raw, other.raw)) }
 
-    /// Multiplies two values. Wraps on overflow.
+    /// `self * other`, wrapping on overflow.
     public func multiply(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.raw, other.raw)) }
 
-    /// Divides two values (integer division, truncates toward zero).
+    /// Truncating integer division (`self / other`). For signed types,
+    /// `minValue / -1` wraps; use `divideChecked` to detect.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
+    /// process aborts before producing a result).
     public func divide(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_div(self.raw, other.raw)) }
 
-    /// Returns the remainder of division (self % other).
+    /// `self % other` — truncated remainder; the result has the sign of
+    /// `self` for signed types.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `divide`.
     public func modulo(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_rem(self.raw, other.raw)) }
 
     
@@ -305,6 +408,8 @@ public struct UInt64:
     // ========================================================================
 
     // TODO: requires overflow-detecting intrinsics for proper implementation
+    /// Wrapping addition that returns `None` on overflow. For unsigned types
+    /// overflow is detected via `result < self`.
     public func addChecked(other: UInt64) -> UInt64? {
         let result = self.add(other);
         // For unsigned, overflow if result < either operand
@@ -314,6 +419,7 @@ public struct UInt64:
         .Some(result)
     }
 
+    /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: UInt64) -> UInt64? {
         // For unsigned, underflow if other > self
         if other > self {
@@ -322,6 +428,8 @@ public struct UInt64:
         .Some(self.subtract(other))
     }
 
+    /// Wrapping multiplication that returns `None` on overflow. Implemented
+    /// by multiplying then dividing back.
     public func multiplyChecked(other: UInt64) -> UInt64? {
         if other == UInt64.zero {
             return .Some(UInt64.zero)
@@ -334,6 +442,7 @@ public struct UInt64:
         .Some(result)
     }
 
+    /// Division that returns `None` for divide-by-zero.
     public func divideChecked(other: UInt64) -> UInt64? {
         if other == UInt64.zero {
             return .None
@@ -346,6 +455,7 @@ public struct UInt64:
     // ARITHMETIC (Saturating - Clamps to Bounds)
     // ========================================================================
 
+    /// Addition that clamps to `maxValue` on overflow.
     public func addSaturating(other: UInt64) -> UInt64 {
         let checked = self.addChecked(other);
         match checked {
@@ -354,6 +464,8 @@ public struct UInt64:
         }
     }
 
+    /// Subtraction that clamps to `0` on underflow (unsigned types cannot
+    /// represent negative results).
     public func subtractSaturating(other: UInt64) -> UInt64 {
         let checked = self.subtractChecked(other);
         match checked {
@@ -362,6 +474,7 @@ public struct UInt64:
         }
     }
 
+    /// Multiplication that clamps to `maxValue` on overflow.
     public func multiplySaturating(other: UInt64) -> UInt64 {
         let checked = self.multiplyChecked(other);
         match checked {
@@ -375,14 +488,17 @@ public struct UInt64:
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises this value to the given power.
+    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
+    /// overflow. Negative exponents return zero (integer truncation of
+    /// the would-be fraction).
     ///
-    /// Uses binary exponentiation for efficiency. Negative exponents return 0
-    /// (integer division truncation).
+    /// # Examples
     ///
-    /// Example:
-    ///     (2).pow(10)  // 1024
-    ///     (3).pow(4)   // 81
+    /// ```
+    /// (2).pow(10);  // 1024
+    /// (3).pow(4);   // 81
+    /// (5).pow(-1);  // 0
+    /// ```
     public func pow(exponent: Int64) -> UInt64 {
         if exponent < 0 {
             return UInt64.zero
@@ -403,13 +519,16 @@ public struct UInt64:
         result
     }
 
-    /// Returns the greatest common divisor of two values.
+    /// Greatest common divisor via Euclidean algorithm. For signed types
+    /// the inputs are taken absolute first; the result is always non-negative.
     ///
-    /// Uses the Euclidean algorithm.
+    /// # Examples
     ///
-    /// Example:
-    ///     (12).gcd(8)  // 4
-    ///     (17).gcd(5)  // 1 (coprime)
+    /// ```
+    /// (12).gcd(8);   // 4
+    /// (17).gcd(5);   // 1   (coprime)
+    /// (-12).gcd(8);  // 4
+    /// ```
     public func gcd(other: UInt64) -> UInt64 {
         var a = self;
         var b = other;
@@ -421,11 +540,16 @@ public struct UInt64:
         a
     }
 
-    /// Returns the least common multiple of two values.
+    /// Least common multiple, computed as `|self| / gcd(self, other) * |other|`
+    /// to avoid intermediate overflow. Returns zero if either input is zero.
     ///
-    /// Example:
-    ///     (4).lcm(6)   // 12
-    ///     (3).lcm(5)   // 15
+    /// # Examples
+    ///
+    /// ```
+    /// (4).lcm(6);   // 12
+    /// (3).lcm(5);   // 15
+    /// (0).lcm(7);   // 0
+    /// ```
     public func lcm(other: UInt64) -> UInt64 {
         if self == UInt64.zero or other == UInt64.zero {
             return UInt64.zero
@@ -438,14 +562,16 @@ public struct UInt64:
     // CLAMPING
     // ========================================================================
 
-    /// Clamps this value to the given range.
+    /// Clamps `self` into `[min, max]`. Caller is responsible for ensuring
+    /// `min <= max`; otherwise the result is undefined.
     ///
-    /// Returns `min` if self < min, `max` if self > max, otherwise self.
+    /// # Examples
     ///
-    /// Example:
-    ///     (5).clamp(min: 0, max: 10)   // 5
-    ///     (-5).clamp(min: 0, max: 10)  // 0
-    ///     (15).clamp(min: 0, max: 10)  // 10
+    /// ```
+    /// (5).clamp(min: 0, max: 10);    // 5
+    /// (-5).clamp(min: 0, max: 10);   // 0
+    /// (15).clamp(min: 0, max: 10);   // 10
+    /// ```
     public func clamp(min: UInt64, max: UInt64) -> UInt64 {
         if self < min { min }
         else if self > max { max }
@@ -456,25 +582,29 @@ public struct UInt64:
     // BITWISE OPERATIONS
     // ========================================================================
 
-    /// Bitwise AND. Example: `0b1010 & 0b1100 = 0b1000`
+    /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
     public func bitwiseAnd(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_and(self.raw, other.raw)) }
 
-    /// Bitwise OR. Example: `0b1010 | 0b1100 = 0b1110`
+    /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
     public func bitwiseOr(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_or(self.raw, other.raw)) }
 
-    /// Bitwise XOR. Example: `0b1010 ^ 0b1100 = 0b0110`
+    /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
     public func bitwiseXor(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_xor(self.raw, other.raw)) }
 
-    /// Bitwise NOT (complement). Flips all bits.
+    /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
     public func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.raw)) }
 
-    /// Left shift. Example: `1 << 4 = 16`
+    /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
+    /// — pre-mask the count if you can't guarantee the bound.
     public func shiftLeft(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_shl(self.raw, count)) }
 
-    /// Right shift (arithmetic for signed, logical for unsigned).
+    /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
+    /// logical (zero-filling) for unsigned. Same `count` precondition as
+    /// `shiftLeft`.
     public func shiftRight(by count: lang.i64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.raw, count)) }
 
-    /// Rotates bits left by the given count.
+    /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
+    /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> UInt64 {
         let bits: Int64 = 64;
         let c = count % bits;
@@ -482,7 +612,8 @@ public struct UInt64:
         else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
     }
 
-    /// Rotates bits right by the given count.
+    /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
+    /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> UInt64 {
         let bits: Int64 = 64;
         let c = count % bits;
@@ -532,6 +663,18 @@ public struct UInt64:
     // PARSING
     // ========================================================================
 
+    /// Parses a base-10 unsigned integer literal, optionally prefixed
+    /// with `+`. A leading `-` is rejected. Returns `None` for an empty
+    /// string, a non-digit character, or a value that does not fit in
+    /// `UInt64`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// UInt64.parse(string: "42");   // Some(42)
+    /// UInt64.parse(string: "-1");   // None  (no sign for unsigned)
+    /// UInt64.parse(string: "");     // None
+    /// ```
     public static func parse(string: String) -> UInt64? {
         let len = string.byteCount;
         if len == 0 {
@@ -598,40 +741,28 @@ public struct UInt64:
     // ========================================================================
 
     // Formattable
-    /// Formats this integer as a string with the given options.
+    /// Renders the integer to a `String`, honouring the supplied
+    /// `FormatOptions`. Implements the `Formattable` protocol.
     ///
-    /// Supports various formatting options including radix (base), width,
-    /// padding, alignment, sign display, and alternate forms.
+    /// Recognised options:
+    /// - `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
+    /// - `width` — minimum output width; shorter values are padded.
+    /// - `fill` / `alignment` — padding character and side.
+    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
+    /// - `uppercase` — uppercase hex digits.
+    /// - `alternate` — emit the `0b` / `0o` / `0x` prefix.
     ///
-    /// Format options:
-    /// - `radix`: Number base (2, 8, 10, 16). Default: 10
-    /// - `width`: Minimum output width. Default: None
-    /// - `fill`: Padding character. Default: ' '
-    /// - `alignment`: .Left, .Right, or .Center. Default: .Left
-    /// - `sign`: .Negative (default), .Always, or .Space
-    /// - `uppercase`: Use uppercase for hex digits. Default: false
-    /// - `alternate`: Include prefix (0b, 0o, 0x). Default: false
+    /// # Examples
     ///
-    /// Example:
-    ///     (42).format()  // "42"
-    ///
-    ///     // Hexadecimal
-    ///     (255).format(options: .{radix: 16})  // "ff"
-    ///     (255).format(options: .{radix: 16, uppercase: true})  // "FF"
-    ///     (255).format(options: .{radix: 16, alternate: true})  // "0xff"
-    ///
-    ///     // Binary
-    ///     (42).format(options: .{radix: 2})  // "101010"
-    ///     (42).format(options: .{radix: 2, alternate: true})  // "0b101010"
-    ///
-    ///     // Padding and alignment
-    ///     (42).format(options: .{width: .Some(5)})  // "   42"
-    ///     (42).format(options: .{width: .Some(5), fill: '0'})  // "00042"
-    ///     (42).format(options: .{width: .Some(5), alignment: .Left})  // "42   "
-    ///
-    ///     // Sign display
-    ///     (42).format(options: .{sign: .Always})  // "+42"
-    ///     (-42).format(options: .{sign: .Always})  // "-42"
+    /// ```
+    /// (42).format();                                           // "42"
+    /// (255).format(options: .{radix: 16});                     // "ff"
+    /// (255).format(options: .{radix: 16, uppercase: true});    // "FF"
+    /// (255).format(options: .{radix: 16, alternate: true});    // "0xff"
+    /// (42).format(options: .{radix: 2, alternate: true});      // "0b101010"
+    /// (42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
+    /// (-42).format(options: .{sign: .Always});                 // "-42"
+    /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var n = self;
         let isNegative = false;
@@ -729,11 +860,5 @@ public struct UInt64:
         result
     }}
 
-/// Platform-sized unsigned integer.
-///
-/// On 64-bit platforms, UInt is an alias for UInt64. Use this when you need
-/// an unsigned integer of the platform's native word size.
-///
-/// Example:
-///     let size: UInt = 1024
+/// Platform-sized unsigned integer — currently always `UInt64`.
 public type UInt = UInt64

@@ -3,15 +3,27 @@
 
 module std.core
 
-/// Protocol for types that support the null coalescing operator (??).
-/// Enables providing a default value when the receiver is None/null.
-/// Uses short-circuit evaluation: the default is only computed if needed.
+/// Raw protocol backing the `??` operator.
+///
+/// Implemented by `Optional[T]` (with `Default = T`, `Output = T`) and by
+/// `Result[T, E]` (with `Default = T`, `Output = T`). The operand is a
+/// thunk so the default expression is only evaluated when needed — this
+/// matters when the default has side effects or is expensive to compute.
+///
+/// # Examples
+///
+/// ```
+/// let name: String? = .None;
+/// name ?? "anonymous"           // "anonymous"
+///
+/// let cached: String? = .Some("hi");
+/// cached ?? expensiveLookup()   // "hi" — expensiveLookup() not called
+/// ```
 @builtin(.CoalesceOperatorProtocol)
 public protocol Coalesce[Default] {
     type Output
 
-    /// Returns the contained value if present, otherwise evaluates and returns the default.
-    /// The closure is only called if self is None/null.
+    /// Returns the contained value, or the result of `default()` if absent.
     @builtin(.CoalesceOperatorMethod)
     func coalesce(default: () -> Default) -> Output
 }

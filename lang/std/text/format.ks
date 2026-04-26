@@ -12,16 +12,44 @@ import std.collections.(Array)
 // FORMAT ENUMS
 // ============================================================================
 
-/// Text alignment for formatted output.
+/// Horizontal alignment of formatted output within a fixed field width.
+///
+/// Pairs with `FormatOptions.width` and `FormatOptions.fill` to position
+/// shorter values inside the requested column. When the value is already at
+/// least as wide as the field, alignment has no visible effect. The
+/// formatter for `String` is the canonical consumer; numeric and boolean
+/// formatters honour the same convention.
+///
+/// # Examples
+///
+/// ```
+/// var opts = FormatOptions();
+/// opts.width = .Some(8);
+/// opts.alignment = .Right;
+/// "ab".format(options: opts);  // "      ab"
+/// opts.alignment = .Center;
+/// "ab".format(options: opts);  // "   ab   "
+/// ```
 public enum Alignment: Equatable, Matchable {
-    /// Align text to the left.
+    /// Pad on the right; the value sits flush against the left edge of the field.
     case Left
-    /// Align text to the right.
+    /// Pad on the left; the value sits flush against the right edge of the field.
     case Right
-    /// Center the text.
+    /// Pad on both sides; if the padding is odd, the extra space goes on the right.
     case Center
 
-    /// Compares for equality.
+    /// Returns true if both cases are the same variant.
+    ///
+    /// Equality is structural — there are no payloads. Used by the
+    /// `Equatable` conformance so `FormatOptions.equals` can fall through
+    /// without payload comparisons.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Alignment.Left.equals(.Left);    // true
+    /// Alignment.Left.equals(.Center);  // false
+    /// ```
     public func equals(other: Alignment) -> Bool {
         match (self, other) {
             (.Left, .Left) => true,
@@ -31,22 +59,57 @@ public enum Alignment: Equatable, Matchable {
         }
     }
 
-    /// Matches for pattern matching.
+    /// Pattern-match form of equality — delegates to `equals`.
+    ///
+    /// Lets `Alignment` appear in `match` patterns against another value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Alignment.Right.matches(.Right);  // true
+    /// ```
     public func matches(other: Alignment) -> Bool {
         self.equals(other)
     }
 }
 
-/// Sign display mode for numeric formatting.
+/// How the sign of a numeric value should be rendered.
+///
+/// Read by integer and float formatters before emitting the magnitude.
+/// `Negative` is the conventional default — only `-` for negative values,
+/// nothing for non-negatives. `Always` is useful for diffs or coordinates
+/// where every value should carry an explicit sign; `Space` reserves a
+/// column so columns of mixed signs line up.
+///
+/// # Examples
+///
+/// ```
+/// var opts = FormatOptions();
+/// opts.sign = .Always;
+/// (3).format(options: opts);   // "+3"
+/// (-3).format(options: opts);  // "-3"
+/// opts.sign = .Space;
+/// (3).format(options: opts);   // " 3"
+/// ```
 public enum Sign: Equatable, Matchable {
-    /// Only show sign for negative numbers (default).
+    /// Show `-` for negative values, no prefix for zero or positive (default).
     case Negative
-    /// Always show sign (+ or -).
+    /// Always show a sign — `+` for non-negative, `-` for negative.
     case Always
-    /// Show space for positive, minus for negative.
+    /// Use a leading space for non-negative, `-` for negative; keeps mixed-sign columns aligned.
     case Space
 
-    /// Compares for equality.
+    /// Returns true if both cases are the same variant.
+    ///
+    /// Used by `Equatable` to lift case identity into a `Bool` for
+    /// composite comparisons (see `FormatOptions.equals`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Sign.Always.equals(.Always);     // true
+    /// Sign.Negative.equals(.Always);   // false
+    /// ```
     public func equals(other: Sign) -> Bool {
         match (self, other) {
             (.Negative, .Negative) => true,
@@ -56,26 +119,60 @@ public enum Sign: Equatable, Matchable {
         }
     }
 
-    /// Matches for pattern matching.
+    /// Pattern-match form of equality — delegates to `equals`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Sign.Space.matches(.Space);  // true
+    /// ```
     public func matches(other: Sign) -> Bool {
         self.equals(other)
     }
 }
 
-/// Float display style.
+/// How a floating-point value should be rendered.
+///
+/// Selected by the `:f` / `:e` / `:E` / `:%` type slots in the format
+/// mini-language and read by the `Float32` / `Float64` formatters. Choice
+/// of style is independent of `precision` — `Auto` honours precision as
+/// "max significant digits", `Fixed` and `Scientific` treat it as
+/// "decimal places". The non-`Auto` variants always emit a decimal point.
+///
+/// # Examples
+///
+/// ```
+/// var opts = FormatOptions();
+/// opts.precision = .Some(2);
+/// opts.floatStyle = .Fixed;
+/// (3.14159).format(options: opts);       // "3.14"
+/// opts.floatStyle = .Scientific;
+/// (3.14159).format(options: opts);       // "3.14e0"
+/// opts.floatStyle = .Percent;
+/// (0.5).format(options: opts);           // "50.00%"
+/// ```
 public enum FloatStyle: Equatable, Matchable {
-    /// Default: use shortest representation.
+    /// Shortest round-trippable representation; switches to scientific for very large or very small magnitudes.
     case Auto
-    /// Fixed-point notation (e.g., "3.14").
+    /// Fixed-point — `precision` controls decimal places.
     case Fixed
-    /// Scientific notation with lowercase 'e' (e.g., "3.14e0").
+    /// Scientific notation with lowercase `e` exponent marker.
     case Scientific
-    /// Scientific notation with uppercase 'E' (e.g., "3.14E0").
+    /// Scientific notation with uppercase `E` exponent marker.
     case ScientificUpper
-    /// Percentage (multiplies by 100, adds '%').
+    /// Multiplies by 100 and appends `%`.
     case Percent
 
-    /// Compares for equality.
+    /// Returns true if both cases are the same variant.
+    ///
+    /// All cases are payload-less, so equality is purely structural.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// FloatStyle.Fixed.equals(.Fixed);       // true
+    /// FloatStyle.Fixed.equals(.Scientific);  // false
+    /// ```
     public func equals(other: FloatStyle) -> Bool {
         match (self, other) {
             (.Auto, .Auto) => true,
@@ -87,7 +184,13 @@ public enum FloatStyle: Equatable, Matchable {
         }
     }
 
-    /// Matches for pattern matching.
+    /// Pattern-match form of equality — delegates to `equals`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// FloatStyle.Auto.matches(.Auto);  // true
+    /// ```
     public func matches(other: FloatStyle) -> Bool {
         self.equals(other)
     }
@@ -97,63 +200,103 @@ public enum FloatStyle: Equatable, Matchable {
 // FORMAT OPTIONS
 // ============================================================================
 
-/// Options for controlling formatted output.
-/// Used by Formattable and string interpolation syntax: "\{expr:spec}"
+/// Mutable bag of formatting knobs threaded through every `Formattable.format` call.
 ///
-/// Format spec mini-language:
-///   [[fill]align][sign][#][0][width][.precision][type]
+/// `FormatOptions` is the parsed form of the format-spec mini-language.
+/// String interpolation `"\{expr:spec}"` constructs one of these from the
+/// trailing spec, then hands it to the formatter for `expr`'s type. Each
+/// formatter reads only the fields that apply to it: integers ignore
+/// `floatStyle`, strings ignore `radix`, and so on.
 ///
-/// Where type is one of:
-///   Integers: 'b' (binary), 'o' (octal), 'x' (hex lower), 'X' (hex upper)
-///   Floats:   'f' (fixed), 'e' (scientific), 'E' (scientific upper), '%' (percent)
-///   Any:      '?' (debug)
+/// # Format spec mini-language
 ///
-/// Examples:
-///   "\{n:>8}"      right-align, width 8
-///   "\{n:08x}"     zero-pad, width 8, hex
-///   "\{n:#X}"      hex upper with 0x prefix
-///   "\{pi:.2}"     precision 2 decimal places
-///   "\{pi:.2e}"    scientific with 2 decimal places
-///   "\{ratio:%}"   as percentage (0.5 -> "50%")
-///   "\{name:^10}"  center, width 10
-///   "\{value:?}"   debug format
+/// `[[fill]align][sign][#][0][width][.precision][type]`
+///
+/// Where `type` is one of:
+///   - Integers: `b` (binary), `o` (octal), `x` (hex lower), `X` (hex upper)
+///   - Floats:   `f` (fixed), `e` (scientific), `E` (scientific upper), `%` (percent)
+///   - Any:      `?` (debug)
+///
+/// # Examples
+///
+/// ```
+/// "\{n:>8}";      // right-align, width 8
+/// "\{n:08x}";     // zero-pad, width 8, hex
+/// "\{n:#X}";      // hex upper with 0x prefix
+/// "\{pi:.2}";     // precision 2 decimal places
+/// "\{pi:.2e}";    // scientific with 2 decimal places
+/// "\{ratio:%}";   // as percentage (0.5 -> "50%")
+/// "\{name:^10}";  // center, width 10
+/// "\{value:?}";   // debug format
+/// ```
+///
+/// # Representation
+///
+/// A flat record of independent fields — no validation across them. Each
+/// formatter is responsible for ignoring fields outside its domain and
+/// applying its own defaults when an option is absent.
 public struct FormatOptions: Equatable {
-    /// Minimum field width.
+    /// Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.
     public var width: Int64?
 
-    /// For floats: decimal places. For strings: max characters.
+    /// For floats: number of decimal places (or significant digits in `Auto` mode). For strings: maximum character count.
     public var precision: Int64?
 
-    /// Text alignment within the field width.
+    /// How to position the value inside `width` when padding is required.
     public var alignment: Alignment
 
-    /// Character used for padding (default: ' ').
+    /// Padding character — defaults to `' '`. Only applies when `width` is set and the value is shorter.
     public var fill: Char
 
-    /// Numeric base: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).
+    /// Numeric base for integer formatting: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).
     public var radix: Int64
 
-    /// Use uppercase for hex digits (A-F vs a-f).
+    /// When `true`, integer hex digits are emitted as `A`–`F` rather than `a`–`f`.
     public var uppercase: Bool
 
-    /// How to display the sign for numbers.
+    /// Sign-display strategy for numeric formatters.
     public var sign: Sign
 
-    /// Alternate form: show 0x/0b/0o prefix for non-decimal radix.
+    /// Alternate form: emit the conventional radix prefix (`0b`, `0o`, `0x`/`0X`) for non-decimal integers.
     public var alternate: Bool
 
-    /// Float display style (fixed, scientific, percent).
+    /// Float rendering style (fixed, scientific, percent, auto).
     public var floatStyle: FloatStyle
 
-    /// Debug mode: show structural representation.
+    /// When `true`, formatters should produce a structural / debug representation rather than a user-facing one.
     public var debug: Bool
 
-    /// Default format options.
+    /// Returns a fresh `FormatOptions` with all fields at their default values.
+    ///
+    /// Equivalent to calling `FormatOptions()`; provided as a static so
+    /// callers that want defaults without spelling out the constructor
+    /// (e.g. default-arg expressions) have a clean call site.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let opts = FormatOptions.default();
+    /// (42).format(options: opts);  // "42"
+    /// ```
     public static func default() -> FormatOptions {
         FormatOptions()
     }
 
-    /// Creates default format options.
+    /// @name Default
+    /// Creates a `FormatOptions` with every field at its default value.
+    ///
+    /// Defaults: no `width` or `precision`, left alignment, space fill,
+    /// decimal radix, lowercase hex, negative-only sign, no alternate form,
+    /// `Auto` float style, debug off.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var opts = FormatOptions();
+    /// opts.width = .Some(6);
+    /// opts.alignment = .Right;
+    /// "hi".format(options: opts);  // "    hi"
+    /// ```
     public init() {
         self.width = .None;
         self.precision = .None;
@@ -167,7 +310,22 @@ public struct FormatOptions: Equatable {
         self.debug = false;
     }
 
-    /// Compares two format options for equality.
+    /// Returns true if all fields are equal between the two options.
+    ///
+    /// `width` and `precision` are not compared — they typically reflect
+    /// per-call overrides rather than logical identity. Compare them
+    /// explicitly if needed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = FormatOptions();
+    /// let b = FormatOptions();
+    /// a.equals(b);  // true
+    /// var c = FormatOptions();
+    /// c.alternate = true;
+    /// a.equals(c);  // false
+    /// ```
     public func equals(other: FormatOptions) -> Bool {
         if self.alignment.equals(other.alignment) == false { return false }
         if self.radix != other.radix { return false }
@@ -184,22 +342,29 @@ public struct FormatOptions: Equatable {
 // FORMATTABLE PROTOCOL
 // ============================================================================
 
-/// Protocol for types that can be formatted as a string.
-/// Used by print functions and string interpolation.
+/// Protocol for types that can render themselves as a `String` under a `FormatOptions`.
 ///
-/// String interpolation syntax:
-///   "\{expr}"        uses default formatting
-///   "\{expr:spec}"   uses format spec (parsed into FormatOptions)
+/// Print routines and string interpolation `"\{expr}"` and `"\{expr:spec}"`
+/// both ultimately bottom out in `format`. Implementors should honour
+/// every `FormatOptions` field that is meaningful for their domain
+/// (alignment and width are universal; `radix` only applies to integers,
+/// `floatStyle` only to floats) and silently ignore fields that aren't.
 ///
-/// Examples:
-///   "\{name}"        "Alice"
-///   "\{name:>10}"    "     Alice"
-///   "\{n:08x}"       "0000002a"
-///   "\{pi:.2}"       "3.14"
-///   "\{value:?}"     debug representation
+/// # Examples
+///
+/// ```
+/// "\{name}";         // "Alice"          (default formatting)
+/// "\{name:>10}";     // "     Alice"     (right-align, width 10)
+/// "\{n:08x}";        // "0000002a"       (zero-pad, hex, width 8)
+/// "\{pi:.2}";        // "3.14"           (precision 2)
+/// "\{value:?}";      // debug representation
+/// ```
 @builtin(.FormattableProtocol)
 public protocol Formattable {
-    /// Returns this value formatted as a string with the given options.
+    /// Returns this value rendered as a `String` under the supplied options.
+    ///
+    /// Default arg uses `FormatOptions.default()` so unsuffixed calls
+    /// behave like the bare `"\{expr}"` interpolation form.
     @builtin(.FormattableFormat)
     func format(options: FormatOptions = FormatOptions.default()) -> String
 }
@@ -208,24 +373,49 @@ public protocol Formattable {
 // STRING INTERPOLATION PROTOCOLS
 // ============================================================================
 
-/// Protocol for types that accumulate string interpolation parts.
+/// Protocol for the accumulator type that string interpolation builds into.
+///
+/// The compiler lowers `"hello, \{name}!"` to a sequence of
+/// `appendLiteral` and `appendInterpolation` calls on a fresh value of
+/// the implementor's type, then reads the final string out (typically
+/// via a `build()` method on the concrete accumulator). `String` ships
+/// `DefaultStringInterpolation` as its accumulator; custom string-like
+/// types can supply their own to intercept literal pieces or coerce
+/// formatted parts.
 public protocol StringInterpolationProtocol {
-    /// Initialize with capacity hints for optimization.
+    /// Constructs an empty accumulator with capacity hints derived from the literal at compile time.
+    ///
+    /// `literalCapacity` is the total byte count of the static segments;
+    /// `interpolationCount` is the number of `\{...}` holes. Implementors
+    /// can use these to preallocate.
     init(literalCapacity: Int64, interpolationCount: Int64)
 
-    /// Append a literal string segment.
+    /// Appends a static literal segment.
+    ///
+    /// Called once per run of literal text between `\{...}` holes. May be
+    /// called with the empty string; implementors should be cheap in
+    /// that case.
     mutating func appendLiteral(literal: String)
 
-    /// Append a formatted value with options.
+    /// Appends one formatted interpolation hole.
+    ///
+    /// Receives the runtime `value`, the parsed `options` from the
+    /// trailing spec (or defaults if no spec was given), and a generic
+    /// constraint that the value is `Formattable`.
     mutating func appendInterpolation[T](value: T, options: FormatOptions) where T: Formattable
 }
 
-/// Protocol for types that can be created from string interpolation.
+/// Marker protocol for types constructible from a completed string interpolation.
+///
+/// Refines `ExpressibleByStringLiteral` so a single conformance covers
+/// both pure-literal `"abc"` and interpolated `"a\{x}b"` forms. The
+/// compiler picks `Interpolation` as the accumulator type, drives it via
+/// `StringInterpolationProtocol`, then hands it to `init(interpolation:)`.
 public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
-    /// The type used to accumulate interpolation parts.
+    /// The accumulator type used to build interpolated values of `Self`.
     type Interpolation: StringInterpolationProtocol
 
-    /// Create from a completed interpolation.
+    /// Constructs `Self` from a fully built interpolation accumulator.
     init(interpolation: Interpolation)
 }
 
@@ -233,24 +423,63 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 // DEFAULT STRING INTERPOLATION
 // ============================================================================
 
-/// Default implementation of StringInterpolationProtocol for String.
+/// The default `StringInterpolationProtocol` accumulator used for `String` interpolation.
+///
+/// Stores each literal and each formatted interpolation as a separate
+/// `String` part, then concatenates them in `build()`. The two-pass
+/// design lets `build()` size the result buffer exactly, avoiding the
+/// repeated reallocation cost a single-buffer accumulator would pay.
+///
+/// # Examples
+///
+/// ```
+/// var acc = DefaultStringInterpolation(literalCapacity: 7, interpolationCount: 1);
+/// acc.appendLiteral("hello, ");
+/// acc.appendInterpolation("world", options: FormatOptions.default());
+/// acc.build();  // "hello, world"
+/// ```
+///
+/// # Representation
+///
+/// A single `Array[String]` of accumulated parts. Empty literal pieces
+/// are dropped on append.
 @builtin(.DefaultStringInterpolation)
 public struct DefaultStringInterpolation: StringInterpolationProtocol, Cloneable {
     private var parts: Array[String]
 
-    /// Initialize with capacity hints.
+    /// @name With Capacity
+    /// Constructs an empty accumulator.
+    ///
+    /// The capacity arguments are ignored by the default implementation
+    /// — `Array[String]` grows on demand and the per-part cost dominates
+    /// the per-byte cost. Custom implementations may use them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
+    /// acc.build();  // ""
+    /// ```
     @builtin(.DefaultStringInterpolationInit)
-    public init(literalCapacity: Int64, interpolationCount: Int64) {
+    public init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64) {
         self.parts = [];
     }
 
+    /// Returns a shallow copy with cloned `parts`.
+    ///
+    /// `String` is COW so the part clone is itself shallow; mutating
+    /// either copy after this call does not affect the other.
     public func clone() -> DefaultStringInterpolation {
         var c = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
         c.parts = self.parts.clone();
         c
     }
 
-    /// Append a literal string segment.
+    /// Records one static literal segment.
+    ///
+    /// Empty literals are dropped — they would force `build()` to do
+    /// extra work without changing the result. Non-empty literals are
+    /// appended verbatim with no copying beyond the `String`'s own COW.
     @builtin(.DefaultStringInterpolationAppendLiteral)
     public mutating func appendLiteral(literal: String) {
         if literal.isEmpty == false {
@@ -258,13 +487,30 @@ public struct DefaultStringInterpolation: StringInterpolationProtocol, Cloneable
         }
     }
 
-    /// Append a formatted value with options.
+    /// Records one interpolation hole, eagerly formatted with `options`.
+    ///
+    /// Calls `value.format(options)` immediately so the resulting
+    /// `String` is what gets stored — `value` is not retained past this
+    /// call. Default `options` matches `FormatOptions.default()`.
     @builtin(.DefaultStringInterpolationAppendInterpolation)
     public mutating func appendInterpolation[T](value: T, options: FormatOptions = FormatOptions.default()) where T: Formattable {
         self.parts.append(value.format(options));
     }
 
-    /// Build the final string by concatenating all parts.
+    /// Concatenates all recorded parts into the final `String`.
+    ///
+    /// Fast paths the zero-part and one-part cases. For the multi-part
+    /// case, computes the exact total byte length first, allocates once
+    /// at that size, then appends — no growth churn.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
+    /// acc.appendLiteral("a");
+    /// acc.appendLiteral("b");
+    /// acc.build();  // "ab"
+    /// ```
     @builtin(.DefaultStringInterpolationBuild)
     public func build() -> String {
         let partsCount = self.parts.count;

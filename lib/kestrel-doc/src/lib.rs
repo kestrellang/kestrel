@@ -1,34 +1,34 @@
 //! Walks a compiled Kestrel `World` and extracts public declarations into
 //! a JSON-serializable shape suitable for a rustdoc-style site.
 //!
-//! Mirrors the LSP hover renderer in shape: each item carries a signature
-//! sliced from source (decl-span start → body-block start) plus its
-//! `Documentation` component as raw markdown.
+//! Signatures are built directly from the AST components (`Callable`,
+//! `TypeAnnotation`, `TypeParams`, `Conformances`, accessor children),
+//! never by slicing source — that side-steps parser quirks where the
+//! decl/body span boundary lands a character or two off.
 
 #[cfg(test)]
 mod repro_test;
 
+pub mod signature;
+
+use std::collections::HashMap;
+
 use kestrel_ast_builder::{
-    CstNode, DeclSpan, Documentation, FileId, FilePath, Name, NodeKind, Vis,
+    AstType, Conformances, DeclSpan, Documentation, ExtensionTarget, FileId, FilePath, Name,
+    NodeKind, Vis,
 };
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleIndex {
-    /// Top-level module entries (e.g. `std.core`, `std.collections`). Each
-    /// has its own JSON file written alongside the index.
     pub modules: Vec<ModuleSummary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleSummary {
-    /// Dotted module path (`std.core`).
     pub path: String,
-    /// Last segment of the path (`core`).
     pub name: String,
-    /// Total public items in this module subtree (including submodules).
     pub item_count: usize,
 }
 
@@ -36,9 +36,7 @@ pub struct ModuleSummary {
 pub struct ModulePage {
     pub path: String,
     pub name: String,
-    /// Direct submodules (dotted paths).
     pub submodules: Vec<String>,
-    /// Public items declared in this module.
     pub items: Vec<Item>,
 }
 
@@ -46,27 +44,37 @@ pub struct ModulePage {
 pub struct Item {
     pub kind: String,
     pub name: String,
-    /// Anchor slug (`fn-bump`, `struct-Array`).
+    /// Anchor slug (`function-bump`, `struct-Array`).
     pub anchor: String,
-    /// Source-sliced signature (no body).
     pub signature: String,
-    /// Doc-comment markdown (`Documentation` component), possibly empty.
     pub doc: String,
-    /// Source file path the item is defined in.
     pub source_path: Option<String>,
-    /// Nested members — fields/cases/methods on structs, enums, protocols,
-    /// and extensions. Empty for plain functions / type aliases.
+
+    /// For container types (struct, enum, protocol, extension), members
+    /// are split into the type's own declarations plus one group per
+    /// protocol it conforms to. Empty for leaf items.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub member_groups: Vec<MemberGroup>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemberGroup {
+    /// `"direct"` for items declared on the type itself, `"protocol"`
+    /// for items pulled from a protocol the type conforms to.
+    pub kind: String,
+    /// Display label (e.g. the protocol's short name). `None` for direct.
+    pub label: Option<String>,
+    /// Dotted module path the protocol lives at, when known. Used by
+    /// the frontend to link "Cloneable" → the protocol's page.
+    pub source_path: Option<String>,
     pub members: Vec<Item>,
 }
 
 /// Extract a doc-site index + per-module pages from a populated world.
-///
-/// Walks the entire module tree (from `root`), skipping the synthetic
-/// `lang` module. Emits one `ModulePage` per module — a top-level module
-/// like `std` and each of its descendants (`std.core`, `std.collections`,
-/// `std.core.ordering`, …) all become independent pages.
 pub fn extract(world: &World, root: Entity) -> (ModuleIndex, Vec<ModulePage>) {
+    let protocol_index = build_protocol_index(world);
+    let extensions_by_target = build_extension_index(world);
+
     let mut pages = Vec::new();
     let mut summaries = Vec::new();
 
@@ -91,9 +99,8 @@ pub fn extract(world: &World, root: Entity) -> (ModuleIndex, Vec<ModulePage>) {
             .get::<Name>(module)
             .map(|n| n.0.clone())
             .unwrap_or_default();
-        let page = build_page(world, module, &path);
+        let page = build_page(world, module, &path, &protocol_index, &extensions_by_target);
 
-        // Push child modules so they get their own pages too.
         for &child in world.children_of(module) {
             if matches!(world.get::<NodeKind>(child), Some(NodeKind::Module)) {
                 stack.push(child);
@@ -113,9 +120,13 @@ pub fn extract(world: &World, root: Entity) -> (ModuleIndex, Vec<ModulePage>) {
     (ModuleIndex { modules: summaries }, pages)
 }
 
-/// Build a page for a module — collects its direct items and lists the
-/// dotted paths of its submodules.
-fn build_page(world: &World, module: Entity, path: &str) -> ModulePage {
+fn build_page(
+    world: &World,
+    module: Entity,
+    path: &str,
+    protocol_index: &HashMap<String, Entity>,
+    extensions_by_target: &HashMap<Entity, Vec<Entity>>,
+) -> ModulePage {
     let name = world
         .get::<Name>(module)
         .map(|n| n.0.clone())
@@ -135,10 +146,19 @@ fn build_page(world: &World, module: Entity, path: &str) -> ModulePage {
             submodules.push(module_path(world, child));
             continue;
         }
+        // Extensions are merged into the type they target — never rendered
+        // as their own item. Their members + conformances flow into the
+        // target's member groups via `build_member_groups`.
+        if matches!(kind, NodeKind::Extension) {
+            continue;
+        }
         if !is_public_top_level(world, child) {
             continue;
         }
-        if let Some(item) = build_item(world, child) {
+        if signature::is_private(world, child) {
+            continue;
+        }
+        if let Some(item) = build_item(world, child, protocol_index, extensions_by_target) {
             items.push(item);
         }
     }
@@ -151,47 +171,50 @@ fn build_page(world: &World, module: Entity, path: &str) -> ModulePage {
     }
 }
 
-fn build_item(world: &World, entity: Entity) -> Option<Item> {
+fn build_item(
+    world: &World,
+    entity: Entity,
+    protocol_index: &HashMap<String, Entity>,
+    extensions_by_target: &HashMap<Entity, Vec<Entity>>,
+) -> Option<Item> {
     let kind = world.get::<NodeKind>(entity)?;
     if !is_documented(kind) {
         return None;
     }
-    let name = world
+    let raw_name = world
         .get::<Name>(entity)
         .map(|n| n.0.clone())
         .unwrap_or_else(|| anonymous_name(kind));
 
-    let signature = signature_text(world, entity).unwrap_or_default();
-    let doc = world
+    let opts = signature::Options::default();
+    let signature = signature::build(world, entity, opts);
+    let raw_doc = world
         .get::<Documentation>(entity)
         .map(|d| d.0.clone())
+        .filter(|s| !s.is_empty())
+        .or_else(|| docs_from_source(world, entity))
         .unwrap_or_default();
+    let (name_directive, doc) = extract_name_directive(&raw_doc);
     let source_path = entity_file_path(world, entity);
 
-    let kind_str = kind_label(kind, world, entity);
-    let anchor = make_anchor(&kind_str, &name);
+    // For inits/subscripts the entity's `Name` is just "init"/"subscript",
+    // which collapses every overload to the same row. If the doc carries
+    // a `@name <Display Name>` directive, use that instead so each
+    // overload gets a distinct, human-readable label.
+    let display_name = match (kind, &name_directive) {
+        (NodeKind::Initializer, Some(n)) => n.clone(),
+        (NodeKind::Subscript, Some(n)) => n.clone(),
+        _ => raw_name.clone(),
+    };
 
-    // Collect public members for container kinds. Extensions get all
-    // public members regardless of kind, since extensions only exist to
-    // add them.
-    let members = if has_members(kind) {
-        let mut child_items = Vec::new();
-        for &child in world.children_of(entity) {
-            let Some(child_kind) = world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if !is_member_kind(child_kind) {
-                continue;
-            }
-            if !is_public_member(world, child) {
-                continue;
-            }
-            if let Some(item) = build_item(world, child) {
-                child_items.push(item);
-            }
-        }
-        child_items.sort_by(|a, b| a.name.cmp(&b.name));
-        child_items
+    let kind_str = kind_label(kind);
+    let anchor = make_anchor(&kind_str, &display_name);
+    let name = display_name;
+
+    let member_groups = if has_members(kind) {
+        let empty: Vec<Entity> = Vec::new();
+        let extensions = extensions_by_target.get(&entity).unwrap_or(&empty);
+        build_member_groups(world, entity, protocol_index, extensions, extensions_by_target)
     } else {
         Vec::new()
     };
@@ -203,61 +226,274 @@ fn build_item(world: &World, entity: Entity) -> Option<Item> {
         signature,
         doc,
         source_path,
-        members,
+        member_groups,
     })
 }
 
-/// Slice the source from the declaration's start to its body-block start
-/// (or to end-of-decl when there is no body). This is the same shape the
-/// LSP hover uses, just minus its CST/source-cache plumbing.
-fn signature_text(world: &World, entity: Entity) -> Option<String> {
-    let cst = world.get::<CstNode>(entity)?;
-    let decl_span = world.get::<DeclSpan>(entity)?.0.clone();
-    let path = entity_file_path(world, entity)?;
-    let file_entity = source_file_entity(world, entity)?;
-    let source = world
-        .get::<kestrel_compiler::SourceText>(file_entity)
-        .map(|s| s.0.clone())
-        .or_else(|| std::fs::read_to_string(&path).ok())?;
+/// Build the docs.rs-style member layout. Walks the type's own children
+/// and routes each one to the conformed-protocol group whose declaration
+/// it satisfies (by raw-name match), so an `Iterable` impl's
+/// `type Item = T` lands under the **Implements Iterable** heading
+/// instead of in `Direct`. Anything that doesn't match a protocol stays
+/// in `Direct`. Each protocol group is then padded out with the
+/// protocol's own members for slots the type didn't override (showing
+/// default-method/abstract signatures).
+fn build_member_groups(
+    world: &World,
+    entity: Entity,
+    protocol_index: &HashMap<String, Entity>,
+    extensions: &[Entity],
+    extensions_by_target: &HashMap<Entity, Vec<Entity>>,
+) -> Vec<MemberGroup> {
+    // Step 1: collect member entities from the type itself + every
+    // extension targeting it. Extensions are flattened into the type's
+    // docs surface so users see one consolidated view.
+    let mut direct_entities: Vec<(Entity, String)> = Vec::new();
+    let mut sources: Vec<Entity> = vec![entity];
+    sources.extend(extensions.iter().copied());
+    for &source in &sources {
+        for &child in world.children_of(source) {
+            let Some(kind) = world.get::<NodeKind>(child) else {
+                continue;
+            };
+            if !is_member_kind(kind) {
+                continue;
+            }
+            if signature::is_private(world, child) {
+                continue;
+            }
+            let raw_name = world
+                .get::<Name>(child)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            direct_entities.push((child, raw_name));
+        }
+    }
 
-    let body_start = first_body_block_offset(&cst.0).unwrap_or(decl_span.end);
-    let end = body_start.min(decl_span.end);
-    let raw = source.get(decl_span.start..end).unwrap_or("");
-    Some(raw.trim_end_matches([';', ' ', '\t', '\n', '\r']).to_string())
+    // Step 2: collect protocols this type conforms to — both directly and
+    // via every extension — in source order, deduped.
+    let mut conformed: Vec<Entity> = Vec::new();
+    for &source in &sources {
+        if let Some(conformances) = world.get::<Conformances>(source) {
+            for item in &conformances.0 {
+                let kestrel_ast_builder::ConformanceItem::Positive(conformance_ty, _) = item
+                else {
+                    continue;
+                };
+                let Some(protocol) =
+                    signature::resolve_protocol(world, protocol_index, conformance_ty)
+                else {
+                    continue;
+                };
+                if protocol == entity || conformed.contains(&protocol) {
+                    continue;
+                }
+                conformed.push(protocol);
+            }
+        }
+    }
+
+    // Step 3: route each direct entity to a protocol group whose
+    // declaration it satisfies. First match wins so we don't double-list.
+    let mut by_protocol: HashMap<Entity, Vec<Entity>> = HashMap::new();
+    let mut assigned: std::collections::HashSet<Entity> = Default::default();
+    for &protocol in &conformed {
+        let protocol_member_names: std::collections::HashSet<String> = world
+            .children_of(protocol)
+            .iter()
+            .filter_map(|&c| world.get::<Name>(c).map(|n| n.0.clone()))
+            .collect();
+        for (e, raw_name) in &direct_entities {
+            if assigned.contains(e) {
+                continue;
+            }
+            if protocol_member_names.contains(raw_name) {
+                by_protocol.entry(protocol).or_default().push(*e);
+                assigned.insert(*e);
+            }
+        }
+    }
+
+    // Step 4: build the Direct group from anything left over.
+    let mut groups = Vec::new();
+    let mut direct_items: Vec<Item> = direct_entities
+        .iter()
+        .filter(|(e, _)| !assigned.contains(e))
+        .filter_map(|(e, _)| build_item(world, *e, protocol_index, extensions_by_target))
+        .collect();
+    direct_items.sort_by(|a, b| a.name.cmp(&b.name));
+    if !direct_items.is_empty() {
+        groups.push(MemberGroup {
+            kind: "direct".into(),
+            label: None,
+            source_path: None,
+            members: direct_items,
+        });
+    }
+
+    // Step 5: build a group per conformed protocol — the type's
+    // implementations first, then any protocol-declared members the type
+    // didn't override (so abstract / default-only items still show up).
+    for protocol in conformed {
+        let label = protocol_short_name(world, protocol);
+        let source_path = Some(module_path_for(world, protocol));
+
+        let mut members: Vec<Item> = Vec::new();
+        let mut covered_names: std::collections::HashSet<String> = Default::default();
+
+        for &e in by_protocol.get(&protocol).unwrap_or(&Vec::new()) {
+            let raw_name = world
+                .get::<Name>(e)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            if let Some(item) = build_item(world, e, protocol_index, extensions_by_target) {
+                covered_names.insert(raw_name);
+                members.push(item);
+            }
+        }
+        for &child in world.children_of(protocol) {
+            let Some(kind) = world.get::<NodeKind>(child) else {
+                continue;
+            };
+            if !is_member_kind(kind) {
+                continue;
+            }
+            if signature::is_private(world, child) {
+                continue;
+            }
+            let raw_name = world
+                .get::<Name>(child)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            if covered_names.contains(&raw_name) {
+                continue;
+            }
+            if let Some(item) = build_item(world, child, protocol_index, extensions_by_target) {
+                members.push(item);
+            }
+        }
+
+        members.sort_by(|a, b| a.name.cmp(&b.name));
+        if !members.is_empty() {
+            groups.push(MemberGroup {
+                kind: "protocol".into(),
+                label: Some(label),
+                source_path,
+                members,
+            });
+        }
+    }
+
+    groups
 }
 
-/// Offset of where the entity's body / accessor block actually begins. We
-/// can't trust the body node's `text_range().start()` directly: the parser
-/// sometimes folds preceding tokens (e.g. the trailing `]` of a generic
-/// return type) into the body node's leading trivia, which would chop off
-/// the last character of the rendered signature. Instead, walk the body
-/// node's tokens and take the first `LBrace` — that's the source-level `{`
-/// that opens the block.
-fn first_body_block_offset(cst: &SyntaxNode) -> Option<usize> {
-    for child in cst.children() {
+/// Group every Extension in the world by the entity it targets, so a
+/// container's docs page can pull in members and conformances from each
+/// extension that extends it. Resolution prefers a same-module match
+/// when multiple types share a short name.
+fn build_extension_index(world: &World) -> HashMap<Entity, Vec<Entity>> {
+    let type_index = build_type_index(world);
+    let mut by_target: HashMap<Entity, Vec<Entity>> = HashMap::new();
+    for (ext, kind) in world.iter_component::<NodeKind>() {
+        if !matches!(kind, NodeKind::Extension) {
+            continue;
+        }
+        let Some(target) = world.get::<ExtensionTarget>(ext) else {
+            continue;
+        };
+        let Some(name) = target_head_name(&target.0) else {
+            continue;
+        };
+        let Some(target_entity) = pick_type_for_extension(world, &type_index, &name, ext) else {
+            continue;
+        };
+        by_target.entry(target_entity).or_default().push(ext);
+    }
+    by_target
+}
+
+/// Index every container-kind entity by its short name. Used to resolve
+/// an `extension Foo` target back to the `Foo` declaration.
+fn build_type_index(world: &World) -> HashMap<String, Vec<Entity>> {
+    let mut map: HashMap<String, Vec<Entity>> = HashMap::new();
+    for (e, kind) in world.iter_component::<NodeKind>() {
         if !matches!(
-            child.kind(),
-            SyntaxKind::FunctionBody
-                | SyntaxKind::StructBody
-                | SyntaxKind::EnumBody
-                | SyntaxKind::ProtocolBody
-                | SyntaxKind::ExtensionBody
-                | SyntaxKind::SubscriptBody
-                | SyntaxKind::PropertyAccessors
-                | SyntaxKind::CodeBlock
+            kind,
+            NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol
         ) {
             continue;
         }
-        let opener = child
-            .descendants_with_tokens()
-            .filter_map(|el| el.into_token())
-            .find(|t| t.kind() == SyntaxKind::LBrace);
-        if let Some(tok) = opener {
-            return Some(tok.text_range().start().into());
+        if let Some(name) = world.get::<Name>(e) {
+            map.entry(name.0.clone()).or_default().push(e);
         }
-        return Some(child.text_range().start().into());
     }
-    None
+    map
+}
+
+fn target_head_name(t: &AstType) -> Option<String> {
+    match t {
+        AstType::Named { segments, .. } => segments.last().map(|s| s.name.clone()),
+        _ => None,
+    }
+}
+
+/// When multiple types share a short name, prefer one defined in the
+/// same module as the extension. Otherwise return the first match.
+fn pick_type_for_extension(
+    world: &World,
+    type_index: &HashMap<String, Vec<Entity>>,
+    name: &str,
+    extension: Entity,
+) -> Option<Entity> {
+    let candidates = type_index.get(name)?;
+    if candidates.is_empty() {
+        return None;
+    }
+    if candidates.len() == 1 {
+        return Some(candidates[0]);
+    }
+    let ext_module = world.parent_of(extension)?;
+    candidates
+        .iter()
+        .copied()
+        .find(|&c| world.parent_of(c) == Some(ext_module))
+        .or_else(|| candidates.first().copied())
+}
+
+/// Index every Protocol entity by its short name. Stdlib happens to have
+/// unique protocol names, so we don't need full path-based resolution
+/// for `Conformances` (which often carry just the short name).
+fn build_protocol_index(world: &World) -> HashMap<String, Entity> {
+    let mut map = HashMap::new();
+    for (e, kind) in world.iter_component::<NodeKind>() {
+        if !matches!(kind, NodeKind::Protocol) {
+            continue;
+        }
+        if let Some(name) = world.get::<Name>(e) {
+            map.entry(name.0.clone()).or_insert(e);
+        }
+    }
+    map
+}
+
+fn protocol_short_name(world: &World, protocol: Entity) -> String {
+    world
+        .get::<Name>(protocol)
+        .map(|n| n.0.clone())
+        .unwrap_or_default()
+}
+
+fn module_path_for(world: &World, entity: Entity) -> String {
+    if let Some(parent) = world.parent_of(entity) {
+        if matches!(world.get::<NodeKind>(parent), Some(NodeKind::Module)) {
+            let mp = module_path(world, parent);
+            if let Some(name) = world.get::<Name>(entity) {
+                return format!("{}.{}", mp, name.0);
+            }
+            return mp;
+        }
+    }
+    String::new()
 }
 
 fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
@@ -268,27 +504,18 @@ fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
     world.get::<FilePath>(fid.0).map(|p| p.0.clone())
 }
 
-fn source_file_entity(world: &World, entity: Entity) -> Option<Entity> {
-    world.get::<FileId>(entity).map(|f| f.0)
-}
-
-/// Top-level items (direct module children) only ship if they're explicitly
-/// `public`. Stdlib follows this convention strictly.
 fn is_public_top_level(world: &World, entity: Entity) -> bool {
-    matches!(world.get::<Vis>(entity).map(|v| (*v).clone()), Some(Vis::Public))
-}
-
-/// Members of containers (protocol methods, extension methods, etc.) often
-/// lack an explicit visibility — protocol APIs are public by convention.
-/// Filter only the explicitly-private ones.
-fn is_public_member(world: &World, entity: Entity) -> bool {
-    match world.get::<Vis>(entity).map(|v| (*v).clone()) {
-        Some(Vis::Private) | Some(Vis::Fileprivate) => false,
-        _ => true,
+    // Top-level items must be explicitly `public`. Stdlib follows this
+    // convention strictly; anything internal stays out of the docs.
+    if let Some(vis) = world.get::<Vis>(entity) {
+        return matches!(vis, Vis::Public);
     }
+    matches!(signature::visibility(world, entity), Some("public"))
 }
 
 fn is_documented(kind: &NodeKind) -> bool {
+    // Extensions are intentionally excluded — they're folded into the
+    // type they target rather than shown as standalone items.
     matches!(
         kind,
         NodeKind::Function
@@ -299,7 +526,6 @@ fn is_documented(kind: &NodeKind) -> bool {
             | NodeKind::Enum
             | NodeKind::EnumCase
             | NodeKind::Protocol
-            | NodeKind::Extension
             | NodeKind::TypeAlias
     )
 }
@@ -307,7 +533,7 @@ fn is_documented(kind: &NodeKind) -> bool {
 fn has_members(kind: &NodeKind) -> bool {
     matches!(
         kind,
-        NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension
+        NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol
     )
 }
 
@@ -323,7 +549,7 @@ fn is_member_kind(kind: &NodeKind) -> bool {
     )
 }
 
-fn kind_label(kind: &NodeKind, _world: &World, _entity: Entity) -> String {
+fn kind_label(kind: &NodeKind) -> String {
     match kind {
         NodeKind::Function => "function",
         NodeKind::Initializer => "initializer",
@@ -378,9 +604,99 @@ fn module_path(world: &World, module: Entity) -> String {
     segments.join(".")
 }
 
+/// Fallback: when the AST builder didn't attach a `Documentation`
+/// component (e.g. the parser folded the leading trivia into the wrong
+/// node — happens reproducibly for all-but-the-first subscript on a
+/// type), recover the doc body by scanning source-text lines preceding
+/// the declaration. Returns `None` when there's no `///` block above
+/// the decl.
+fn docs_from_source(world: &World, entity: Entity) -> Option<String> {
+    let span = world.get::<DeclSpan>(entity)?;
+    let file = world.get::<FileId>(entity)?.0;
+    let source = world.get::<kestrel_compiler::SourceText>(file)?.0.clone();
+    let bytes = source.as_bytes();
+
+    // Walk to the start of the line containing decl_span.start.
+    let mut pos = span.0.start.min(source.len());
+    while pos > 0 && bytes[pos - 1] != b'\n' {
+        pos -= 1;
+    }
+
+    // Walk backward line-by-line. Collect contiguous `///` lines (with
+    // optional blank lines between them). Stop at any other content.
+    let mut chunks: Vec<String> = Vec::new();
+    let mut blank_run = false;
+    while pos > 0 {
+        let line_end = pos - 1; // skip past the '\n' that ended the prior line
+        let mut line_start = line_end;
+        while line_start > 0 && bytes[line_start - 1] != b'\n' {
+            line_start -= 1;
+        }
+        let line = &source[line_start..line_end];
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("///") {
+            // `////` is a section divider, not a doc comment.
+            if rest.starts_with('/') {
+                break;
+            }
+            let content = rest.strip_prefix(' ').unwrap_or(rest).to_string();
+            chunks.push(content);
+            blank_run = false;
+            pos = line_start;
+        } else if trimmed.is_empty() {
+            // Blank line — only allowed once between doc paragraphs.
+            if blank_run {
+                break;
+            }
+            blank_run = true;
+            pos = line_start;
+        } else {
+            break;
+        }
+    }
+
+    if chunks.is_empty() {
+        return None;
+    }
+    chunks.reverse();
+    Some(chunks.join("\n").trim().to_string())
+}
+
+/// Pull a `@name <Display Name>` directive out of a doc-comment body.
+/// Returns `(directive, doc_with_directive_line_removed)`. Stdlib uses
+/// these to disambiguate init/subscript overloads in the rendered docs.
+fn extract_name_directive(doc: &str) -> (Option<String>, String) {
+    let mut directive: Option<String> = None;
+    let mut kept: Vec<&str> = Vec::new();
+    for line in doc.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("@name ") {
+            if directive.is_none() {
+                directive = Some(rest.trim().to_string());
+            }
+            continue;
+        }
+        kept.push(line);
+    }
+    // Collapse any double-blank-lines left behind after stripping the
+    // directive so doc bodies don't gain accidental gaps.
+    let mut cleaned = String::new();
+    let mut prev_blank = false;
+    for line in kept {
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue;
+        }
+        cleaned.push_str(line);
+        cleaned.push('\n');
+        prev_blank = is_blank;
+    }
+    (directive, cleaned.trim().to_string())
+}
+
 fn count_items(page: &ModulePage) -> usize {
     page.items
         .iter()
-        .map(|it| 1 + it.members.len())
+        .map(|it| 1 + it.member_groups.iter().map(|g| g.members.len()).sum::<usize>())
         .sum::<usize>()
 }

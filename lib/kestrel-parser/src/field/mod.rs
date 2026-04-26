@@ -340,13 +340,20 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
             emit_code_block(sink, body);
         },
         ComputedBodyData::Accessors {
-            lbrace: _,
+            lbrace,
             get_span,
             getter,
             set_span,
             setter,
-            rbrace: _,
+            rbrace,
         } => {
+            // Emit the outer `{` so the event sink advances over it
+            // instead of leaving it as orphan source text. Without this
+            // the trivia following the previous declaration's body lands
+            // in this accessor's leading-trivia slot, swallowing doc
+            // comments on subsequent items.
+            sink.add_token(SyntaxKind::LBrace, lbrace.clone());
+
             // Emit getter
             if let Some(getter_body) = getter {
                 // Full getter with body: emit GetterClause containing Get token and code block
@@ -377,6 +384,8 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
                     sink.finish_node();
                 }
             }
+
+            sink.add_token(SyntaxKind::RBrace, rbrace.clone());
         },
     }
 

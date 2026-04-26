@@ -27,34 +27,34 @@ module Test
             if notFound.isSome() { return 5 }
 
             // Test all(satisfy:) - true
-            if s.all(satisfy: { (x) in x > 0 }) == false { return 6 }
+            if s.all(satisfying: { (x) in x > 0 }) == false { return 6 }
 
             // Test all(satisfy:) - false
-            if s.all(satisfy: { (x) in x > 2 }) { return 7 }
+            if s.all(satisfying: { (x) in x > 2 }) { return 7 }
 
             // Test all(satisfy:) - empty set (vacuous truth)
             let empty = std.collections.Set[std.num.Int64]();
-            if empty.all(satisfy: { (x) in false }) == false { return 8 }
+            if empty.all(satisfying: { (x) in false }) == false { return 8 }
 
             // Test any(satisfy:) - true
-            if s.any(satisfy: { (x) in x == 3 }) == false { return 9 }
+            if s.any(satisfying: { (x) in x == 3 }) == false { return 9 }
 
             // Test any(satisfy:) - false
-            if s.any(satisfy: { (x) in x > 100 }) { return 10 }
+            if s.any(satisfying: { (x) in x > 100 }) { return 10 }
 
             // Test any(satisfy:) - empty set
-            if empty.any(satisfy: { (x) in true }) { return 11 }
+            if empty.any(satisfying: { (x) in true }) { return 11 }
 
             // Test countWhere(predicate:)
-            let evenCount = s.countWhere({ (x) in x % 2 == 0 });
+            let evenCount = s.countItems(matching: { (x) in x % 2 == 0 });
             if evenCount != 2 { return 12 }
 
             // countWhere with all matching
-            let allCount = s.countWhere({ (x) in x > 0 });
+            let allCount = s.countItems(matching: { (x) in x > 0 });
             if allCount != 5 { return 13 }
 
             // countWhere with none matching
-            let noneCount = s.countWhere({ (x) in x > 100 });
+            let noneCount = s.countItems(matching: { (x) in x > 100 });
             if noneCount != 0 { return 14 }
 
             0

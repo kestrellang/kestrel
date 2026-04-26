@@ -7,49 +7,56 @@
       "kind": "struct",
       "name": "Error",
       "anchor": "struct-Error",
-      "signature": "public struct Error",
+      "signature": "public struct Error { /* private fields */ }",
       "doc": "Represents an I/O error with a POSIX error code.",
       "source_path": "lang/std/io/error.ks",
-      "members": [
+      "member_groups": [
         {
-          "kind": "field",
-          "name": "code",
-          "anchor": "field-code",
-          "signature": "var code: Int32",
-          "doc": "",
-          "source_path": "lang/std/io/error.ks"
-        },
-        {
-          "kind": "function",
-          "name": "description",
-          "anchor": "function-description",
-          "signature": "public func description() -> String",
-          "doc": "Returns a human-readable description of the error.",
-          "source_path": "lang/std/io/error.ks"
-        },
-        {
-          "kind": "function",
-          "name": "errno",
-          "anchor": "function-errno",
-          "signature": "public func errno() -> Int32",
-          "doc": "Returns the raw POSIX error code.",
-          "source_path": "lang/std/io/error.ks"
-        },
-        {
-          "kind": "initializer",
-          "name": "init",
-          "anchor": "initializer-init",
-          "signature": "public init(code: Int32)",
-          "doc": "Creates an error from an error code.",
-          "source_path": "lang/std/io/error.ks"
-        },
-        {
-          "kind": "function",
-          "name": "last",
-          "anchor": "function-last",
-          "signature": "public static func last() -> Error",
-          "doc": "Creates an error from the current errno value.",
-          "source_path": "lang/std/io/error.ks"
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "field",
+              "name": "code",
+              "anchor": "field-code",
+              "signature": "var code: Int32",
+              "doc": "",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "function",
+              "name": "description",
+              "anchor": "function-description",
+              "signature": "public func description() -> String",
+              "doc": "Returns a human-readable description of the error.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "function",
+              "name": "errno",
+              "anchor": "function-errno",
+              "signature": "public func errno() -> Int32",
+              "doc": "Returns the raw POSIX error code.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(Int32)",
+              "doc": "Creates an error from an error code.",
+              "source_path": "lang/std/io/error.ks"
+            },
+            {
+              "kind": "function",
+              "name": "last",
+              "anchor": "function-last",
+              "signature": "public static func last() -> Error",
+              "doc": "Creates an error from the current errno value.",
+              "source_path": "lang/std/io/error.ks"
+            }
+          ]
         }
       ]
     },

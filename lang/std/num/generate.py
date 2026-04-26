@@ -129,39 +129,48 @@ def apply_interface_docs(content: str, docs_map: dict[str, list[str]]) -> str:
 def generate_sign_properties(type_name: str, bits: int, signed: bool, lang_type: str, signed_prefix: str) -> str:
     """Generate sign inspection properties for integer types."""
     if signed:
-        return f'''    public var sign: {type_name} {{ get {{
+        return f'''    /// Sign as a `{type_name}`: `-1`, `0`, or `1`.
+    public var sign: {type_name} {{ get {{
         if Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0)) {{ {type_name}(intLiteral: lang.i64_neg(1)) }}
         else if Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0)) {{ {type_name}.zero }}
         else {{ {type_name}.one }}
     }}}}
 
+    /// True when `self > 0`.
     public var isPositive: Bool {{ get {{
         Bool(boolLiteral: lang.{lang_type}_signed_gt(self.raw, 0))
     }}}}
 
+    /// True when `self < 0`.
     public var isNegative: Bool {{ get {{
         Bool(boolLiteral: lang.{lang_type}_signed_lt(self.raw, 0))
     }}}}
 
+    /// True when `self == 0`.
     public var isZero: Bool {{ get {{
         Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0))
     }}}}
 '''
     else:
-        return f'''    public var sign: {type_name} {{ get {{
+        return f'''    /// Sign as a `{type_name}`: `0` for zero, `1` otherwise (unsigned types
+    /// have no negative values).
+    public var sign: {type_name} {{ get {{
         if Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0)) {{ {type_name}.zero }}
         else {{ {type_name}.one }}
     }}}}
 
+    /// True when `self > 0`.
     public var isPositive: Bool {{ get {{
         Bool(boolLiteral: lang.{lang_type}_unsigned_gt(self.raw, 0))
     }}}}
 
+    /// Always `false` — unsigned types cannot be negative.
     public var isNegative: Bool {{ get {{
         // Unsigned types are never negative
         false
     }}}}
 
+    /// True when `self == 0`.
     public var isZero: Bool {{ get {{
         Bool(boolLiteral: lang.{lang_type}_eq(self.raw, 0))
     }}}}
@@ -217,6 +226,7 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
     """Generate checked arithmetic methods that return Optional."""
     if signed:
         return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
+    /// Wrapping addition that returns `None` instead of overflowing.
     public func addChecked(other: {type_name}) -> {type_name}? {{
         // Simplified check - detect if signs are same and result sign differs
         let result = self.add(other);
@@ -229,6 +239,7 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(result)
     }}
 
+    /// Wrapping subtraction that returns `None` instead of overflowing.
     public func subtractChecked(other: {type_name}) -> {type_name}? {{
         // Simplified check
         let result = self.subtract(other);
@@ -241,6 +252,9 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(result)
     }}
 
+    /// Wrapping multiplication that returns `None` instead of overflowing.
+    /// Implemented by multiplying then dividing back; replace with an
+    /// overflow-detecting intrinsic when one is available.
     public func multiplyChecked(other: {type_name}) -> {type_name}? {{
         if other == {type_name}.zero {{
             return .Some({type_name}.zero)
@@ -253,6 +267,8 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(result)
     }}
 
+    /// Division that returns `None` for divide-by-zero or for the
+    /// `minValue / -1` overflow case.
     public func divideChecked(other: {type_name}) -> {type_name}? {{
         if other == {type_name}.zero {{
             return .None
@@ -264,6 +280,7 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(self.divide(other))
     }}
 
+    /// Negation that returns `None` for `minValue` (whose negation overflows).
     public func negateChecked() -> {type_name}? {{
         if self == {type_name}.minValue {{
             return .None
@@ -271,6 +288,8 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(self.negate())
     }}
 
+    /// Absolute value that returns `None` for `minValue` (whose absolute
+    /// value overflows).
     public func absChecked() -> {type_name}? {{
         if self == {type_name}.minValue {{
             return .None
@@ -281,6 +300,8 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
 '''
     else:
         return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
+    /// Wrapping addition that returns `None` on overflow. For unsigned types
+    /// overflow is detected via `result < self`.
     public func addChecked(other: {type_name}) -> {type_name}? {{
         let result = self.add(other);
         // For unsigned, overflow if result < either operand
@@ -290,6 +311,7 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(result)
     }}
 
+    /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: {type_name}) -> {type_name}? {{
         // For unsigned, underflow if other > self
         if other > self {{
@@ -298,6 +320,8 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(self.subtract(other))
     }}
 
+    /// Wrapping multiplication that returns `None` on overflow. Implemented
+    /// by multiplying then dividing back.
     public func multiplyChecked(other: {type_name}) -> {type_name}? {{
         if other == {type_name}.zero {{
             return .Some({type_name}.zero)
@@ -310,6 +334,7 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
         .Some(result)
     }}
 
+    /// Division that returns `None` for divide-by-zero.
     public func divideChecked(other: {type_name}) -> {type_name}? {{
         if other == {type_name}.zero {{
             return .None
@@ -323,7 +348,8 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
 def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
     """Generate saturating arithmetic methods."""
     if signed:
-        return f'''    public func addSaturating(other: {type_name}) -> {type_name} {{
+        return f'''    /// Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+    public func addSaturating(other: {type_name}) -> {type_name} {{
         let checked = self.addChecked(other);
         match checked {{
             .Some(result) => result,
@@ -331,6 +357,7 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
         }}
     }}
 
+    /// Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
     public func subtractSaturating(other: {type_name}) -> {type_name} {{
         let checked = self.subtractChecked(other);
         match checked {{
@@ -339,6 +366,8 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
         }}
     }}
 
+    /// Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
+    /// The clamp direction follows the algebraic sign of the would-be result.
     public func multiplySaturating(other: {type_name}) -> {type_name} {{
         let checked = self.multiplyChecked(other);
         match checked {{
@@ -351,6 +380,7 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
         }}
     }}
 
+    /// Negation that returns `maxValue` instead of wrapping `minValue`.
     public func negateSaturating() -> {type_name} {{
         if self == {type_name}.minValue {{
             {type_name}.maxValue
@@ -359,6 +389,7 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
         }}
     }}
 
+    /// Absolute value that returns `maxValue` instead of wrapping `minValue`.
     public func absSaturating() -> {type_name} {{
         if self == {type_name}.minValue {{
             {type_name}.maxValue
@@ -369,7 +400,8 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
 
 '''
     else:
-        return f'''    public func addSaturating(other: {type_name}) -> {type_name} {{
+        return f'''    /// Addition that clamps to `maxValue` on overflow.
+    public func addSaturating(other: {type_name}) -> {type_name} {{
         let checked = self.addChecked(other);
         match checked {{
             .Some(result) => result,
@@ -377,6 +409,8 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
         }}
     }}
 
+    /// Subtraction that clamps to `0` on underflow (unsigned types cannot
+    /// represent negative results).
     public func subtractSaturating(other: {type_name}) -> {type_name} {{
         let checked = self.subtractChecked(other);
         match checked {{
@@ -385,6 +419,7 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
         }}
     }}
 
+    /// Multiplication that clamps to `maxValue` on overflow.
     public func multiplySaturating(other: {type_name}) -> {type_name} {{
         let checked = self.multiplyChecked(other);
         match checked {{
@@ -441,40 +476,28 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         }'''
 
     return f'''    // Formattable
-    /// Formats this integer as a string with the given options.
+    /// Renders the integer to a `String`, honouring the supplied
+    /// `FormatOptions`. Implements the `Formattable` protocol.
     ///
-    /// Supports various formatting options including radix (base), width,
-    /// padding, alignment, sign display, and alternate forms.
+    /// Recognised options:
+    /// - `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
+    /// - `width` — minimum output width; shorter values are padded.
+    /// - `fill` / `alignment` — padding character and side.
+    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
+    /// - `uppercase` — uppercase hex digits.
+    /// - `alternate` — emit the `0b` / `0o` / `0x` prefix.
     ///
-    /// Format options:
-    /// - `radix`: Number base (2, 8, 10, 16). Default: 10
-    /// - `width`: Minimum output width. Default: None
-    /// - `fill`: Padding character. Default: ' '
-    /// - `alignment`: .Left, .Right, or .Center. Default: .Left
-    /// - `sign`: .Negative (default), .Always, or .Space
-    /// - `uppercase`: Use uppercase for hex digits. Default: false
-    /// - `alternate`: Include prefix (0b, 0o, 0x). Default: false
+    /// # Examples
     ///
-    /// Example:
-    ///     (42).format()  // "42"
-    ///
-    ///     // Hexadecimal
-    ///     (255).format(options: .{{radix: 16}})  // "ff"
-    ///     (255).format(options: .{{radix: 16, uppercase: true}})  // "FF"
-    ///     (255).format(options: .{{radix: 16, alternate: true}})  // "0xff"
-    ///
-    ///     // Binary
-    ///     (42).format(options: .{{radix: 2}})  // "101010"
-    ///     (42).format(options: .{{radix: 2, alternate: true}})  // "0b101010"
-    ///
-    ///     // Padding and alignment
-    ///     (42).format(options: .{{width: .Some(5)}})  // "   42"
-    ///     (42).format(options: .{{width: .Some(5), fill: '0'}})  // "00042"
-    ///     (42).format(options: .{{width: .Some(5), alignment: .Left}})  // "42   "
-    ///
-    ///     // Sign display
-    ///     (42).format(options: .{{sign: .Always}})  // "+42"
-    ///     (-42).format(options: .{{sign: .Always}})  // "-42"
+    /// ```
+    /// (42).format();                                           // "42"
+    /// (255).format(options: .{{radix: 16}});                     // "ff"
+    /// (255).format(options: .{{radix: 16, uppercase: true}});    // "FF"
+    /// (255).format(options: .{{radix: 16, alternate: true}});    // "0xff"
+    /// (42).format(options: .{{radix: 2, alternate: true}});      // "0b101010"
+    /// (42).format(options: .{{width: .Some(5), fill: '0'}});     // "00042"
+    /// (-42).format(options: .{{sign: .Always}});                 // "-42"
+    /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {{
         var n = self;{sign_handling}
 
@@ -599,7 +622,19 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
     # For signed types, handle negative numbers
     if signed:
-        base_parse = f'''    public static func parse(string: String) -> {type_name}? {{
+        base_parse = f'''    /// Parses a base-10 integer literal, optionally prefixed with `+` or
+    /// `-`. Returns `None` for an empty string, a non-digit character,
+    /// or a value that does not fit in `{type_name}`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// {type_name}.parse(string: "42");    // Some(42)
+    /// {type_name}.parse(string: "-7");    // Some(-7)
+    /// {type_name}.parse(string: "abc");   // None
+    /// {type_name}.parse(string: "");      // None
+    /// ```
+    public static func parse(string: String) -> {type_name}? {{
         let len = string.byteCount;
         if len == 0 {{
             return .None
@@ -669,16 +704,19 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     }}'''
         if type_name == "Int64":
             radix_parse = f'''
-    /// Parses an integer from a string in the given radix (base).
+    /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
+    /// case-insensitive and represent digit values 10–35. Returns `None`
+    /// for an out-of-range radix, an empty string, an unrecognised digit,
+    /// or a value that overflows `Int64`.
     ///
-    /// Radix must be between 2 and 36 inclusive. For radix > 10, letters
-    /// a-z (case insensitive) represent values 10-35.
+    /// # Examples
     ///
-    /// Example:
-    ///     Int64.parse(string: "ff", radix: 16)    // Some(255)
-    ///     Int64.parse(string: "FF", radix: 16)    // Some(255)
-    ///     Int64.parse(string: "101010", radix: 2) // Some(42)
-    ///     Int64.parse(string: "z", radix: 36)     // Some(35)
+    /// ```
+    /// Int64.parse(string: "ff", radix: 16);     // Some(255)
+    /// Int64.parse(string: "FF", radix: 16);     // Some(255)
+    /// Int64.parse(string: "101010", radix: 2);  // Some(42)
+    /// Int64.parse(string: "z", radix: 36);      // Some(35)
+    /// ```
     public static func parse(string: String, radix: Int64) -> Int64? {{
         if radix < 2 or radix > 36 {{
             return .None
@@ -755,7 +793,19 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         # Unsigned - no negative numbers allowed
         max_before_multiply = "1844674407370955161"  # UInt64.maxValue / 10
 
-        return f'''    public static func parse(string: String) -> {type_name}? {{
+        return f'''    /// Parses a base-10 unsigned integer literal, optionally prefixed
+    /// with `+`. A leading `-` is rejected. Returns `None` for an empty
+    /// string, a non-digit character, or a value that does not fit in
+    /// `{type_name}`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// {type_name}.parse(string: "42");   // Some(42)
+    /// {type_name}.parse(string: "-1");   // None  (no sign for unsigned)
+    /// {type_name}.parse(string: "");     // None
+    /// ```
+    public static func parse(string: String) -> {type_name}? {{
         let len = string.byteCount;
         if len == 0 {{
             return .None
@@ -828,12 +878,17 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     // public static func fromBytesBigEndian(bytes: Array[UInt8]) -> {type_name}?
     // public static func fromBytesLittleEndian(bytes: Array[UInt8]) -> {type_name}?'''
 
-    return '''    /// Returns this integer as an array of 8 bytes in native byte order.
+    return '''    /// Splits this integer into 8 bytes in *native* (host) byte order. Use
+    /// `toBytesBigEndian` / `toBytesLittleEndian` when serialising for a
+    /// fixed wire format.
     ///
-    /// Example:
-    ///     let bytes = (0x0102030405060708).toBytes()
-    ///     // On little-endian: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
-    ///     // On big-endian: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = (0x0102030405060708).toBytes();
+    /// // little-endian host: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+    /// // big-endian host:    [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
         let value = self;
@@ -846,13 +901,15 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         result
     }
 
-    /// Returns this integer as an array of 8 bytes in big-endian order.
+    /// Splits this integer into 8 bytes in big-endian order (most significant
+    /// byte first — i.e. network byte order).
     ///
-    /// Big-endian: most significant byte first (network byte order).
+    /// # Examples
     ///
-    /// Example:
-    ///     (0x0102030405060708).toBytesBigEndian()
-    ///     // [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    /// ```
+    /// (0x0102030405060708).toBytesBigEndian();
+    /// // [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    /// ```
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
         let value = UInt64(raw: self.raw);
@@ -867,13 +924,15 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         result
     }
 
-    /// Returns this integer as an array of 8 bytes in little-endian order.
+    /// Splits this integer into 8 bytes in little-endian order (least
+    /// significant byte first).
     ///
-    /// Little-endian: least significant byte first.
+    /// # Examples
     ///
-    /// Example:
-    ///     (0x0102030405060708).toBytesLittleEndian()
-    ///     // [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+    /// ```
+    /// (0x0102030405060708).toBytesLittleEndian();
+    /// // [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+    /// ```
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
         let value = UInt64(raw: self.raw);
@@ -888,12 +947,14 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         result
     }
 
-    /// Creates an Int64 from an array of 8 bytes in native byte order.
+    /// Reassembles an `Int64` from 8 bytes in native (host) byte order.
+    /// Returns `None` if the input is not exactly 8 bytes long.
     ///
-    /// Returns None if the array doesn't have exactly 8 bytes.
+    /// # Examples
     ///
-    /// Example:
-    ///     Int64.fromBytes(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+    /// ```
+    /// Int64.fromBytes(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    /// ```
     public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int64? {
         if bytes.count != Int64(intLiteral: 8) {
             return .None
@@ -909,12 +970,14 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         .Some(value)
     }
 
-    /// Creates an Int64 from an array of 8 bytes in big-endian order.
+    /// Reassembles an `Int64` from 8 bytes in big-endian order. Returns
+    /// `None` if the input is not exactly 8 bytes long.
     ///
-    /// Returns None if the array doesn't have exactly 8 bytes.
+    /// # Examples
     ///
-    /// Example:
-    ///     Int64.fromBytesBigEndian(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+    /// ```
+    /// Int64.fromBytesBigEndian(bytes: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    /// ```
     public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
         if bytes.count != Int64(intLiteral: 8) {
             return .None
@@ -930,12 +993,14 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         .Some(Int64(from: result))
     }
 
-    /// Creates an Int64 from an array of 8 bytes in little-endian order.
+    /// Reassembles an `Int64` from 8 bytes in little-endian order. Returns
+    /// `None` if the input is not exactly 8 bytes long.
     ///
-    /// Returns None if the array doesn't have exactly 8 bytes.
+    /// # Examples
     ///
-    /// Example:
-    ///     Int64.fromBytesLittleEndian(bytes: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01])
+    /// ```
+    /// Int64.fromBytesLittleEndian(bytes: [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+    /// ```
     public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
         if bytes.count != Int64(intLiteral: 8) {
             return .None
@@ -966,7 +1031,12 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     for other_name, other_bits, other_signed in other_types:
         conformances.append(f"    Convertible[{other_name}]")
         cast_expr = get_cast(other_bits, bits, other_signed)
-        inits.append(f"    public init(from other: {other_name}) {{ self.raw = {cast_expr} }}")
+        inits.append(
+            f"    /// @name From Integer\n"
+            f"    /// Converts from `{other_name}`. Narrowing conversions truncate the high\n"
+            f"    /// bits; signed→unsigned reinterprets the bit pattern.\n"
+            f"    public init(from other: {other_name}) {{ self.raw = {cast_expr} }}"
+        )
 
     # Join with comma+newline, no trailing comma
     convertible_conformances = ",\n".join(conformances) + "\n" if conformances else ""
@@ -1031,9 +1101,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Type alias for platform defaults
     if is_default:
         if signed:
-            type_alias = f"\n/// Platform-sized signed integer (alias to Int64 on 64-bit platforms).\npublic type Int = {type_name}"
+            type_alias = f"\n/// Platform-sized signed integer — currently always `Int64`.\npublic type Int = {type_name}"
         else:
-            type_alias = f"\n/// Platform-sized unsigned integer (alias to UInt64 on 64-bit platforms).\npublic type UInt = {type_name}"
+            type_alias = f"\n/// Platform-sized unsigned integer — currently always `UInt64`.\npublic type UInt = {type_name}"
     else:
         type_alias = ""
 
@@ -1115,22 +1185,21 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     """Generate the parse() method for float types."""
     lang_type = f"f{bits}"
 
-    method = '''    /// Parses a float from a string.
+    method = '''    /// Parses a `__TYPE_NAME__` from a string. Recognises decimal
+    /// (`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
+    /// tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
+    /// (case-insensitive). Returns `None` for any other input.
     ///
-    /// Accepts:
-    /// - Decimal notation: "3.14", "-0.5", "+2.0"
-    /// - Scientific notation: "1.5e10", "2.5E-3"
-    /// - Special values: "inf", "-inf", "nan" (case insensitive)
+    /// # Examples
     ///
-    /// Returns None if the string is not a valid float.
-    ///
-    /// Example:
-    ///     __TYPE_NAME__.parse(string: "3.14")      // Some(3.14)
-    ///     __TYPE_NAME__.parse(string: "-2.5e10")   // Some(-2.5e10)
-    ///     __TYPE_NAME__.parse(string: "inf")       // Some(infinity)
-    ///     __TYPE_NAME__.parse(string: "nan")       // Some(nan)
-    ///     __TYPE_NAME__.parse(string: "abc")       // None
-    ///     __TYPE_NAME__.parse(string: "")          // None
+    /// ```
+    /// __TYPE_NAME__.parse(string: "3.14");      // Some(3.14)
+    /// __TYPE_NAME__.parse(string: "-2.5e10");   // Some(-2.5e10)
+    /// __TYPE_NAME__.parse(string: "inf");       // Some(infinity)
+    /// __TYPE_NAME__.parse(string: "nan");       // Some(nan)
+    /// __TYPE_NAME__.parse(string: "abc");       // None
+    /// __TYPE_NAME__.parse(string: "");          // None
+    /// ```
     public static func parse(string: String) -> __TYPE_NAME__? {
         let len = string.byteCount;
         if len == 0 {
@@ -1361,53 +1430,31 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     """Generate the format() method for float types."""
     lang_type = f"f{bits}"
 
-    method = '''    /// Formats this float as a string.
+    method = '''    /// Renders the float to a `String`, honouring the supplied
+    /// `FormatOptions`. Implements `Formattable`.
     ///
-    /// Supports various formatting options including precision, width,
-    /// padding, alignment, sign display, and float style.
+    /// Recognised options:
+    /// - `precision` — digits after the decimal point (default 6).
+    /// - `width` / `fill` / `alignment` — padding control.
+    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
+    /// - `floatStyle` — `.Fixed`, `.Scientific`, `.Auto`, or `.Percent`.
+    ///   `.Auto` picks fixed or scientific based on magnitude.
+    ///   `.Percent` multiplies by 100 and appends `%`.
     ///
-    /// Format options:
-    /// - `precision`: Number of digits after decimal point. Default: 6
-    /// - `width`: Minimum output width. Default: 0
-    /// - `fill`: Padding character. Default: ' '
-    /// - `alignment`: .Left, .Right, or .Center. Default: .Right
-    /// - `sign`: .Negative (default), .Always, or .Space
-    /// - `floatStyle`: .Fixed, .Scientific, .general, or .Percent
+    /// String interpolation forwards through the same options:
+    /// `"\\{x:.2}"` is two decimal places, `"\\{x:.2e}"` is scientific,
+    /// `"\\{x:%}"` is percentage.
     ///
-    /// Float styles:
-    /// - `.Fixed`: Always use decimal notation (e.g., "3.14")
-    /// - `.Scientific`: Always use exponential notation (e.g., "3.14e0")
-    /// - `.general`: Choose notation based on magnitude (default)
-    /// - `.Percent`: Multiply by 100 and add % (e.g., 0.5 -> "50%")
+    /// # Examples
     ///
-    /// Example:
-    ///     (3.14159).format()  // "3.14159"
-    ///
-    ///     // Precision control
-    ///     (3.14159).format(options: .{precision: 2})  // "3.14"
-    ///     (3.14159).format(options: .{precision: 0})  // "3"
-    ///
-    ///     // Scientific notation
-    ///     (1234.5).format(options: .{floatStyle: .Scientific})  // "1.2345e3"
-    ///     (0.00123).format(options: .{floatStyle: .Scientific, precision: 2})  // "1.23e-3"
-    ///
-    ///     // Percentage
-    ///     (0.756).format(options: .{floatStyle: .Percent})  // "75.6%"
-    ///     (0.756).format(options: .{floatStyle: .Percent, precision: 0})  // "76%"
-    ///
-    ///     // Padding and alignment
-    ///     (3.14).format(options: .{width: 8})  // "    3.14"
-    ///     (3.14).format(options: .{width: 8, fill: '0'})  // "00003.14"
-    ///     (3.14).format(options: .{width: 8, alignment: .Left})  // "3.14    "
-    ///
-    ///     // Sign display
-    ///     (3.14).format(options: .{sign: .Always})  // "+3.14"
-    ///
-    ///     // String interpolation
-    ///     "\\{value}"       // general format
-    ///     "\\{value:.2}"    // 2 decimal places
-    ///     "\\{value:.2e}"   // scientific with 2 decimal places
-    ///     "\\{value:%}"     // percentage
+    /// ```
+    /// (3.14159).format();                                          // "3.14159"
+    /// (3.14159).format(options: .{precision: 2});                  // "3.14"
+    /// (1234.5).format(options: .{floatStyle: .Scientific});        // "1.2345e3"
+    /// (0.756).format(options: .{floatStyle: .Percent});            // "75.6%"
+    /// (3.14).format(options: .{width: 8, fill: '0'});              // "00003.14"
+    /// (3.14).format(options: .{sign: .Always});                    // "+3.14"
+    /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var precision: Int64 = 6;
         var precisionProvided = false;
@@ -1718,14 +1765,9 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
 // TYPE ALIASES
 // ============================================================================
 
-/// Default floating-point type.
-///
-/// Float is an alias for {type_name}. This is the recommended floating-point
-/// type for most use cases, offering good precision and performance.
-///
-/// Example:
-///     let pi: Float = 3.14159
-///     let area = pi * radius * radius
+/// Default floating-point type — alias for `{type_name}`. Reach for `Float`
+/// when you want the recommended precision/performance trade-off; reach for
+/// `Float32` only when you specifically need 32-bit storage.
 public type Float = {type_name}"""
     else:
         type_alias = ""

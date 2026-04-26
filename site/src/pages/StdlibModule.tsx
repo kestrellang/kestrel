@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import Markdown from "react-markdown";
-import { ArrowLeft, Package } from "lucide-react";
-import Nav from "../components/Nav";
-import Footer from "../components/Footer";
+import { ChevronRight, Package } from "lucide-react";
+import StdlibLayout from "../components/StdlibLayout";
+import MarkdownBody from "../components/MarkdownBody";
+import { HighlightedCode } from "../components/Highlight";
 
 interface Item {
   kind: string;
@@ -28,108 +28,75 @@ const KIND_ORDER = [
   "enum",
   "typealias",
   "function",
-  "extension",
 ];
+
+const KIND_TITLE: Record<string, string> = {
+  protocol: "Protocols",
+  struct: "Structs",
+  enum: "Enums",
+  typealias: "Type Aliases",
+  function: "Functions",
+};
 
 function kindRank(kind: string): number {
   const i = KIND_ORDER.indexOf(kind);
   return i === -1 ? KIND_ORDER.length : i;
 }
 
-function ItemBlock({ item }: { item: Item }) {
+/// Module-page item row. Mirrors the rustdoc-style collapsible
+/// `<details>` row used on item pages: chevron + signature in the
+/// summary, full doc body when expanded. Clicking the name jumps to
+/// the item's detail page.
+function ItemRow({
+  modulePath,
+  item,
+}: {
+  modulePath: string;
+  item: Item;
+}) {
   return (
-    <article
+    <details
+      open
       id={item.anchor}
-      className="p-5 rounded-lg bg-white/60 dark:bg-white/5 border border-[var(--color-slate)]/10 scroll-mt-24"
+      className="member-row py-3 border-b border-[var(--color-slate)]/10 last:border-0 scroll-mt-24"
     >
-      <div className="flex items-baseline gap-3 mb-3">
-        <span className="font-mono text-xs uppercase tracking-wide px-2 py-0.5 rounded bg-[var(--color-rust)]/10 text-[var(--color-rust)]">
-          {item.kind}
-        </span>
-        <h3 className="font-mono text-xl text-[var(--color-slate)]">
-          {item.name}
-        </h3>
-      </div>
-      {item.signature && (
-        <pre className="font-mono text-sm bg-black/10 dark:bg-white/10 rounded-lg p-4 mb-3 overflow-x-auto whitespace-pre-wrap">
-          <code>{item.signature}</code>
-        </pre>
-      )}
+      <summary className="cursor-pointer list-none flex items-start gap-2">
+        <ChevronRight className="member-chevron w-4 h-4 mt-1 shrink-0 text-[var(--color-slate-light)] transition-transform" />
+        <Link
+          to={`/reference/stdlib/${modulePath}/${item.name}`}
+          className="font-mono text-base whitespace-pre-wrap break-words min-w-0 flex-1 hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HighlightedCode code={item.signature} />
+        </Link>
+      </summary>
       {item.doc && (
-        <div className="prose prose-sm max-w-none text-[var(--color-slate)]">
-          <Markdown
-            components={{
-              p: ({ children }) => (
-                <p className="text-sm leading-relaxed mb-2">{children}</p>
-              ),
-              code: ({ className, children }) => {
-                const isBlock = className?.includes("language-");
-                return isBlock ? (
-                  <code className="block font-mono text-xs bg-black/10 dark:bg-white/10 rounded p-3 mb-2 overflow-x-auto whitespace-pre">
-                    {children}
-                  </code>
-                ) : (
-                  <code className="font-mono text-xs bg-black/10 dark:bg-white/10 rounded px-1 py-0.5">
-                    {children}
-                  </code>
-                );
-              },
-              ul: ({ children }) => (
-                <ul className="list-disc list-inside mb-2 space-y-0.5 text-sm">
-                  {children}
-                </ul>
-              ),
-              li: ({ children }) => <li className="text-sm">{children}</li>,
-              a: ({ href, children }) => (
-                <a
-                  href={href}
-                  className="text-[var(--color-rust)] hover:underline"
-                >
-                  {children}
-                </a>
-              ),
-            }}
-          >
-            {item.doc}
-          </Markdown>
+        <div className="mt-2 ml-6">
+          <MarkdownBody source={item.doc} compact />
         </div>
       )}
-      {item.members && item.members.length > 0 && (
-        <details className="mt-4">
-          <summary className="cursor-pointer font-mono text-xs text-[var(--color-slate-light)] hover:text-[var(--color-rust)]">
-            {item.members.length} member
-            {item.members.length === 1 ? "" : "s"}
-          </summary>
-          <div className="mt-3 flex flex-col gap-3 pl-4 border-l-2 border-[var(--color-slate)]/10">
-            {item.members.map((m) => (
-              <ItemBlock key={`${m.kind}-${m.name}`} item={m} />
-            ))}
-          </div>
-        </details>
-      )}
-    </article>
+    </details>
   );
 }
 
 export default function StdlibModule() {
   const params = useParams();
-  const path = params["*"] || params.modulePath || "";
+  const modulePath = params.modulePath || "";
   const [page, setPage] = useState<ModulePage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setPage(null);
     setError(null);
-    fetch(`/stdlib/${path}.json`)
+    fetch(`/stdlib/${modulePath}.json`)
       .then((r) => {
-        if (!r.ok) throw new Error(`module not found: ${path}`);
+        if (!r.ok) throw new Error(`module not found: ${modulePath}`);
         return r.json();
       })
       .then((data: ModulePage) => setPage(data))
       .catch((e) => setError((e as Error).message));
-  }, [path]);
+  }, [modulePath]);
 
-  // Group items by kind for a sidebar TOC.
   const groupedItems = (() => {
     if (!page) return [] as [string, Item[]][];
     const buckets = new Map<string, Item[]>();
@@ -137,107 +104,87 @@ export default function StdlibModule() {
       if (!buckets.has(it.kind)) buckets.set(it.kind, []);
       buckets.get(it.kind)!.push(it);
     }
+    for (const list of buckets.values())
+      list.sort((a, b) => a.name.localeCompare(b.name));
     return [...buckets.entries()].sort(
       (a, b) => kindRank(a[0]) - kindRank(b[0])
     );
   })();
 
   return (
-    <div className="min-h-screen bg-[var(--bg-secondary)] flex flex-col">
-      <Nav />
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-12">
-        <Link
-          to="/reference/stdlib"
-          className="inline-flex items-center gap-2 text-[var(--color-slate-light)] hover:text-[var(--color-rust)] font-mono text-sm mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to stdlib
-        </Link>
-
-        {error ? (
-          <div className="text-center py-16">
-            <Package className="w-12 h-12 mx-auto mb-4 text-[var(--color-slate-light)] opacity-50" />
-            <p className="font-serif text-lg text-[var(--color-slate-light)]">
-              {error}
-            </p>
-          </div>
-        ) : !page ? (
-          <p className="font-mono text-sm text-[var(--color-slate-light)]">
-            Loading…
+    <StdlibLayout>
+      {error ? (
+        <div className="text-center py-16">
+          <Package className="w-12 h-12 mx-auto mb-4 text-[var(--color-slate-light)] opacity-50" />
+          <p className="font-serif text-lg text-[var(--color-slate-light)]">
+            {error}
           </p>
-        ) : (
-          <>
-            <h1 className="font-mono text-3xl text-[var(--color-slate)] mb-2">
+        </div>
+      ) : !page ? (
+        <p className="font-mono text-sm text-[var(--color-slate-light)]">
+          Loading…
+        </p>
+      ) : (
+        <>
+          <div className="mb-6">
+            <p className="font-mono text-xs text-[var(--color-slate-light)] uppercase tracking-wide">
+              Module
+            </p>
+            <h1 className="font-mono text-3xl text-[var(--color-slate)]">
               {page.path}
             </h1>
-            <p className="text-[var(--color-slate-light)] font-mono text-sm mb-8">
-              {page.items.length} item{page.items.length === 1 ? "" : "s"}
-              {page.submodules.length > 0 &&
-                ` · ${page.submodules.length} submodule${
-                  page.submodules.length === 1 ? "" : "s"
-                }`}
-            </p>
+          </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-6">
-              <div className="flex flex-col gap-6">
-                {page.submodules.length > 0 && (
-                  <section>
-                    <h2 className="font-mono text-lg text-[var(--color-slate)] mb-3">
-                      Submodules
-                    </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {page.submodules.map((sub) => (
-                        <Link
-                          key={sub}
-                          to={`/reference/stdlib/${sub}`}
-                          className="p-3 rounded-lg bg-white/60 dark:bg-white/5 border border-[var(--color-slate)]/10 hover:border-[var(--color-rust)]/40 transition-colors font-mono text-sm text-[var(--color-rust)]"
-                        >
-                          {sub}
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
+          {page.submodules.length > 0 && (
+            <section className="mb-10">
+              <h2 className="font-mono text-xl text-[var(--color-slate)] mb-4 pb-1 border-b border-[var(--color-slate)]/15">
+                Modules
+              </h2>
+              <ul className="flex flex-col">
+                {page.submodules.map((sub) => (
+                  <li
+                    key={sub}
+                    className="py-2 border-b border-[var(--color-slate)]/10 last:border-0"
+                  >
+                    <Link
+                      to={`/reference/stdlib/${sub}`}
+                      className="font-mono text-base text-[var(--color-rust)] hover:underline"
+                    >
+                      {sub.split(".").pop()}
+                    </Link>
+                    <span className="ml-3 font-mono text-sm text-[var(--color-slate-light)]">
+                      {sub}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
-                {groupedItems.map(([kind, items]) => (
-                  <section key={kind}>
-                    <h2 className="font-mono text-lg text-[var(--color-slate)] mb-3 capitalize">
-                      {kind}s
-                    </h2>
-                    <div className="flex flex-col gap-4">
-                      {items.map((it) => (
-                        <ItemBlock key={it.anchor} item={it} />
-                      ))}
-                    </div>
-                  </section>
+          {groupedItems.map(([kind, items]) => (
+            <section key={kind} className="mb-10">
+              <h2 className="font-mono text-xl text-[var(--color-slate)] mb-4 pb-1 border-b border-[var(--color-slate)]/15">
+                {KIND_TITLE[kind] || kind}
+              </h2>
+              <div>
+                {items.map((it) => (
+                  <ItemRow
+                    key={`${kind}-${it.name}-${it.anchor}`}
+                    modulePath={page.path}
+                    item={it}
+                  />
                 ))}
               </div>
+            </section>
+          ))}
 
-              <aside className="hidden lg:block">
-                <div className="sticky top-6 p-4 rounded-lg bg-white/60 dark:bg-white/5 border border-[var(--color-slate)]/10">
-                  <p className="font-mono text-xs text-[var(--color-slate-light)] mb-2">
-                    On this page
-                  </p>
-                  <nav className="flex flex-col gap-1">
-                    {groupedItems.flatMap(([_, items]) =>
-                      items.map((it) => (
-                        <a
-                          key={it.anchor}
-                          href={`#${it.anchor}`}
-                          className="font-mono text-xs text-[var(--color-slate)] hover:text-[var(--color-rust)] truncate"
-                        >
-                          {it.name}
-                        </a>
-                      ))
-                    )}
-                  </nav>
-                </div>
-              </aside>
-            </div>
-          </>
-        )}
-      </main>
-      <Footer />
-    </div>
+          {groupedItems.length === 0 && page.submodules.length === 0 && (
+            <p className="font-serif italic text-[var(--color-slate-light)]">
+              This module has no public items.
+            </p>
+          )}
+        </>
+      )}
+    </StdlibLayout>
   );
 }

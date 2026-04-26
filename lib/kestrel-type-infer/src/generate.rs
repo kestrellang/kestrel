@@ -929,12 +929,18 @@ fn gen_struct_init(
                 }
             }
         } else if matched.is_empty() {
-            kestrel_debug::ktrace!(
-                "type-infer",
-                "no matching init for {:?} with labels {:?}",
-                qctx.get::<Name>(struct_entity),
-                arg_labels
-            );
+            // No init matches the call's labels. Without this report, the
+            // arg TyVars stay unresolved (no coerce constraint is emitted)
+            // and downstream MIR lowering happily picks the first init
+            // anyway, silently miscompiling primitive args as `ref`.
+            let name = qctx
+                .get::<Name>(struct_entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| "<struct>".into());
+            ctx.report_error(InferError::NoMatchingOverload {
+                name,
+                span: span.clone(),
+            });
         } else {
             // Multiple label matches — emit Member constraint.
             // resolve_member will detect the ambiguity and try protocol-based

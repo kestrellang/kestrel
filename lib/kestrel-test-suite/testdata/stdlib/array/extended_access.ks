@@ -17,8 +17,8 @@ module Test
             // Test subscript set via arr(i) = v
             arr(1) = 25;
             if arr(1) != 25 { return 4 }
-            // Also exercise setUnchecked for equivalence
-            arr.setUnchecked(1, 25);
+            // Also exercise unchecked subscript for equivalence
+            arr(unchecked: 1) = 25;
 
             // Test subscript(wrapping:) with negative index
             let wrapLast = arr(wrapping: -1);
@@ -65,8 +65,8 @@ module Test
             if arr.isValidIndex(3) { return 21 }
             if arr.isValidIndex(-1) { return 22 }
 
-            // Test setUnchecked
-            arr.setUnchecked(0, 99);
+            // Test unchecked subscript setter
+            arr(unchecked: 0) = 99;
             if arr(0) != 99 { return 23 }
 
             0

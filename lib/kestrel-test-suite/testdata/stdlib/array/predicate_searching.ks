@@ -48,33 +48,33 @@ module Test
             if lmNone.isSome() { return 12 }
 
             // all(satisfy:)
-            let allPos = arr.all(satisfy: { (x) in x > 0 });
+            let allPos = arr.all(satisfying: { (x) in x > 0 });
             if allPos == false { return 13 }
 
-            let allBig = arr.all(satisfy: { (x) in x > 3 });
+            let allBig = arr.all(satisfying: { (x) in x > 3 });
             if allBig { return 14 }
 
             // all(satisfy:) on empty array - vacuous truth
             let empty = std.collections.Array[std.num.Int64]();
-            let allEmpty = empty.all(satisfy: { (x) in false });
+            let allEmpty = empty.all(satisfying: { (x) in false });
             if allEmpty == false { return 15 }
 
             // any(satisfy:)
-            let anyBig = arr.any(satisfy: { (x) in x > 4 });
+            let anyBig = arr.any(satisfying: { (x) in x > 4 });
             if anyBig == false { return 16 }
 
-            let anyHuge = arr.any(satisfy: { (x) in x > 10 });
+            let anyHuge = arr.any(satisfying: { (x) in x > 10 });
             if anyHuge { return 17 }
 
             // any(satisfy:) on empty array
-            let anyEmpty = empty.any(satisfy: { (x) in true });
+            let anyEmpty = empty.any(satisfying: { (x) in true });
             if anyEmpty { return 18 }
 
             // countWhere(predicate:) - positional single-name param
-            let cw = arr.countWhere({ (x) in x % 2 == 0 });
+            let cw = arr.countItems(matching: { (x) in x % 2 == 0 });
             if cw != 2 { return 19 }
 
-            let cwNone = arr.countWhere({ (x) in x > 10 });
+            let cwNone = arr.countItems(matching: { (x) in x > 10 });
             if cwNone != 0 { return 20 }
 
             0

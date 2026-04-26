@@ -642,17 +642,17 @@ See [docs/memory-model/](docs/memory-model/) for the memory model specification.
 
 ### Architecture
 
-- [ ] Refactor parser
+- [x] Refactor parser
 - [x] Refactor symbol mangling
 - [x] Switch lookup from binding phase to type inference
 - [x] Consolidate type transformations
 - [x] Refactor semantic model and passes
 - [x] Incremental compilation
-- [ ] Introduce `HirTy::SelfType`
+- [x] Introduce `HirTy::SelfType`
 
 ### Tooling
 
-- [ ] Language Server Protocol (LSP)
+- [x] Language Server Protocol (LSP)
 - [x] Web Server
 - [x] Flock package manager
 - [x] Jessup version manager

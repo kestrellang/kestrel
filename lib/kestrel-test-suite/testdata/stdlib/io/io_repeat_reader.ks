@@ -6,7 +6,7 @@ module Test
         func main() -> lang.i64 {
             // Create a Repeat reader that yields byte 42
             let byte42: std.num.UInt8 = 42;
-            var rep = std.io.read.Repeat( byte42);
+            var rep = std.io.read.Repeat(byte: byte42);
 
             // Create a buffer to read into
             let zeroByte: std.num.UInt8 = 0;

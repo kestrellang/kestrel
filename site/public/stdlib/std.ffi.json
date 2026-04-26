@@ -7,49 +7,56 @@
       "kind": "struct",
       "name": "CString",
       "anchor": "struct-CString",
-      "signature": "public struct CString: FFISafe",
+      "signature": "public struct CString { /* private fields */ }",
       "doc": "A null-terminated C string suitable for FFI.\n\nCString is an unsafe, non-owning wrapper around a pointer to null-terminated bytes.\nIt does NOT manage memory - the caller is responsible for ensuring the pointer\nremains valid for the lifetime of the CString and for freeing memory when appropriate.\n\nConforms to FFISafe, so it can be used as a parameter or return type\nin @extern(.C) function declarations.\n\n# Safety\n\n- The pointer must remain valid for the lifetime of the CString\n- The pointer must point to null-terminated memory\n- The length must match the actual string length (excluding null terminator)\n- Caller is responsible for memory allocation and deallocation",
       "source_path": "lang/std/ffi/cstring.ks",
-      "members": [
+      "member_groups": [
         {
-          "kind": "function",
-          "name": "free",
-          "anchor": "function-free",
-          "signature": "public func free()",
-          "doc": "Frees the memory pointed to by this CString.\n\nWARNING: This is unsafe. Only call this if you allocated the memory\nyourself (e.g., via toCString()). Do not call on CStrings wrapping\nexternal pointers unless you know it's safe to free them.\n\nAfter calling free(), the CString should not be used.",
-          "source_path": "lang/std/ffi/cstring.ks"
-        },
-        {
-          "kind": "initializer",
-          "name": "init",
-          "anchor": "initializer-init",
-          "signature": "public init(raw rawPtr: Pointer[UInt8])",
-          "doc": "",
-          "source_path": "lang/std/ffi/cstring.ks"
-        },
-        {
-          "kind": "field",
-          "name": "isNull",
-          "anchor": "field-isNull",
-          "signature": "public var isNull: Bool",
-          "doc": "Returns true if this CString's pointer is null.",
-          "source_path": "lang/std/ffi/cstring.ks"
-        },
-        {
-          "kind": "field",
-          "name": "length",
-          "anchor": "field-length",
-          "signature": "public var length: Int64",
-          "doc": "The length of the string in bytes (not including the null terminator).\nComputed by scanning for the null terminator.",
-          "source_path": "lang/std/ffi/cstring.ks"
-        },
-        {
-          "kind": "field",
-          "name": "raw",
-          "anchor": "field-raw",
-          "signature": "public var raw: Pointer[UInt8",
-          "doc": "The underlying pointer to the null-terminated bytes.",
-          "source_path": "lang/std/ffi/cstring.ks"
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "free",
+              "anchor": "function-free",
+              "signature": "public func free()",
+              "doc": "Frees the memory pointed to by this CString.\n\nWARNING: This is unsafe. Only call this if you allocated the memory\nyourself (e.g., via toCString()). Do not call on CStrings wrapping\nexternal pointers unless you know it's safe to free them.\n\nAfter calling free(), the CString should not be used.",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "initializer",
+              "name": "init",
+              "anchor": "initializer-init",
+              "signature": "public init(raw: Pointer[UInt8])",
+              "doc": "Creates a CString from a pointer.\n\nWARNING: This is unsafe. The caller is responsible for:\n- Ensuring the pointer is valid and remains valid\n- Ensuring the pointer points to null-terminated memory\n- Managing the memory lifecycle (allocation and deallocation)",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "field",
+              "name": "isNull",
+              "anchor": "field-isNull",
+              "signature": "public var isNull: Bool { get }",
+              "doc": "Returns true if this CString's pointer is null.",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "field",
+              "name": "length",
+              "anchor": "field-length",
+              "signature": "public var length: Int64 { get }",
+              "doc": "The length of the string in bytes (not including the null terminator).\nComputed by scanning for the null terminator.",
+              "source_path": "lang/std/ffi/cstring.ks"
+            },
+            {
+              "kind": "field",
+              "name": "raw",
+              "anchor": "field-raw",
+              "signature": "public var raw: Pointer[UInt8]",
+              "doc": "The underlying pointer to the null-terminated bytes.",
+              "source_path": "lang/std/ffi/cstring.ks"
+            }
+          ]
         }
       ]
     },
@@ -65,7 +72,7 @@
       "kind": "function",
       "name": "free",
       "anchor": "function-free",
-      "signature": "public func free(consuming ptr: lang.ptr[lang.i8])",
+      "signature": "public func free(consuming lang.ptr[lang.i8])",
       "doc": "",
       "source_path": "lang/std/ffi/libc.ks"
     },
@@ -73,7 +80,7 @@
       "kind": "function",
       "name": "malloc",
       "anchor": "function-malloc",
-      "signature": "public func malloc(consuming size: lang.i64) -> lang.ptr[lang.i8",
+      "signature": "public func malloc(consuming lang.i64) -> lang.ptr[lang.i8]",
       "doc": "Allocates size bytes of uninitialized memory.\nReturns a pointer to the allocated memory, or null on failure.",
       "source_path": "lang/std/ffi/libc.ks"
     },
@@ -81,7 +88,7 @@
       "kind": "function",
       "name": "memcpy",
       "anchor": "function-memcpy",
-      "signature": "public func memcpy(\n    consuming dest: lang.ptr[lang.i8],\n    consuming src: lang.ptr[lang.i8],\n    consuming n: lang.i64\n) -> lang.ptr[lang.i8",
+      "signature": "public func memcpy(consuming lang.ptr[lang.i8], consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
       "doc": "",
       "source_path": "lang/std/ffi/libc.ks"
     },
@@ -89,7 +96,7 @@
       "kind": "function",
       "name": "memmove",
       "anchor": "function-memmove",
-      "signature": "public func memmove(\n    consuming dest: lang.ptr[lang.i8],\n    consuming src: lang.ptr[lang.i8],\n    consuming n: lang.i64\n) -> lang.ptr[lang.i8",
+      "signature": "public func memmove(consuming lang.ptr[lang.i8], consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
       "doc": "",
       "source_path": "lang/std/ffi/libc.ks"
     },
@@ -97,7 +104,7 @@
       "kind": "function",
       "name": "memset",
       "anchor": "function-memset",
-      "signature": "public func memset(\n    consuming dest: lang.ptr[lang.i8],\n    consuming c: lang.i64,\n    consuming n: lang.i64\n) -> lang.ptr[lang.i8",
+      "signature": "public func memset(consuming lang.ptr[lang.i8], consuming lang.i64, consuming lang.i64) -> lang.ptr[lang.i8]",
       "doc": "",
       "source_path": "lang/std/ffi/libc.ks"
     },
@@ -105,7 +112,7 @@
       "kind": "function",
       "name": "realloc",
       "anchor": "function-realloc",
-      "signature": "public func realloc(consuming ptr: lang.ptr[lang.i8], consuming size: lang.i64) -> lang.ptr[lang.i8",
+      "signature": "public func realloc(consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
       "doc": "Changes the size of a memory block.\nReturns a pointer to the reallocated memory, or null on failure.\nThe original pointer becomes invalid after this call.",
       "source_path": "lang/std/ffi/libc.ks"
     }

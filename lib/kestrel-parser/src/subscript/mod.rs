@@ -406,14 +406,19 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
             emit_code_block(sink, code_block);
         },
         SubscriptBodyData::Accessors {
-            lbrace: _,
+            lbrace,
             get_span,
             getter,
             set_span,
             setter,
-            rbrace: _,
+            rbrace,
         } => {
             sink.start_node(SyntaxKind::PropertyAccessors);
+            // Emit the outer `{` so the event sink advances over it
+            // instead of leaving it as orphan source text. Without this
+            // the trivia between subscripts would land in the wrong
+            // declaration's leading-trivia slot, swallowing doc comments.
+            sink.add_token(SyntaxKind::LBrace, lbrace.clone());
 
             if let Some(getter_body) = getter {
                 sink.start_node(SyntaxKind::GetterClause);
@@ -439,6 +444,7 @@ fn emit_subscript_body(sink: &mut EventSink, body: &SubscriptBodyData) {
                 }
             }
 
+            sink.add_token(SyntaxKind::RBrace, rbrace.clone());
             sink.finish_node(); // PropertyAccessors
         },
     }

@@ -14,9 +14,30 @@
 
 module std.ffi
 
-/// Marker protocol for types that can safely cross FFI boundaries.
-/// Types must have a well-defined memory layout compatible with C.
-/// Primitive types and pointers to FFISafe types conform automatically.
-/// Custom structs can conform if all their fields are FFISafe.
+/// Marker protocol for types that can cross an `@extern(.C)` boundary.
+///
+/// `FFISafe` is empty — conformance is purely a contract that the
+/// type's in-memory layout matches what a C function expects.
+/// Conformance is *not* automatically transitive at the type level:
+/// the compiler checks `FFISafe` constraints separately on each
+/// generic instantiation. The conformance rules:
+///
+///   - Primitive numeric types and `Bool` conform automatically.
+///   - `Pointer[T]` conforms iff `T: FFISafe`.
+///   - Tuples of `FFISafe` types conform.
+///   - User structs may opt in (`struct Foo: FFISafe`); every field
+///     must itself be `FFISafe`.
+///
+/// String and other heap-managed types do **not** conform — convert
+/// at the boundary with `String.toCString()` and pass `CString`.
+///
+/// # Examples
+///
+/// ```
+/// struct Point: FFISafe { var x: Int32; var y: Int32 }
+///
+/// @extern(.C, mangleName: "process_point")
+/// func processPoint(p: Point) -> Int32
+/// ```
 @builtin(.FFISafe)
 public protocol FFISafe {}

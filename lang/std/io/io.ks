@@ -1,21 +1,22 @@
 // Kestrel I/O Library
 //
-// A simple I/O library built on libc.
+// A simple I/O library built on libc. The umbrella module re-exports the
+// types and functions from the submodules below so users can `import std.io`
+// and get readers, writers, files, and standard streams in one go.
 //
-// Example usage:
+// # Examples
 //
-//   import io
+// ```
+// import std.io
 //
-//   // Print to stdout
-//   try io.print(s: "Hello, ")
-//   try io.println(s: "World!")
+// try io.print("Hello, ");
+// try io.println("World!");
 //
-//   // Read from file
-//   var file = try io.File.open(path: "hello.txt")
+// var file = try io.File.open("hello.txt");
 //
-//   // Standard I/O
-//   let name = try io.prompt(message: "Name: ")
-//   try io.println(s: "Hello, " + name)
+// let name = try io.prompt("Name: ");
+// try io.println("Hello, " + name);
+// ```
 
 module std.io
 

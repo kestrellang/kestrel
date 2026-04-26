@@ -5,6 +5,7 @@ import OrgPage from "./pages/OrgPage";
 import PackagePage from "./pages/PackagePage";
 import StdlibIndex from "./pages/StdlibIndex";
 import StdlibModule from "./pages/StdlibModule";
+import StdlibItem from "./pages/StdlibItem";
 
 function App() {
   return (
@@ -15,6 +16,10 @@ function App() {
       <Route path="/flock/:org/:pkg" element={<PackagePage />} />
       <Route path="/reference/stdlib" element={<StdlibIndex />} />
       <Route path="/reference/stdlib/:modulePath" element={<StdlibModule />} />
+      <Route
+        path="/reference/stdlib/:modulePath/:itemName"
+        element={<StdlibItem />}
+      />
     </Routes>
   );
 }

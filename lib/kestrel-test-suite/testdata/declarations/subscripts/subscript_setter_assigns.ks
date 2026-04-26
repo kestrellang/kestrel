@@ -6,7 +6,7 @@ module Test
 struct Holder {
     var value: lang.i64
 
-    public init(value: lang.i64) {
+    public init(value value: lang.i64) {
         self.value = value
     }
 

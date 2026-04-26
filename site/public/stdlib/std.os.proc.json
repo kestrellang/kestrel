@@ -7,7 +7,7 @@
       "kind": "function",
       "name": "captureOutput",
       "anchor": "function-captureOutput",
-      "signature": "public func captureOutput(command: String) -> String",
+      "signature": "public func captureOutput(String) -> String",
       "doc": "Runs a shell command and captures its stdout as a string.\nReturns the trimmed output, or an empty string if the command fails.",
       "source_path": "lang/std/os/proc.ks"
     },
@@ -15,7 +15,7 @@
       "kind": "function",
       "name": "exit",
       "anchor": "function-exit",
-      "signature": "public func exit(code: Int32)",
+      "signature": "public func exit(Int32)",
       "doc": "Terminates the process with the given exit code.",
       "source_path": "lang/std/os/proc.ks"
     },
@@ -23,7 +23,7 @@
       "kind": "function",
       "name": "spawn",
       "anchor": "function-spawn",
-      "signature": "public func spawn(command: String) -> Int32",
+      "signature": "public func spawn(String) -> Int32",
       "doc": "Runs a shell command and returns the exit code.\nThe command's stdout/stderr go directly to the terminal.",
       "source_path": "lang/std/os/proc.ks"
     }

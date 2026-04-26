@@ -7,145 +7,166 @@
       "kind": "enum",
       "name": "GraphemeBreakProperty",
       "anchor": "enum-GraphemeBreakProperty",
-      "signature": "public enum GraphemeBreakProperty: Equatable, Matchable",
+      "signature": "public enum GraphemeBreakProperty",
       "doc": "Grapheme cluster break property (UAX #29).",
       "source_path": "lang/std/text/unicode/grapheme_tables.ks",
-      "members": [
+      "member_groups": [
         {
-          "kind": "case",
-          "name": "CR",
-          "anchor": "case-CR",
-          "signature": "case CR",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "case",
+              "name": "CR",
+              "anchor": "case-CR",
+              "signature": "case CR",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Control",
+              "anchor": "case-Control",
+              "signature": "case Control",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Extend",
+              "anchor": "case-Extend",
+              "signature": "case Extend",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "L",
+              "anchor": "case-L",
+              "signature": "case L",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "LF",
+              "anchor": "case-LF",
+              "signature": "case LF",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "LV",
+              "anchor": "case-LV",
+              "signature": "case LV",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "LVT",
+              "anchor": "case-LVT",
+              "signature": "case LVT",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Other",
+              "anchor": "case-Other",
+              "signature": "case Other",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "Prepend",
+              "anchor": "case-Prepend",
+              "signature": "case Prepend",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "RegionalIndicator",
+              "anchor": "case-RegionalIndicator",
+              "signature": "case RegionalIndicator",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "SpacingMark",
+              "anchor": "case-SpacingMark",
+              "signature": "case SpacingMark",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "T",
+              "anchor": "case-T",
+              "signature": "case T",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "V",
+              "anchor": "case-V",
+              "signature": "case V",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "case",
+              "name": "ZWJ",
+              "anchor": "case-ZWJ",
+              "signature": "case ZWJ",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            },
+            {
+              "kind": "function",
+              "name": "ordinal",
+              "anchor": "function-ordinal",
+              "signature": "func ordinal() -> Int32",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            }
+          ]
         },
         {
-          "kind": "case",
-          "name": "Control",
-          "anchor": "case-Control",
-          "signature": "case Control",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+          "kind": "protocol",
+          "label": "Equatable",
+          "source_path": "std.core.Equatable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "equals",
+              "anchor": "function-equals",
+              "signature": "public func equals(GraphemeBreakProperty) -> Bool",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            }
+          ]
         },
         {
-          "kind": "case",
-          "name": "Extend",
-          "anchor": "case-Extend",
-          "signature": "case Extend",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "L",
-          "anchor": "case-L",
-          "signature": "case L",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "LF",
-          "anchor": "case-LF",
-          "signature": "case LF",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "LV",
-          "anchor": "case-LV",
-          "signature": "case LV",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "LVT",
-          "anchor": "case-LVT",
-          "signature": "case LVT",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "Other",
-          "anchor": "case-Other",
-          "signature": "case Other",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "Prepend",
-          "anchor": "case-Prepend",
-          "signature": "case Prepend",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "RegionalIndicator",
-          "anchor": "case-RegionalIndicator",
-          "signature": "case RegionalIndicator",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "SpacingMark",
-          "anchor": "case-SpacingMark",
-          "signature": "case SpacingMark",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "T",
-          "anchor": "case-T",
-          "signature": "case T",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "V",
-          "anchor": "case-V",
-          "signature": "case V",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "case",
-          "name": "ZWJ",
-          "anchor": "case-ZWJ",
-          "signature": "case ZWJ",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "function",
-          "name": "equals",
-          "anchor": "function-equals",
-          "signature": "public func equals(other: GraphemeBreakProperty) -> Bool",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "function",
-          "name": "matches",
-          "anchor": "function-matches",
-          "signature": "public func matches(other: GraphemeBreakProperty) -> Bool",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
-        },
-        {
-          "kind": "function",
-          "name": "ordinal",
-          "anchor": "function-ordinal",
-          "signature": "func ordinal() -> Int32",
-          "doc": "",
-          "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+          "kind": "protocol",
+          "label": "Matchable",
+          "source_path": "std.core.Matchable",
+          "members": [
+            {
+              "kind": "function",
+              "name": "matches",
+              "anchor": "function-matches",
+              "signature": "public func matches(GraphemeBreakProperty) -> Bool",
+              "doc": "",
+              "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+            }
+          ]
         }
       ]
     },
@@ -153,7 +174,7 @@
       "kind": "function",
       "name": "caseFold",
       "anchor": "function-caseFold",
-      "signature": "public func caseFold(c: Char) -> Char",
+      "signature": "public func caseFold(Char) -> Char",
       "doc": "Returns the case-folded version of a character (for case-insensitive comparison).\nFor characters with multi-char folding, returns the first char.",
       "source_path": "lang/std/text/unicode/case_folding.ks"
     },
@@ -161,15 +182,23 @@
       "kind": "function",
       "name": "caseFoldExpansion",
       "anchor": "function-caseFoldExpansion",
-      "signature": "public func caseFoldExpansion(c: Char) -> String",
+      "signature": "public func caseFoldExpansion(Char) -> String",
       "doc": "Returns the multi-character case fold for a character.",
       "source_path": "lang/std/text/unicode/case_folding.ks"
     },
     {
       "kind": "function",
+      "name": "graphemeBreakProperty",
+      "anchor": "function-graphemeBreakProperty",
+      "signature": "public func graphemeBreakProperty(Char) -> GraphemeBreakProperty",
+      "doc": "Returns the grapheme break property for a character.",
+      "source_path": "lang/std/text/unicode/grapheme_tables.ks"
+    },
+    {
+      "kind": "function",
       "name": "hasCaseFoldExpansion",
       "anchor": "function-hasCaseFoldExpansion",
-      "signature": "public func hasCaseFoldExpansion(c: Char) -> Bool",
+      "signature": "public func hasCaseFoldExpansion(Char) -> Bool",
       "doc": "Returns true if the character has a multi-character case fold.",
       "source_path": "lang/std/text/unicode/case_folding.ks"
     },
@@ -177,7 +206,7 @@
       "kind": "function",
       "name": "hasLowercaseExpansion",
       "anchor": "function-hasLowercaseExpansion",
-      "signature": "public func hasLowercaseExpansion(c: Char) -> Bool",
+      "signature": "public func hasLowercaseExpansion(Char) -> Bool",
       "doc": "Returns true if the character has a multi-character lowercase expansion.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -185,7 +214,7 @@
       "kind": "function",
       "name": "hasTitlecaseExpansion",
       "anchor": "function-hasTitlecaseExpansion",
-      "signature": "public func hasTitlecaseExpansion(c: Char) -> Bool",
+      "signature": "public func hasTitlecaseExpansion(Char) -> Bool",
       "doc": "Returns true if the character has a multi-character titlecase expansion.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -193,7 +222,7 @@
       "kind": "function",
       "name": "hasUppercaseExpansion",
       "anchor": "function-hasUppercaseExpansion",
-      "signature": "public func hasUppercaseExpansion(c: Char) -> Bool",
+      "signature": "public func hasUppercaseExpansion(Char) -> Bool",
       "doc": "Returns true if the character has a multi-character uppercase expansion.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -201,7 +230,7 @@
       "kind": "function",
       "name": "lowercaseExpansion",
       "anchor": "function-lowercaseExpansion",
-      "signature": "public func lowercaseExpansion(c: Char) -> String",
+      "signature": "public func lowercaseExpansion(Char) -> String",
       "doc": "Returns the multi-character lowercase expansion for a character.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -209,7 +238,7 @@
       "kind": "function",
       "name": "shouldBreakBetween",
       "anchor": "function-shouldBreakBetween",
-      "signature": "public func shouldBreakBetween(\n    prev: GraphemeBreakProperty,\n    curr: GraphemeBreakProperty,\n    prevPrevWasRI: Bool,\n    prevWasZWJ: Bool\n) -> Bool",
+      "signature": "public func shouldBreakBetween(GraphemeBreakProperty, GraphemeBreakProperty, Bool, Bool) -> Bool",
       "doc": "Returns true if there should be a grapheme cluster break between\ntwo characters with the given properties.\nImplements UAX #29 grapheme cluster boundary rules.",
       "source_path": "lang/std/text/unicode/grapheme_tables.ks"
     },
@@ -217,7 +246,7 @@
       "kind": "function",
       "name": "titlecaseExpansion",
       "anchor": "function-titlecaseExpansion",
-      "signature": "public func titlecaseExpansion(c: Char) -> String",
+      "signature": "public func titlecaseExpansion(Char) -> String",
       "doc": "Returns the multi-character titlecase expansion for a character.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -225,7 +254,7 @@
       "kind": "function",
       "name": "toLowercase",
       "anchor": "function-toLowercase",
-      "signature": "public func toLowercase(c: Char) -> Char",
+      "signature": "public func toLowercase(Char) -> Char",
       "doc": "Returns the lowercase version of a character.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -233,7 +262,7 @@
       "kind": "function",
       "name": "toTitlecase",
       "anchor": "function-toTitlecase",
-      "signature": "public func toTitlecase(c: Char) -> Char",
+      "signature": "public func toTitlecase(Char) -> Char",
       "doc": "Returns the titlecase version of a character.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -241,7 +270,7 @@
       "kind": "function",
       "name": "toUppercase",
       "anchor": "function-toUppercase",
-      "signature": "public func toUppercase(c: Char) -> Char",
+      "signature": "public func toUppercase(Char) -> Char",
       "doc": "Returns the uppercase version of a character.\nFor characters with multi-char expansions, returns the first char.\nUse hasUppercaseExpansion() and uppercaseExpansion() for full support.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -249,7 +278,7 @@
       "kind": "field",
       "name": "unicodeVersion",
       "anchor": "field-unicodeVersion",
-      "signature": "public let unicodeVersion: String = \"15.1.0\"",
+      "signature": "public let unicodeVersion: String",
       "doc": "The Unicode version these tables were generated from.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     },
@@ -257,7 +286,7 @@
       "kind": "function",
       "name": "uppercaseExpansion",
       "anchor": "function-uppercaseExpansion",
-      "signature": "public func uppercaseExpansion(c: Char) -> String",
+      "signature": "public func uppercaseExpansion(Char) -> String",
       "doc": "Returns the multi-character uppercase expansion for a character.\nReturns empty string if no expansion exists.",
       "source_path": "lang/std/text/unicode/case_tables.ks"
     }

@@ -13,13 +13,30 @@ import std.io.error.(Error, invalidInput)
 // READ PROTOCOL
 // ============================================================================
 
-/// Protocol for types that can be read from.
+/// Protocol for byte-source streams.
 ///
-/// Implementors provide a source of bytes that can be read into a buffer.
+/// A single `read(into:)` call reads up to `buf.count` bytes into the
+/// provided slice and returns how many actually landed. A return of `0`
+/// means end-of-stream; a partial read (`n < buf.count`) is *not* an
+/// error — the caller is expected to loop, or to use `readExact` /
+/// `readAll` when a specific shape is required.
+///
+/// # Examples
+///
+/// ```
+/// public struct DigitsReader: Read {
+///     var next: UInt8
+///     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+///         if buf.count == 0 { return .Ok(0) }
+///         buf.pointer.write(self.next);
+///         self.next = self.next + 1;
+///         .Ok(1)
+///     }
+/// }
+/// ```
 public protocol Read {
-    /// Reads bytes into the buffer.
-    ///
-    /// Returns the number of bytes read, or 0 on EOF.
+    /// Reads up to `buf.count` bytes; returns the number of bytes
+    /// actually written, with `0` signalling EOF.
     mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error]
 }
 
@@ -27,12 +44,18 @@ public protocol Read {
 // EMPTY READER
 // ============================================================================
 
-/// A reader that always returns EOF immediately.
+/// `Read` that always returns `0` (EOF). Useful as a placeholder reader
+/// or in tests that need to assert how a consumer handles an empty source.
+///
+/// # Representation
+///
+/// Zero-sized — no fields.
 public struct Empty: Read {
-    /// Creates an empty reader.
+    /// @name Default
+    /// Builds the empty reader.
     public init() {}
 
-    /// Always returns 0 (EOF).
+    /// Always returns `.Ok(0)`.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         .Ok(0)
     }
@@ -42,16 +65,22 @@ public struct Empty: Read {
 // REPEAT READER
 // ============================================================================
 
-/// A reader that produces an infinite stream of a single byte.
+/// `Read` that yields the same byte forever — analogous to `/dev/zero`
+/// (with `byte: 0`) or `yes(1)`. Each `read` fills the entire destination.
+///
+/// # Representation
+///
+/// One `UInt8` field for the repeated byte.
 public struct Repeat: Read {
     var byte: UInt8
 
-    /// Creates a repeat reader that yields the given byte forever.
-    public init(byte: UInt8) {
+    /// @name From Byte
+    /// Builds a reader that yields `byte` indefinitely.
+    public init(byte byte: UInt8) {
         self.byte = byte
     }
 
-    /// Fills the entire buffer with the repeated byte.
+    /// Fills `buf` with the repeated byte; returns `.Ok(buf.count)`.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         var i: Int64 = 0;
         while i < buf.count {
@@ -66,24 +95,41 @@ public struct Repeat: Read {
 // CURSOR
 // ============================================================================
 
-/// A reader that reads from a byte array with a movable position.
+/// `Read` over an in-memory `Array[UInt8]` with a movable position.
+///
+/// Mirrors the role of Rust's `io::Cursor` — useful for tests, parsers, and
+/// any place a byte buffer needs to be presented as a `Read` stream. The
+/// position is clamped to `[0, count]` by `setPosition`. `Cursor` clones
+/// share the underlying COW array.
+///
+/// # Examples
+///
+/// ```
+/// var c = Cursor(data: [10, 20, 30].asArray());
+/// var buf = Array[UInt8](repeating: 0, count: 2);
+/// try c.read(into: buf.asSlice());     // .Ok(2); buf == [10, 20]
+/// c.position()                         // 2
+/// ```
 public struct Cursor: Read, Cloneable {
     var data: Array[UInt8]
     var pos: Int64
 
-    /// Creates a cursor that reads from the given data.
-    public init(data: Array[UInt8]) {
+    /// @name From Bytes
+    /// Builds a cursor positioned at byte 0 over `data`.
+    public init(data data: Array[UInt8]) {
         self.data = data;
         self.pos = 0;
     }
 
+    /// Deep-clones the underlying byte array and copies the position.
     public func clone() -> Cursor {
         var c = Cursor(data: self.data.clone());
         c.pos = self.pos;
         c
     }
 
-    /// Reads bytes from the current position.
+    /// Reads from the current position; returns `.Ok(0)` at EOF and
+    /// advances the position by the byte count returned.
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
         let available = self.data.count - self.pos;
         if available == 0 {
@@ -103,10 +149,11 @@ public struct Cursor: Read, Cloneable {
         .Ok(n)
     }
 
-    /// Returns the current position.
+    /// Current byte offset into the underlying array.
     public func position() -> Int64 { self.pos }
 
-    /// Sets the position, clamping to valid range.
+    /// Sets the position. Negative values clamp to `0`; values past the
+    /// end clamp to `count`.
     public mutating func setPosition(to pos: Int64) {
         let count = self.data.count;
         if pos < 0 {
@@ -123,9 +170,17 @@ public struct Cursor: Read, Cloneable {
 // HELPER FUNCTIONS
 // ============================================================================
 
-/// Reads a single byte from a reader.
+/// Reads exactly one byte. Returns `.Ok(.None)` on EOF, `.Ok(.Some(b))`
+/// on success, or propagates a reader error.
 ///
-/// Returns None on EOF.
+/// # Examples
+///
+/// ```
+/// match try readByte(reader) {
+///     .Some(b) => use(b),
+///     .None => /* EOF */ break
+/// }
+/// ```
 public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], Error] where R: Read {
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
@@ -138,9 +193,16 @@ public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], Error] wh
     }
 }
 
-/// Reads all bytes from a reader into an array.
+/// Drains `reader` into `buf`, appending every byte until EOF. Reads in
+/// 4 KiB chunks. Returns the total number of bytes appended.
 ///
-/// Returns the total number of bytes read.
+/// # Examples
+///
+/// ```
+/// var bytes = Array[UInt8]();
+/// var file = try File.open("input.bin");
+/// let total = try readAll(file, into: bytes);
+/// ```
 public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> Result[Int64, Error] where R: Read {
     var total: Int64 = 0;
     var chunk = Array[UInt8](capacity: 4096);
@@ -167,15 +229,21 @@ public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> R
     .Ok(total)
 }
 
-/// Reads exactly count bytes from a reader.
+/// Reads exactly `buf.count` bytes; treats a short read (EOF reached
+/// early) as an error rather than a quiet truncation. Use when the
+/// caller wants binary fidelity — e.g. reading a fixed-width header.
 ///
-/// Returns Err if EOF is reached before count bytes are read.
-/// Use when you need a specific number of bytes and a short read is an error.
+/// # Errors
 ///
-/// Example:
-///     var file = try File.open(path: "header.bin")
-///     var header = Array[UInt8](repeating: 0, count: 16)
-///     try readExact(reader: file, into: header.asSlice())  // must read 16 bytes
+/// Returns `.Err(invalidInput())` if EOF is reached before `buf.count`
+/// bytes have been collected.
+///
+/// # Examples
+///
+/// ```
+/// var header = Array[UInt8](repeating: 0, count: 16);
+/// try readExact(file, into: header.asSlice());   // must read 16 bytes
+/// ```
 public func readExact[R](mutating reader: R, into buf: Slice[UInt8]) -> Result[(), Error] where R: Read {
     var filled: Int64 = 0;
     while filled < buf.count {

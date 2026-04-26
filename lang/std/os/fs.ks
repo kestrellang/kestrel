@@ -72,32 +72,47 @@ func __errno_ptr() -> lang.ptr[lang.i32]
 // CONSTANTS
 // ============================================================================
 
+/// `access(2)` mode flag — file existence check, no permission bits.
 func F_OK() -> Int32 { 0 }
+
+/// Conservative upper bound on `sizeof(struct stat)` across darwin/linux; used to allocate the buffer for `stat(2)`.
 func STAT_BUF_SIZE() -> Int64 { 144 }
 
+/// Byte offset of `st_mode` within `struct stat` on darwin (after `st_dev`).
 @platform(.darwin)
 func ST_MODE_OFFSET() -> Int64 { 4 }
 
+/// Byte offset of `st_mode` within `struct stat` on linux (`st_dev` + `st_ino` + padding).
 @platform(.linux)
 func ST_MODE_OFFSET() -> Int64 { 24 }
 
+/// `S_IFMT` — bitmask isolating the file-type bits of `st_mode`.
 func S_IFMT() -> Int32 { 61440 }
+
+/// `S_IFDIR` — file-type bits for a directory.
 func S_IFDIR() -> Int32 { 16384 }
+
+/// `S_IFREG` — file-type bits for a regular file.
 func S_IFREG() -> Int32 { 32768 }
 
+/// Byte offset of `d_name` within `struct dirent` on darwin.
 @platform(.darwin)
 func DIRENT_NAME_OFFSET() -> Int64 { 21 }
 
+/// Byte offset of `d_name` within `struct dirent` on linux.
 @platform(.linux)
 func DIRENT_NAME_OFFSET() -> Int64 { 19 }
 
+/// Default mode for new directories — `0o755` (`rwxr-xr-x`).
 func MODE_DIR_DEFAULT() -> Int32 { 493 }
 
+/// Reads the current value of `errno`. Platform-specific access via `__error` (darwin) or `__errno_location` (linux).
 func fsErrno() -> Int32 {
     let ptr = __errno_ptr();
     Int32(raw: lang.ptr_read(ptr))
 }
 
+/// Snapshots `errno` into a typed `Error`. Call this immediately after a failing libc call before any other syscall could perturb `errno`.
 func lastError() -> Error {
     Error(fsErrno())
 }
@@ -106,7 +121,20 @@ func lastError() -> Error {
 // FILE EXISTENCE AND TYPE CHECKS
 // ============================================================================
 
-/// Returns true if a file or directory exists at the given path.
+/// Returns true if any filesystem entry exists at `path`.
+///
+/// Wraps `access(path, F_OK)`. Does not distinguish files from
+/// directories or symlinks (a dangling symlink reports as
+/// nonexistent because `access` follows symlinks). For the type,
+/// follow up with `isFile` / `isDirectory`.
+///
+/// # Examples
+///
+/// ```
+/// if fileExists(path: "/tmp/foo") {
+///     // ...
+/// }
+/// ```
 public func fileExists(path: String) -> Bool {
     let cpath = path.toCString();
     let result = libc_access(lang.cast_ptr[_, lang.i8](cpath.raw.raw), F_OK().raw);
@@ -114,7 +142,17 @@ public func fileExists(path: String) -> Bool {
     Int32(raw: result) == 0
 }
 
-/// Returns true if the path is a directory.
+/// Returns true if `path` exists and is a directory.
+///
+/// Resolves symlinks (uses `stat`, not `lstat`). Returns `false` for
+/// nonexistent paths or any non-directory file type.
+///
+/// # Examples
+///
+/// ```
+/// isDirectory(path: "/tmp");      // true
+/// isDirectory(path: "/etc/hosts"); // false
+/// ```
 public func isDirectory(path: String) -> Bool {
     let mode = statMode(path);
     match mode {
@@ -126,7 +164,10 @@ public func isDirectory(path: String) -> Bool {
     }
 }
 
-/// Returns true if the path is a regular file.
+/// Returns true if `path` exists and is a regular file.
+///
+/// Resolves symlinks. Returns `false` for directories, sockets,
+/// FIFOs, devices, and nonexistent paths.
 public func isFile(path: String) -> Bool {
     let mode = statMode(path);
     match mode {
@@ -138,6 +179,17 @@ public func isFile(path: String) -> Bool {
     }
 }
 
+/// Reads `st_mode` for `path` via `stat(2)`.
+///
+/// Returns `None` on any error (path missing, permission denied,
+/// etc.). Allocates a per-call `STAT_BUF_SIZE`-byte scratch buffer;
+/// the buffer is freed before return.
+///
+/// # Safety
+///
+/// Reads `sizeof(int16)` bytes at `ST_MODE_OFFSET` into the buffer
+/// and zero-extends to `Int32`. Relies on the layout constants above
+/// matching the host's `struct stat`.
 func statMode(path: String) -> Optional[Int32] {
     let cpath = path.toCString();
     let buf = malloc(STAT_BUF_SIZE().raw);
@@ -163,7 +215,26 @@ func statMode(path: String) -> Optional[Int32] {
 // DIRECTORY OPERATIONS
 // ============================================================================
 
-/// Creates a directory at the given path.
+/// Creates a single directory at `path` with mode `0o755`.
+///
+/// Wraps `mkdir(2)`. Fails if `path` already exists or any parent
+/// component is missing — use `mkdirAll` to create intermediate
+/// directories.
+///
+/// # Errors
+///
+/// Returns `Err(Error)` on any libc failure; `errno` is captured and
+/// surfaced via `Error`. Common cases: `EEXIST` (path exists),
+/// `ENOENT` (missing parent), `EACCES` (permission denied).
+///
+/// # Examples
+///
+/// ```
+/// match mkdir(path: "/tmp/foo") {
+///     .Ok(_)  => print("created"),
+///     .Err(e) => print(e.message)
+/// }
+/// ```
 public func mkdir(path: String) -> Result[(), Error] {
     let cpath = path.toCString();
     let result = libc_mkdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw), MODE_DIR_DEFAULT().raw);
@@ -175,7 +246,24 @@ public func mkdir(path: String) -> Result[(), Error] {
     .Ok(())
 }
 
-/// Creates a directory and all parent directories as needed.
+/// Creates `path` and any missing parent directories.
+///
+/// Walks back from the deepest non-existent component, recursing on
+/// the parent first. If `path` already exists and is a directory, the
+/// call is a no-op success; if it exists and is **not** a directory,
+/// returns `Err(Error(17))` (`EEXIST`) without disturbing the file.
+/// Each created intermediate uses the default mode `0o755`.
+///
+/// # Errors
+///
+/// Forwards any `mkdir` failure verbatim. Specific to this function:
+/// `Err(Error(17))` when `path` exists as a non-directory.
+///
+/// # Examples
+///
+/// ```
+/// mkdirAll(path: "/tmp/foo/bar/baz");  // creates all three levels
+/// ```
 public func mkdirAll(path: String) -> Result[(), Error] {
     if fileExists(path) {
         if isDirectory(path) {
@@ -197,7 +285,15 @@ public func mkdirAll(path: String) -> Result[(), Error] {
     mkdir(path)
 }
 
-/// Removes an empty directory.
+/// Removes an empty directory at `path`.
+///
+/// Wraps `rmdir(2)`. Fails with `ENOTEMPTY` if the directory still
+/// has entries — list and remove its contents first if you need a
+/// recursive remove.
+///
+/// # Errors
+///
+/// Returns `Err(Error)` on any libc failure; `errno` is captured.
 public func removeDir(path: String) -> Result[(), Error] {
     let cpath = path.toCString();
     let result = libc_rmdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
@@ -209,8 +305,21 @@ public func removeDir(path: String) -> Result[(), Error] {
     .Ok(())
 }
 
-/// Lists all entries in a directory (excluding "." and "..").
-/// Returns an empty array if the directory cannot be opened.
+/// Returns the names of the entries inside `path`, excluding `.` and `..`.
+///
+/// Wraps `opendir`/`readdir`/`closedir`. The returned names are
+/// relative to `path`; join with `path` yourself if you need full
+/// paths. On failure to open the directory (missing path, permission
+/// denied, etc.), returns an empty array — the function does not
+/// distinguish "empty directory" from "open failed".
+///
+/// # Examples
+///
+/// ```
+/// for entry in listDir(path: "/tmp") {
+///     print(entry);
+/// }
+/// ```
 public func listDir(path: String) -> Array[String] {
     var result = Array[String]();
     let cpath = path.toCString();
@@ -246,7 +355,15 @@ public func listDir(path: String) -> Array[String] {
 // FILE OPERATIONS
 // ============================================================================
 
-/// Deletes a file.
+/// Deletes the file at `path`.
+///
+/// Wraps `unlink(2)`. Does not work on directories — use `removeDir`
+/// for those. If `path` is the last link to an open file, the file's
+/// blocks remain allocated until every descriptor is closed.
+///
+/// # Errors
+///
+/// Returns `Err(Error)` on any libc failure; `errno` is captured.
 public func remove(path: String) -> Result[(), Error] {
     let cpath = path.toCString();
     let result = libc_unlink(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
@@ -258,7 +375,16 @@ public func remove(path: String) -> Result[(), Error] {
     .Ok(())
 }
 
-/// Renames or moves a file or directory.
+/// Renames or moves `from` to `to`.
+///
+/// Wraps `rename(2)`. Atomic within a single filesystem; cross-
+/// filesystem moves return `EXDEV` and require a copy + delete
+/// instead. If `to` exists, it is replaced (subject to type-match
+/// rules — file replaces file, directory replaces empty directory).
+///
+/// # Errors
+///
+/// Returns `Err(Error)` on any libc failure; `errno` is captured.
 public func rename(from: String, to: String) -> Result[(), Error] {
     let cfrom = from.toCString();
     let cto = to.toCString();
@@ -276,7 +402,15 @@ public func rename(from: String, to: String) -> Result[(), Error] {
 // SYMBOLIC LINKS
 // ============================================================================
 
-/// Creates a symbolic link at linkPath pointing to target.
+/// Creates a symbolic link at `path` pointing to `target`.
+///
+/// Wraps `symlink(2)`. The target is stored verbatim — it is not
+/// resolved or validated, so dangling links are allowed and relative
+/// targets resolve relative to the directory containing the link.
+///
+/// # Errors
+///
+/// Returns `Err(Error)` on any libc failure; `errno` is captured.
 public func symlink(target: String, path: String) -> Result[(), Error] {
     let ctarget = target.toCString();
     let cpath = path.toCString();
@@ -290,7 +424,18 @@ public func symlink(target: String, path: String) -> Result[(), Error] {
     .Ok(())
 }
 
-/// Reads the target of a symbolic link.
+/// Returns the target stored in the symlink at `path`.
+///
+/// Wraps `readlink(2)` with a 1 KiB buffer. `readlink` does not null-
+/// terminate, so this function copies exactly the returned byte
+/// count into the result string. Targets longer than 1 KiB are
+/// silently truncated — the syscall returns a partial result rather
+/// than failing.
+///
+/// # Errors
+///
+/// Returns `Err(Error)` if `path` is not a symlink (`EINVAL`),
+/// missing (`ENOENT`), or any other libc failure.
 public func readlink(path: String) -> Result[String, Error] {
     let cpath = path.toCString();
     let bufsize: Int64 = 1024;
@@ -323,7 +468,22 @@ public func readlink(path: String) -> Result[String, Error] {
 // PERMISSIONS
 // ============================================================================
 
-/// Changes the permissions of a file or directory.
+/// Changes the mode bits of `path` to `mode`.
+///
+/// Wraps `chmod(2)`. `mode` is the raw POSIX mode bits (e.g.
+/// `0o755`); pass it as `Int32`. Resolves symlinks (use `lchmod`
+/// equivalent if you need to change a link itself — not currently
+/// exposed).
+///
+/// # Errors
+///
+/// Returns `Err(Error)` on any libc failure; `errno` is captured.
+///
+/// # Examples
+///
+/// ```
+/// chmod(path: "/tmp/script.sh", mode: Int32(intLiteral: 0o755));
+/// ```
 public func chmod(path: String, mode: Int32) -> Result[(), Error] {
     let cpath = path.toCString();
     let result = libc_chmod(lang.cast_ptr[_, lang.i8](cpath.raw.raw), mode.raw);
@@ -339,7 +499,18 @@ public func chmod(path: String, mode: Int32) -> Result[(), Error] {
 // WORKING DIRECTORY
 // ============================================================================
 
-/// Returns the current working directory.
+/// Returns the calling process's current working directory.
+///
+/// Wraps `getcwd(2)` with a 1 KiB buffer. Returns the empty string if
+/// the cwd has been deleted, is longer than 1 KiB, or any other
+/// `getcwd` failure occurs — the function does not surface the
+/// error code.
+///
+/// # Examples
+///
+/// ```
+/// let here = getcwd();
+/// ```
 public func getcwd() -> String {
     let size: Int64 = 1024;
     let buf = malloc(size.raw);
@@ -360,6 +531,11 @@ public func getcwd() -> String {
 // HELPERS
 // ============================================================================
 
+/// Returns the byte offset of the last `/` in `s`, or `-1` if there is none.
+///
+/// Used by `mkdirAll` to find the parent directory boundary. Plain
+/// byte scan — works correctly for UTF-8 because `/` is ASCII and
+/// cannot appear inside a multi-byte sequence.
 func findLastSlash(s: String) -> Int64 {
     let len = s.byteCount;
     var i: Int64 = len - 1;

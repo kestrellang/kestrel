@@ -19,7 +19,7 @@ module Test
             data.append(byte50);
 
             // Create cursor
-            var cursor = std.io.read.Cursor( data);
+            var cursor = std.io.read.Cursor(data: data);
 
             // Initial position should be 0
             if cursor.position() != 0 { return 1 }

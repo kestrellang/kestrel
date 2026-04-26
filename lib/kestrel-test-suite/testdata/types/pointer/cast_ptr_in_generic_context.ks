@@ -6,7 +6,7 @@ module Test
 public struct Pointer[T] {
     var raw: lang.ptr[T]
 
-    public init(raw: lang.ptr[T]) {
+    public init(raw raw: lang.ptr[T]) {
         self.raw = raw;
     }
 }

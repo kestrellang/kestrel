@@ -13,7 +13,7 @@ module Test
             data.append(byte66);
             data.append(byte67);
 
-            var cursor = std.io.read.Cursor( data);
+            var cursor = std.io.read.Cursor(data: data);
 
             // readByte should return first byte
             let rb1 = std.io.read.readByte( cursor);
@@ -63,7 +63,7 @@ module Test
             data2.append(byte1);
             data2.append(byte2);
             data2.append(byte3);
-            var cursor2 = std.io.read.Cursor( data2);
+            var cursor2 = std.io.read.Cursor(data: data2);
             var dest = std.collections.Array[std.num.UInt8]();
             let raResult = std.io.read.readAll( cursor2, into: dest);
             match raResult {

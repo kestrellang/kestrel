@@ -6,6 +6,7 @@ export default function Nav() {
   const location = useLocation();
   const isHome = location.pathname === "/";
   const isFlockActive = location.pathname.startsWith("/flock");
+  const isReferenceActive = location.pathname.startsWith("/reference");
 
   return (
     <nav className="flex items-center justify-between px-6 py-6">
@@ -35,13 +36,18 @@ export default function Nav() {
           <Package className="w-5 h-5" />
           {isFlockActive && "Flock"}
         </Link>
-        <a
-          href="https://github.com/jkpdino/kestrel/tree/main/docs"
-          className="p-3 rounded-full text-[var(--color-slate)] hover:text-[#f5deb3] hover:bg-[var(--color-rust)] transition-colors"
+        <Link
+          to="/reference/stdlib"
+          className={`inline-flex items-center gap-2 px-3 py-2 rounded-full transition-colors font-mono text-sm ${
+            isReferenceActive
+              ? "text-[var(--color-rust)] bg-[var(--color-rust)]/10"
+              : "text-[var(--color-slate)] hover:text-[#f5deb3] hover:bg-[var(--color-rust)]"
+          }`}
           title="Documentation"
         >
           <BookOpen className="w-5 h-5" />
-        </a>
+          {isReferenceActive && "Docs"}
+        </Link>
         <ThemeToggle />
         <a
           href="https://github.com/jkpdino/kestrel"

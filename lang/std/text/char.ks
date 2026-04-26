@@ -13,16 +13,36 @@ import std.text.unicode as unicode
 // TYPE ALIASES
 // ============================================================================
 
-/// Alias for UInt8, representing a single UTF-8 byte.
+/// One byte of UTF-8 (or any other) encoded text — alias for `UInt8`.
 public type Byte = UInt8
 
 // ============================================================================
 // CHAR
 // ============================================================================
 
-/// A Unicode code point (scalar value from 0 to 0x10FFFF).
+/// A single Unicode scalar value (code point in `0..=0x10FFFF`, surrogates excluded).
 ///
-/// Supports character literal syntax: 'a', '\n', '\u{1F600}'.
+/// `Char` is the unit yielded by `String.chars` / `CharsView`; iterating
+/// graphemes (`String.graphemes`) instead returns `Grapheme` clusters
+/// that may comprise multiple `Char`s. The character-literal syntax
+/// constructs values directly: `'a'`, `'\n'`, `'\u{1F600}'`. For the
+/// raw byte representation, see `utf8Length()` and the free
+/// `encodeUtf8` / `decodeUtf8` functions.
+///
+/// # Examples
+///
+/// ```
+/// let a: Char = 'a';
+/// a.isAlphabetic();    // true
+/// a.utf8Length();      // 1
+/// let smile: Char = '\u{1F600}';
+/// smile.utf8Length();  // 4
+/// ```
+///
+/// # Representation
+///
+/// A single `UInt32` holding the scalar value. Comparison and hashing
+/// operate on that integer directly.
 public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash, RangeMatchable {
     private var _value: UInt32
 
@@ -30,12 +50,34 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // CONSTRUCTORS
     // ========================================================================
 
-    /// Creates a Char from a Unicode code point value.
+    /// @name From Value
+    /// Wraps a raw `UInt32` scalar value as a `Char`.
+    ///
+    /// No range or surrogate validation is performed; pass values you
+    /// already know are valid Unicode scalars. Prefer the literal syntax
+    /// (`'a'`, `'\u{...}'`) when the value is known at compile time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let c = Char(value: UInt32(intLiteral: 0x41));
+    /// c == 'A';  // true
+    /// ```
     public init(value: UInt32) {
         self._value = value;
     }
 
-    /// Creates a Char from a character literal.
+    /// @name Char Literal
+    /// Compiler-emitted constructor for character literals.
+    ///
+    /// Called when you write `'a'`, `'\n'`, `'\u{1F600}'`. Not intended
+    /// for direct use — `Char(value:)` is the user-facing constructor.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let c: Char = 'a';  // lowers to Char(charLiteral: ...)
+    /// ```
     public init(charLiteral value: lang.i32) {
         self._value = UInt32(raw: value);
     }
@@ -44,49 +86,149 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // VALUE ACCESS
     // ========================================================================
 
-    /// Returns the Unicode code point value.
+    /// Returns the raw Unicode scalar as a `UInt32`.
+    ///
+    /// Useful for arithmetic on code points (e.g. `digitValue`'s offset
+    /// trick) or interop with APIs that take a numeric code point.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'A'.value();  // 65
+    /// '\u{1F600}'.value();  // 128512
+    /// ```
     public func value() -> UInt32 { self._value }
 
     // ========================================================================
     // CHARACTER CLASSIFICATION
     // ========================================================================
 
-    /// Returns true if this is an ASCII character (< 128).
+    /// Returns true if the scalar is in the ASCII range (`< 0x80`).
+    ///
+    /// Cheap byte-range test; does not consult Unicode tables. For
+    /// "alphabetic by Unicode" use `unicode.toLowercase` round-tripping
+    /// or the property tables directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'A'.isAscii();          // true
+    /// '\u{00E9}'.isAscii();   // false (é)
+    /// ```
     public func isAscii() -> Bool {
         self < '\u{80}'
     }
 
-    /// Returns true if this is an alphabetic character (a-z, A-Z).
+    /// Returns true for ASCII letters `A`–`Z` / `a`–`z`.
+    ///
+    /// **ASCII-only.** Non-ASCII letters (e.g. `é`, `Ω`, `日`) return
+    /// `false` even though they are letters in Unicode. For the full
+    /// Unicode test, use the property tables in `std.text.unicode`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'A'.isAlphabetic();         // true
+    /// '\u{00E9}'.isAlphabetic();  // false (é — non-ASCII)
+    /// '7'.isAlphabetic();         // false
+    /// ```
     public func isAlphabetic() -> Bool {
         (self >= 'A' and self <= 'Z') or (self >= 'a' and self <= 'z')
     }
 
-    /// Returns true if this is a digit (0-9).
+    /// Returns true for the ASCII digits `0`–`9`.
+    ///
+    /// **ASCII-only.** Other Unicode digit categories (Arabic-Indic,
+    /// Devanagari, etc.) return `false`. See `digitValue()` for parsing
+    /// to numeric value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// '7'.isDigit();   // true
+    /// 'a'.isDigit();   // false
+    /// ```
     public func isDigit() -> Bool {
         self >= '0' and self <= '9'
     }
 
-    /// Returns true if this is alphanumeric.
+    /// Returns true for ASCII letters and ASCII digits.
+    ///
+    /// Composition of `isAlphabetic` and `isDigit`; same ASCII-only
+    /// caveats apply.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.isAlphanumeric();  // true
+    /// '7'.isAlphanumeric();  // true
+    /// '_'.isAlphanumeric();  // false
+    /// ```
     public func isAlphanumeric() -> Bool {
         self.isAlphabetic() or self.isDigit()
     }
 
-    /// Returns true if this is whitespace (space, tab, newline, etc.).
+    /// Returns true for the common ASCII whitespace set: space, tab, LF, CR, form feed.
+    ///
+    /// Does not include Unicode whitespace such as `U+00A0` (no-break
+    /// space) or `U+2028` (line separator). For Unicode-aware
+    /// whitespace, consult the property tables.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ' '.isWhitespace();    // true
+    /// '\t'.isWhitespace();   // true
+    /// '\n'.isWhitespace();   // true
+    /// 'a'.isWhitespace();    // false
+    /// ```
     public func isWhitespace() -> Bool {
         self == ' ' or self == '\t' or self == '\n' or self == '\r' or self == '\x0C'
     }
 
-    /// Returns true if this is a control character.
+    /// Returns true for the C0 controls (`< U+0020`) and DEL (`U+007F`).
+    ///
+    /// Does not include the C1 controls (`U+0080`–`U+009F`); add a
+    /// dedicated test if you need them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// '\n'.isControl();     // true
+    /// '\x7F'.isControl();   // true
+    /// 'a'.isControl();      // false
+    /// ```
     public func isControl() -> Bool {
         self < ' ' or self == '\x7F'
     }
 
-    /// Returns true if this is an uppercase letter (A-Z).
+    /// Returns true for ASCII uppercase letters `A`–`Z`.
+    ///
+    /// **ASCII-only.** Use `unicode.toUppercase` round-tripping for
+    /// general Unicode case tests.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'A'.isUppercase();         // true
+    /// 'a'.isUppercase();         // false
+    /// '\u{00C9}'.isUppercase();  // false (É — non-ASCII)
+    /// ```
     public func isUppercase() -> Bool {
         self >= 'A' and self <= 'Z'
     }
 
-    /// Returns true if this is a lowercase letter (a-z).
+    /// Returns true for ASCII lowercase letters `a`–`z`.
+    ///
+    /// **ASCII-only.** Use `unicode.toLowercase` round-tripping for
+    /// general Unicode case tests.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.isLowercase();   // true
+    /// 'A'.isLowercase();   // false
+    /// ```
     public func isLowercase() -> Bool {
         self >= 'a' and self <= 'z'
     }
@@ -95,54 +237,106 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // CASE CONVERSION (Unicode)
     // ========================================================================
 
-    /// Returns the uppercase version of this character.
-    /// Uses full Unicode case mapping tables.
-    /// For characters with multi-char expansions (e.g., ß → SS), returns the first char.
-    /// Use hasUppercaseExpansion() and uppercaseExpansion() for full support.
+    /// Returns the uppercase form, using full Unicode case-mapping tables.
+    ///
+    /// For characters whose uppercase form is multiple `Char`s (e.g.
+    /// German `ß` → `SS`), this returns only the first `Char`. Use
+    /// `hasUppercaseExpansion()` plus `uppercaseExpansion()` to handle
+    /// those cases correctly. Locale-independent — does not perform
+    /// Turkish / Azeri tailoring.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.toUppercase();         // 'A'
+    /// '\u{00DF}'.toUppercase();  // 'S' (first char of "SS"; see hasUppercaseExpansion)
+    /// ```
     public func toUppercase() -> Char {
         unicode.toUppercase(self)
     }
 
-    /// Returns the lowercase version of this character.
-    /// Uses full Unicode case mapping tables.
+    /// Returns the lowercase form, using full Unicode case-mapping tables.
+    ///
+    /// Locale-independent. For characters with multi-char lowercase
+    /// expansions, see `lowercaseExpansion()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'A'.toLowercase();         // 'a'
+    /// '\u{0130}'.toLowercase();  // 'i' (Turkish dotted I — first char only)
+    /// ```
     public func toLowercase() -> Char {
         unicode.toLowercase(self)
     }
 
-    /// Returns the titlecase version of this character.
-    /// Titlecase differs from uppercase for some characters (e.g., ligatures).
+    /// Returns the titlecase form, using full Unicode case-mapping tables.
+    ///
+    /// Titlecase differs from uppercase for some characters — e.g.
+    /// ligatures like `ǳ` titlecase to `ǲ` (capital plus small) rather
+    /// than `Ǳ` (full uppercase).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.toTitlecase();   // 'A'
+    /// ```
     public func toTitlecase() -> Char {
         unicode.toTitlecase(self)
     }
 
-    /// Returns true if this character has a multi-char uppercase expansion.
-    /// For example, German ß uppercases to "SS" (two characters).
+    /// Returns true if the uppercase form is multi-char (e.g. `ß` → `SS`).
+    ///
+    /// When `true`, prefer `uppercaseExpansion()` over `toUppercase()`
+    /// to avoid silently dropping characters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// '\u{00DF}'.hasUppercaseExpansion();  // true (ß)
+    /// 'a'.hasUppercaseExpansion();         // false
+    /// ```
     public func hasUppercaseExpansion() -> Bool {
         unicode.hasUppercaseExpansion(self)
     }
 
-    /// Returns the multi-character uppercase expansion for this character.
-    /// Returns empty string if no expansion exists.
+    /// Returns the multi-char uppercase form as a `String`.
+    ///
+    /// For characters without an expansion this returns the empty
+    /// string; use `hasUppercaseExpansion()` first to distinguish.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// '\u{00DF}'.uppercaseExpansion();  // "SS"
+    /// 'a'.uppercaseExpansion();         // ""
+    /// ```
     public func uppercaseExpansion() -> String {
         unicode.uppercaseExpansion(self)
     }
 
-    /// Returns true if this character has a multi-char lowercase expansion.
+    /// Returns true if the lowercase form is multi-char.
+    ///
+    /// Rare in practice but exists for full Unicode round-tripping.
     public func hasLowercaseExpansion() -> Bool {
         unicode.hasLowercaseExpansion(self)
     }
 
-    /// Returns the multi-character lowercase expansion for this character.
+    /// Returns the multi-char lowercase form as a `String`.
+    ///
+    /// Empty string if no expansion exists.
     public func lowercaseExpansion() -> String {
         unicode.lowercaseExpansion(self)
     }
 
-    /// Returns true if this character has a multi-char titlecase expansion.
+    /// Returns true if the titlecase form is multi-char.
     public func hasTitlecaseExpansion() -> Bool {
         unicode.hasTitlecaseExpansion(self)
     }
 
-    /// Returns the multi-character titlecase expansion for this character.
+    /// Returns the multi-char titlecase form as a `String`.
+    ///
+    /// Empty string if no expansion exists.
     public func titlecaseExpansion() -> String {
         unicode.titlecaseExpansion(self)
     }
@@ -151,7 +345,19 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // UTF-8 ENCODING
     // ========================================================================
 
-    /// Returns the number of bytes needed to encode this char in UTF-8 (1-4).
+    /// Returns how many UTF-8 bytes are required to encode this character (1–4).
+    ///
+    /// Constant time — branches on the scalar value alone. Use this to
+    /// size buffers before calling `encodeUtf8`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.utf8Length();          // 1
+    /// '\u{00E9}'.utf8Length();   // 2 (é)
+    /// '\u{20AC}'.utf8Length();   // 3 (€)
+    /// '\u{1F600}'.utf8Length();  // 4 (😀)
+    /// ```
     public func utf8Length() -> Int64 {
         let v = self._value;
         if v < UInt32(intLiteral: 128) { Int64(intLiteral: 1) }
@@ -164,7 +370,17 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // DIGIT CONVERSION
     // ========================================================================
 
-    /// Returns the digit value (0-9) if this is a digit, otherwise None.
+    /// Returns the numeric value `0`–`9` for ASCII digits, otherwise `None`.
+    ///
+    /// Inverse of `fromDigit`. Non-ASCII digit characters return `None`
+    /// — match `isDigit` semantics.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// '7'.digitValue();  // Some(7)
+    /// 'a'.digitValue();  // None
+    /// ```
     public func digitValue() -> UInt32? {
         if self.isDigit() {
             let zero: Char = '0';
@@ -174,7 +390,16 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
         }
     }
 
-    /// Creates a Char from a digit value (0-9).
+    /// Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.
+    ///
+    /// Inverse of `digitValue`. Values outside `0..=9` return `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Char.fromDigit(d: UInt32(intLiteral: 7));   // Some('7')
+    /// Char.fromDigit(d: UInt32(intLiteral: 12));  // None
+    /// ```
     public static func fromDigit(d: UInt32) -> Char? {
         if d <= UInt32(intLiteral: 9) {
             let zero: Char = '0';
@@ -188,38 +413,62 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // PROTOCOL CONFORMANCES
     // ========================================================================
 
-    /// Compares two characters for equality.
+    /// Returns true if both characters are the same Unicode scalar.
+    ///
+    /// Pure scalar-value equality — no case folding, no normalization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.equals('a');  // true
+    /// 'a'.equals('A');  // false
+    /// ```
     public func equals(other: Char) -> Bool {
         self._value == other._value
     }
 
-    /// Matches two characters for pattern matching.
+    /// Pattern-match form of equality — delegates to `equals`.
     public func matches(other: Char) -> Bool {
         self._value == other._value
     }
 
-    /// Compares two characters for ordering.
+    /// Compares two characters by scalar value.
+    ///
+    /// Yields code-point order, which agrees with byte order in UTF-8
+    /// (UTF-8 is order-preserving). Not the same as locale-aware
+    /// collation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// 'a'.compare('b');  // Less
+    /// 'b'.compare('a');  // Greater
+    /// 'a'.compare('a');  // Equal
+    /// ```
     public func compare(other: Char) -> Ordering {
         self._value.compare(other._value)
     }
 
-    /// Hashes this character.
+    /// Hashes this character by writing its 4-byte scalar value to the hasher.
+    ///
+    /// Uses native byte order — fine for in-process hash maps; do not
+    /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
         hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: 4)))
     }
 
-    /// Returns true if self >= bound (for range pattern matching).
+    /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
     public func isAtLeast(bound: Char) -> Bool {
         self.compare(bound) != Ordering.Less
     }
 
-    /// Returns true if self <= bound (for range pattern matching).
+    /// Returns true if `self <= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
     public func isAtMost(bound: Char) -> Bool {
         self.compare(bound) != Ordering.Greater
     }
 
-    /// Returns true if self < bound (for range pattern matching).
+    /// Returns true if `self < bound`. Used by `RangeMatchable` for half-open patterns.
     public func isBelow(bound: Char) -> Bool {
         self.compare(bound) == Ordering.Less
     }
@@ -229,9 +478,27 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 // GRAPHEME
 // ============================================================================
 
-/// An extended grapheme cluster (user-perceived character).
+/// An extended grapheme cluster — what users perceive as a single character.
 ///
-/// May consist of multiple code points (e.g., emoji sequences).
+/// A grapheme may comprise one `Char` (e.g. `'a'`) or several
+/// (combining marks, regional-indicator country flags, ZWJ-joined emoji
+/// sequences). `String.graphemes` is the canonical producer; iteration
+/// uses UAX #29 segmentation. Treat `Grapheme` as the right unit for
+/// any user-visible operation (cursor movement, selection, truncation
+/// for display).
+///
+/// # Examples
+///
+/// ```
+/// let g = Grapheme(char: 'a');
+/// g.charCount();   // 1
+/// g.isAscii();     // true
+/// g.utf8Length();  // 1
+/// ```
+///
+/// # Representation
+///
+/// An `Array[Char]` of the constituent code points in scalar order.
 public struct Grapheme: Equatable, Cloneable {
     private var _chars: Array[Char]
 
@@ -239,17 +506,45 @@ public struct Grapheme: Equatable, Cloneable {
     // CONSTRUCTORS
     // ========================================================================
 
-    /// Creates a Grapheme from a single Char.
+    /// @name Single Char
+    /// Constructs a one-`Char` grapheme.
+    ///
+    /// Convenience for the common single-scalar case so callers don't
+    /// have to build an `Array[Char]` first.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let g = Grapheme(char: 'a');
+    /// g.charCount();  // 1
+    /// ```
     public init(char char: Char) {
         self._chars = Array[Char]();
         self._chars.append(char);
     }
 
-    /// Creates a Grapheme from multiple Chars.
+    /// @name From Chars
+    /// Constructs a grapheme from a sequence of `Char`s.
+    ///
+    /// The caller is responsible for the chars actually forming a
+    /// single UAX #29 cluster — the constructor does not segment or
+    /// validate. `GraphemesIterator` is the canonical producer of valid
+    /// clusters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var chars = Array[Char]();
+    /// chars.append('e');
+    /// chars.append('\u{0301}');  // combining acute
+    /// let g = Grapheme(chars: chars);
+    /// g.charCount();  // 2
+    /// ```
     public init(chars chars: Array[Char]) {
         self._chars = chars;
     }
 
+    /// Returns a deep copy of this grapheme (clones the underlying char array).
     public func clone() -> Grapheme {
         Grapheme(chars: self._chars.clone())
     }
@@ -258,20 +553,31 @@ public struct Grapheme: Equatable, Cloneable {
     // ACCESSORS
     // ========================================================================
 
-    /// Returns the code points in this grapheme.
+    /// Returns the constituent code points in scalar order.
+    ///
+    /// The returned array is a clone of the internal storage; mutating
+    /// it does not affect the grapheme.
     public func chars() -> Array[Char] { self._chars }
 
-    /// Returns the number of code points.
+    /// Returns the number of `Char`s in this cluster — `1` for plain ASCII, more for combining sequences and ZWJ-joined emoji.
     public func charCount() -> Int64 {
         self._chars.count
     }
 
-    /// Returns the first code point, or None if empty.
+    /// Returns the first `Char` of the cluster, or `None` if the grapheme is empty.
+    ///
+    /// Useful as a cheap "what kind of grapheme is this?" check
+    /// (alphabetic, digit, emoji-base, …) without inspecting the full
+    /// cluster.
     public func firstChar() -> Char? {
         self._chars.first()
     }
 
-    /// Returns true if this is a single ASCII character.
+    /// Returns true iff the cluster is exactly one ASCII `Char`.
+    ///
+    /// A single-`Char` non-ASCII grapheme (e.g. `é` as the precomposed
+    /// `U+00E9`) returns `false`. Multi-`Char` clusters always return
+    /// `false` even if every component is ASCII.
     public func isAscii() -> Bool {
         let count = self._chars.count;
         if count == Int64(intLiteral: 1) {
@@ -281,7 +587,10 @@ public struct Grapheme: Equatable, Cloneable {
         }
     }
 
-    /// Returns the byte length when encoded as UTF-8.
+    /// Returns the total UTF-8 byte length of all constituent `Char`s.
+    ///
+    /// Sum of each `Char.utf8Length()`. Use this to size a buffer
+    /// before re-encoding the cluster.
     public func utf8Length() -> Int64 {
         var len: Int64 = Int64(intLiteral: 0);
         let count = self._chars.count;
@@ -295,7 +604,20 @@ public struct Grapheme: Equatable, Cloneable {
     // PROTOCOL CONFORMANCES
     // ========================================================================
 
-    /// Compares two graphemes for equality.
+    /// Returns true if the two graphemes are the same length and every `Char` is equal pairwise.
+    ///
+    /// **Not** Unicode normalization-aware: precomposed `é` (`U+00E9`)
+    /// and decomposed `e` + `U+0301` are not equal under this check
+    /// even though they represent the same user-perceived character.
+    /// Normalize both sides first if you need that.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = Grapheme(char: 'a');
+    /// let b = Grapheme(char: 'a');
+    /// a.equals(b);  // true
+    /// ```
     public func equals(other: Grapheme) -> Bool {
         let selfCount = self._chars.count;
         let otherCount = other._chars.count;
@@ -316,45 +638,57 @@ public struct Grapheme: Equatable, Cloneable {
 // ASCII CONSTANTS
 // ============================================================================
 
-/// Common ASCII characters as constants.
+/// Namespace of common ASCII punctuation and whitespace characters.
+///
+/// Static factories rather than constants because Kestrel does not yet
+/// have non-trivial `static let` initialisation; calls are cheap and
+/// fully constant-folded.
+///
+/// # Examples
+///
+/// ```
+/// AsciiChars.space() == ' ';        // true
+/// AsciiChars.newline() == '\n';     // true
+/// AsciiChars.colon() == ':';        // true
+/// ```
 public struct AsciiChars {
-    /// Space character (' ').
+    /// The space character `' '` (`U+0020`).
     public static func space() -> Char { ' ' }
 
-    /// Newline character ('\n').
+    /// The newline character `'\n'` (`U+000A`, line feed).
     public static func newline() -> Char { '\n' }
 
-    /// Carriage return character ('\r').
+    /// The carriage return character `'\r'` (`U+000D`).
     public static func carriageReturn() -> Char { '\r' }
 
-    /// Tab character ('\t').
+    /// The horizontal tab character `'\t'` (`U+0009`).
     public static func tab() -> Char { '\t' }
 
-    /// Null character ('\0').
+    /// The null character `'\0'` (`U+0000`).
     public static func nul() -> Char { '\0' }
 
-    /// Forward slash ('/').
+    /// The forward-slash character `'/'`.
     public static func slash() -> Char { '/' }
 
-    /// Backslash ('\\').
+    /// The backslash character `'\\'`.
     public static func backslash() -> Char { '\\' }
 
-    /// Period ('.').
+    /// The period character `'.'`.
     public static func dot() -> Char { '.' }
 
-    /// Comma (',').
+    /// The comma character `','`.
     public static func comma() -> Char { ',' }
 
-    /// Colon (':').
+    /// The colon character `':'`.
     public static func colon() -> Char { ':' }
 
-    /// Semicolon (';').
+    /// The semicolon character `';'`.
     public static func semicolon() -> Char { ';' }
 
-    /// Double quote ('"').
+    /// The double-quote character `'"'`.
     public static func quote() -> Char { '"' }
 
-    /// Single quote/apostrophe ('\'').
+    /// The single-quote / apostrophe character `'\''`.
     public static func apostrophe() -> Char { '\'' }
 }
 
@@ -362,15 +696,37 @@ public struct AsciiChars {
 // UTF-8 DECODING RESULT
 // ============================================================================
 
-/// Result of decoding a UTF-8 character.
+/// The output of decoding one UTF-8 character from a byte buffer.
+///
+/// Carries both the decoded `Char` and the number of bytes consumed,
+/// so the caller can advance their cursor without re-running
+/// `utf8Length()`. Returned as `Some` from `decodeUtf8`; `None`
+/// indicates an invalid or truncated sequence.
+///
+/// # Examples
+///
+/// ```
+/// let r = Utf8DecodeResult(char: 'a', bytesConsumed: 1);
+/// r.char;           // 'a'
+/// r.bytesConsumed;  // 1
+/// ```
+///
+/// # Representation
+///
+/// A plain pair `(char: Char, bytesConsumed: Int64)`. Both fields are
+/// public to keep the type cheap to inspect.
 public struct Utf8DecodeResult {
     /// The decoded character.
     public var char: Char
 
-    /// Number of bytes consumed from the input.
+    /// How many bytes the encoded form occupied (1–4).
     public var bytesConsumed: Int64
 
-    /// Creates a decode result.
+    /// @name From Fields
+    /// Constructs a decode result from an already-decoded char and byte length.
+    ///
+    /// Mainly used by `decodeUtf8` itself; user code rarely needs to
+    /// build one directly.
     public init(char char: Char, bytesConsumed bytesConsumed: Int64) {
         self.char = char;
         self.bytesConsumed = bytesConsumed;
@@ -381,7 +737,16 @@ public struct Utf8DecodeResult {
 // UTF-8 ENCODING/DECODING FUNCTIONS
 // ============================================================================
 
-/// Helper to read byte at offset (returns unsigned byte value as i32).
+/// Reads the byte at `ptr + offset` as an unsigned `lang.i32` in `0..=255`.
+///
+/// Helper used by `decodeUtf8` so the bit-twiddling in the main path
+/// can pretend bytes are unsigned. The pointer must be valid for the
+/// requested offset.
+///
+/// # Safety
+///
+/// Caller-checked — no bounds testing happens here. Used only inside
+/// this file after explicit length checks.
 func readByteAt(ptr: lang.ptr[lang.i8], offset: Int64) -> lang.i32 {
     let rawOffset: lang.i64 = offset.raw;
     let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
@@ -390,16 +755,41 @@ func readByteAt(ptr: lang.ptr[lang.i8], offset: Int64) -> lang.i32 {
     lang.i32_and(asI32, 0xFF)
 }
 
-/// Helper to write byte at offset.
+/// Writes `byte` to `ptr + offset`. Companion to `readByteAt`.
+///
+/// # Safety
+///
+/// Caller must ensure the offset is within an allocated, writable
+/// region of memory.
 func writeByteAt(ptr: lang.ptr[lang.i8], offset: Int64, byte: lang.i8) {
     let rawOffset: lang.i64 = offset.raw;
     let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
     lang.ptr_write(bytePtr, byte)
 }
 
-/// Decodes a single UTF-8 character from raw bytes.
+/// Decodes one UTF-8 character starting at `index` inside the buffer of `length` bytes pointed to by `ptr`.
 ///
-/// Returns None if the encoding is invalid.
+/// Returns `Some(Utf8DecodeResult)` on success, where `bytesConsumed`
+/// is `1`–`4`. Returns `None` for any of the malformed-input cases:
+/// truncated multi-byte sequence, continuation byte where a leading
+/// byte was expected, or invalid leading byte (`0xF8`–`0xFF`).
+/// **Does not** validate against overlong encodings or surrogate-range
+/// scalars — feed only well-formed UTF-8 if those matter.
+///
+/// # Safety
+///
+/// `ptr` must be valid for `length` bytes. The function bounds-checks
+/// `index` and any continuation bytes against `length`.
+///
+/// # Examples
+///
+/// ```
+/// var result = String("hé");
+/// // Conceptually:
+/// // decodeUtf8(rawPtr, 3, at: 0)  // Some(char: 'h', bytesConsumed: 1)
+/// // decodeUtf8(rawPtr, 3, at: 1)  // Some(char: 'é', bytesConsumed: 2)
+/// // decodeUtf8(rawPtr, 3, at: 3)  // None (past the end)
+/// ```
 public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -> Utf8DecodeResult? {
     if index >= length {
         return .None
@@ -474,9 +864,25 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
     }
 }
 
-/// Encodes a character to UTF-8, writing to a buffer.
+/// Encodes `c` as UTF-8 starting at `ptr + index`, returning the number of bytes written (1–4).
 ///
-/// Returns the number of bytes written (1-4).
+/// Companion of `decodeUtf8`. `c.utf8Length()` predicts the same byte
+/// count without writing — call it first to ensure the buffer has
+/// room.
+///
+/// # Safety
+///
+/// `ptr + index` through `ptr + index + utf8Length() - 1` must lie
+/// within an allocated, writable region. No bounds checking happens
+/// here.
+///
+/// # Examples
+///
+/// ```
+/// // Conceptually, given a buffer `buf` of length 4:
+/// // encodeUtf8(c: 'a',         ptr: buf, at: 0);  // 1
+/// // encodeUtf8(c: '\u{1F600}', ptr: buf, at: 0);  // 4
+/// ```
 public func encodeUtf8(c: Char, ptr: lang.ptr[lang.i8], at index: Int64) -> Int64 {
     let v: lang.i32 = c.value().raw;
 

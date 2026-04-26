@@ -3,6 +3,7 @@
 //! Handles: literals, locals, assignments, return, if/else, loops,
 //! break/continue, blocks, field access, tuple index, calls (direct,
 //! method, protocol/witness).
+//
 
 use std::collections::HashMap;
 
@@ -1869,8 +1870,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
-    /// Resolve the init function for a struct entity by finding its Initializer children.
-    /// Falls back to the first init if multiple match or returns None.
+    /// Resolve the init function for a struct entity by finding its Initializer children
+    /// whose param count and labels exactly match the call site. Returns None when no
+    /// init matches — the caller (`resolve_callee_entity`) then leaves the struct entity
+    /// in place, but inference's `gen_struct_init` should already have reported
+    /// `NoMatchingOverload` so MIR is unlikely to be reached for that program.
     fn resolve_init_function(
         &mut self,
         struct_entity: Entity,
@@ -1881,32 +1885,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let arg_count = args.len();
         let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
 
-        // Search for initializer children of the struct
-        let children = self.ctx.world.children_of(struct_entity).to_vec();
-        let mut best: Option<Entity> = None;
-
-        for &child in &children {
-            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if *kind != NodeKind::Initializer {
-                continue;
-            }
-
-            // Keep first init as fallback regardless of param matching
-            if best.is_none() {
-                best = Some(child);
-            }
-
-            let Some(callable) = self.ctx.world.get::<Callable>(child) else {
-                continue;
-            };
-
-            // Match by param count and labels
+        let labels_match = |callable: &Callable| {
             if callable.params.len() != arg_count {
-                continue;
+                return false;
             }
-            let labels_ok = callable
+            callable
                 .params
                 .iter()
                 .zip(arg_labels.iter())
@@ -1914,37 +1897,49 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     (Some(pl), Some(al)) => pl == *al,
                     (None, None) => true,
                     _ => false,
-                });
-            if labels_ok {
-                best = Some(child);
-                break;
+                })
+        };
+
+        // Search for initializer children of the struct
+        let children = self.ctx.world.children_of(struct_entity).to_vec();
+        for &child in &children {
+            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
+                continue;
+            };
+            if *kind != NodeKind::Initializer {
+                continue;
+            }
+            let Some(callable) = self.ctx.world.get::<Callable>(child) else {
+                continue;
+            };
+            if labels_match(callable) {
+                return Some(child);
             }
         }
 
         // Also search extensions for init
-        if best.is_none() {
-            let extensions = self.ctx.query.query(kestrel_name_res::ExtensionsFor {
-                target: struct_entity,
-                root: self.ctx.root,
-            });
-            for ext in &extensions {
-                for &child in self.ctx.world.children_of(*ext) {
-                    let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
-                        continue;
-                    };
-                    if *kind != NodeKind::Initializer {
-                        continue;
-                    }
-                    best = Some(child);
-                    break;
+        let extensions = self.ctx.query.query(kestrel_name_res::ExtensionsFor {
+            target: struct_entity,
+            root: self.ctx.root,
+        });
+        for ext in &extensions {
+            for &child in self.ctx.world.children_of(*ext) {
+                let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
+                    continue;
+                };
+                if *kind != NodeKind::Initializer {
+                    continue;
                 }
-                if best.is_some() {
-                    break;
+                let Some(callable) = self.ctx.world.get::<Callable>(child) else {
+                    continue;
+                };
+                if labels_match(callable) {
+                    return Some(child);
                 }
             }
         }
 
-        best
+        None
     }
 
     /// Lower call arguments from HIR to MIR.
@@ -1955,7 +1950,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .map(|arg| {
                 let value = self.lower_expr(arg.value);
                 let arg_ty = self.resolve_expr_type(arg.value);
-                if arg_ty.is_trivially_copyable() {
+                // Inference doesn't always populate `expr_types` for init-call
+                // argument expressions — when the call labels don't match an
+                // init exactly, `gen_struct_init` falls through without emitting
+                // arg constraints, leaving the literal TyVar unresolved. The
+                // MIR-side `resolve_init_function` still picks an init by name,
+                // so the call goes ahead with `arg_ty == MirTy::Error`. A
+                // primitive literal would then be classified non-copyable and
+                // lowered as `ref &literal_slot`, storing a stack pointer into
+                // the field instead of the value. Fall back to the lowered
+                // Value: an Immediate is a constant, always pass-by-value.
+                let copyable = arg_ty.is_trivially_copyable()
+                    || (matches!(arg_ty, MirTy::Error)
+                        && matches!(value, Value::Immediate(_)));
+                if copyable {
                     CallArg::copy(value)
                 } else {
                     CallArg::borrow(value)
