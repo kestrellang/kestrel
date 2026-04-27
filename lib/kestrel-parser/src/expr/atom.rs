@@ -106,3 +106,28 @@ pub(super) fn path_parser<'tokens>()
         })
         .boxed()
 }
+
+#[cfg(test)]
+mod tests {
+    use kestrel_lexer::lex;
+
+    /// Regression: raw string nodes/tokens used to round-trip as `Error` because
+    /// `ExprRawString` and the `RawString` token were missing from
+    /// `KestrelLanguage::kind_from_raw`. The `_ => SyntaxKind::Error` fallback
+    /// silently swallowed them when the green tree was viewed via SyntaxNode.
+    #[test]
+    fn raw_string_round_trips_through_full_pipeline() {
+        let source = "module Test\n\nfunc main() -> lang.i64 {\n    \"\"\"hello\"\"\"\n}\n";
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+        let result = crate::parse_source_file_from_source(source, tokens.into_iter());
+        let dbg = format!("{:#?}", result.tree);
+        assert!(
+            dbg.contains("ExprRawString"),
+            "expected ExprRawString in tree, got:\n{dbg}"
+        );
+        assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+    }
+}

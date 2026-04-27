@@ -278,14 +278,24 @@ pub fn decode_string_literal_token(
     file_id: usize,
     literal_start: usize,
 ) -> (String, Vec<EscapeError>) {
-    let quote_count = raw.chars().take_while(|&c| c == '"').count();
-    if quote_count >= 3 && raw.len() >= quote_count * 2 && raw.ends_with(&"\"".repeat(quote_count))
-    {
-        // Raw string — no escape processing.
-        return (
-            raw[quote_count..raw.len() - quote_count].to_string(),
-            Vec::new(),
-        );
+    let leading = raw.chars().take_while(|&c| c == '"').count();
+    if leading >= 3 {
+        // Raw string. The empty-raw-string form `""""""` has every char
+        // as a quote, so `leading` over-counts — when all chars are
+        // quotes, half are openers and half are closers.
+        let trailing = raw.chars().rev().take_while(|&c| c == '"').count();
+        let quote_count = if leading == raw.len() && raw.len() % 2 == 0 {
+            raw.len() / 2
+        } else {
+            leading.min(trailing)
+        };
+        if quote_count >= 3 && raw.len() >= quote_count * 2 {
+            // Raw string — no escape processing.
+            return (
+                raw[quote_count..raw.len() - quote_count].to_string(),
+                Vec::new(),
+            );
+        }
     }
 
     if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {

@@ -11,6 +11,7 @@ import perch.context.(MiddlewareResult)
 import perch.router.(Router, GroupBuilder)
 import perch.parse.(parseHttpRequest)
 import perch.send.(sendResponse)
+import std.io.error.(IoError)
 
 /// A Perch web application parameterized by an app context type.
 ///
@@ -78,7 +79,7 @@ public struct App[T] {
     ///
     /// This blocks forever, accepting connections and dispatching requests.
     /// Each connection is handled synchronously with Connection: close.
-    public func listen(port: UInt16) -> Result[(), Error] {
+    public func listen(port: UInt16) -> Result[(), IoError] {
         var listener = try TcpListener.bind(port);
         let _ = println("Perch listening on port " + Int64(from: port).format());
 

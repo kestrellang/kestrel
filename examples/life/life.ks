@@ -1,9 +1,16 @@
 // Conway's Game of Life — an SDL example.
 //
-// The world is a toroidal 80x60 grid (cells wrap at the edges) drawn with
-// 10px squares into the 800x600 window provided by `Sdl.SDLApp`. Each tick
-// applies the standard B3/S23 rules to every cell using a double-buffered
-// step so reads always see the previous generation.
+// The world is a toroidal grid (cells wrap at the edges) drawn with square
+// cells into a window sized to fit. Each tick applies the standard B3/S23
+// rules to every cell using a double-buffered step so reads always see the
+// previous generation.
+//
+// Usage:
+//   life [width] [height] [cellPx]
+//     interactive SDL window. Bounds: 5..2000 board, 1..40 cellPx.
+//   life --headless ITERS [width] [height]
+//     no window; runs ITERS generations from a randomized board, prints
+//     wall time and gens/sec, exits. Useful for benchmarking the solver.
 //
 // Controls:
 //   1..5   pick a pattern: glider, blinker, LWSS, pulsar, Gosper gun
@@ -17,19 +24,118 @@ module Life
 
 import Sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
 
+@extern(.C, mangleName: "Kestrel_Argc")
+func cliArgc() -> Int32
+
+@extern(.C, mangleName: "Kestrel_GetArg")
+func cliGetArg(idx: Int32) -> CString
+
+@extern(.C, mangleName: "Kestrel_GetTicks")
+func sdlGetTicks() -> UInt32
+
+@extern(.C, mangleName: "Kestrel_MonotonicMs")
+func monotonicMs() -> Int64
+
 struct Config {
-    static var width: Int64 { 80 }
-    static var height: Int64 { 60 }
-    static var cellSize: Int64 { 10 }
-    static var stepDelayMs: Int64 { 80 }
+    var width: Int64
+    var height: Int64
+    var cellSize: Int64
+    var stepDelayMs: Int64
+    // 0 means interactive; >0 runs N headless generations and exits.
+    var headlessIters: Int64
+}
+
+// Reads argv slot `idx` into a String, returning the empty string if missing
+// or null. Centralises the CString → String dance so the parser body stays
+// readable.
+func argString(idx: Int32) -> String {
+    let cstr = cliGetArg(idx);
+    if cstr.isNull { "" } else { String(from: cstr) }
+}
+
+// Picks the largest cell size (in px) that keeps the board inside ~800x600,
+// clamped to [2, 40]. Smaller boards stay readable, bigger ones still fit.
+func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
+    let byW = 800 / w;
+    let byH = 600 / h;
+    var c = if byW < byH { byW } else { byH };
+    if c < 1 { c = 1; }
+    if c > 40 { c = 40; }
+    c
+}
+
+// Reads CLI args. Two layouts:
+//   life [width] [height] [cellPx]
+//   life --headless ITERS [width] [height]
+// Out-of-range or unparseable values are silently ignored so the binary
+// still launches. `cellPx` is auto-fitted unless the user overrides it.
+func parseConfig() -> Config {
+    var width: Int64 = 80;
+    var height: Int64 = 60;
+    var cellOverride: Int64 = 0;
+    var headlessIters: Int64 = 0;
+    let argc = cliArgc();
+
+    // Detect headless mode: argv[1] == "--headless", argv[2] == iterations.
+    // Width/height shift to argv[3]/argv[4] in that case.
+    var posStart: Int32 = Int32(intLiteral: 1);
+    if argc >= Int32(intLiteral: 3) and argString(Int32(intLiteral: 1)).equals("--headless") {
+        if let .Some(n) = Int64.parse(argString(Int32(intLiteral: 2))) {
+            if n > 0 {
+                headlessIters = n;
+            }
+        }
+        posStart = Int32(intLiteral: 3);
+    }
+
+    if argc >= posStart + Int32(intLiteral: 1) {
+        if let .Some(w) = Int64.parse(argString(posStart)) {
+            if w >= 5 and w <= 2000 {
+                width = w;
+            }
+        }
+    }
+    if argc >= posStart + Int32(intLiteral: 2) {
+        if let .Some(h) = Int64.parse(argString(posStart + Int32(intLiteral: 1))) {
+            if h >= 5 and h <= 2000 {
+                height = h;
+            }
+        }
+    }
+    // cellPx only applies in interactive mode.
+    if headlessIters == 0 and argc >= posStart + Int32(intLiteral: 3) {
+        if let .Some(c) = Int64.parse(argString(posStart + Int32(intLiteral: 2))) {
+            if c >= 1 and c <= 40 {
+                cellOverride = c;
+            }
+        }
+    }
+    let cellSize = if cellOverride > 0 {
+        cellOverride
+    } else {
+        autoCellSize(width: width, height: height)
+    };
+    Config(
+        width: width,
+        height: height,
+        cellSize: cellSize,
+        stepDelayMs: 80,
+        headlessIters: headlessIters
+    )
 }
 
 struct Grid {
+    var width: Int64
+    var height: Int64
+    var cellSize: Int64
     var cells: Array[Bool]
     var next: Array[Bool]
 
-    init() {
-        let n = Config.width * Config.height;
+    init(width w: Int64, height h: Int64, cellSize c: Int64) {
+        let n = w * h;
+        self.width = w;
+        self.height = h;
+        self.cellSize = c;
         self.cells = Array[Bool](repeating: false, count: n);
         self.next = Array[Bool](repeating: false, count: n);
     }
@@ -38,8 +144,8 @@ struct Grid {
     // opposite side. The double-modulo handles negative inputs from the
     // neighbour scan.
     func index(x x: Int64, y y: Int64) -> Int64 {
-        let w = Config.width;
-        let h = Config.height;
+        let w = self.width;
+        let h = self.height;
         let xx = (x.modulo(w) + w).modulo(w);
         let yy = (y.modulo(h) + h).modulo(h);
         yy * w + xx
@@ -72,9 +178,9 @@ struct Grid {
 
     mutating func step() {
         var y: Int64 = 0;
-        while y < Config.height {
+        while y < self.height {
             var x: Int64 = 0;
-            while x < Config.width {
+            while x < self.width {
                 let alive = self.cellAt(x: x, y: y);
                 let n = self.neighborCount(x: x, y: y);
                 // B3/S23: birth on exactly 3 live neighbours; an already-live
@@ -268,21 +374,25 @@ struct Grid {
     }
 
     func render(renderer: Renderer) {
-        let cell = Config.cellSize;
+        let cell = self.cellSize;
+        // Set the cell color once so the inner loop only issues fillRect
+        // calls. With dense boards (e.g. 200x150) this halves the SDL
+        // syscalls per frame.
+        renderer.setColor(Color.green());
+        // Drop the 1px gutter once cells get small — it eats the cell.
+        let gutter = if cell >= 4 { 1 } else { 0 };
         var y: Int64 = 0;
-        while y < Config.height {
+        while y < self.height {
             var x: Int64 = 0;
-            while x < Config.width {
+            while x < self.width {
                 if self.cellAt(x: x, y: y) {
-                    // Subtract 1 from the rect size so a thin black gutter
-                    // separates neighbouring cells visually.
                     let rect = Rectangle(
                         x: x * cell,
                         y: y * cell,
-                        width: cell - 1,
-                        height: cell - 1
+                        width: cell - gutter,
+                        height: cell - gutter
                     );
-                    renderer.fill(rect, Color.green());
+                    renderer.fillRect(rect);
                 }
                 x = x + 1;
             }
@@ -305,9 +415,41 @@ func patternName(kind kind: Int64) -> String {
     }
 }
 
+// Headless mode: no window, no SDL. Times N generations on a randomized
+// board and prints `gens / ms / gens-per-sec`. Exits 0.
+func runHeadless(cfg: Config) -> Int32 {
+    var grid = Grid(width: cfg.width, height: cfg.height, cellSize: 1);
+    grid.randomize(seed: UInt64(intLiteral: 12648430));
+
+    let start = monotonicMs();
+    var i: Int64 = 0;
+    while i < cfg.headlessIters {
+        grid.step();
+        i = i + 1;
+    }
+    let elapsedMs = monotonicMs() - start;
+    // Avoid divide-by-zero on instant runs.
+    let denom = if elapsedMs > 0 { elapsedMs } else { 1 };
+    let gensPerSec = cfg.headlessIters * 1000 / denom;
+
+    let _ = std.io.stdio.println(
+        cfg.width.format() + "x" + cfg.height.format() +
+        "  gens=" + cfg.headlessIters.format() +
+        "  elapsed_ms=" + elapsedMs.format() +
+        "  gens_per_sec=" + gensPerSec.format()
+    );
+    0
+}
+
 func main() -> Int32 {
-    var app = SDLApp(title: "Game of Life");
-    var grid = Grid();
+    let cfg = parseConfig();
+    if cfg.headlessIters > 0 {
+        return runHeadless(cfg);
+    }
+    let windowW = cfg.width * cfg.cellSize;
+    let windowH = cfg.height * cfg.cellSize;
+    var app = SDLApp(title: "Game of Life", width: windowW, height: windowH);
+    var grid = Grid(width: cfg.width, height: cfg.height, cellSize: cfg.cellSize);
     var paused = false;
     var running = true;
     // 0..4 — see `patternName` for the labels.
@@ -317,6 +459,20 @@ func main() -> Int32 {
     var seedCounter: UInt64 = UInt64(intLiteral: 12648430);
 
     grid.randomize(seed: seedCounter);
+
+    // FPS sampling: count frames between ticks, refresh the displayed value
+    // once per ~500ms so it doesn't flicker.
+    var frameCount: Int64 = 0;
+    var fpsLast: UInt32 = sdlGetTicks();
+    var displayedFps: Int64 = 0;
+
+    // Sim is paced independently of render: render runs vsync-capped (so the
+    // FPS counter is meaningful), the simulation only advances when at least
+    // `stepDelayMs` has elapsed since the last generation. Without this, a
+    // 30k-cell board at vsync would step 60+ generations/sec — too fast to
+    // watch.
+    let simStepMs = UInt32(from: cfg.stepDelayMs);
+    var simLast: UInt32 = sdlGetTicks();
 
     while running {
         while let .Some(event) = app.pollEvent() {
@@ -345,25 +501,35 @@ func main() -> Int32 {
                 },
                 .KeyUp(_) => {},
                 .MouseDown(px, py) => {
-                    let gx = px / Config.cellSize;
-                    let gy = py / Config.cellSize;
+                    let gx = px / cfg.cellSize;
+                    let gy = py / cfg.cellSize;
                     grid.stamp(kind: selectedPattern, centerX: gx, centerY: gy);
                 }
             }
         }
 
-        if not paused {
+        let now = sdlGetTicks();
+        if not paused and (now - simLast) >= simStepMs {
             grid.step();
+            simLast = now;
+        }
+
+        // Refresh the FPS readout every ~500ms.
+        frameCount = frameCount + 1;
+        let elapsed = Int64(from: now - fpsLast);
+        if elapsed >= 500 {
+            displayedFps = frameCount * 1000 / elapsed;
+            frameCount = 0;
+            fpsLast = now;
         }
 
         app.render { (renderer) in
             renderer.clear(Color.black());
             grid.render(renderer);
-            // HUD: current pattern selection in the top-left, scale 2.
+            // HUD: current pattern in the top-left, FPS just below.
             renderer.drawText("PATTERN: " + patternName(kind: selectedPattern), 8, 8, 2);
+            renderer.drawText("FPS: " + displayedFps.format(), 8, 28, 2);
         };
-
-        app.delay(Milliseconds(Config.stepDelayMs));
     }
 
     0

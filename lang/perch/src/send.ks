@@ -3,12 +3,13 @@
 module perch.send
 
 import perch.response.(Response)
+import std.io.error.(IoError)
 
 /// Serializes and sends an HTTP response over a socket fd.
 ///
 /// Sends the status line, headers (including Content-Length and
 /// Connection: close), and body.
-public func sendResponse(response: Response, to fd: Int32) -> Result[(), Error] {
+public func sendResponse(response: Response, to fd: Int32) -> Result[(), IoError] {
     var resp = String(capacity: 256 + response.bodyContent.byteCount);
 
     // Status line: HTTP/1.1 200 OK\r\n
@@ -46,7 +47,7 @@ public func sendResponse(response: Response, to fd: Int32) -> Result[(), Error] 
 }
 
 /// Sends all bytes of a string over a socket fd, retrying partial writes.
-func sendAllBytes(fd: Int32, s: String) -> Result[(), Error] {
+func sendAllBytes(fd: Int32, s: String) -> Result[(), IoError] {
     let len = s.byteCount;
     if len == 0 {
         return .Ok(())
@@ -65,10 +66,10 @@ func sendAllBytes(fd: Int32, s: String) -> Result[(), Error] {
         let remaining = len - sent;
         let n = send(fd, ptr, remaining, 0);
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         if n == 0 {
-            return .Err(Error(32))
+            return .Err(IoError(code: 32))
         }
         sent = sent + n
     }

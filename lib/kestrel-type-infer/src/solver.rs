@@ -25,8 +25,22 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Phase 1: main solving
     fixpoint(ctx);
 
-    // Phase 2: apply literal defaults
-    apply_literal_defaults(ctx);
+    // Phase 2: apply literal defaults — iteratively, so that defaulting a
+    // literal that *unblocks* a deferred dispatch (e.g. an array subscript's
+    // index) lets that dispatch run and bind any *other* literal args of
+    // downstream constraints (like the RHS of `byte == 35`) before they get
+    // a fallback default of `Int64`. See `apply_literal_defaults` for the
+    // blocking-vs-leaf distinction.
+    loop {
+        let progress = apply_literal_defaults(ctx, false);
+        if !progress {
+            break;
+        }
+        fixpoint(ctx);
+    }
+    // Final pass: default any literals still unconstrained, including ones
+    // that were previously deferred because their dispatch never completed.
+    apply_literal_defaults(ctx, true);
 
     // Phase 3: solve again with defaults
     fixpoint(ctx);
@@ -1435,22 +1449,47 @@ fn solve_associated(
                 // bindings inside `extend Type: Proto[...]` are scoped to
                 // the conformance protocol, not the extension's parent.
                 let proto = find_extension_conformance_protocol(ctx.query_ctx, ext, ctx.root)?;
-                let canonical = ctx.resolve(container);
-                // Direct lookup; fall back to scanning the cache for any key
-                // whose TyVar redirects to the same canonical (the where-clause
-                // emitter may have inserted before later unification redirected
-                // the container's TyVar).
+                // Look up the witness's protocol args by the *exact* container
+                // TyVar that the constraint was generated with. Each call site
+                // creates a fresh TyVar for the protocol-bound type parameter
+                // and `record_witness_args` stores under that fresh TyVar, so
+                // the constraint's `container` matches the cache key directly.
+                //
+                // Resolving to the canonical here would merge entries from
+                // independent call sites that later got unified to the same
+                // concrete type (e.g. multiple `arr(unchecked: i)` calls where
+                // every `I` collapses to `Int64`), and the fallback scan would
+                // pick whichever entry came first in HashMap iteration order.
                 let proto_args = ctx
                     .witness_protocol_args
-                    .get(&(canonical, proto))
+                    .get(&(container, proto))
                     .cloned()
                     .or_else(|| {
-                        ctx.witness_protocol_args
-                            .iter()
-                            .find(|((k_tv, k_proto), _)| {
+                        // The container may have been recorded under a
+                        // different-but-redirected TyVar (the body-level
+                        // emitter in `lib.rs` records against the body-scoped
+                        // param TyVar). Fall back to canonical match, but
+                        // only when it is unambiguous — multiple matches
+                        // mean separate call sites collapsed to the same
+                        // canonical and cannot be disambiguated by canonical
+                        // alone.
+                        let canonical = ctx.resolve(container);
+                        if let Some(args) =
+                            ctx.witness_protocol_args.get(&(canonical, proto))
+                        {
+                            return Some(args.clone());
+                        }
+                        let mut iter = ctx.witness_protocol_args.iter().filter(
+                            |((k_tv, k_proto), _)| {
                                 *k_proto == proto && ctx.resolve(*k_tv) == canonical
-                            })
-                            .map(|(_, v)| v.clone())
+                            },
+                        );
+                        let first = iter.next()?;
+                        if iter.next().is_some() {
+                            // Ambiguous — bail rather than pick arbitrarily.
+                            return None;
+                        }
+                        Some(first.1.clone())
                     })?;
                 let ext_params: Vec<Entity> = ctx
                     .query_ctx
@@ -2952,7 +2991,18 @@ fn extension_where_clauses_satisfied(
 /// constrains the literal through a deferred Member chain. E.g., `-1` assigned
 /// to an Int32 field: the negate result is already Int32, so the literal should
 /// adopt Int32 instead of defaulting to Int64.
-fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
+///
+/// When `force_all` is false, literals that sit in the *args* of a deferred
+/// `Member`/`Call` whose receiver/callee is itself unresolved are left alone
+/// — the dispatch may yet bind them to a concrete parameter type once the
+/// receiver resolves. The solver loops `fixpoint` + `apply_literal_defaults`
+/// until no progress, then makes one final call with `force_all = true` to
+/// default any stragglers.
+///
+/// Returns `true` when this call made any change.
+fn apply_literal_defaults(ctx: &mut InferCtx<'_>, force_all: bool) -> bool {
+    let mut progress = false;
+
     // First pass: collect context-driven types for literals that have deferred
     // Member constraints with already-resolved result TyVars.
     let mut context_types: Vec<(TyVar, TyVar)> = Vec::new();
@@ -2989,14 +3039,59 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
             TySlot::Unresolved { literal: Some(_) }
         ) {
             ctx.types[literal_tv.0 as usize] = TySlot::Redirect(*context_tv);
+            progress = true;
         }
     }
+
+    // Compute the set of literal TyVars that are "blocked": they sit in the
+    // args of a deferred `Member` / `Call` whose receiver/callee is still
+    // unresolved. Defaulting these now would lock in `Int64` / etc. before
+    // the dispatch (e.g. `Self.equals(self, other: Self)`) ever gets a chance
+    // to bind the arg's type from the method signature. Only meaningful when
+    // `force_all` is false; the final pass overrides this and defaults
+    // everything left.
+    let blocked: std::collections::HashSet<TyVar> = if force_all {
+        std::collections::HashSet::new()
+    } else {
+        let mut set = std::collections::HashSet::new();
+        for constraint in &ctx.constraints {
+            let (receiver, args) = match constraint {
+                Constraint::Member { receiver, args, .. } => (*receiver, args),
+                Constraint::Call { callee, args, .. } => (*callee, args),
+                _ => continue,
+            };
+            // Receiver/callee unresolved → dispatch may still happen, deferring
+            // arg defaults gives it a chance to bind them. If the receiver is
+            // *concrete*, dispatch already had its shot during the prior
+            // fixpoint, so any literal arg here is genuinely undetermined and
+            // can be defaulted normally.
+            let recv_resolved = ctx.resolve(receiver);
+            if matches!(
+                &ctx.types[recv_resolved.0 as usize],
+                TySlot::Unresolved { literal: None }
+            ) {
+                for a in args {
+                    let arg_resolved = ctx.resolve(a.ty);
+                    if matches!(
+                        &ctx.types[arg_resolved.0 as usize],
+                        TySlot::Unresolved { literal: Some(_) }
+                    ) {
+                        set.insert(arg_resolved);
+                    }
+                }
+            }
+        }
+        set
+    };
 
     // Second pass: apply defaults for remaining unconstrained literals
     for idx in 0..ctx.types.len() {
         let tv = TyVar(idx as u32);
         let resolved = ctx.resolve(tv);
         if resolved != tv {
+            continue;
+        }
+        if blocked.contains(&resolved) {
             continue;
         }
 
@@ -3030,6 +3125,7 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
             let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
             let default_tv = ctx.named(entity, args);
             ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
+            progress = true;
         }
         // Without the `Default<Kind>LiteralType` builtin (e.g. `// stdlib: false`
         // tests), leave the literal as `Unresolved { literal: Some(_) }`. Phase
@@ -3039,6 +3135,8 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>) {
         // produces the preferred "does not conform to protocol" / "type mismatch"
         // wording via `try_literal_mismatch` in `mismatch_error`.
     }
+
+    progress
 }
 
 // ===== Helpers =====

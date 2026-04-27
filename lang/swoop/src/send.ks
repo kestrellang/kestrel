@@ -11,6 +11,7 @@ import http.method.(HttpMethod)
 import http.status.(StatusCode)
 import http.headers.(Headers)
 import swoop.error.(SwoopError)
+import std.io.error.(IoError)
 import swoop.response.(Response)
 import http.wire.(findHeaderEnd, bytesToString, parseDecimal)
 import swoop.url.(ClientUrl)
@@ -357,7 +358,7 @@ func hexDigitValue(b: UInt8) -> Int64 {
 // ============================================================================
 
 /// Sends all bytes of a string over a stream.
-func sendAllString[S](stream: S, s: String) -> Result[(), Error] where S: Write {
+func sendAllString[S](stream: S, s: String) -> Result[(), IoError] where S: Write {
     var mutStream = stream;
     let len = s.byteCount;
     if len == 0 {
@@ -375,7 +376,7 @@ func sendAllString[S](stream: S, s: String) -> Result[(), Error] where S: Write 
 }
 
 /// Sends all bytes of a buffer over a stream.
-func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), Error] where S: Write {
+func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), IoError] where S: Write {
     var mutStream = stream;
     let len = buf.count;
     var sent: Int64 = 0;
@@ -385,7 +386,7 @@ func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), Error] where S:
         let slice = Slice(pointer: ptr, count: remaining);
         let n = try mutStream.write(from: slice);
         if n == 0 {
-            return .Err(Error(32))
+            return .Err(IoError(code: Int32(intLiteral: 32)))
         }
         sent = sent + n
     }

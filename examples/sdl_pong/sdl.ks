@@ -154,6 +154,13 @@ public struct Renderer {
         sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
     }
 
+    // Fills using whatever color is already set on the renderer. Use after
+    // a single `setColor` to avoid a per-rect color-state syscall when
+    // drawing many same-colored rects (e.g. a tile grid).
+    public func fillRect(rect: Rectangle) {
+        sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
+    }
+
     public func drawText(text: String, x: Int64, y: Int64, scale: Int64) {
         let cstr = text.toCString();
         sdlDrawText(self.raw, cstr, x, y, scale);
@@ -166,13 +173,13 @@ public struct SDLApp : not Copyable {
     var rendererPtr: lang.ptr[lang.i8]
     var eventBuffer: Array[Int8]
 
-    public init(title title: String) {
+    public init(title title: String, width width: Int64, height height: Int64) {
         if sdlInit(UInt32(intLiteral: 0x20)) < 0 {
             lang.panic("SDL Init failed");
         }
 
         let titleCStr = title.toCString();
-        let win = sdlCreateWindow(titleCStr, 800, 600);
+        let win = sdlCreateWindow(titleCStr, width, height);
         titleCStr.free();
 
         if isNull(win) != 0 {

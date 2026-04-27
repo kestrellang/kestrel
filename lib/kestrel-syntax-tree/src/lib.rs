@@ -542,6 +542,7 @@ impl Language for KestrelLanguage {
         const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
         const EXPR_FLOAT: u16 = SyntaxKind::ExprFloat as u16;
         const EXPR_STRING: u16 = SyntaxKind::ExprString as u16;
+        const EXPR_RAW_STRING: u16 = SyntaxKind::ExprRawString as u16;
         const EXPR_INTERPOLATED_STRING: u16 = SyntaxKind::ExprInterpolatedString as u16;
         const STRING_LITERAL_PART: u16 = SyntaxKind::StringLiteralPart as u16;
         const STRING_INTERPOLATION: u16 = SyntaxKind::StringInterpolation as u16;
@@ -608,6 +609,7 @@ impl Language for KestrelLanguage {
         const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
+        const RAW_STRING: u16 = SyntaxKind::RawString as u16;
         const CHAR: u16 = SyntaxKind::Char as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
         const FLOAT: u16 = SyntaxKind::Float as u16;
@@ -795,6 +797,7 @@ impl Language for KestrelLanguage {
             EXPR_INTEGER => SyntaxKind::ExprInteger,
             EXPR_FLOAT => SyntaxKind::ExprFloat,
             EXPR_STRING => SyntaxKind::ExprString,
+            EXPR_RAW_STRING => SyntaxKind::ExprRawString,
             EXPR_INTERPOLATED_STRING => SyntaxKind::ExprInterpolatedString,
             STRING_LITERAL_PART => SyntaxKind::StringLiteralPart,
             STRING_INTERPOLATION => SyntaxKind::StringInterpolation,
@@ -861,6 +864,7 @@ impl Language for KestrelLanguage {
             ERROR_PATTERN => SyntaxKind::ErrorPattern,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
+            RAW_STRING => SyntaxKind::RawString,
             CHAR => SyntaxKind::Char,
             INTEGER => SyntaxKind::Integer,
             FLOAT => SyntaxKind::Float,

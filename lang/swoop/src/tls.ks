@@ -5,6 +5,8 @@
 
 module swoop.tls
 
+import std.io.error.(IoError)
+
 // ============================================================================
 // OPENSSL C BINDINGS
 // ============================================================================
@@ -78,7 +80,7 @@ public struct TlsStream: Read, Write {
         self.fd = fd;
     }
 
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_read(
             self.ssl,
@@ -86,12 +88,12 @@ public struct TlsStream: Read, Write {
             count32.raw
         ));
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(Int64(from: n))
     }
 
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, Error] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(
             self.ssl,
@@ -99,12 +101,12 @@ public struct TlsStream: Read, Write {
             count32.raw
         ));
         if n < 0 {
-            return .Err(Error.last())
+            return .Err(IoError.last())
         }
         .Ok(Int64(from: n))
     }
 
-    public mutating func flush() -> Result[(), Error] {
+    public mutating func flush() -> Result[(), IoError] {
         .Ok(())
     }
 
@@ -125,7 +127,7 @@ public struct TlsStream: Read, Write {
 
 extend TlsStream {
     /// Connects to a remote host over TLS, returning a TlsStream.
-    public static func connect(host: String, port: UInt16) -> Result[TlsStream, Error] {
+    public static func connect(host: String, port: UInt16) -> Result[TlsStream, IoError] {
         // One-time init (safe to call multiple times)
         // OPENSSL_INIT_LOAD_SSL_STRINGS (0x00200000) | OPENSSL_INIT_LOAD_CRYPTO_STRINGS (0x00000002)
         let initOpts: Int64 = 2097154;
@@ -140,7 +142,7 @@ extend TlsStream {
         let ctx = libc_SSL_CTX_new(method);
         if lang.ptr_is_null(ctx) {
             let _ = posix_close(fd.raw);
-            return .Err(Error(1))
+            return .Err(IoError(code: Int32(intLiteral: 1)))
         }
 
         // Load system CA certificates and enable peer verification
@@ -153,7 +155,7 @@ extend TlsStream {
         if lang.ptr_is_null(ssl) {
             libc_SSL_CTX_free(ctx);
             let _ = posix_close(fd.raw);
-            return .Err(Error(2))
+            return .Err(IoError(code: Int32(intLiteral: 2)))
         }
 
         // Attach socket fd
@@ -180,7 +182,7 @@ extend TlsStream {
             libc_SSL_free(ssl);
             libc_SSL_CTX_free(ctx);
             let _ = posix_close(fd.raw);
-            return .Err(Error(connectResult))
+            return .Err(IoError(code: connectResult))
         }
 
         .Ok(TlsStream(ssl, ctx, fd))

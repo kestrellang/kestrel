@@ -165,7 +165,7 @@ struct InputState {
 // --- Main Game ---
 
 func main() -> Int32 {
-    var app = SDLApp(title: "Pong");
+    var app = SDLApp(title: "Pong", width: 800, height: 600);
     var ball = Ball.create();
     var paddle1 = Paddle.left();
     var paddle2 = Paddle.right();

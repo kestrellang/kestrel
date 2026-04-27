@@ -1,6 +1,36 @@
 #include <SDL.h>
 #include <stdint.h>
 #include <string.h>
+#include <stddef.h>
+#include <time.h>
+
+// Capture argv from the C runtime so Kestrel can read CLI args. The
+// constructor runs before main() on both glibc and dyld; both pass argc/argv
+// to constructors with this signature.
+static int g_argc = 0;
+static char** g_argv = NULL;
+__attribute__((constructor))
+static void Kestrel_CaptureArgs(int argc, char** argv, char** envp) {
+    (void)envp;
+    g_argc = argc;
+    g_argv = argv;
+}
+int32_t Kestrel_Argc(void) { return (int32_t)g_argc; }
+const char* Kestrel_GetArg(int32_t idx) {
+    if (idx < 0 || idx >= g_argc || g_argv == NULL) return NULL;
+    return g_argv[idx];
+}
+
+// Wraps SDL_GetTicks for use as an FPS clock. SDL_Init must have run.
+uint32_t Kestrel_GetTicks(void) { return SDL_GetTicks(); }
+
+// Monotonic millisecond clock that does NOT require SDL_Init — needed for
+// headless runs that skip the video subsystem.
+int64_t Kestrel_MonotonicMs(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+}
 
 // Event helpers
 uint32_t Kestrel_GetEventType(SDL_Event* event) { return event->type; }

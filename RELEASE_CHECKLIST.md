@@ -1,7 +1,8 @@
 - [x] Clean up repository
-- [ ] Cargo fmt
-- [ ] Cargo clippy
+- [x] Cargo fmt
+- [x] Cargo clippy
 - [ ] Rewrite README.md
+- [ ] Write style guide
 - [ ] Add custom written docs
 - [ ] Move to github org
 - [ ] Write blog post
@@ -13,3 +14,4 @@
 - [ ] Move plugin to separate repo
 - [ ] Move triage to separate repo
 - [ ] Verify installation end-to-end
+- [ ] Build the playground

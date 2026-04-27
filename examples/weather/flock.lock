@@ -7,12 +7,6 @@ source = "path"
 path = "/Users/dino/Documents/Projects/kestrel/lang/plume"
 
 [[package]]
-name = "http"
-version = "0.0.0"
-source = "path"
-path = "/Users/dino/Documents/Projects/kestrel/lang/http"
-
-[[package]]
 name = "quill"
 version = "0.0.0"
 source = "path"
@@ -25,13 +19,19 @@ source = "path"
 path = "/Users/dino/Documents/Projects/kestrel/lang/quill-json"
 
 [[package]]
-name = "swoop"
+name = "http"
 version = "0.0.0"
 source = "path"
-path = "/Users/dino/Documents/Projects/kestrel/lang/swoop"
+path = "/Users/dino/Documents/Projects/kestrel/lang/http"
 
 [[package]]
 name = "perch"
 version = "0.0.0"
 source = "path"
 path = "/Users/dino/Documents/Projects/kestrel/lang/perch"
+
+[[package]]
+name = "swoop"
+version = "0.0.0"
+source = "path"
+path = "/Users/dino/Documents/Projects/kestrel/lang/swoop"

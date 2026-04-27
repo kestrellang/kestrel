@@ -9,13 +9,14 @@ import http.headers.(Headers)
 import http.url.(parseUrl, ParsedUrl)
 import http.wire.(findHeaderEnd, bytesToString, parseDecimal)
 import perch.request.(Request)
+import std.io.error.(IoError)
 
 /// Reads and parses an HTTP request from a raw socket fd.
 ///
 /// Reads bytes until the header terminator (\r\n\r\n) is found,
 /// then parses the request line, headers, and optional body.
 /// Maximum header size is 65536 bytes.
-public func parseHttpRequest(fd: Int32) -> Result[Request, Error] {
+public func parseHttpRequest(fd: Int32) -> Result[Request, IoError] {
     // Read bytes until we find \r\n\r\n
     var buf = Array[UInt8]();
     var chunk = Array[UInt8](capacity: 4096);
