@@ -147,8 +147,8 @@ fn scan_stmt(
                         format!("direct-call type_args (bb{bi}[{si}] of '{fn_name}')"),
                     );
                 }
-                if let Some(t) = self_type {
-                    if t.contains_error() {
+                if let Some(t) = self_type
+                    && t.contains_error() {
                         emit(
                             ctx,
                             n,
@@ -156,7 +156,6 @@ fn scan_stmt(
                             format!("direct-call self_type (bb{bi}[{si}] of '{fn_name}')"),
                         );
                     }
-                }
             },
             Callee::Witness {
                 self_type,

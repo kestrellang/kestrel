@@ -133,8 +133,8 @@ fn normalize_hir_type(
                 };
             }
 
-            if qctx.get::<TypeAnnotation>(*entity).is_some() {
-                if let Some(alias_ty) = qctx.query(LowerTypeAnnotation {
+            if qctx.get::<TypeAnnotation>(*entity).is_some()
+                && let Some(alias_ty) = qctx.query(LowerTypeAnnotation {
                     entity: *entity,
                     root,
                 }) {
@@ -162,7 +162,6 @@ fn normalize_hir_type(
 
                     return normalized;
                 }
-            }
 
             ResolvedTy::Named {
                 entity: *entity,

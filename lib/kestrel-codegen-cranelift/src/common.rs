@@ -10,11 +10,11 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use kestrel_codegen::{
-    Layout, LayoutCache, TargetConfig, substitute_type, substitute_type_with_self,
+    LayoutCache, TargetConfig, substitute_type, substitute_type_with_self,
 };
 use kestrel_hecs::Entity;
 use kestrel_mir::{
-    BasicBlock, BlockId, EnumId, LocalId, MirBody, MirModule, MirTy, Place, StructId,
+    EnumId, MirBody, MirModule, MirTy, Place, StructId,
 };
 use std::collections::HashMap;
 

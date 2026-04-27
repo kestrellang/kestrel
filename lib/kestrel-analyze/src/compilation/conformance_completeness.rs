@@ -140,19 +140,17 @@ fn check_entity(cx: &CompilationContext<'_>, entity: Entity, diags: &mut Vec<Ana
     }
 
     // Check extensions that add conformances
-    if kind == Some(&NodeKind::Extension) {
-        if let Some(target) = cx.query.query(ExtensionTargetEntity {
+    if kind == Some(&NodeKind::Extension)
+        && let Some(target) = cx.query.query(ExtensionTargetEntity {
             extension: entity,
             root: cx.root,
         }) {
             // Only check if this extension declares new conformances
-            if let Some(conf) = cx.query.get::<Conformances>(entity) {
-                if !conf.0.is_empty() {
+            if let Some(conf) = cx.query.get::<Conformances>(entity)
+                && !conf.0.is_empty() {
                     check_extension_conformances(cx, entity, target, diags);
                 }
-            }
         }
-    }
 
     for &child in cx.query.children_of(entity) {
         check_entity(cx, child, diags);
@@ -377,7 +375,7 @@ fn check_protocol_requirements(
                                 ),
                                 labels: vec![DiagLabel {
                                     span: field_span,
-                                    message: format!("type does not match protocol requirement",),
+                                    message: "type does not match protocol requirement".to_string(),
                                     is_primary: true,
                                 }],
                                 notes: vec![],
@@ -720,10 +718,9 @@ fn find_protocol_extension_assoc_binding(
                 if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
                     continue;
                 }
-                if !cx
+                if cx
                     .query
-                    .get::<Name>(child)
-                    .is_some_and(|name| name.0 == assoc_name)
+                    .get::<Name>(child).is_none_or(|name| name.0 != assoc_name)
                 {
                     continue;
                 }
@@ -1153,11 +1150,10 @@ fn collect_from_entity(
             },
             Some(NodeKind::TypeAlias) => {
                 // Only count type aliases with a binding (TypeAnnotation = concrete type)
-                if let Some(name) = name {
-                    if cx.query.get::<TypeAnnotation>(child).is_some() {
+                if let Some(name) = name
+                    && cx.query.get::<TypeAnnotation>(child).is_some() {
                         type_aliases.insert(name);
                     }
-                }
             },
             Some(NodeKind::Field) => {
                 if let Some(name) = name {

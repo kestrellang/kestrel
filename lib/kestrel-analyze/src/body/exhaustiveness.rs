@@ -353,7 +353,7 @@ fn pat_has_error(hir: &HirBody, pat: HirPatId) -> bool {
         },
         HirPat::Struct { fields, .. } => fields
             .iter()
-            .any(|f| f.pattern.map_or(false, |p| pat_has_error(hir, p))),
+            .any(|f| f.pattern.is_some_and(|p| pat_has_error(hir, p))),
         HirPat::Or { alternatives, .. } => alternatives.iter().any(|&p| pat_has_error(hir, p)),
         HirPat::At { subpattern, .. } => pat_has_error(hir, *subpattern),
     }

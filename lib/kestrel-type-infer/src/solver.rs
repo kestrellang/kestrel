@@ -795,9 +795,7 @@ fn primitive_family(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<PrimitiveFamily
     let TyKind::Struct { entity, .. } = kind else {
         return None;
     };
-    if ctx.query_ctx.get::<Intrinsic>(*entity).is_none() {
-        return None;
-    }
+    ctx.query_ctx.get::<Intrinsic>(*entity)?;
     let name = ctx.query_ctx.get::<Name>(*entity)?;
     match name.0.as_str() {
         "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" => Some(PrimitiveFamily::Int),
@@ -1002,13 +1000,12 @@ fn direct_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) -> Vec<Entity
             context: scope,
             root: ctx.root,
         });
-        if let kestrel_name_res::TypeResolution::Found(proto) = result {
-            if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(proto)
+        if let kestrel_name_res::TypeResolution::Found(proto) = result
+            && ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(proto)
                 == Some(&kestrel_ast_builder::NodeKind::Protocol)
             {
                 protocols.push(proto);
             }
-        }
     }
     protocols
 }
@@ -1201,8 +1198,8 @@ fn solve_coerce(
             // "does not conform" diagnostic now — deferring would let
             // literal defaulting overwrite the literal slot (e.g. null →
             // Optional[?]) and we'd lose the correct wording on retry.
-            if !target_accepts_promotion(ctx, to) {
-                if let Some(err) = try_literal_mismatch(ctx, from, to, span.clone())
+            if !target_accepts_promotion(ctx, to)
+                && let Some(err) = try_literal_mismatch(ctx, from, to, span.clone())
                     .or_else(|| try_literal_mismatch(ctx, to, from, span.clone()))
                 {
                     ctx.errored_coerce_exprs.insert(expr);
@@ -1213,7 +1210,6 @@ fn solve_coerce(
                     }
                     return SolveResult::Error(err);
                 }
-            }
             // Otherwise fall through to promotion (possibly after defaulting).
         },
         Err(UnifyError::Mismatch) => {
@@ -1271,8 +1267,8 @@ fn solve_coerce(
             if let Some(param_hir_tys) = qctx.query(LowerCallableTypes {
                 entity: method,
                 root,
-            }) {
-                if let Some(Some(value_hir_ty)) = param_hir_tys.first() {
+            })
+                && let Some(Some(value_hir_ty)) = param_hir_tys.first() {
                     let param_tv = lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
                     if unify::unify(ctx, from, param_tv).is_err() {
                         ctx.errored_coerce_exprs.insert(expr);
@@ -1283,7 +1279,6 @@ fn solve_coerce(
                         });
                     }
                 }
-            }
         }
 
         // Record the promotion for codegen
@@ -1304,11 +1299,10 @@ fn solve_coerce(
         TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(*entity),
         _ => None,
     };
-    if let Some(to_entity) = to_protocol_entity {
-        if ctx.resolver.conforms_to(&from_kind, to_entity) {
+    if let Some(to_entity) = to_protocol_entity
+        && ctx.resolver.conforms_to(&from_kind, to_entity) {
             return SolveResult::Solved;
         }
-    }
 
     // Flex closure adaptation: 0-param closure coerced to N-param function.
     // Also catches implicit `it` in wrong-arity context.
@@ -1590,8 +1584,8 @@ fn solve_call(
     // If the callee is a concrete TypeAlias, reduce before dispatch.
     // This handles `type C = Counter; C(42)` — the callee is TypeAlias{C}
     // which reduces to Struct{Counter}, and then init-call dispatch proceeds.
-    if let TyKind::TypeAlias { entity, .. } = &kind {
-        if ctx
+    if let TyKind::TypeAlias { entity, .. } = &kind
+        && ctx
             .query_ctx
             .query(kestrel_hir_lower::LowerTypeAnnotation {
                 entity: *entity,
@@ -1609,7 +1603,6 @@ fn solve_call(
                 span,
             });
         }
-    }
 
     match kind {
         TyKind::Function { params, ret } => {
@@ -1801,8 +1794,8 @@ fn emit_resolved_call(
 
     // For initializers and enum cases, also add parent type params
     let kind = qctx.get::<NodeKind>(entity);
-    if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
-        if let Some(parent) = qctx.parent_of(entity) {
+    if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase))
+        && let Some(parent) = qctx.parent_of(entity) {
             let parent_tps: Vec<Entity> = qctx
                 .get::<TypeParams>(parent)
                 .map(|tp| tp.0.clone())
@@ -1813,7 +1806,6 @@ fn emit_resolved_call(
                 }
             }
         }
-    }
 
     // Record resolution
     ctx.resolutions.insert(expr, entity);
@@ -1931,15 +1923,14 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
     // For inits, also include parent struct type params
     let mut all_type_params = type_param_entities;
     let kind = qctx.get::<NodeKind>(entity);
-    if matches!(kind, Some(NodeKind::Initializer)) {
-        if let Some(parent) = qctx.parent_of(entity) {
+    if matches!(kind, Some(NodeKind::Initializer))
+        && let Some(parent) = qctx.parent_of(entity) {
             let parent_tps: Vec<Entity> = qctx
                 .get::<TypeParams>(parent)
                 .map(|tp| tp.0.clone())
                 .unwrap_or_default();
             all_type_params.extend(parent_tps);
         }
-    }
 
     for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
         let Some(hir_ty) = param_ty else {
@@ -2068,8 +2059,8 @@ fn solve_member(
         TyKind::TypeAlias { entity, args } if args.is_empty() => Some(*entity),
         _ => None,
     };
-    if let Some(entity) = bound_entity {
-        if let Some(&(_, bound_tv)) = ctx
+    if let Some(entity) = bound_entity
+        && let Some(&(_, bound_tv)) = ctx
             .where_clause_assoc_subs
             .iter()
             .find(|(e, _)| *e == entity)
@@ -2097,13 +2088,12 @@ fn solve_member(
                 });
             }
         }
-    }
 
     // If the receiver is a TypeAlias with a concrete TypeAnnotation, reduce it
     // before member dispatch. Abstract aliases (no annotation) fall through to
     // the resolver's bound-search path (handled in resolve_member).
-    if let TyKind::TypeAlias { entity, .. } = &recv_kind {
-        if ctx
+    if let TyKind::TypeAlias { entity, .. } = &recv_kind
+        && ctx
             .query_ctx
             .query(kestrel_hir_lower::LowerTypeAnnotation {
                 entity: *entity,
@@ -2125,17 +2115,14 @@ fn solve_member(
                 span,
             });
         }
-    }
 
     // Tuple index access: "0", "1", etc. on a Tuple type
-    if let TyKind::Tuple(ref elems) = recv_kind {
-        if let Ok(idx) = name.parse::<usize>() {
-            if idx < elems.len() {
+    if let TyKind::Tuple(ref elems) = recv_kind
+        && let Ok(idx) = name.parse::<usize>()
+            && idx < elems.len() {
                 ctx.equal(result, elems[idx], span);
                 return SolveResult::Solved;
             }
-        }
-    }
 
     // (debug removed)
     // Resolve the member via the type resolver.
@@ -2590,8 +2577,8 @@ fn solve_implicit(
     };
 
     // Check labels match for enum case calls (e.g., .Circle(radius: 5.0))
-    if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase) {
-        if let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity) {
+    if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase)
+        && let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity) {
             let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
             if !crate::constraint::labels_match(&callable.params, &arg_labels) {
                 let case_name = ctx
@@ -2605,7 +2592,6 @@ fn solve_implicit(
                 });
             }
         }
-    }
 
     ctx.resolutions.insert(expr, resolution.entity);
 
@@ -2947,11 +2933,10 @@ fn extension_where_clauses_satisfied(
             // Case 2: `T: Protocol` — param is a type parameter
             if let Some(&(_, recv_tv)) = param_to_recv.iter().find(|(p, _)| p == param) {
                 let resolved = ctx.resolve(recv_tv);
-                if let crate::ty::TySlot::Resolved(kind) = ctx.slot(resolved) {
-                    if !ctx.resolver.conforms_to(kind, *protocol) {
+                if let crate::ty::TySlot::Resolved(kind) = ctx.slot(resolved)
+                    && !ctx.resolver.conforms_to(kind, *protocol) {
                         return false;
                     }
-                }
             }
         }
     }
@@ -3151,11 +3136,9 @@ fn find_extension_conformance_protocol(
                 context: extension,
                 root,
             })
-        {
-            if matches!(ctx.get::<NodeKind>(proto), Some(NodeKind::Protocol)) {
+            && matches!(ctx.get::<NodeKind>(proto), Some(NodeKind::Protocol)) {
                 return Some(proto);
             }
-        }
     }
     None
 }
@@ -3300,13 +3283,12 @@ fn lower_hir_ty_sub(
                     },
                     _ => false,
                 };
-                if is_concrete_non_self {
-                    if let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity) {
+                if is_concrete_non_self
+                    && let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity) {
                         let result = ctx.fresh();
                         ctx.associated(recv_tv, &name.0, result, kestrel_span::Span::synthetic(0));
                         return result;
                     }
-                }
             }
 
             let arg_tvs: Vec<TyVar> = args

@@ -184,17 +184,15 @@ fn collect_param_refs(
 ) {
     match ty {
         AstType::Named { segments, .. } => {
-            if let Some(first) = segments.first() {
-                if let TypeResolution::Found(e) = cx.query.query(ResolveTypePath {
+            if let Some(first) = segments.first()
+                && let TypeResolution::Found(e) = cx.query.query(ResolveTypePath {
                     segments: vec![first.name.clone()],
                     context,
                     root: cx.root,
-                }) {
-                    if param_set.contains(&e) {
+                })
+                    && param_set.contains(&e) {
                         out.push(e);
                     }
-                }
-            }
             for seg in segments {
                 for t in &seg.type_args {
                     collect_param_refs(cx, t, context, param_set, out);

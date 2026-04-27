@@ -41,11 +41,9 @@ pub fn run_thunk_pass(module: &mut MirModule) {
                     rvalue: Rvalue::ApplyPartial { func: target, .. },
                     ..
                 } = &stmt.kind
-                {
-                    if seen.insert(*target) {
+                    && seen.insert(*target) {
                         thunk_targets.push(*target);
                     }
-                }
             }
         }
     }
@@ -77,7 +75,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
                 let needs_env = f
                     .params
                     .first()
-                    .map_or(false, |p| p.name == "env" || p.name == "_env");
+                    .is_some_and(|p| p.name == "env" || p.name == "_env");
                 let params: Vec<_> = f
                     .params
                     .iter()

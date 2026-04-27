@@ -108,11 +108,10 @@ fn check_condition(
     }
 
     // Check BooleanConditional protocol conformance
-    if let Some(protocol) = bool_cond_protocol {
-        if conforms_to_protocol(cx, cond_ty, protocol) {
+    if let Some(protocol) = bool_cond_protocol
+        && conforms_to_protocol(cx, cond_ty, protocol) {
             return;
         }
-    }
 
     let span = util::expr_span(cx.hir, cond_id);
     let type_name = describe_type(cx, cond_ty);

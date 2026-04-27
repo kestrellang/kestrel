@@ -136,7 +136,7 @@ impl Constructor {
             // Integer comparisons
             (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
             (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-                start.map_or(true, |s| *v >= s) && end.map_or(true, |e| *v <= e)
+                start.is_none_or(|s| *v >= s) && end.is_none_or(|e| *v <= e)
             },
             (
                 Constructor::IntRange { start: s1, end: e1 },
@@ -146,7 +146,7 @@ impl Constructor {
             // Character comparisons
             (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
             (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
-                start.map_or(true, |s| *v >= s) && end.map_or(true, |e| *v <= e)
+                start.is_none_or(|s| *v >= s) && end.is_none_or(|e| *v <= e)
             },
             (
                 Constructor::CharRange { start: s1, end: e1 },

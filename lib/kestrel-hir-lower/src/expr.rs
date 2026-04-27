@@ -309,8 +309,8 @@ impl LowerCtx<'_> {
 
         // Check for empty type argument brackets (e.g., `identity[]`)
         for seg in segments {
-            if let Some(args) = &seg.type_args {
-                if args.is_empty() {
+            if let Some(args) = &seg.type_args
+                && args.is_empty() {
                     self.ctx.accumulate(
                         kestrel_reporting::Diagnostic::error()
                             .with_message("empty type argument list")
@@ -324,7 +324,6 @@ impl LowerCtx<'_> {
                     );
                     return self.alloc_expr(HirExpr::Error { span: span.clone() });
                 }
-            }
         }
 
         // Collect explicit type args from all path segments (e.g., Pointer[UInt8])
@@ -572,8 +571,8 @@ impl LowerCtx<'_> {
                     return self.emit_init_outside_initializer(span);
                 }
                 let first = &segments[0];
-                if first.type_args.is_none() {
-                    if let Some(_) = self.lookup_local(&first.name) {
+                if first.type_args.is_none()
+                    && self.lookup_local(&first.name).is_some() {
                         // Lower all segments except the last as nested Field accesses
                         let last = &segments[segments.len() - 1];
                         let method = last.name.clone();
@@ -593,7 +592,6 @@ impl LowerCtx<'_> {
                             span: span.clone(),
                         });
                     }
-                }
 
                 // Not a local-based path — check for static method call.
                 // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
@@ -1037,7 +1035,7 @@ impl LowerCtx<'_> {
         let mut lhs = self.lower_expr(body, first);
 
         loop {
-            let Some(&(ref op, _)) = operators.peek() else {
+            let Some((op, _)) = operators.peek() else {
                 break;
             };
             let prec = op.precedence();
@@ -1318,8 +1316,8 @@ impl LowerCtx<'_> {
             );
             return;
         }
-        if let Some(lbl) = label {
-            if !self.has_loop_label(lbl) {
+        if let Some(lbl) = label
+            && !self.has_loop_label(lbl) {
                 self.ctx.accumulate(
                     kestrel_reporting::Diagnostic::error()
                         .with_message(format!("undeclared label '{}'", lbl))
@@ -1332,6 +1330,5 @@ impl LowerCtx<'_> {
                         ]),
                 );
             }
-        }
     }
 }

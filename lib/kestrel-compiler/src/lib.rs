@@ -215,6 +215,7 @@ impl Compiler {
     /// Lower to MIR, run all passes, and compile to native object code.
     ///
     /// Call after inference has been run. Returns the raw object file bytes.
+    #[allow(clippy::result_large_err)]
     pub fn compile_to_object(
         &self,
     ) -> Result<Vec<u8>, kestrel_codegen_cranelift::error::CodegenError> {
@@ -228,6 +229,7 @@ impl Compiler {
     /// Lower to MIR, run all passes, compile, and link to an executable.
     ///
     /// Call after inference has been run.
+    #[allow(clippy::result_large_err)]
     pub fn compile_and_link(
         &self,
         output_path: &Path,

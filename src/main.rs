@@ -381,8 +381,8 @@ fn default_std_path() -> Result<PathBuf, StdLookupError> {
         tried.push(("KESTREL_STD", p));
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(p) = exe
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(p) = exe
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("lib/std"))
@@ -392,7 +392,6 @@ fn default_std_path() -> Result<PathBuf, StdLookupError> {
             }
             tried.push(("exe-relative", p));
         }
-    }
 
     let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
     if baked.exists() {

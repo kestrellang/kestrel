@@ -213,13 +213,11 @@ impl<'a> LowerCtx<'a> {
     ) {
         match &self.exprs[id] {
             HirExpr::Local(local_id, _) => {
-                if seen.insert(*local_id) {
-                    if let Some(depth) = self.local_scope_depth(*local_id) {
-                        if depth <= entry_depth {
+                if seen.insert(*local_id)
+                    && let Some(depth) = self.local_scope_depth(*local_id)
+                        && depth <= entry_depth {
                             captures.push(*local_id);
                         }
-                    }
-                }
             },
             // Skip nested closures — they compute their own captures
             HirExpr::Closure { .. } => {},

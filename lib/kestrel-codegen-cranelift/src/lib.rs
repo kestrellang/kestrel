@@ -4,6 +4,8 @@
 //!
 //! Pipeline: `MirModule` → monomorphize (BFS) → CodegenContext → compile all → object bytes → link.
 
+#![allow(clippy::result_large_err)]
+
 const _CACHE_BUST: u8 = 2;
 
 pub mod block;

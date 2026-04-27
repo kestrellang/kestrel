@@ -283,7 +283,6 @@ fn check_closure_type(
             notes: vec![],
         });
         // Don't check types if counts differ
-        return;
     }
 
     // TODO: E602 — per-parameter type mismatch checking.
@@ -294,6 +293,7 @@ fn check_closure_type(
 }
 
 /// Walk a closure body looking for assignments to closure parameters.
+#[allow(dead_code)]
 fn check_param_assignments(
     cx: &BodyContext<'_>,
     body: &HirBlock,
@@ -308,6 +308,7 @@ fn check_param_assignments(
     }
 }
 
+#[allow(dead_code)]
 fn check_stmt_for_param_assign(
     cx: &BodyContext<'_>,
     id: HirStmtId,
@@ -325,6 +326,7 @@ fn check_stmt_for_param_assign(
     }
 }
 
+#[allow(dead_code)]
 fn check_expr_for_param_assign(
     cx: &BodyContext<'_>,
     id: HirExprId,
@@ -334,8 +336,8 @@ fn check_expr_for_param_assign(
     match &cx.hir.exprs[id] {
         HirExpr::Assign { target, value, .. } => {
             // Check if target is a closure parameter
-            if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target] {
-                if param_locals.contains(local_id) {
+            if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target]
+                && param_locals.contains(local_id) {
                     let name = cx.hir.locals[*local_id].name.clone();
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[4].id,
@@ -349,7 +351,6 @@ fn check_expr_for_param_assign(
                         notes: vec![],
                     });
                 }
-            }
             check_expr_for_param_assign(cx, *value, param_locals, diags);
         },
 
@@ -396,10 +397,8 @@ fn check_expr_for_param_assign(
                 check_expr_for_param_assign(cx, arg.value, param_locals, diags);
             }
         },
-        HirExpr::Return { value, .. } => {
-            if let Some(val) = value {
-                check_expr_for_param_assign(cx, *val, param_locals, diags);
-            }
+        HirExpr::Return { value: Some(val), .. } => {
+            check_expr_for_param_assign(cx, *val, param_locals, diags);
         },
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             check_expr_for_param_assign(cx, *base, param_locals, diags);
@@ -423,6 +422,7 @@ fn check_expr_for_param_assign(
     }
 }
 
+#[allow(dead_code)]
 fn check_block_for_param_assign(
     cx: &BodyContext<'_>,
     block: &HirBlock,
@@ -468,8 +468,8 @@ fn walk_for_capture_assign(
 ) {
     match &cx.hir.exprs[id] {
         HirExpr::Assign { target, value, .. } => {
-            if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target] {
-                if capture_set.contains(local_id) {
+            if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target]
+                && capture_set.contains(local_id) {
                     let name = cx.hir.locals[*local_id].name.clone();
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[3].id,
@@ -483,7 +483,6 @@ fn walk_for_capture_assign(
                         notes: vec![],
                     });
                 }
-            }
             walk_for_capture_assign(cx, *value, capture_set, diags);
         },
         HirExpr::If {
@@ -525,10 +524,8 @@ fn walk_for_capture_assign(
                 walk_for_capture_assign(cx, arg.value, capture_set, diags);
             }
         },
-        HirExpr::Return { value, .. } => {
-            if let Some(v) = value {
-                walk_for_capture_assign(cx, *v, capture_set, diags);
-            }
+        HirExpr::Return { value: Some(v), .. } => {
+            walk_for_capture_assign(cx, *v, capture_set, diags);
         },
         HirExpr::Closure { .. } => {}, // nested closure has own scope
         _ => {},

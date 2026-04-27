@@ -132,12 +132,11 @@ pub fn lower_named_type_from_entity(
     }
 
     // TypeParameter entities → MirTy::TypeParam
-    if let Some(kind) = ctx.world.get::<NodeKind>(entity) {
-        if *kind == NodeKind::TypeParameter {
+    if let Some(kind) = ctx.world.get::<NodeKind>(entity)
+        && *kind == NodeKind::TypeParameter {
             ctx.register_name(entity);
             return MirTy::TypeParam(entity);
         }
-    }
 
     // Register the entity name for display
     ctx.register_name(entity);

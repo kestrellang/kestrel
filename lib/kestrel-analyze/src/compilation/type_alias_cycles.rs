@@ -149,11 +149,10 @@ fn check_type(
                 context,
                 root: cx.root,
             });
-            if let TypeResolution::Found(entity) = result {
-                if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias) {
+            if let TypeResolution::Found(entity) = result
+                && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias) {
                     return enter_alias(cx, entity, detector);
                 }
-            }
             Ok(())
         },
         AstType::Tuple(elements, _) => {

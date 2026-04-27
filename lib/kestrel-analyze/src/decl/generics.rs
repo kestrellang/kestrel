@@ -456,6 +456,7 @@ fn check_type_param_shadowing(
 /// Validate where clause bounds:
 /// - E436: bound is not a protocol (e.g., `T: SomeStruct`)
 /// - E437: subject is not a declared type parameter (e.g., `U: Protocol` when only `T` is declared)
+///
 /// Also catches unresolved bounds (e.g., `T: NonExistent`).
 fn check_where_clause_bounds(
     cx: &DeclContext<'_>,
@@ -602,7 +603,7 @@ fn check_where_clause_bounds(
                         message: format!("cannot find type '{}' in this scope", type_name),
                         labels: vec![DiagLabel {
                             span: span.clone(),
-                            message: format!("not found"),
+                            message: "not found".to_string(),
                             is_primary: true,
                         }],
                         notes: vec![],

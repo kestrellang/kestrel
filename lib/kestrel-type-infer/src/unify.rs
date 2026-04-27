@@ -62,11 +62,10 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         // If both have different literal kinds, that's a mismatch
         // (e.g., integer literal vs string literal in if/else branches).
         (TySlot::Unresolved { literal: lit_a }, TySlot::Unresolved { literal: lit_b }) => {
-            if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b) {
-                if a_kind != b_kind {
+            if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b)
+                && a_kind != b_kind {
                     return Err(UnifyError::Mismatch);
                 }
-            }
             // Propagate wildcard status: if either side is a wildcard, the root
             // (b, since a redirects to b) must also be a wildcard so that
             // report_unresolved_slots skips it.

@@ -342,23 +342,21 @@ where
     let matching_init_in = |parent: Entity| -> Option<Entity> {
         ctx.children_of(parent).iter().copied().find(|&child| {
             ctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer)
-                && ctx.get::<Callable>(child).is_some_and(|c| predicate(c))
+                && ctx.get::<Callable>(child).is_some_and(&predicate)
         })
     };
 
-    if declares_protocol(target) {
-        if let Some(init) = matching_init_in(target) {
+    if declares_protocol(target)
+        && let Some(init) = matching_init_in(target) {
             return Some(init);
         }
-    }
 
     let extensions = ctx.query(ExtensionsFor { target, root });
     for ext in extensions {
-        if declares_protocol(ext) {
-            if let Some(init) = matching_init_in(ext) {
+        if declares_protocol(ext)
+            && let Some(init) = matching_init_in(ext) {
                 return Some(init);
             }
-        }
     }
 
     None

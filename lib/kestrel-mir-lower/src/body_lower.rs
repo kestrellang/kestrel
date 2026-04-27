@@ -183,21 +183,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Get the MIR type for a HIR local from type inference results.
     fn resolve_local_type(&mut self, hir_id: HirLocalId) -> MirTy {
-        if let Some(typed) = self.typed {
-            if let Some(resolved) = typed.local_types.get(&hir_id) {
+        if let Some(typed) = self.typed
+            && let Some(resolved) = typed.local_types.get(&hir_id) {
                 return lower_resolved_ty(self.ctx, resolved);
             }
-        }
         MirTy::Error
     }
 
     /// Get the MIR type for a HIR expression from type inference results.
     fn resolve_expr_type(&mut self, expr_id: HirExprId) -> MirTy {
-        if let Some(typed) = self.typed {
-            if let Some(resolved) = typed.expr_types.get(&expr_id) {
+        if let Some(typed) = self.typed
+            && let Some(resolved) = typed.expr_types.get(&expr_id) {
                 return lower_resolved_ty(self.ctx, resolved);
             }
-        }
         MirTy::Error
     }
 
@@ -370,6 +368,96 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
                 Some(Value::Immediate(Immediate::unit()))
             },
+            // Subscript-set on a struct field: `obj.field(i) = v`. The reader
+            // path in `lower_method_call` decomposes this into "field access +
+            // subscript on the field's type"; we mirror that decomposition here
+            // and route the assignment through the field type's setter so the
+            // mutation lands in `obj.field`. Without this arm the fallback in
+            // `HirExpr::Assign` lowers `obj.field(i)` as a getter call and the
+            // assignment writes into the dropped return value.
+            HirExpr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                let resolved = self
+                    .typed
+                    .and_then(|t| t.resolutions.get(&target_id))
+                    .copied()?;
+                if self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::NodeKind>(resolved)
+                    != Some(&kestrel_ast_builder::NodeKind::Subscript)
+                {
+                    return None;
+                }
+                let method_name = method.as_str()?;
+                let receiver_ty = self.resolve_expr_type(receiver);
+                let receiver_entity = match &receiver_ty {
+                    MirTy::Named { entity, .. } => Some(*entity),
+                    _ => None,
+                };
+                let subscript_parent = self.ctx.world.parent_of(resolved);
+                // Only handle subscript-on-field. If the subscript belongs
+                // directly to the receiver type (`self(i) = v` on a type
+                // with its own subscript), the existing Call arm already
+                // handles it; bail out here so we don't double-emit.
+                if subscript_parent.is_none() || subscript_parent == receiver_entity {
+                    return None;
+                }
+                // Computed-property subscript-set would need: read prop →
+                // mutate via subscript → write prop back. Skip for now —
+                // stored fields are the common case and what we actually
+                // exercise. A computed-prop fix can layer on later.
+                let prefix_entity = receiver_entity.and_then(|recv| {
+                    self.ctx.world.children_of(recv).iter().copied().find(|&c| {
+                        self.ctx.world.get::<kestrel_ast_builder::NodeKind>(c)
+                            == Some(&kestrel_ast_builder::NodeKind::Field)
+                            && self
+                                .ctx
+                                .world
+                                .get::<kestrel_ast_builder::Name>(c)
+                                .is_some_and(|n| n.0 == method_name)
+                    })
+                });
+                let is_computed_property = prefix_entity.is_some_and(|e| {
+                    self.ctx
+                        .world
+                        .get::<kestrel_ast_builder::Callable>(e)
+                        .is_some()
+                });
+                if is_computed_property {
+                    return None;
+                }
+                let setter = find_setter_child(self.ctx, resolved)?;
+                self.ctx.register_name(setter);
+                let field_ty = self.resolve_field_type(&receiver_ty, method_name);
+                let receiver_val = self.lower_expr(receiver);
+                let field_place = match receiver_val {
+                    Value::Place(p) => p.field(method_name.to_string()),
+                    _ => {
+                        let temp = self.fresh_temp(receiver_ty.clone());
+                        self.emit_stmt(Statement::new(StatementKind::Assign {
+                            dest: Place::local(temp),
+                            rvalue: value_to_rvalue(receiver_val),
+                        }));
+                        Place::local(temp).field(method_name.to_string())
+                    },
+                };
+                let receiver_arg = CallArg::mutating(Value::Place(field_place));
+                let mut subscript_args = self.lower_call_args(&args);
+                let newval_arg = CallArg::copy(self.lower_expr(value_id));
+                let type_args = self.resolve_type_args(target_id);
+                let type_args = self.prepend_receiver_type_args(&field_ty, type_args);
+                let callee = Callee::method(setter, type_args, field_ty);
+                let mut call_args = vec![receiver_arg];
+                call_args.append(&mut subscript_args);
+                call_args.push(newval_arg);
+                self.emit_call(callee, call_args, MirTy::unit());
+                Some(Value::Immediate(Immediate::unit()))
+            },
             _ => None,
         }
     }
@@ -463,7 +551,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .typed
                     .and_then(|t| t.resolutions.get(&expr_id))
                     .copied();
-                let is_callable = resolved.map_or(false, |e| {
+                let is_callable = resolved.is_some_and(|e| {
                     self.ctx
                         .world
                         .get::<kestrel_ast_builder::Callable>(e)
@@ -473,7 +561,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // (no body, no Callable). Dispatch via witness so monomorphization
                 // resolves to the conforming type's computed property.
                 let is_protocol_property = !is_callable
-                    && resolved.map_or(false, |e| {
+                    && resolved.is_some_and(|e| {
                         let is_field = matches!(
                             self.ctx.world.get::<kestrel_ast_builder::NodeKind>(e),
                             Some(kestrel_ast_builder::NodeKind::Field)
@@ -481,7 +569,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         if !is_field {
                             return false;
                         }
-                        self.ctx.world.parent_of(e).map_or(false, |p| {
+                        self.ctx.world.parent_of(e).is_some_and(|p| {
                             matches!(
                                 self.ctx.world.get::<kestrel_ast_builder::NodeKind>(p),
                                 Some(kestrel_ast_builder::NodeKind::Protocol)
@@ -490,7 +578,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     });
                 // Static property: no receiver. The base is a type-ref (Def of
                 // TypeParameter or concrete type), not a value expression.
-                let is_static = resolved.map_or(false, |e| {
+                let is_static = resolved.is_some_and(|e| {
                     self.ctx
                         .world
                         .get::<kestrel_ast_builder::Static>(e)
@@ -791,7 +879,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .typed
                     .and_then(|t| t.resolutions.get(&expr_id))
                     .copied();
-                let is_enum_case = resolved.map_or(true, |e| {
+                let is_enum_case = resolved.is_none_or(|e| {
                     self.ctx.world.get::<kestrel_ast_builder::NodeKind>(e)
                         == Some(&kestrel_ast_builder::NodeKind::EnumCase)
                 });
@@ -920,15 +1008,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Resolve inferred type arguments for a generic call/reference.
     fn resolve_type_args(&mut self, expr_id: HirExprId) -> Vec<MirTy> {
-        if let Some(typed) = self.typed {
-            if let Some(resolved_args) = typed.type_args.get(&expr_id) {
+        if let Some(typed) = self.typed
+            && let Some(resolved_args) = typed.type_args.get(&expr_id) {
                 let args: Vec<MirTy> = resolved_args
                     .iter()
                     .map(|ty| lower_resolved_ty(self.ctx, ty))
                     .collect();
                 return args;
             }
-        }
         Vec::new()
     }
 
@@ -962,13 +1049,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         receiver_ty: &MirTy,
         method_args: Vec<MirTy>,
     ) -> Vec<MirTy> {
-        if let MirTy::Named { type_args, .. } = receiver_ty {
-            if !type_args.is_empty() {
+        if let MirTy::Named { type_args, .. } = receiver_ty
+            && !type_args.is_empty() {
                 let mut full_args = type_args.clone();
                 full_args.extend(method_args);
                 return full_args;
             }
-        }
         method_args
     }
 
@@ -980,13 +1066,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         hir_type_args: Option<&[kestrel_hir::ty::HirTy]>,
     ) -> Vec<MirTy> {
         let mut args = self.resolve_type_args(expr_id);
-        if args.iter().any(|a| matches!(a, MirTy::Error)) {
-            if let Some(hir_args) = hir_type_args {
-                if !hir_args.is_empty() {
+        if args.iter().any(|a| matches!(a, MirTy::Error))
+            && let Some(hir_args) = hir_type_args
+                && !hir_args.is_empty() {
                     args = hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
                 }
-            }
-        }
         args
     }
 
@@ -1056,15 +1140,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         };
 
         // Must have Intrinsic marker
-        if self.ctx.world.get::<Intrinsic>(entity).is_none() {
-            return None;
-        }
+        self.ctx.world.get::<Intrinsic>(entity)?;
 
         let name = self.ctx.world.get::<Name>(entity)?.0.clone();
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Helper: lower arg at index
-        let lower_arg = |this: &mut Self, idx: usize| -> Value {
+        let _lower_arg = |this: &mut Self, idx: usize| -> Value {
             if idx < args.len() {
                 this.lower_expr(args[idx].value)
             } else {
@@ -1553,7 +1635,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 .ctx
                 .world
                 .get::<Name>(child)
-                .map_or(false, |n| n.0 == field_name);
+                .is_some_and(|n| n.0 == field_name);
             if !name_matches {
                 continue;
             }
@@ -1669,6 +1751,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Find the subscript getter entity for a struct/enum type.
     /// Searches through children and extensions for a Subscript with a Callable.
+    #[allow(dead_code)]
     fn find_subscript_getter(&self, type_entity: Entity) -> Option<Entity> {
         use kestrel_ast_builder::NodeKind;
         // Search direct children of the type
@@ -1689,8 +1772,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         for &child in self.ctx.world.children_of(type_entity) {
             if self.ctx.world.get::<NodeKind>(child) == Some(&NodeKind::Extension) {
                 for &ext_child in self.ctx.world.children_of(child) {
-                    if self.ctx.world.get::<NodeKind>(ext_child) == Some(&NodeKind::Subscript) {
-                        if self
+                    if self.ctx.world.get::<NodeKind>(ext_child) == Some(&NodeKind::Subscript)
+                        && self
                             .ctx
                             .world
                             .get::<kestrel_ast_builder::Callable>(ext_child)
@@ -1698,7 +1781,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         {
                             return Some(ext_child);
                         }
-                    }
                 }
             }
         }
@@ -1743,13 +1825,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Check if a MirTy is a protocol type (Named whose entity is a protocol).
+    #[allow(dead_code)]
     fn is_protocol_type(&self, ty: &MirTy) -> bool {
-        if let MirTy::Named { entity, type_args } = ty {
-            if type_args.is_empty() {
+        if let MirTy::Named { entity, type_args } = ty
+            && type_args.is_empty() {
                 return self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
                     == Some(&kestrel_ast_builder::NodeKind::Protocol);
             }
-        }
         false
     }
 
@@ -1872,36 +1954,33 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 &[callee_expr, expr_id]
             };
             for &eid in candidates {
-                if let Some(resolved_args) = typed.type_args.get(&eid) {
-                    if resolved_args.len() >= parent_tp_count {
+                if let Some(resolved_args) = typed.type_args.get(&eid)
+                    && resolved_args.len() >= parent_tp_count {
                         return resolved_args
                             .iter()
                             .map(|ty| lower_resolved_ty(self.ctx, ty))
                             .collect();
                     }
-                }
             }
         }
 
         // Strategy 2: Extract from the result type if it's a Named type
         // containing the parent (e.g., nullPointer() -> Pointer[Int32])
         let result_ty = self.resolve_expr_type(expr_id);
-        if let MirTy::Named { entity, type_args } = &result_ty {
-            if *entity == parent && type_args.len() == parent_tp_count {
+        if let MirTy::Named { entity, type_args } = &result_ty
+            && *entity == parent && type_args.len() == parent_tp_count {
                 return type_args.clone();
             }
-        }
 
         // Strategy 3: Check explicit HIR type args on the Def expression
         // For paths like Pointer[Int32].nullPointer, the Def might carry [Int32]
-        if let HirExpr::Def(_, hir_args, _) = &self.hir.exprs[callee_expr] {
-            if hir_args.len() == parent_tp_count {
+        if let HirExpr::Def(_, hir_args, _) = &self.hir.exprs[callee_expr]
+            && hir_args.len() == parent_tp_count {
                 return hir_args
                     .iter()
                     .map(|hir_ty| crate::ty::lower_type(self.ctx, hir_ty))
                     .collect();
             }
-        }
 
         Vec::new()
     }
@@ -2073,13 +2152,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         args: &[HirCallArg],
     ) -> Value {
         // Intercept lang.panic / lang.panic_unwind — emit as Panic terminator, not a call
-        if let HirExpr::Def(entity, _, _) = &self.hir.exprs[callee_expr] {
-            if self.is_panic_intrinsic(*entity) {
+        if let HirExpr::Def(entity, _, _) = &self.hir.exprs[callee_expr]
+            && self.is_panic_intrinsic(*entity) {
                 let msg = "panic".to_string();
                 self.set_terminator(Terminator::panic(msg));
                 return Value::Immediate(Immediate::unit());
             }
-        }
 
         // Intercept lang intrinsics — emit as MIR Ops, not function calls
         if let Some(val) = self.try_lower_intrinsic_call(expr_id, callee_expr, args) {
@@ -2211,7 +2289,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 .ctx
                 .world
                 .get::<kestrel_ast_builder::Callable>(func_entity)
-                .map_or(false, |c| c.receiver.is_some());
+                .is_some_and(|c| c.receiver.is_some());
             // Init functions handle their own self-allocation via emit_call_maybe_init
             let is_init = self.is_init_function(func_entity).is_some();
             if has_receiver && !is_init {
@@ -2345,15 +2423,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // If the receiver type resolves to a protocol entity (happens inside protocol
         // extensions where self is abstract), replace with SelfType so monomorphization
         // can substitute the concrete type
-        if let MirTy::Named { entity, type_args } = &receiver_ty {
-            if type_args.is_empty() {
-                if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+        if let MirTy::Named { entity, type_args } = &receiver_ty
+            && type_args.is_empty()
+                && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
                     == Some(&kestrel_ast_builder::NodeKind::Protocol)
                 {
                     receiver_ty = MirTy::SelfType;
                 }
-            }
-        }
 
         // Check for function-typed field calls BEFORE lowering receiver into call_args,
         // since field calls use the receiver differently (to access the field, not as self)
@@ -2419,10 +2495,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                     .ctx
                                     .world
                                     .get::<kestrel_ast_builder::Name>(c)
-                                    .map_or(false, |n| n.0 == method_name)
+                                    .is_some_and(|n| n.0 == method_name)
                         })
                     });
-                    let is_computed_property = prefix_entity.map_or(false, |e| {
+                    let is_computed_property = prefix_entity.is_some_and(|e| {
                         self.ctx
                             .world
                             .get::<kestrel_ast_builder::Callable>(e)
@@ -2492,7 +2568,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .typed
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
-        let is_static = resolved_entity.map_or(false, |e| {
+        let is_static = resolved_entity.is_some_and(|e| {
             self.ctx
                 .world
                 .get::<kestrel_ast_builder::Static>(e)
@@ -3824,11 +3900,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         &self,
         expr_id: HirExprId,
     ) -> kestrel_type_infer::result::ResolvedTy {
-        if let Some(typed) = self.typed {
-            if let Some(resolved) = typed.expr_types.get(&expr_id) {
+        if let Some(typed) = self.typed
+            && let Some(resolved) = typed.expr_types.get(&expr_id) {
                 return resolved.clone();
             }
-        }
         kestrel_type_infer::result::ResolvedTy::Error
     }
 

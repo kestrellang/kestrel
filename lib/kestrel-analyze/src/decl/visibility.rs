@@ -167,8 +167,8 @@ fn check_callable(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         }
     }
 
-    if let Some(TypeAnnotation(ret_ty)) = cx.query.get::<TypeAnnotation>(cx.entity) {
-        if let Some(hit) = first_less_visible(cx, ret_ty) {
+    if let Some(TypeAnnotation(ret_ty)) = cx.query.get::<TypeAnnotation>(cx.entity)
+        && let Some(hit) = first_less_visible(cx, ret_ty) {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[0].id,
                 severity: DESCRIPTORS[0].default_severity,
@@ -187,7 +187,6 @@ fn check_callable(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
                 )],
             });
         }
-    }
 
     diags
 }
@@ -281,13 +280,11 @@ fn first_less_visible(cx: &DeclContext<'_>, ty: &AstType) -> Option<Vis> {
                 segments: segs,
                 context,
                 root: cx.root,
-            }) {
-                if let Some(v) = cx.query.get::<Vis>(e) {
-                    if !matches!(*v, Vis::Public) {
+            })
+                && let Some(v) = cx.query.get::<Vis>(e)
+                    && !matches!(*v, Vis::Public) {
                         return Some(v.clone());
                     }
-                }
-            }
             for seg in segments {
                 for arg in &seg.type_args {
                     if let Some(hit) = first_less_visible(cx, arg) {

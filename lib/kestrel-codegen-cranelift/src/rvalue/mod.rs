@@ -12,7 +12,6 @@ pub mod immediate;
 pub mod pointer;
 pub mod string;
 
-use crate::common;
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;

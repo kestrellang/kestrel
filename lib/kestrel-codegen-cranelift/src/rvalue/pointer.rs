@@ -82,7 +82,7 @@ pub fn compile_memory_op1(
     state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
-    arg: CrValue,
+    _arg: CrValue,
 ) -> Result<CrValue, CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
 
@@ -230,8 +230,8 @@ pub fn compile_pointer_op2(
 
 /// Compile atomic binary ops (AtomicAdd, AtomicSub).
 pub fn compile_atomic_op2(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _ctx: &mut CodegenContext,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
     ptr: CrValue,

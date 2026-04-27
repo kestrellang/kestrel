@@ -73,8 +73,8 @@ impl DeclCheck for SubscriptAnalyzer {
         let span = util::entity_span(cx.query, cx.entity);
 
         // Check 1: subscript must have at least one parameter
-        if let Some(callable) = cx.query.get::<Callable>(cx.entity) {
-            if callable.params.is_empty() {
+        if let Some(callable) = cx.query.get::<Callable>(cx.entity)
+            && callable.params.is_empty() {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
@@ -90,14 +90,12 @@ impl DeclCheck for SubscriptAnalyzer {
                     ],
                 });
             }
-        }
 
         // Check 2: subscript must have a body (unless inside a protocol)
-        if let Some(parent) = cx.query.parent_of(cx.entity) {
-            if matches!(cx.query.get::<NodeKind>(parent), Some(NodeKind::Protocol)) {
+        if let Some(parent) = cx.query.parent_of(cx.entity)
+            && matches!(cx.query.get::<NodeKind>(parent), Some(NodeKind::Protocol)) {
                 return diags;
             }
-        }
 
         let has_body = cx.query.get::<Body>(cx.entity).is_some()
             || cx.query.get::<Valued>(cx.entity).is_some();

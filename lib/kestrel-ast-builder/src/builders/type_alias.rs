@@ -55,26 +55,24 @@ pub fn build_type_alias(
 
     // Capture the qualifying protocol path (`Protocol` in `type Protocol.Assoc = …`)
     // as an AstType so analyzers can resolve it via ResolveTypePath.
-    if let Some(target) = &assoc_target {
-        if let Some(proto_ty) = target
+    if let Some(target) = &assoc_target
+        && let Some(proto_ty) = target
             .children()
             .find(|c| is_type_kind(c.kind()))
             .and_then(|c| ast_type_from_cst(&c, file_id))
         {
             world.set(entity, QualifiedTarget(proto_ty));
         }
-    }
 
     // Target type from AliasedType child
-    if let Some(aliased) = find_child(node, SyntaxKind::AliasedType) {
-        if let Some(ty) = aliased
+    if let Some(aliased) = find_child(node, SyntaxKind::AliasedType)
+        && let Some(ty) = aliased
             .children()
             .find(|c| is_type_kind(c.kind()))
             .and_then(|c| ast_type_from_cst(&c, file_id))
         {
             world.set(entity, TypeAnnotation(ty));
         }
-    }
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);

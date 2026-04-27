@@ -602,11 +602,10 @@ fn get_or_create_subject_tv(
     query_ctx: &QueryContext<'_>,
 ) -> ty::TyVar {
     // Check if param is a type parameter of the target type
-    if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
-        if idx < fresh_args.len() {
+    if let Some(idx) = target_type_params.iter().position(|&p| p == param)
+        && idx < fresh_args.len() {
             return fresh_args[idx];
         }
-    }
 
     // Check if param is an associated type (TypeAlias) — create via associated constraint
     if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeAlias) {

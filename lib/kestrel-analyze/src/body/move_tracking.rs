@@ -171,11 +171,10 @@ fn analyze_block(
         }
         state = analyze_stmt(mcx, stmt_id, state, diags);
     }
-    if !state.diverged {
-        if let Some(tail) = tail {
+    if !state.diverged
+        && let Some(tail) = tail {
             state = analyze_expr(mcx, tail, state, false, diags);
         }
-    }
     state
 }
 
@@ -192,8 +191,8 @@ fn analyze_stmt(
                 // A `let b = x` on a non-Copyable `x` moves `x` into `b`.
                 // Only simple Local-on-RHS triggers a move — field/method/call
                 // RHS is never a partial move (matches lib1).
-                if let Some(src) = rhs_local(mcx.cx.hir, *val) {
-                    if local_is_non_copyable(mcx, src) {
+                if let Some(src) = rhs_local(mcx.cx.hir, *val)
+                    && local_is_non_copyable(mcx, src) {
                         state.moves.insert(
                             src,
                             MoveInfo {
@@ -202,7 +201,6 @@ fn analyze_stmt(
                             },
                         );
                     }
-                }
                 // Freshly bound local is valid — remove any stale move state
                 // under the same id (shouldn't happen, but defensive).
                 state.moves.remove(local);
@@ -260,14 +258,12 @@ fn analyze_expr(
     match &hir.exprs[id] {
         // ===== Read of a local =====
         HirExpr::Local(local_id, span) => {
-            if !is_assign_target {
-                if let Some(info) = state.moves.get(local_id).copied() {
-                    if state.reported.insert(*local_id) {
+            if !is_assign_target
+                && let Some(info) = state.moves.get(local_id).copied()
+                    && state.reported.insert(*local_id) {
                         let name = hir.locals[*local_id].name.clone();
                         emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
                     }
-                }
-            }
         },
 
         // ===== Assignment =====
@@ -395,8 +391,8 @@ fn analyze_expr(
         HirExpr::Return { value, span: _ } => {
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
-                if let Some(src) = rhs_local(hir, *val) {
-                    if local_is_non_copyable(mcx, src) {
+                if let Some(src) = rhs_local(hir, *val)
+                    && local_is_non_copyable(mcx, src) {
                         state.moves.insert(
                             src,
                             MoveInfo {
@@ -405,7 +401,6 @@ fn analyze_expr(
                             },
                         );
                     }
-                }
             }
         },
 
@@ -500,11 +495,10 @@ fn analyze_expr(
     // the Loop arm above (which only sets `diverged` when the body actually
     // runs to completion without break) — don't let the Never-type shortcut
     // override that.
-    if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id) {
-        if !matches!(&hir.exprs[id], HirExpr::Loop { .. }) {
+    if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id)
+        && !matches!(&hir.exprs[id], HirExpr::Loop { .. }) {
             state.diverged = true;
         }
-    }
 
     state
 }
@@ -524,9 +518,9 @@ fn apply_call_moves(
         return;
     };
 
-    if let (Some(recv_id), Some(ReceiverKind::Consuming)) = (receiver, callable.receiver.as_ref()) {
-        if let Some(src) = rhs_local(mcx.cx.hir, recv_id) {
-            if local_is_non_copyable(mcx, src) {
+    if let (Some(recv_id), Some(ReceiverKind::Consuming)) = (receiver, callable.receiver.as_ref())
+        && let Some(src) = rhs_local(mcx.cx.hir, recv_id)
+            && local_is_non_copyable(mcx, src) {
                 state.moves.insert(
                     src,
                     MoveInfo {
@@ -535,8 +529,6 @@ fn apply_call_moves(
                     },
                 );
             }
-        }
-    }
 
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = callable.params.get(i) else {
@@ -545,8 +537,8 @@ fn apply_call_moves(
         if !param.is_consuming {
             continue;
         }
-        if let Some(src) = rhs_local(mcx.cx.hir, arg.value) {
-            if local_is_non_copyable(mcx, src) {
+        if let Some(src) = rhs_local(mcx.cx.hir, arg.value)
+            && local_is_non_copyable(mcx, src) {
                 state.moves.insert(
                     src,
                     MoveInfo {
@@ -555,7 +547,6 @@ fn apply_call_moves(
                     },
                 );
             }
-        }
     }
 }
 
@@ -951,11 +942,10 @@ fn deinit_site(hir: &HirBody, local: LocalId) -> HirExprId {
     // Scan for any expression that reads this local — good enough as a span
     // anchor for downstream secondary labels.
     for (id, expr) in hir.exprs.iter() {
-        if let HirExpr::Local(l, _) = expr {
-            if *l == local {
+        if let HirExpr::Local(l, _) = expr
+            && *l == local {
                 return id;
             }
-        }
     }
     // Fallback: the first expression in the arena.
     hir.exprs

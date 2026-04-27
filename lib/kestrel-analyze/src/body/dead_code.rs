@@ -87,11 +87,10 @@ fn check_block(
         }
 
         // Check if this statement diverges
-        if stmt_diverges(hir, stmt_id, in_loop) {
-            if i + 1 < stmts.len() || tail.is_some() {
+        if stmt_diverges(hir, stmt_id, in_loop)
+            && (i + 1 < stmts.len() || tail.is_some()) {
                 diverged = true;
             }
-        }
 
         // Recurse into sub-blocks within the statement
         check_stmt_inner(hir, stmt_id, in_loop, diags);
@@ -241,13 +240,13 @@ fn block_part_diverges(hir: &HirBody, block: &HirBlock) -> bool {
 
 /// Check if any Loop in the HIR body has the given label.
 /// Used to suppress divergence for break/continue with invalid labels.
+#[allow(dead_code)]
 fn body_has_loop_label(hir: &HirBody, label: &str) -> bool {
     for (_, expr) in hir.exprs.iter() {
-        if let HirExpr::Loop { label: Some(l), .. } = expr {
-            if l == label {
+        if let HirExpr::Loop { label: Some(l), .. } = expr
+            && l == label {
                 return true;
             }
-        }
     }
     false
 }
@@ -257,11 +256,10 @@ fn body_has_loop_label(hir: &HirBody, label: &str) -> bool {
 /// code after the loop unreachable.
 fn block_always_returns(hir: &HirBody, block: &HirBlock) -> bool {
     for &stmt_id in &block.stmts {
-        if let HirStmt::Expr { expr, .. } = &hir.stmts[stmt_id] {
-            if expr_always_returns(hir, *expr) {
+        if let HirStmt::Expr { expr, .. } = &hir.stmts[stmt_id]
+            && expr_always_returns(hir, *expr) {
                 return true;
             }
-        }
     }
     if let Some(tail) = block.tail_expr {
         return expr_always_returns(hir, tail);

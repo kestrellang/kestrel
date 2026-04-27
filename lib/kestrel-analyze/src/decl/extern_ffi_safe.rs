@@ -200,9 +200,9 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
         if let Some(ret_ty) = cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
             entity: cx.entity,
             root: cx.root,
-        }) {
-            if !matches!(&ret_ty, HirTy::Tuple(elems, _) if elems.is_empty()) {
-                if !is_ffi_safe(cx, &ret_ty, ffi_safe_entity) {
+        })
+            && !matches!(&ret_ty, HirTy::Tuple(elems, _) if elems.is_empty())
+                && !is_ffi_safe(cx, &ret_ty, ffi_safe_entity) {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: "E605",
                         severity: Severity::Error,
@@ -217,8 +217,6 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
                         ],
                     });
                 }
-            }
-        }
 
         diags
     }

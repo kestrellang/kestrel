@@ -551,8 +551,8 @@ fn check_or_consistency(
     pat_id: HirPatId,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    if let HirPat::Or { alternatives, .. } = &cx.hir.pats[pat_id] {
-        if alternatives.len() >= 2 {
+    if let HirPat::Or { alternatives, .. } = &cx.hir.pats[pat_id]
+        && alternatives.len() >= 2 {
             let first = collect_bindings(cx, alternatives[0]);
             for &alt in &alternatives[1..] {
                 let other = collect_bindings(cx, alt);
@@ -581,7 +581,6 @@ fn check_or_consistency(
                 }
             }
         }
-    }
     // Recurse into sub-patterns to catch nested or-patterns.
     for child in pat_children(&cx.hir.pats[pat_id]) {
         check_or_consistency(cx, child, diags);
@@ -724,7 +723,7 @@ pub fn is_invalid(cx: &BodyContext<'_>, pat_id: HirPatId, expected: Option<&Reso
         },
         HirPat::Struct { fields, .. } => fields
             .iter()
-            .any(|f| f.pattern.map_or(false, |p| is_invalid(cx, p, None))),
+            .any(|f| f.pattern.is_some_and(|p| is_invalid(cx, p, None))),
         HirPat::Array { prefix, suffix, .. } => prefix
             .iter()
             .chain(suffix.iter())
@@ -774,7 +773,7 @@ pub fn has_inconsistent_or(hir: &HirBody, pat_id: HirPatId) -> bool {
         },
         HirPat::Struct { fields, .. } => fields
             .iter()
-            .any(|f| f.pattern.map_or(false, |p| has_inconsistent_or(hir, p))),
+            .any(|f| f.pattern.is_some_and(|p| has_inconsistent_or(hir, p))),
         HirPat::At { subpattern, .. } => has_inconsistent_or(hir, *subpattern),
         HirPat::Wildcard { .. }
         | HirPat::Binding { .. }

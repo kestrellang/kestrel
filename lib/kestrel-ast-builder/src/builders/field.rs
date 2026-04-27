@@ -136,9 +136,9 @@ pub fn build_field(
         // `newValue` is an implicit parameter typed as the field's type.
         // Instance setters are Mutating (they write self's backing storage);
         // static/global setters have no receiver.
-        if has_setter {
-            if let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause) {
-                if let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
+        if has_setter
+            && let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause)
+                && let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
                     let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
                     let setter_receiver = if is_static_field || !parent_is_type {
                         None
@@ -166,8 +166,6 @@ pub fn build_field(
                         is_static_field,
                     );
                 }
-            }
-        }
     } else {
         // Stored property: always Gettable
         world.set(entity, Gettable);
@@ -185,8 +183,8 @@ pub fn build_field(
                 .is_some_and(|t| t.kind() == SyntaxKind::Equals)
             {
                 found_equals = true;
-            } else if found_equals {
-                if let Some(expr_node) = child.into_node() {
+            } else if found_equals
+                && let Some(expr_node) = child.into_node() {
                     // The parser wraps initializer exprs in Expression nodes
                     world.set(
                         entity,
@@ -195,7 +193,6 @@ pub fn build_field(
                     world.set(entity, Valued(expr_node));
                     break;
                 }
-            }
         }
     }
 

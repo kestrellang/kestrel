@@ -119,7 +119,7 @@ pub(crate) fn is_pattern_irrefutable(hir: &HirBody, pat_id: HirPatId) -> bool {
         // Struct patterns are irrefutable if all field patterns are irrefutable
         HirPat::Struct { fields, .. } => fields
             .iter()
-            .all(|f| f.pattern.map_or(true, |p| is_pattern_irrefutable(hir, p))),
+            .all(|f| f.pattern.is_none_or(|p| is_pattern_irrefutable(hir, p))),
         // Or-pattern is irrefutable if ANY alternative is irrefutable
         HirPat::Or { alternatives, .. } => {
             alternatives.iter().any(|&a| is_pattern_irrefutable(hir, a))

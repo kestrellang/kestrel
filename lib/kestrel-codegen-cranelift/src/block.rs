@@ -1,17 +1,14 @@
 //! Block and statement compilation.
 
-use crate::common;
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
 use crate::place;
 use crate::rvalue;
 use crate::terminator;
-use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CrValue};
+use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen::substitute_type;
-use kestrel_mir::{BlockId, Place, Rvalue, StatementKind};
+use kestrel_mir::{BlockId, StatementKind};
 
 /// Compile a single basic block: all statements, then the terminator.
 pub fn compile_block(

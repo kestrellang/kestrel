@@ -46,15 +46,14 @@ pub fn build_type_parameters(
         world.set_parent(entity, parent);
 
         // Default type from DefaultType child
-        if let Some(default_node) = find_child(&child, SyntaxKind::DefaultType) {
-            if let Some(ty) = default_node
+        if let Some(default_node) = find_child(&child, SyntaxKind::DefaultType)
+            && let Some(ty) = default_node
                 .children()
                 .find(|c| is_type_kind(c.kind()))
                 .and_then(|c| ast_type_from_cst(&c, file_id))
             {
                 world.set(entity, TypeAnnotation(ty));
             }
-        }
 
         param_entities.push(entity);
     }

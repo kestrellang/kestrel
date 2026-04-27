@@ -301,8 +301,7 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                         if let Some(args_node) = neg
                             .children()
                             .find(|c| c.kind() == SyntaxKind::TypeArgumentList)
-                        {
-                            if let AstType::Named {
+                            && let AstType::Named {
                                 ref mut segments, ..
                             } = ty
                             {
@@ -315,7 +314,6 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                                     last.type_args = type_args;
                                 }
                             }
-                        }
                         return Some(WhereConstraint::NegativeBound {
                             subject,
                             protocol: ty,
@@ -406,11 +404,10 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
 /// Handles both simple `Name` (T) and `AssociatedTypeTarget` (T.Item) nodes.
 fn bound_subject_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
     // Try AssociatedTypeTarget first (T.Item — contains a Path)
-    if let Some(assoc) = find_child(parent, SyntaxKind::AssociatedTypeTarget) {
-        if let Some(path) = find_child(&assoc, SyntaxKind::Path) {
+    if let Some(assoc) = find_child(parent, SyntaxKind::AssociatedTypeTarget)
+        && let Some(path) = find_child(&assoc, SyntaxKind::Path) {
             return path_to_ast_type(&path, file_id);
         }
-    }
     // Fall back to simple Name (T)
     name_to_ast_type(parent, file_id)
 }
@@ -472,11 +469,10 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
         .collect::<Vec<_>>();
     // If multi-segment, put type args on last segment
     let mut segments = segments;
-    if segments.len() > 1 && !type_args.is_empty() {
-        if let Some(last) = segments.last_mut() {
+    if segments.len() > 1 && !type_args.is_empty()
+        && let Some(last) = segments.last_mut() {
             last.type_args = type_args;
         }
-    }
     Some(AstType::Named { segments, span })
 }
 

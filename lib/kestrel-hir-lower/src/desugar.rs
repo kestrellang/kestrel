@@ -70,8 +70,8 @@ impl LowerCtx<'_> {
         }
 
         // Regular binary op
-        if let Some((proto, method, label)) = lookup_binary_op(&op) {
-            if let Some(protocol) = self.resolve_builtin(proto) {
+        if let Some((proto, method, label)) = lookup_binary_op(&op)
+            && let Some(protocol) = self.resolve_builtin(proto) {
                 return self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lhs,
                     protocol,
@@ -84,7 +84,6 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 });
             }
-        }
 
         self.emit_missing_operator_diagnostic(&op, span);
         self.alloc_expr(HirExpr::Error { span: span.clone() })
@@ -208,8 +207,8 @@ impl LowerCtx<'_> {
         let lowered_lhs = self.lower_expr(body, lhs);
         let lowered_rhs = self.lower_expr(body, rhs);
 
-        if let Some((proto, method, label)) = lookup_compound_assign_op(op) {
-            if let Some(protocol) = self.resolve_builtin(proto) {
+        if let Some((proto, method, label)) = lookup_compound_assign_op(op)
+            && let Some(protocol) = self.resolve_builtin(proto) {
                 let pcall = self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lowered_lhs,
                     protocol,
@@ -227,7 +226,6 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 });
             }
-        }
 
         self.ctx.accumulate(
             Diagnostic::error()

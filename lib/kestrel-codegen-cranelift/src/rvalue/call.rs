@@ -19,7 +19,7 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen::{mangle_function_with_self, substitute_type, substitute_type_with_self};
+use kestrel_codegen::{mangle_function_with_self, substitute_type_with_self};
 use kestrel_hecs::Entity;
 use kestrel_mir::{CallArg, Callee, MirTy, PassingMode, Place, Value};
 use std::collections::HashMap;
@@ -122,7 +122,7 @@ pub fn compile_call(
                 ctx.module,
             );
             // Resolve associated types (e.g., Iterator.Item → Int64) via witness table
-            concrete_self = resolve_associated_self_type(ctx, &state, *protocol, &concrete_self);
+            concrete_self = resolve_associated_self_type(ctx, state, *protocol, &concrete_self);
             let concrete_method_args: Vec<MirTy> = method_type_args
                 .iter()
                 .map(|a| {
@@ -210,7 +210,7 @@ fn compile_resolved_call(
         let sret = sig_data
             .params
             .first()
-            .map_or(false, |p| p.purpose == ir::ArgumentPurpose::StructReturn);
+            .is_some_and(|p| p.purpose == ir::ArgumentPurpose::StructReturn);
         let has_return = !sig_data.returns.is_empty();
         (sret, has_return, sig_data.params.len())
     };
@@ -387,7 +387,7 @@ fn compile_indirect_call(
         sig.params
             .push(AbiParam::new(types::translate_type(param_ty, ctx.target)));
     }
-    if !callee_sret && !(ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
+    if !(callee_sret || ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
         sig.returns
             .push(AbiParam::new(types::translate_type(&ret_ty, ctx.target)));
     }
@@ -650,7 +650,7 @@ fn resolve_associated_self_type(
 
     // Get the associated type short name
     let assoc_name = ctx.module.resolve_name(entity);
-    let short = common::short_name(&assoc_name);
+    let short = common::short_name(assoc_name);
 
     // Find which protocol owns this associated type (not necessarily the one being called)
     let owning_proto = ctx
@@ -673,13 +673,12 @@ fn resolve_associated_self_type(
     }
 
     // Fall back to function's self_type
-    if let Some(base) = state.self_type.as_ref() {
-        if let Ok(resolved) =
+    if let Some(base) = state.self_type.as_ref()
+        && let Ok(resolved) =
             witness::resolve_associated_type(ctx.module, proto_def.entity, base, short)
         {
             return resolved;
         }
-    }
 
     self_type.clone()
 }

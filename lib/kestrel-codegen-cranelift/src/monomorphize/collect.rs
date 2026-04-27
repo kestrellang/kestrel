@@ -12,7 +12,7 @@ use super::error::MonomorphizeError;
 use super::instantiation::{FunctionInstantiation, MonomorphizationSet};
 use super::witness;
 use crate::common;
-use kestrel_codegen::{substitute_type, substitute_type_with_self};
+use kestrel_codegen::substitute_type_with_self;
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
 use kestrel_mir::{Callee, FunctionId, FunctionKind, MirModule, MirTy, Rvalue, StatementKind};
@@ -254,14 +254,13 @@ impl<'a> CollectionContext<'a> {
                 // MirTy::Error is caught earlier by MIR-lower's validate pass
                 // (which short-circuits `compile_inner`), so we don't re-check
                 // for it here.
-                if concrete_type_args.iter().any(|a| has_type_param(a)) {
+                if concrete_type_args.iter().any(has_type_param) {
                     return;
                 }
-                if let Some(ref st) = concrete_self {
-                    if has_type_param(st) {
+                if let Some(ref st) = concrete_self
+                    && has_type_param(st) {
                         return;
                     }
-                }
                 if concrete_type_args.len() < callee_func.type_params.len() {
                     return;
                 }
@@ -294,10 +293,9 @@ impl<'a> CollectionContext<'a> {
                     entity,
                     ref type_args,
                 } = concrete_self
-                {
-                    if type_args.is_empty() {
+                    && type_args.is_empty() {
                         let assoc_name = self.module.resolve_name(entity);
-                        let short = common::short_name(&assoc_name);
+                        let short = common::short_name(assoc_name);
 
                         // Find which protocol owns this associated type
                         let owning_protocol = self
@@ -330,7 +328,6 @@ impl<'a> CollectionContext<'a> {
                             }
                         }
                     }
-                }
                 let concrete_method_args: Vec<MirTy> = method_type_args
                     .iter()
                     .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref(), self.module))
@@ -353,7 +350,7 @@ impl<'a> CollectionContext<'a> {
                             return;
                         };
 
-                        if resolved.type_args.iter().any(|a| has_type_param(a)) {
+                        if resolved.type_args.iter().any(has_type_param) {
                             return;
                         }
 
@@ -419,8 +416,8 @@ impl<'a> CollectionContext<'a> {
 
             // Const with FunctionRef introduces the referenced function
             Rvalue::Const(imm) => {
-                if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind {
-                    if let Some(&func_id) = self.entity_to_func.get(func) {
+                if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind
+                    && let Some(&func_id) = self.entity_to_func.get(func) {
                         let concrete_type_args = common::substitute_type_args(
                             type_args,
                             subst,
@@ -438,7 +435,6 @@ impl<'a> CollectionContext<'a> {
                             self.queue.push_back(inst);
                         }
                     }
-                }
             },
 
             _ => {},
@@ -493,35 +489,6 @@ fn type_uses_self(ty: &MirTy) -> bool {
         MirTy::AssociatedProjection { base, .. } => type_uses_self(base),
         _ => false,
     }
-}
-
-/// Check if a function's body references any TypeParam types that aren't
-/// covered by the function's own type_params. This detects functions that
-/// should be generic but aren't (missing inherited type params).
-fn func_body_has_type_params(func: &kestrel_mir::FunctionDef) -> bool {
-    let Some(body) = &func.body else { return false };
-    // Check locals for TypeParam references
-    for local in &body.locals {
-        if has_type_param(&local.ty) {
-            return true;
-        }
-    }
-    // Check call type_args for TypeParam references
-    for block in &body.blocks {
-        for stmt in &block.stmts {
-            if let kestrel_mir::StatementKind::Call { callee, .. } = &stmt.kind {
-                match callee {
-                    kestrel_mir::Callee::Direct { type_args, .. } => {
-                        if type_args.iter().any(has_type_param) {
-                            return true;
-                        }
-                    },
-                    _ => {},
-                }
-            }
-        }
-    }
-    false
 }
 
 /// Check if a type contains any unresolved TypeParam or Error.

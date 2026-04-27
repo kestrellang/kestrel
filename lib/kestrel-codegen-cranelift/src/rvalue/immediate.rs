@@ -12,12 +12,12 @@ use cranelift_codegen::ir::{
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
 use kestrel_codegen::mangle_function_with_self;
-use kestrel_mir::{FloatBits, FunctionKind, Immediate, ImmediateKind, IntBits, MirTy};
+use kestrel_mir::{FloatBits, FunctionKind, Immediate, ImmediateKind, MirTy};
 
 /// Compile an immediate value to a Cranelift value.
 pub fn compile_immediate(
     ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     imm: &Immediate,
 ) -> Result<CrValue, CodegenError> {
@@ -116,9 +116,9 @@ pub fn compile_immediate(
         },
 
         ImmediateKind::WitnessMethod {
-            protocol,
-            method,
-            for_type,
+            protocol: _,
+            method: _,
+            for_type: _,
         } => {
             // Resolve through witness table to get concrete function
             Err(CodegenError::Unsupported(

@@ -170,14 +170,13 @@ fn collect_extensions(
     entity: Entity,
     out: &mut HashMap<Entity, Vec<Entity>>,
 ) {
-    if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
-        if let Some(target) = cx.query.query(ExtensionTargetEntity {
+    if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Extension)
+        && let Some(target) = cx.query.query(ExtensionTargetEntity {
             extension: entity,
             root: cx.root,
         }) {
             out.entry(target).or_default().push(entity);
         }
-    }
     for &child in cx.query.children_of(entity) {
         collect_extensions(cx, child, out);
     }

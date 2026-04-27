@@ -277,8 +277,8 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
     // conformance RHS, e.g., `extend Int64: ArrayIndex[T]`). Append these
     // after the target type's params so the order is target-then-extension
     // and dedupe against the target's set.
-    if matches!(parent_kind, Some(NodeKind::Extension)) {
-        if let Some(ext_params) = ctx.world.get::<TypeParams>(parent) {
+    if matches!(parent_kind, Some(NodeKind::Extension))
+        && let Some(ext_params) = ctx.world.get::<TypeParams>(parent) {
             let already_added: std::collections::HashSet<Entity> =
                 def.type_params.iter().map(|tp| tp.entity).collect();
             for &tp_entity in &ext_params.0 {
@@ -294,7 +294,6 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
                 def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
             }
         }
-    }
 
     // A Setter under a generic Subscript inherits the subscript's own type
     // params (e.g., `subscript[I](...) { set { ... } }`). Without this, the
@@ -306,8 +305,8 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
             .world
             .parent_of(entity)
             .filter(|p| matches!(ctx.world.get::<NodeKind>(*p), Some(NodeKind::Subscript)));
-        if let Some(parent_subscript) = parent_subscript {
-            if let Some(type_params) = ctx.world.get::<TypeParams>(parent_subscript) {
+        if let Some(parent_subscript) = parent_subscript
+            && let Some(type_params) = ctx.world.get::<TypeParams>(parent_subscript) {
                 for &tp_entity in &type_params.0 {
                     ctx.register_name(tp_entity);
                     let tp_name = ctx
@@ -318,6 +317,5 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
                     def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
                 }
             }
-        }
     }
 }

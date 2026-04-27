@@ -53,15 +53,14 @@ pub fn build_function(
     world.set(entity, Callable { params, receiver });
 
     // Return type from ReturnType child
-    if let Some(return_node) = find_child(node, SyntaxKind::ReturnType) {
-        if let Some(ty) = return_node
+    if let Some(return_node) = find_child(node, SyntaxKind::ReturnType)
+        && let Some(ty) = return_node
             .children()
             .find(|c| is_type_kind(c.kind()))
             .and_then(|c| ast_type_from_cst(&c, file_id))
         {
             world.set(entity, TypeAnnotation(ty));
         }
-    }
 
     // Body — CST wraps it in FunctionBody > CodeBlock (block body)
     // or FunctionBody > Expression (expression body: `= expr`)
@@ -117,12 +116,11 @@ pub fn build_initializer(
     );
 
     // Body — CST wraps it in FunctionBody > CodeBlock
-    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
-        if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
+    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody)
+        && let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
             world.set(entity, Body(lower::lower_body(&code_block, file_id)));
             world.set(entity, Valued(code_block));
         }
-    }
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
@@ -159,12 +157,11 @@ pub fn build_deinit(
     );
 
     // Body — CST wraps it in FunctionBody > CodeBlock
-    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
-        if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
+    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody)
+        && let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
             world.set(entity, Body(lower::lower_body(&code_block, file_id)));
             world.set(entity, Valued(code_block));
         }
-    }
 }
 
 /// Extract receiver kind from function modifier keywords.

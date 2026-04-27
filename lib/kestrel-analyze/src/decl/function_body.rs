@@ -48,11 +48,10 @@ impl DeclCheck for FunctionBodyAnalyzer {
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         // Skip functions inside protocols -- they're declarations only
-        if let Some(parent) = cx.query.parent_of(cx.entity) {
-            if matches!(cx.query.get::<NodeKind>(parent), Some(NodeKind::Protocol)) {
+        if let Some(parent) = cx.query.parent_of(cx.entity)
+            && matches!(cx.query.get::<NodeKind>(parent), Some(NodeKind::Protocol)) {
                 return vec![];
             }
-        }
 
         // Skip intrinsic functions (lang module builtins with no implementation)
         if cx.query.has::<Intrinsic>(cx.entity) {
@@ -60,15 +59,14 @@ impl DeclCheck for FunctionBodyAnalyzer {
         }
 
         // Skip extern and builtin functions
-        if let Some(attrs) = cx.query.get::<Attributes>(cx.entity) {
-            if attrs
+        if let Some(attrs) = cx.query.get::<Attributes>(cx.entity)
+            && attrs
                 .0
                 .iter()
                 .any(|a| a.name == "extern" || a.name == "builtin")
             {
                 return vec![];
             }
-        }
 
         // Function has a body or computed value -- no error
         if cx.query.get::<Body>(cx.entity).is_some() || cx.query.get::<Valued>(cx.entity).is_some()

@@ -315,13 +315,12 @@ impl QueryFn for TypeParamCopyRequirement {
                         {
                             continue;
                         }
-                        if let Some(copyable) = copyable {
-                            if resolve_type_entity(ctx, protocol, context, self.root)
+                        if let Some(copyable) = copyable
+                            && resolve_type_entity(ctx, protocol, context, self.root)
                                 == Some(copyable)
                             {
                                 return CopyRequirement::MayBeNonCopyable;
                             }
-                        }
                     },
                     WhereConstraint::Bound {
                         subject, protocols, ..
@@ -587,8 +586,8 @@ fn nominal_copy_semantics_impl(
         root,
     });
 
-    if let Some(copyable) = copyable {
-        if ctx.query(ExplicitlyNegatesProtocol {
+    if let Some(copyable) = copyable
+        && ctx.query(ExplicitlyNegatesProtocol {
             entity,
             protocol: copyable,
             root,
@@ -598,7 +597,6 @@ fn nominal_copy_semantics_impl(
                 reason: CopySemanticsReason::ExplicitNotCopyable,
             };
         }
-    }
 
     let child_types = collect_child_types(ctx, entity, root);
     for (child, ty) in &child_types {
@@ -610,8 +608,8 @@ fn nominal_copy_semantics_impl(
         }
     }
 
-    if let Some(cloneable) = cloneable {
-        if ctx.query(ExplicitlyConformsToProtocol {
+    if let Some(cloneable) = cloneable
+        && ctx.query(ExplicitlyConformsToProtocol {
             entity,
             protocol: cloneable,
             root,
@@ -621,7 +619,6 @@ fn nominal_copy_semantics_impl(
                 reason: CopySemanticsReason::ExplicitCloneable,
             };
         }
-    }
 
     for (child, ty) in &child_types {
         if hir_type_copy_semantics(ctx, ty, entity, root) == CopySemantics::Cloneable {

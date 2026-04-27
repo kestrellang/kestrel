@@ -19,13 +19,11 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use kestrel_codegen::{
     LayoutCache, Mangler, TargetConfig, mangle_function_with_self, substitute_type_with_self,
 };
-use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
 use kestrel_mir::{
-    CallingConvention, FunctionDef, FunctionKind, ImmediateKind, MirModule, MirTy, StaticDef,
+    FunctionDef, MirModule, MirTy, StaticDef,
 };
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::CodegenOptions;
@@ -152,9 +150,7 @@ impl<'a> CodegenContext<'a> {
             // object file and there's no other opportunity to embed them.
             let data_name = format!("{mangled}_data");
             let base_path = file_const
-                .base_path
-                .as_ref()
-                .map(|p| p.clone())
+                .base_path.clone()
                 .unwrap_or_default();
             let file_path = base_path.join(&file_const.relative_path);
 
@@ -317,7 +313,7 @@ impl<'a> CodegenContext<'a> {
 
     fn define_all_functions(&mut self) -> Result<(), CodegenError> {
         let insts: Vec<FunctionInstantiation> = self.mono_set.functions.iter().cloned().collect();
-        for (idx, inst) in insts.into_iter().enumerate() {
+        for inst in insts {
             let func_def = &self.module.functions[inst.func_id.index()];
 
             // Only functions in the `Full` emit path have bodies to compile.
@@ -460,7 +456,7 @@ impl<'a> CodegenContext<'a> {
         // Return type
         if is_main {
             sig.returns.push(AbiParam::new(ir::types::I64));
-        } else if !use_sret && !(ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
+        } else if !(use_sret || ret_ty.is_unit() || matches!(ret_ty, MirTy::Never)) {
             sig.returns
                 .push(AbiParam::new(types::translate_type(&ret_ty, self.target)));
         }
@@ -474,7 +470,7 @@ impl<'a> CodegenContext<'a> {
             self.module.functions[entry.index()].entity == func_def.entity
         } else {
             // Fallback: last segment of name is "main"
-            func_def.name.split('.').last() == Some("main")
+            func_def.name.split('.').next_back() == Some("main")
         }
     }
 

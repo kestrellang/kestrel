@@ -608,8 +608,8 @@ fn unescape_char_content(
                         {
                             let hex_str: String = [h1, h2].iter().collect();
                             let value = u32::from_str_radix(&hex_str, 16).unwrap_or(0);
-                            if value > 0x7F {
-                                if let Some(ctx) = ctx {
+                            if value > 0x7F
+                                && let Some(ctx) = ctx {
                                     ctx.accumulate(
                                         kestrel_reporting::Diagnostic::error()
                                             .with_message(format!(
@@ -625,7 +625,6 @@ fn unescape_char_content(
                                             ]),
                                     );
                                 }
-                            }
                             result.push(value);
                         },
                         _ => {

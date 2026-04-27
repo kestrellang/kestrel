@@ -95,11 +95,10 @@ fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span::S
     if let Some(tail) = block.tail_expr {
         return Some(util::expr_span(hir, tail));
     }
-    if let Some(&last_stmt) = block.stmts.last() {
-        if let HirStmt::Expr { expr, .. } = &hir.stmts[last_stmt] {
+    if let Some(&last_stmt) = block.stmts.last()
+        && let HirStmt::Expr { expr, .. } = &hir.stmts[last_stmt] {
             return Some(util::expr_span(hir, *expr));
         }
-    }
     None
 }
 

@@ -158,8 +158,8 @@ fn check_duplicates(
         let Some(name_comp) = cx.query.get::<Name>(child) else {
             continue;
         };
-        if *child_kind == NodeKind::TypeAlias {
-            if let Some(cst) = cx.query.get::<CstNode>(child) {
+        if *child_kind == NodeKind::TypeAlias
+            && let Some(cst) = cx.query.get::<CstNode>(child) {
                 use kestrel_syntax_tree::SyntaxKind;
                 if cst
                     .0
@@ -169,7 +169,6 @@ fn check_duplicates(
                     continue;
                 }
             }
-        }
         let name = name_comp.0.clone();
         let span = util::entity_span(cx.query, child);
 

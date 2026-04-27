@@ -20,7 +20,7 @@ use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, IsIndirect, Name, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{Callable, IsIndirect, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
@@ -176,11 +176,10 @@ fn entity_contains(
                     continue;
                 };
                 for param in &callable.params {
-                    if let Some(ref ty) = param.ty {
-                        if type_contains(cx, target_enum, ty, entity, visited) {
+                    if let Some(ref ty) = param.ty
+                        && type_contains(cx, target_enum, ty, entity, visited) {
                             return true;
                         }
-                    }
                 }
             }
         },

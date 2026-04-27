@@ -925,7 +925,7 @@ impl WorldResolver<'_> {
                 root: self.root,
             });
             for m in members {
-                if !self.ctx.get::<Name>(m.entity).is_some_and(|n| n.0 == name) {
+                if self.ctx.get::<Name>(m.entity).is_none_or(|n| n.0 != name) {
                     continue;
                 }
                 // Concrete (has TypeAnnotation) → lower and return.
@@ -983,17 +983,15 @@ impl WorldResolver<'_> {
             .get::<kestrel_ast_builder::TypeParams>(member)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
-        if let Some(parent) = self.ctx.parent_of(member) {
-            if matches!(self.ctx.get::<NodeKind>(parent), Some(NodeKind::Extension)) {
-                if let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent) {
+        if let Some(parent) = self.ctx.parent_of(member)
+            && matches!(self.ctx.get::<NodeKind>(parent), Some(NodeKind::Extension))
+                && let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent) {
                     for &tp in &ext_params.0 {
                         if !type_params.contains(&tp) {
                             type_params.push(tp);
                         }
                     }
                 }
-            }
-        }
 
         // Build parameter types from Callable component + lowered types
         let lowered_param_tys = self.ctx.query(LowerCallableTypes {
@@ -1362,13 +1360,11 @@ impl WorldResolver<'_> {
         };
 
         for item in &conformances.0 {
-            if let ConformanceItem::Positive(ast_ty, _) = item {
-                if let Some(resolved) = self.resolve_type_entity(ast_ty) {
-                    if resolved == protocol {
+            if let ConformanceItem::Positive(ast_ty, _) = item
+                && let Some(resolved) = self.resolve_type_entity(ast_ty)
+                    && resolved == protocol {
                         return true;
                     }
-                }
-            }
         }
 
         false
@@ -1485,11 +1481,9 @@ impl WorldResolver<'_> {
                 protocol_type_args,
                 ..
             } = clause
-            {
-                if *param == param_entity && *protocol == protocol_entity {
+                && *param == param_entity && *protocol == protocol_entity {
                     return protocol_type_args.clone();
                 }
-            }
         }
 
         // Inherited match: where clause says T: ParentProtocol, and
@@ -1499,15 +1493,12 @@ impl WorldResolver<'_> {
             if let WhereClause::Bound {
                 param, protocol, ..
             } = clause
-            {
-                if *param == param_entity {
-                    if let Some(args) =
+                && *param == param_entity
+                    && let Some(args) =
                         self.find_inherited_protocol_type_args(*protocol, protocol_entity)
                     {
                         return args;
                     }
-                }
-            }
         }
 
         Vec::new()
@@ -1538,13 +1529,12 @@ impl WorldResolver<'_> {
                 ));
             }
             // Recurse into inherited protocols
-            if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol) {
-                if let Some(args) =
+            if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
+                && let Some(args) =
                     self.find_inherited_protocol_type_args(resolved, target_protocol)
                 {
                     return Some(args);
                 }
-            }
         }
         None
     }
@@ -1676,6 +1666,7 @@ impl WorldResolver<'_> {
     /// We collect protocol bounds from:
     /// - The TypeAlias's Conformances component (if present)
     /// - The parent protocol's where clause (`where Iter: Iterator`)
+    ///
     /// Then search those protocols for the member, same as resolve_param_member.
     fn resolve_assoc_type_member(
         &self,
@@ -1776,15 +1767,12 @@ impl WorldResolver<'_> {
         // Check Conformances on the TypeAlias itself (e.g., `type Iter: Iterator`)
         if let Some(conformances) = self.ctx.get::<Conformances>(alias_entity) {
             for item in &conformances.0 {
-                if let ConformanceItem::Positive(ast_ty, _) = item {
-                    if let Some(proto) = self.resolve_type_entity(ast_ty) {
-                        if self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol) {
-                            if visited.insert(proto) {
+                if let ConformanceItem::Positive(ast_ty, _) = item
+                    && let Some(proto) = self.resolve_type_entity(ast_ty)
+                        && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
+                            && visited.insert(proto) {
                                 protocols.push(proto);
                             }
-                        }
-                    }
-                }
             }
         }
 
@@ -1941,19 +1929,15 @@ impl WorldResolver<'_> {
                 protocols: proto_types,
                 ..
             } = constraint
-            {
-                if let Some(resolved_subj) = self.resolve_type_entity(subject) {
-                    if resolved_subj == param_entity {
+                && let Some(resolved_subj) = self.resolve_type_entity(subject)
+                    && resolved_subj == param_entity {
                         for proto_ty in proto_types {
-                            if let Some(proto) = self.resolve_type_entity(proto_ty) {
-                                if visited.insert(proto) {
+                            if let Some(proto) = self.resolve_type_entity(proto_ty)
+                                && visited.insert(proto) {
                                     protocols.push(proto);
                                 }
-                            }
                         }
                     }
-                }
-            }
         }
     }
 

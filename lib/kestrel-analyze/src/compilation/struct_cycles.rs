@@ -201,11 +201,10 @@ fn check_type(
                 context,
                 root: cx.root,
             });
-            if let TypeResolution::Found(entity) = result {
-                if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Struct) {
+            if let TypeResolution::Found(entity) = result
+                && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Struct) {
                     return enter_struct(cx, entity, detector, stack, direct, entry);
                 }
-            }
             Ok(())
         },
         AstType::Tuple(elements, _) => {
@@ -247,7 +246,7 @@ fn enter_struct(
             AstType::Named { .. } => Some(child),
             _ => None,
         };
-        if let Err(cycle) = check_type(
+        check_type(
             cx,
             &ann.0,
             entity,
@@ -255,9 +254,7 @@ fn enter_struct(
             stack,
             child_direct,
             Some(child),
-        ) {
-            return Err(cycle);
-        }
+        )?
     }
     stack.pop();
     detector.exit(entity);

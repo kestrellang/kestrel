@@ -12,10 +12,9 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen::{LayoutCache, NamedKind, substitute_type};
+use kestrel_codegen::{LayoutCache, NamedKind};
 use kestrel_hecs::Entity;
 use kestrel_mir::{MirTy, Place};
-use std::collections::HashMap;
 
 /// Store a scalar value directly to an aggregate destination.
 /// Used when a function returns a small value that fits in a register

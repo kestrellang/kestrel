@@ -205,11 +205,10 @@ impl EventSink {
     /// synthesised tokens at the end of the previous real content.
     fn last_real_token_end(&self) -> Option<usize> {
         for ev in self.events.iter().rev() {
-            if let Event::AddToken(k, span) = ev {
-                if !is_trivia_kind(*k) {
+            if let Event::AddToken(k, span) = ev
+                && !is_trivia_kind(*k) {
                     return Some(span.end);
                 }
-            }
         }
         None
     }

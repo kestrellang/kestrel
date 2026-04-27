@@ -3,7 +3,6 @@
 //! Key simplification over lib1: every Op carries explicit width info
 //! (IntBits/FloatBits), so we never need to infer types from context.
 
-use crate::common;
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
@@ -12,25 +11,25 @@ use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{self, InstBuilder, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
 use kestrel_mir::{
-    FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness,
+    FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, Op, Signedness,
 };
 
 /// Compile a unary arithmetic/bitwise/boolean operation.
 pub fn compile_op1(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _ctx: &mut CodegenContext,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
     arg: CrValue,
 ) -> Result<CrValue, CodegenError> {
     match op {
-        Op::Neg(bits) => Ok(builder.ins().ineg(arg)),
+        Op::Neg(_bits) => Ok(builder.ins().ineg(arg)),
         Op::FNeg(bits) => {
             let arg = coerce_float(builder, arg, *bits);
             Ok(builder.ins().fneg(arg))
         },
 
-        Op::Not(bits) => Ok(builder.ins().bnot(arg)),
+        Op::Not(_bits) => Ok(builder.ins().bnot(arg)),
 
         Op::BoolNot => {
             let one = builder.ins().iconst(ir::types::I8, 1);
@@ -96,8 +95,8 @@ fn coerce_float(builder: &mut FunctionBuilder, val: CrValue, expected: FloatBits
 
 /// Compile a binary arithmetic/bitwise/comparison/boolean operation.
 pub fn compile_op2(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _ctx: &mut CodegenContext,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
     lhs: CrValue,
@@ -255,8 +254,8 @@ pub fn compile_op2(
 
 /// Compile float intrinsic unary ops (FloatConst, FloatPred, FloatMath).
 pub fn compile_float_intrinsic_op1(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _ctx: &mut CodegenContext,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
     arg: CrValue,
@@ -319,8 +318,8 @@ pub fn compile_float_intrinsic_op1(
 
 /// Compile float intrinsic binary ops (FloatCopysign).
 pub fn compile_float_intrinsic_op2(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _ctx: &mut CodegenContext,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
     lhs: CrValue,
@@ -336,8 +335,8 @@ pub fn compile_float_intrinsic_op2(
 
 /// Compile FloatFma (a * b + c).
 pub fn compile_float_fma(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    _ctx: &mut CodegenContext,
+    _state: &FunctionState,
     builder: &mut FunctionBuilder,
     op: &Op,
     a: CrValue,

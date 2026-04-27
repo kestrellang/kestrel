@@ -147,8 +147,8 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
         if matches!(
             ctx.world.get::<NodeKind>(*source),
             Some(NodeKind::Extension)
-        ) {
-            if let Some(tp) = ctx.world.get::<TypeParams>(*source) {
+        )
+            && let Some(tp) = ctx.world.get::<TypeParams>(*source) {
                 for &tp_entity in &tp.0 {
                     if witness.type_params.iter().any(|t| t.entity == tp_entity) {
                         continue;
@@ -164,7 +164,6 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
                         .push(TypeParamDef::new(tp_entity, tp_name));
                 }
             }
-        }
 
         // Every method/property requirement the protocol exposes — direct,
         // extension defaults, inherited from parent protocols, and parents'

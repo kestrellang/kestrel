@@ -200,7 +200,7 @@ fn check_copyable_conflict(
             labels: vec![
                 DiagLabel {
                     span: pos_item.span.clone(),
-                    message: format!("this conformance requires `Copyable`"),
+                    message: "this conformance requires `Copyable`".to_string(),
                     is_primary: true,
                 },
                 DiagLabel {

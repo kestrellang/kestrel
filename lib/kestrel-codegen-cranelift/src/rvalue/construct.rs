@@ -5,7 +5,6 @@ use crate::context::CodegenContext;
 use crate::error::CodegenError;
 use crate::function::FunctionState;
 use crate::rvalue;
-use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{
     self, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value as CrValue,
@@ -101,7 +100,7 @@ pub fn compile_tuple(
                 state.self_type.as_ref(),
                 &ctx.layouts,
             ),
-            Value::Immediate(imm) => Ok(MirTy::I64), // Approximate; ideally infer from imm
+            Value::Immediate(_imm) => Ok(MirTy::I64), // Approximate; ideally infer from imm
         })
         .collect::<Result<_, _>>()?;
 

@@ -48,15 +48,14 @@ pub fn build_subscript(
     world.set(entity, Callable { params, receiver });
 
     // Return type
-    if let Some(return_node) = find_child(node, SyntaxKind::ReturnType) {
-        if let Some(ty) = return_node
+    if let Some(return_node) = find_child(node, SyntaxKind::ReturnType)
+        && let Some(ty) = return_node
             .children()
             .find(|c| is_type_kind(c.kind()))
             .and_then(|c| ast_type_from_cst(&c, file_id))
         {
             world.set(entity, TypeAnnotation(ty));
         }
-    }
 
     // Check for getter/setter in SubscriptBody > PropertyAccessors
     if let Some(body) = find_child(node, SyntaxKind::SubscriptBody) {
@@ -71,18 +70,17 @@ pub fn build_subscript(
                 world.set(entity, Settable);
             }
             // Lower getter body if present
-            if let Some(getter) = find_child(&acc, SyntaxKind::GetterClause) {
-                if let Some(code_block) = find_child(&getter, SyntaxKind::CodeBlock) {
+            if let Some(getter) = find_child(&acc, SyntaxKind::GetterClause)
+                && let Some(code_block) = find_child(&getter, SyntaxKind::CodeBlock) {
                     world.set(entity, Body(lower::lower_body(&code_block, file_id)));
                     world.set(entity, Valued(code_block));
                 }
-            }
             // Setter accessor: spawn a child entity whose Callable is
             // `[index_params..., newValue]`. Receiver upgraded to Mutating
             // (setters mutate self's backing storage); None for static.
-            if has_setter {
-                if let Some(setter_clause) = find_child(&acc, SyntaxKind::SetterClause) {
-                    if let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
+            if has_setter
+                && let Some(setter_clause) = find_child(&acc, SyntaxKind::SetterClause)
+                    && let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
                         let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
                         let mut setter_params = world
                             .get::<Callable>(entity)
@@ -114,8 +112,6 @@ pub fn build_subscript(
                             is_static,
                         );
                     }
-                }
-            }
         } else if let Some(code_block) = find_child(&body, SyntaxKind::CodeBlock) {
             // Shorthand getter-only form: subscript(...) -> T { expr }
             world.set(entity, Body(lower::lower_body(&code_block, file_id)));

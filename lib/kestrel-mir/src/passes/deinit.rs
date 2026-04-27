@@ -67,9 +67,8 @@ pub fn run_deinit_pass(module: &mut MirModule) {
                     rvalue: Rvalue::Move(place),
                     ..
                 } = &stmt.kind
-                {
-                    if let Some(local_id) = place.root_local() {
-                        if let Some(&flag_id) = flag_locals.get(&local_id) {
+                    && let Some(local_id) = place.root_local()
+                        && let Some(&flag_id) = flag_locals.get(&local_id) {
                             insertions.push((
                                 stmt_idx + 1,
                                 Statement::new(StatementKind::SetDeinitFlag {
@@ -78,8 +77,6 @@ pub fn run_deinit_pass(module: &mut MirModule) {
                                 }),
                             ));
                         }
-                    }
-                }
             }
             // Insert in reverse order to maintain indices
             for (pos, stmt) in insertions.into_iter().rev() {
@@ -98,18 +95,18 @@ pub fn run_deinit_pass(module: &mut MirModule) {
                 let deinit_stmts: Vec<Statement> = deinit_locals
                     .iter()
                     .rev()
-                    .filter_map(|&local| {
+                    .map(|&local| {
                         if let Some(&flag) = flag_locals.get(&local) {
                             // Moved somewhere — conditional deinit
-                            Some(Statement::new(StatementKind::DeinitIf {
+                            Statement::new(StatementKind::DeinitIf {
                                 place: Place::local(local),
                                 flag,
-                            }))
+                            })
                         } else {
                             // Never moved — unconditional deinit
-                            Some(Statement::new(StatementKind::Deinit {
+                            Statement::new(StatementKind::Deinit {
                                 place: Place::local(local),
-                            }))
+                            })
                         }
                     })
                     .collect();
@@ -131,13 +128,10 @@ fn find_moved_locals(body: &MirBody, deinit_locals: &[LocalId]) -> HashSet<Local
                 rvalue: Rvalue::Move(place),
                 ..
             } = &stmt.kind
-            {
-                if let Some(local_id) = place.root_local() {
-                    if deinit_set.contains(&local_id) {
+                && let Some(local_id) = place.root_local()
+                    && deinit_set.contains(&local_id) {
                         moved.insert(local_id);
                     }
-                }
-            }
         }
     }
 

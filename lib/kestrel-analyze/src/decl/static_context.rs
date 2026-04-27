@@ -53,14 +53,13 @@ impl DeclCheck for StaticContextAnalyzer {
         }
 
         // Check parent: static is valid inside Struct, Enum, Protocol, Extension
-        if let Some(parent) = cx.query.parent_of(cx.entity) {
-            if matches!(
+        if let Some(parent) = cx.query.parent_of(cx.entity)
+            && matches!(
                 cx.query.get::<NodeKind>(parent),
                 Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
             ) {
                 return vec![];
             }
-        }
 
         let name = util::entity_name(cx.query, cx.entity);
         let span = util::entity_span(cx.query, cx.entity);

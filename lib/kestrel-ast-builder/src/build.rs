@@ -177,15 +177,10 @@ fn is_excluded_by_target(node: &SyntaxNode, target: Option<&TargetConfig>) -> bo
 
         let Some(name) = attr_name else { continue };
 
-        // Check each conditional attribute type against its target dimension
-        match name.as_str() {
-            "platform" => {
-                if is_excluded_by_platform(&attr_node, target) {
-                    return true;
-                }
-            },
-            // Future: "arch" => { if is_excluded_by_arch(...) { return true; } }
-            _ => {},
+        // Check each conditional attribute type against its target dimension.
+        // Future: "arch" => { if is_excluded_by_arch(...) { return true; } }
+        if name == "platform" && is_excluded_by_platform(&attr_node, target) {
+            return true;
         }
     }
 
@@ -206,31 +201,31 @@ fn is_excluded_by_platform(attr_node: &SyntaxNode, target: &TargetConfig) -> boo
     };
 
     // Extract the implicit member value from the first arg
-    for arg_node in args_node
+    let Some(arg_node) = args_node
         .children()
-        .filter(|c| c.kind() == SyntaxKind::AttributeArg)
-    {
-        let tokens: Vec<_> = arg_node
-            .children_with_tokens()
-            .filter_map(|c| c.into_token())
-            .collect();
+        .find(|c| c.kind() == SyntaxKind::AttributeArg)
+    else {
+        return false;
+    };
 
-        let mut found_dot = false;
-        for tok in &tokens {
-            if tok.kind() == SyntaxKind::Dot {
-                found_dot = true;
-            } else if found_dot && tok.kind() == SyntaxKind::Identifier {
-                return match Os::from_name(tok.text()) {
-                    Some(declared) => declared != target_os,
-                    None => false, // unknown platform — let validation report
-                };
-            }
+    let tokens: Vec<_> = arg_node
+        .children_with_tokens()
+        .filter_map(|c| c.into_token())
+        .collect();
+
+    let mut found_dot = false;
+    for tok in &tokens {
+        if tok.kind() == SyntaxKind::Dot {
+            found_dot = true;
+        } else if found_dot && tok.kind() == SyntaxKind::Identifier {
+            return match Os::from_name(tok.text()) {
+                Some(declared) => declared != target_os,
+                None => false, // unknown platform — let validation report
+            };
         }
-
-        return false; // no implicit member — don't exclude
     }
 
-    false
+    false // no implicit member — don't exclude
 }
 
 #[cfg(test)]

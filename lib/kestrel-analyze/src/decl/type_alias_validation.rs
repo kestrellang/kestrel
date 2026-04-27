@@ -165,9 +165,9 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
 
         // Check 1: Conformances on a type alias are bounds (type Item: Protocol).
         // Only valid inside protocol declarations.
-        if !is_protocol_context {
-            if let Some(conformances) = cx.query.get::<Conformances>(cx.entity) {
-                if !conformances.0.is_empty() {
+        if !is_protocol_context
+            && let Some(conformances) = cx.query.get::<Conformances>(cx.entity)
+                && !conformances.0.is_empty() {
                     let name = util::entity_name(cx.query, cx.entity);
                     let span = util::entity_span(cx.query, cx.entity);
                     diags.push(AnalyzeDiagnostic {
@@ -187,8 +187,6 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
                         ],
                     });
                 }
-            }
-        }
 
         // Check 2: Non-protocol type aliases require `= Type` definition.
         // Inside protocols, abstract associated types (no definition) are allowed.
@@ -414,11 +412,10 @@ fn check_unqualified_ambiguity(
     // e.g., `extend Array[T]: ArrayMatchable { type Element = T }` — the
     // unqualified Element is clearly for ArrayMatchable since the extension
     // declares that conformance.
-    if let Some(parent) = cx.query.parent_of(cx.entity) {
-        if cx.query.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
+    if let Some(parent) = cx.query.parent_of(cx.entity)
+        && cx.query.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
             covered.extend(protocols_declared_on_extension(cx, parent));
         }
-    }
 
     // Filter out covered protocols
     let uncovered: Vec<&str> = matching_protocols
@@ -534,10 +531,9 @@ fn protocols_covered_by_qualified_bindings(
                     continue;
                 }
                 // Must have the same name as the alias we're checking
-                if !cx
+                if cx
                     .query
-                    .get::<Name>(child)
-                    .is_some_and(|n| n.0 == alias_name)
+                    .get::<Name>(child).is_none_or(|n| n.0 != alias_name)
                 {
                     continue;
                 }

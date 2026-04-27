@@ -14,6 +14,12 @@ pub struct AnalyzerRegistry {
     pub(crate) compilation_checks: Vec<Arc<dyn CompilationCheck>>,
 }
 
+impl Default for AnalyzerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnalyzerRegistry {
     pub fn new() -> Self {
         Self {

@@ -34,7 +34,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::Entity;
 use kestrel_name_res::{
-    ExtensionsFor, ProtocolAssociatedTypes, ProtocolMembers, ResolveTypePath, TypeResolution,
+    ExtensionsFor, ProtocolMembers, ResolveTypePath, TypeResolution,
 };
 use std::collections::{HashMap, HashSet};
 

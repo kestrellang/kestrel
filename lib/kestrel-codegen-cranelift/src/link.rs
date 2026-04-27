@@ -29,9 +29,9 @@ pub fn link_executable(
 
     // Libraries
     for lib in libraries {
-        if lib.starts_with(':') {
+        if let Some(path) = lib.strip_prefix(':') {
             // Literal path (strip colon prefix)
-            cmd.arg(&lib[1..]);
+            cmd.arg(path);
         } else {
             cmd.arg(format!("-l{lib}"));
         }

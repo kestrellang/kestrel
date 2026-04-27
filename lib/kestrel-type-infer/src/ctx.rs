@@ -159,8 +159,7 @@ impl<'a> InferCtx<'a> {
         root: Entity,
     ) -> Self {
         // Allocate a dummy TyVar(0) for the return type — will be overwritten
-        let mut types = Vec::new();
-        types.push(TySlot::Unresolved { literal: None });
+        let types = vec![TySlot::Unresolved { literal: None }];
 
         Self {
             resolver,

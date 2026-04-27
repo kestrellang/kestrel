@@ -80,7 +80,7 @@ pub fn build_enum_case(
         let params: Vec<AstParam> = param_list
             .children()
             .filter(|c| c.kind() == SyntaxKind::EnumCaseParameter)
-            .filter_map(|param_node| {
+            .map(|param_node| {
                 // Enum case params: label from Name > Identifier, type from Ty
                 let label = extract_name(&param_node);
 
@@ -91,7 +91,7 @@ pub fn build_enum_case(
 
                 // For enum case params, the label IS the name
                 let name = label.clone().unwrap_or_default();
-                Some(AstParam {
+                AstParam {
                     label,
                     name,
                     ty,
@@ -99,7 +99,7 @@ pub fn build_enum_case(
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
-                })
+                }
             })
             .collect();
 

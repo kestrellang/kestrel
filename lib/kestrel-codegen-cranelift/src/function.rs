@@ -18,7 +18,7 @@ use cranelift_module::Module;
 use kestrel_codegen::{LayoutCache, substitute_type_with_self};
 use kestrel_hecs::Entity;
 use kestrel_mir::{
-    BlockId, FunctionDef, FunctionKind, LocalId, MirBody, MirTy, PassingMode, Place, Rvalue,
+    BlockId, FunctionDef, LocalId, MirBody, MirTy, PassingMode, Rvalue,
     StatementKind,
 };
 use std::collections::{HashMap, HashSet};
@@ -695,8 +695,7 @@ pub fn compile_function(
     })
     .map_err(|e| CodegenError::FunctionCompilation {
         name: mangled_name.to_string(),
-        source: Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        source: Box::new(std::io::Error::other(
             format!("{e:?}"),
         )),
     })?;
@@ -727,27 +726,27 @@ fn collect_address_taken_locals(
     for block in &body.blocks {
         for stmt in &block.stmts {
             match &stmt.kind {
-                StatementKind::Assign { rvalue, .. } => match rvalue {
-                    Rvalue::Ref(place) | Rvalue::RefMut(place) => {
-                        if let Some(id) = place.root_local() {
-                            let ty = substitute_type_with_self(
-                                &body.locals[id.index()].ty,
-                                subst,
-                                self_type,
-                                layouts.module(),
-                            );
-                            if !is_aggregate(&ty, layouts) {
-                                result.insert(id);
-                            }
+                StatementKind::Assign {
+                    rvalue: Rvalue::Ref(place) | Rvalue::RefMut(place),
+                    ..
+                } => {
+                    if let Some(id) = place.root_local() {
+                        let ty = substitute_type_with_self(
+                            &body.locals[id.index()].ty,
+                            subst,
+                            self_type,
+                            layouts.module(),
+                        );
+                        if !is_aggregate(&ty, layouts) {
+                            result.insert(id);
                         }
-                    },
-                    _ => {},
+                    }
                 },
                 StatementKind::Call { args, .. } => {
                     for arg in args {
-                        if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef) {
-                            if let kestrel_mir::Value::Place(place) = &arg.value {
-                                if let Some(id) = place.root_local() {
+                        if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef)
+                            && let kestrel_mir::Value::Place(place) = &arg.value
+                                && let Some(id) = place.root_local() {
                                     let ty = substitute_type_with_self(
                                         &body.locals[id.index()].ty,
                                         subst,
@@ -758,8 +757,6 @@ fn collect_address_taken_locals(
                                         result.insert(id);
                                     }
                                 }
-                            }
-                        }
                     }
                 },
                 _ => {},

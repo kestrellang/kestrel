@@ -144,15 +144,14 @@ impl QueryFn for ResolveTypePath {
 
             // Check if current is an associated type (TypeAlias in a protocol) —
             // look for nested associated types via its bounds (e.g. T.Iter.Item)
-            if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
-                if let Some(assoc) =
+            if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
+                && let Some(assoc) =
                     resolve_assoc_type_nested(ctx, current, segment, self.context, self.root)
                 {
                     current = assoc;
                     continue;
                 }
                 // Fall through to child walk — the alias might have children
-            }
 
             // Otherwise walk children
             let visible = ctx.query(VisibleChildrenByName {
@@ -266,12 +265,11 @@ fn try_resolve_self_via_extension_target(
     let mut resolved = target;
     for segment in &segments[1..] {
         // Check if resolved is a protocol — look for associated types
-        if ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol) {
-            if let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment) {
+        if ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
+            && let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment) {
                 resolved = assoc;
                 continue;
             }
-        }
 
         // Check children by name (handles nested types, etc.)
         let visible = ctx.query(crate::VisibleChildrenByName {
@@ -574,15 +572,13 @@ pub fn resolve_assoc_type_nested(
                 // Match if the last segment is our associated type's name
                 if segments.len() >= 2 {
                     let assoc_self_name = ctx.get::<Name>(assoc_type);
-                    if let Some(name) = assoc_self_name {
-                        if segments.last().map(|s| &s.name) == Some(&name.0) {
-                            if let Some(found) =
+                    if let Some(name) = assoc_self_name
+                        && segments.last().map(|s| &s.name) == Some(&name.0)
+                            && let Some(found) =
                                 search_protocols_for_assoc(ctx, protocols, assoc_name, anc, root)
                             {
                                 return Some(found);
                             }
-                        }
-                    }
                 }
             }
         }

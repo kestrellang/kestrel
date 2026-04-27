@@ -101,15 +101,14 @@ pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<S
         .map(|s| s.0.file_id)
         .unwrap_or(0);
     for elem in node.children_with_tokens() {
-        if let SyntaxElement::Token(tok) = elem {
-            if tok.kind() == SyntaxKind::RBrace {
+        if let SyntaxElement::Token(tok) = elem
+            && tok.kind() == SyntaxKind::RBrace {
                 let r = tok.text_range();
                 return Some(Span::new(
                     file_id,
                     usize::from(r.start())..usize::from(r.end()),
                 ));
             }
-        }
     }
     None
 }

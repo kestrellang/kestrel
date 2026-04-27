@@ -69,14 +69,13 @@ impl<'a> CompilerDriver<'a> {
                                 .entry(proto_name)
                                 .or_insert(0) += 1;
                         }
-                        if let InferError::TypeMismatch { .. } = err {
-                            if let Some(detail) = typed.error_details.get(i) {
+                        if let InferError::TypeMismatch { .. } = err
+                            && let Some(detail) = typed.error_details.get(i) {
                                 *summary
                                     .type_mismatch_breakdown
                                     .entry(detail.clone())
                                     .or_insert(0) += 1;
                             }
-                        }
                     }
 
                     if summary.error_samples.len() < 50 {

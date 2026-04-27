@@ -123,9 +123,7 @@ fn extract_single_param(
         (name, None)
     } else {
         let param_pat = extract_param_pattern(&pattern_node);
-        if param_pat.is_none() {
-            return None;
-        }
+        param_pat.as_ref()?;
         let idx = PARAM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         (format!("_param_{}", idx), param_pat)
     };
@@ -315,13 +313,12 @@ fn default_body_references_param<'a>(
     param_names: &[&'a str],
 ) -> Option<&'a str> {
     let tail_id = body.tail_expr?;
-    if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id] {
-        if segments.len() == 1 && segments[0].type_args.is_none() {
+    if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id]
+        && segments.len() == 1 && segments[0].type_args.is_none() {
             return param_names
                 .iter()
                 .find(|&&p| p == segments[0].name)
                 .copied();
         }
-    }
     None
 }

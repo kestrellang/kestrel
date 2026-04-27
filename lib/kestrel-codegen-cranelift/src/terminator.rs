@@ -8,7 +8,6 @@ use crate::error::CodegenError;
 use crate::function::FunctionState;
 use crate::place;
 use crate::rvalue;
-use crate::types;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};

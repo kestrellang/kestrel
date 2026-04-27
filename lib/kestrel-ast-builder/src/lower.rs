@@ -122,9 +122,9 @@ impl LowerCtx {
                         || children[i + 1..]
                             .iter()
                             .all(|c| c.kind() == SyntaxKind::RBrace);
-                    if is_last && tail_expr.is_none() {
-                        if let Some(inner) = child.children().next() {
-                            if inner.kind() == SyntaxKind::ExpressionStatement
+                    if is_last && tail_expr.is_none()
+                        && let Some(inner) = child.children().next()
+                            && inner.kind() == SyntaxKind::ExpressionStatement
                                 && !has_semicolon(&inner)
                             {
                                 // Promote to tail expression
@@ -132,8 +132,6 @@ impl LowerCtx {
                                 tail_expr = Some(expr_id);
                                 continue;
                             }
-                        }
-                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
@@ -141,11 +139,11 @@ impl LowerCtx {
                 },
                 // Bare expression at end of block = tail expression
                 SyntaxKind::Expression => {
-                    let expr_id = self.lower_expr(&child);
+                    let expr_id = self.lower_expr(child);
                     tail_expr = Some(expr_id);
                 },
                 _ if is_expr_kind(child.kind()) => {
-                    let expr_id = self.lower_expr(&child);
+                    let expr_id = self.lower_expr(child);
                     tail_expr = Some(expr_id);
                 },
                 _ => {},
@@ -215,16 +213,14 @@ impl LowerCtx {
                     .is_some_and(|t| t.kind() == SyntaxKind::Equals)
                 {
                     found_equals = true;
-                } else if found_equals {
-                    if let Some(expr_node) = child.into_node() {
-                        if expr_node.kind() == SyntaxKind::Expression
-                            || is_expr_kind(expr_node.kind())
+                } else if found_equals
+                    && let Some(expr_node) = child.into_node()
+                        && (expr_node.kind() == SyntaxKind::Expression
+                            || is_expr_kind(expr_node.kind()))
                         {
                             result = Some(self.lower_expr(&expr_node));
                             break;
                         }
-                    }
-                }
             }
             result
         };
@@ -306,13 +302,13 @@ impl LowerCtx {
 
         match node.kind() {
             // Literals
-            SyntaxKind::ExprInteger => self.lower_literal(&node, |text| AstLiteral::Integer(text)),
-            SyntaxKind::ExprFloat => self.lower_literal(&node, |text| AstLiteral::Float(text)),
-            SyntaxKind::ExprString => self.lower_literal(&node, |text| AstLiteral::String(text)),
+            SyntaxKind::ExprInteger => self.lower_literal(&node, AstLiteral::Integer),
+            SyntaxKind::ExprFloat => self.lower_literal(&node, AstLiteral::Float),
+            SyntaxKind::ExprString => self.lower_literal(&node, AstLiteral::String),
             SyntaxKind::ExprRawString => {
-                self.lower_literal(&node, |text| AstLiteral::RawString(text))
+                self.lower_literal(&node, AstLiteral::RawString)
             },
-            SyntaxKind::ExprChar => self.lower_literal(&node, |text| AstLiteral::Char(text)),
+            SyntaxKind::ExprChar => self.lower_literal(&node, AstLiteral::Char),
             SyntaxKind::ExprBool => {
                 let span = self.span(&node);
                 let text = first_token_text(&node);
@@ -458,11 +454,10 @@ impl LowerCtx {
 
         // If no structured children, the interpolated string is a raw token —
         // treat entire text as a literal part
-        if parts.is_empty() {
-            if let Some(text) = first_token_text(node) {
+        if parts.is_empty()
+            && let Some(text) = first_token_text(node) {
                 parts.push(StringPart::Literal(text));
             }
-        }
 
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
@@ -588,13 +583,12 @@ impl LowerCtx {
                         trailing_missing_member = true;
                     }
                 }
-            } else if let Some(child) = elem.as_node() {
-                if child.kind() == SyntaxKind::Missing {
+            } else if let Some(child) = elem.as_node()
+                && child.kind() == SyntaxKind::Missing {
                     // Parser recovered `.<missing>` after a path; treat it
                     // as a member access whose member name is empty.
                     trailing_missing_member = true;
                 }
-            }
         }
 
         if trailing_missing_member && !segments.is_empty() {
@@ -643,8 +637,8 @@ impl LowerCtx {
         // name so the chain still lowers.
         let mut i = start_idx;
         while i < elements.len() {
-            if let Some(token) = elements[i].as_token() {
-                if token.kind() == SyntaxKind::Dot {
+            if let Some(token) = elements[i].as_token()
+                && token.kind() == SyntaxKind::Dot {
                     i += 1;
                     if let Some(id_text) = member_identifier_at(&elements, i) {
                         i += 1;
@@ -667,7 +661,6 @@ impl LowerCtx {
                         continue;
                     }
                 }
-            }
             i += 1;
         }
 
@@ -992,12 +985,11 @@ impl LowerCtx {
             if let Some(expr_node) = node.children().find(|c| {
                 (c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
                     && c.kind() != SyntaxKind::CodeBlock
-            }) {
-                if appears_before_code_block(node, &expr_node) {
+            })
+                && appears_before_code_block(node, &expr_node) {
                     let expr = self.lower_expr(&expr_node);
                     conditions.push(IfCondition::Expr(expr));
                 }
-            }
         }
 
         conditions

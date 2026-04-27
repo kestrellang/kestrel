@@ -9,8 +9,8 @@ use std::fmt;
 use kestrel_hecs::Entity;
 
 use crate::{
-    BasicBlock, Callee, EnumId, FunctionDef, FunctionId, FunctionKind, ImmediateKind, MirBody,
-    MirTy, Place, Rvalue, StatementKind, StructId, TerminatorKind, Value,
+    BasicBlock, Callee, FunctionDef, FunctionId, ImmediateKind, MirBody,
+    MirTy, Place, Rvalue, StatementKind, TerminatorKind, Value,
 };
 
 /// A single verification diagnostic.
@@ -70,14 +70,13 @@ impl VerifyResult {
         }
 
         // Write full details to temp file for analysis
-        if !self.errors.is_empty() {
-            if let Ok(mut f) = std::fs::File::create("/tmp/mir_verify.txt") {
+        if !self.errors.is_empty()
+            && let Ok(mut f) = std::fs::File::create("/tmp/mir_verify.txt") {
                 use std::io::Write;
                 for e in &self.errors {
                     let _ = writeln!(f, "{}", e);
                 }
             }
-        }
     }
 }
 
@@ -93,8 +92,6 @@ struct VerifyCtx<'a> {
     errors: Vec<VerifyError>,
     // Lookup maps built once
     entity_to_func: HashMap<Entity, FunctionId>,
-    struct_fields: HashMap<StructId, Vec<String>>,
-    enum_cases: HashMap<EnumId, Vec<String>>,
 }
 
 impl<'a> VerifyCtx<'a> {
@@ -106,32 +103,10 @@ impl<'a> VerifyCtx<'a> {
             .map(|(i, f)| (f.entity, FunctionId::new(i)))
             .collect();
 
-        let struct_fields: HashMap<StructId, Vec<String>> = module
-            .structs
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let names = s.fields.iter().map(|f| f.name.clone()).collect();
-                (StructId::new(i), names)
-            })
-            .collect();
-
-        let enum_cases: HashMap<EnumId, Vec<String>> = module
-            .enums
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let names = e.cases.iter().map(|c| c.name.clone()).collect();
-                (EnumId::new(i), names)
-            })
-            .collect();
-
         Self {
             module,
             errors: Vec::new(),
             entity_to_func,
-            struct_fields,
-            enum_cases,
         }
     }
 
@@ -149,7 +124,7 @@ impl<'a> VerifyCtx<'a> {
         }
     }
 
-    fn verify_function(&mut self, idx: usize, func: &FunctionDef) {
+    fn verify_function(&mut self, _idx: usize, func: &FunctionDef) {
         let name = &func.name;
 
         // Check: function with body should have entry block
@@ -207,7 +182,7 @@ impl<'a> VerifyCtx<'a> {
         bi: usize,
         block: &BasicBlock,
         body: &MirBody,
-        func: &FunctionDef,
+        _func: &FunctionDef,
     ) {
         // Verify statements
         for stmt in &block.stmts {
@@ -347,7 +322,7 @@ impl<'a> VerifyCtx<'a> {
                 captures,
             } => {
                 // Check the target entity is a known function
-                if self.entity_to_func.get(target).is_none() {
+                if !self.entity_to_func.contains_key(target) {
                     self.err(
                         func,
                         Some(bi),
@@ -367,7 +342,7 @@ impl<'a> VerifyCtx<'a> {
     fn verify_callee(&mut self, func: &str, bi: usize, callee: &Callee) {
         match callee {
             Callee::Direct { func: target, .. } => {
-                if self.entity_to_func.get(target).is_none() {
+                if !self.entity_to_func.contains_key(target) {
                     let target_name = self.module.resolve_name(*target);
                     self.err(
                         func,
@@ -426,8 +401,8 @@ impl<'a> VerifyCtx<'a> {
         _body: &MirBody,
     ) {
         // For Direct calls, check arg count matches the target function's param count
-        if let Callee::Direct { func: target, .. } = callee {
-            if let Some(&func_id) = self.entity_to_func.get(target) {
+        if let Callee::Direct { func: target, .. } = callee
+            && let Some(&func_id) = self.entity_to_func.get(target) {
                 let target_def = &self.module.functions[func_id.index()];
                 let expected = target_def.params.len();
                 let got = args.len();
@@ -442,25 +417,21 @@ impl<'a> VerifyCtx<'a> {
                     );
                 }
             }
-        }
     }
 
     fn verify_immediate(&mut self, func: &str, bi: usize, kind: &ImmediateKind) {
-        match kind {
-            ImmediateKind::FunctionRef { func: target, .. } => {
-                if self.entity_to_func.get(target).is_none() {
-                    let target_name = self.module.resolve_name(*target);
-                    self.err(
-                        func,
-                        Some(bi),
-                        format!(
-                            "FunctionRef: entity {:?} ({}) not a known function",
-                            target, target_name
-                        ),
-                    );
-                }
-            },
-            _ => {},
+        if let ImmediateKind::FunctionRef { func: target, .. } = kind
+            && !self.entity_to_func.contains_key(target)
+        {
+            let target_name = self.module.resolve_name(*target);
+            self.err(
+                func,
+                Some(bi),
+                format!(
+                    "FunctionRef: entity {:?} ({}) not a known function",
+                    target, target_name
+                ),
+            );
         }
     }
 
@@ -487,8 +458,8 @@ impl<'a> VerifyCtx<'a> {
                     self.verify_block_id(func, bi, *target, body);
                     // Guard against display_name leakage on enum variants —
                     // case_by_name keys on short names, not display form.
-                    if let crate::SwitchCase::Variant(name) = case {
-                        if name.contains('(') || name.contains(')') {
+                    if let crate::SwitchCase::Variant(name) = case
+                        && (name.contains('(') || name.contains(')')) {
                             self.err(
                                 func,
                                 Some(bi),
@@ -498,7 +469,6 @@ impl<'a> VerifyCtx<'a> {
                                 ),
                             );
                         }
-                    }
                 }
             },
             TerminatorKind::Return(val) => {

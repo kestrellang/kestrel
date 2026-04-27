@@ -262,7 +262,7 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_message(detail.to_string())
                 .with_labels(vec![
                     Label::primary(file_id, range)
-                        .with_message(format!("add () to call this method")),
+                        .with_message("add () to call this method".to_string()),
                 ])
                 .with_notes(vec![format!(
                     "primitive methods cannot be used as first-class values; use '.{method}()' instead"
