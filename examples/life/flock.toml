@@ -1,0 +1,10 @@
+[package]
+name = "life"
+version = "0.1.0"
+description = "Conway's Game of Life rendered with SDL2"
+source = "."
+
+[build]
+c-sources = ["../sdl_pong/sdl_helpers.c"]
+c-flags-cmd = "sdl2-config --cflags"
+link-cmd = "sdl2-config --libs"

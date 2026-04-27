@@ -109,6 +109,9 @@ public struct Milliseconds {
 public enum Key {
     case W
     case S
+    case C
+    case G
+    case R
     case UpArrow
     case DownArrow
     case Space
@@ -228,6 +231,12 @@ func scancodeToKey(code: Int32) -> Key {
         Key.W
     } else if code == 22 {
         Key.S
+    } else if code == 6 {
+        Key.C
+    } else if code == 10 {
+        Key.G
+    } else if code == 21 {
+        Key.R
     } else if code == 82 {
         Key.UpArrow
     } else if code == 81 {

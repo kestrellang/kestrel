@@ -14,7 +14,7 @@ use crate::ty::emit_ty_variant;
 
 use super::data::{
     ArgumentListData, CallArg, ClosureParamsData, ElseClause, ExprVariant, IfCondition, LabelData,
-    MatchArmData, PathSegmentData, TypeArgsData,
+    MatchArm, PathSegmentData, TypeArgsData,
 };
 
 /// Emit events for any expression variant
@@ -673,7 +673,7 @@ fn emit_match_expr(
     match_span: Span,
     scrutinee: &ExprVariant,
     lbrace: Span,
-    arms: &[MatchArmData],
+    arms: &[MatchArm],
     rbrace: Span,
 ) {
     sink.start_node(SyntaxKind::Expression);
@@ -682,17 +682,28 @@ fn emit_match_expr(
     emit_expr_variant(sink, scrutinee);
     sink.add_token(SyntaxKind::LBrace, lbrace);
     for arm in arms {
-        sink.start_node(SyntaxKind::MatchArm);
-        crate::pattern::emit_pattern_variant(sink, &arm.pattern);
-        if let Some(guard) = &arm.guard {
-            sink.start_node(SyntaxKind::MatchArmGuard);
-            sink.add_token(SyntaxKind::If, guard.if_span.clone());
-            emit_expr_variant(sink, &guard.condition);
-            sink.finish_node();
+        match arm {
+            MatchArm::Arm(arm) => {
+                sink.start_node(SyntaxKind::MatchArm);
+                crate::pattern::emit_pattern_variant(sink, &arm.pattern);
+                if let Some(guard) = &arm.guard {
+                    sink.start_node(SyntaxKind::MatchArmGuard);
+                    sink.add_token(SyntaxKind::If, guard.if_span.clone());
+                    emit_expr_variant(sink, &guard.condition);
+                    sink.finish_node();
+                }
+                sink.add_token(SyntaxKind::FatArrow, arm.fat_arrow.clone());
+                emit_expr_variant(sink, &arm.body);
+                sink.finish_node();
+            },
+            MatchArm::Recovered(span) => {
+                // Wrap the skipped range as an Error node so the tree round-trips
+                // and the AST builder ignores it (it filters on MatchArm kind).
+                sink.start_node(SyntaxKind::Error);
+                sink.add_token(SyntaxKind::Error, span.clone());
+                sink.finish_node();
+            },
         }
-        sink.add_token(SyntaxKind::FatArrow, arm.fat_arrow.clone());
-        emit_expr_variant(sink, &arm.body);
-        sink.finish_node();
     }
     sink.add_token(SyntaxKind::RBrace, rbrace);
     sink.finish_node();

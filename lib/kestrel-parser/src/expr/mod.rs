@@ -27,7 +27,7 @@ use postfix::PostfixOp;
 
 pub use data::{
     ArgumentListData, CallArg, ClosureParamData, ClosureParamsData, ElseClause, ExprVariant,
-    IfCondition, LabelData, MatchArmData, MatchGuardData, PathSegmentData, TypeArgsData,
+    IfCondition, LabelData, MatchArm, MatchArmData, MatchGuardData, PathSegmentData, TypeArgsData,
 };
 pub use emit::{emit_expr_variant, emit_if_condition, emit_unit_expr};
 
@@ -1006,6 +1006,13 @@ pub fn expr_parser<'tokens>()
                 use crate::pattern::pattern_parser;
 
                 // Match arm: pattern [if guard] => expression
+                //
+                // Recovery: when the arm fails (e.g. a malformed pattern like
+                // `1 @ n`), skip tokens up to the next arm boundary (`,` or
+                // `}`) and yield `MatchArm::Recovered`. Without this, the
+                // failing arm cascades up through `separated_by` and the
+                // match expression as a whole, producing spurious "expected
+                // `}`" errors pinned to the enclosing block.
                 let match_arm = pattern_parser()
                     .then(
                         skip_trivia()
@@ -1023,12 +1030,15 @@ pub fn expr_parser<'tokens>()
                         just(Token::FatArrow).map_with(|_, e| to_kestrel_span(e.span())),
                     ))
                     .then(expr.clone())
-                    .map(|(((pattern, guard), fat_arrow), body)| MatchArmData {
-                        pattern,
-                        guard,
-                        fat_arrow,
-                        body: Box::new(body),
-                    });
+                    .map(|(((pattern, guard), fat_arrow), body)| {
+                        MatchArm::Arm(MatchArmData {
+                            pattern,
+                            guard,
+                            fat_arrow,
+                            body: Box::new(body),
+                        })
+                    })
+                    .recover_with(via_parser(match_arm_recovery()));
 
                 skip_trivia()
                     .ignore_then(just(Token::Match).map_with(|_, e| to_kestrel_span(e.span())))
@@ -1200,6 +1210,32 @@ pub fn expr_parser<'tokens>()
     })
 }
 
+
+/// Recovery for a malformed match arm. Skips trivia and one non-boundary
+/// token, then keeps consuming up to (but not including) the next arm
+/// boundary (`,` or `}`). The resulting span becomes a `MatchArm::Recovered`
+/// that emits as a `SyntaxKind::Error` node — the surrounding
+/// `separated_by(comma)` chain stays alive and the match expression's
+/// closing `}` is found.
+fn is_match_arm_boundary(token: &Token) -> bool {
+    matches!(token, Token::Comma | Token::RBrace)
+}
+
+fn match_arm_recovery<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, MatchArm, ParserExtra<'tokens>> + Clone {
+    let next_is_boundary = any().filter(is_match_arm_boundary).ignored();
+    let recoverable_first = any().filter(|t: &Token| {
+        !matches!(
+            t,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        ) && !is_match_arm_boundary(t)
+    });
+    skip_trivia()
+        .ignore_then(recoverable_first)
+        .then(any().and_is(next_is_boundary.not()).repeated())
+        .map_with(|_, e| MatchArm::Recovered(to_kestrel_span(e.span())))
+        .boxed()
+}
 
 /// Parse an expression and emit events
 pub fn parse_expr<I>(source: &str, tokens: I, sink: &mut EventSink)

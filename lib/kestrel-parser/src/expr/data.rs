@@ -236,9 +236,20 @@ pub enum ExprVariant {
         match_span: Span,
         scrutinee: Box<ExprVariant>,
         lbrace: Span,
-        arms: Vec<MatchArmData>,
+        arms: Vec<MatchArm>,
         rbrace: Span,
     },
+}
+
+/// One entry in a match expression's arm list. Either a well-formed arm or a
+/// recovered range covering tokens skipped after a malformed arm.
+#[derive(Debug, Clone)]
+pub enum MatchArm {
+    Arm(MatchArmData),
+    /// Tokens skipped by recovery up to (but not including) the next arm
+    /// boundary (`,` or `}`). Emitted as a `SyntaxKind::Error` node so the
+    /// tree round-trips with the source.
+    Recovered(Span),
 }
 
 /// Argument list data for implicit member access

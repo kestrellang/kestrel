@@ -1,0 +1,15 @@
+- [x] Clean up repository
+- [ ] Cargo fmt
+- [ ] Cargo clippy
+- [ ] Rewrite README.md
+- [ ] Add custom written docs
+- [ ] Move to github org
+- [ ] Write blog post
+- [ ] Play with extension
+- [ ] Create claude code plugin
+- [ ] Create skill
+- [ ] Move site to separate repo
+- [ ] Move registry to separate repo
+- [ ] Move plugin to separate repo
+- [ ] Move triage to separate repo
+- [ ] Verify installation end-to-end

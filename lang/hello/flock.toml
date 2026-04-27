@@ -1,4 +1,0 @@
-[package]
-name = "hello"
-version = "0.0.1"
-description = "Smoke-test workspace for kestrel-lsp"
