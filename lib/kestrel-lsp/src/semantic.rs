@@ -67,6 +67,7 @@ pub fn hir_expr_span(expr: &HirExpr) -> Span {
         HirExpr::Assign { span, .. } => span.clone(),
         HirExpr::Block { span, .. } => span.clone(),
         HirExpr::Error { span } => span.clone(),
+        HirExpr::Sugar { span, .. } => span.clone(),
     }
 }
 

@@ -9,6 +9,7 @@
 #[cfg(test)]
 mod repro_test;
 
+pub mod markdown;
 pub mod signature;
 
 use std::collections::HashMap;

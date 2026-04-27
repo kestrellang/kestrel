@@ -1,0 +1,26 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Kestrel Standard Library",
+  "description": "API reference for the Kestrel standard library — protocols, primitive types, collections, IO, and core utilities. Generated from the stdlib source by `kestrel-doc`.",
+  "folders": [
+    "docs/stdlib",
+    "docs/language"
+  ],
+  "excludeFolders": [
+    "docs/contributing",
+    "docs/plans",
+    "docs/memory-model"
+  ],
+  "excludeFiles": [
+    "FUTURE_ARCH_IDEAS.md",
+    "FUTURE_IDEAS.md",
+    "STYLE_GUIDE.md",
+    "scope_0.16.md"
+  ],
+  "rules": [
+    "Kestrel uses Swift-inspired syntax with value semantics and monomorphized generics.",
+    "Operator overloads are written as protocol conformances (e.g. `Addable`, `AddAssign`); prefer using the operator over calling the method directly.",
+    "The never type is spelled `!`, not `Never`.",
+    "Initializers and subscripts are documented with `@name` directives so each overload has a distinct label."
+  ]
+}

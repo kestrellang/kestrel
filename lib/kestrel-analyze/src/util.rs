@@ -37,7 +37,8 @@ pub fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Dict { span, .. }
         | HirExpr::Closure { span, .. }
         | HirExpr::Block { span, .. }
-        | HirExpr::Error { span } => span.clone(),
+        | HirExpr::Error { span }
+        | HirExpr::Sugar { span, .. } => span.clone(),
     }
 }
 

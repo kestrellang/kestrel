@@ -887,6 +887,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }));
                 Value::Place(Place::local(dest))
             },
+
+            // Sugar wrapper is structurally transparent: lower the inner expr.
+            // MIR is the post-Sugar IR; codegen never sees Sugar.
+            HirExpr::Sugar { inner, .. } => self.lower_expr(*inner),
         }
     }
 
@@ -3588,6 +3592,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             | HirExpr::Break { .. }
             | HirExpr::Continue { .. }
             | HirExpr::Error { .. } => {},
+
+            HirExpr::Sugar { inner, .. } => {
+                self.collect_captures_expr(*inner, closure_params, captures, seen)
+            },
         }
     }
 

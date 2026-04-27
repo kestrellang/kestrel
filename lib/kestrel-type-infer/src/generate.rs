@@ -292,8 +292,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
-            // Receiver must conform to the protocol
-            ctx.conforms(recv_tv, *protocol, span.clone());
+            // Receiver must conform to the protocol. When this ProtocolCall
+            // sits inside a Sugar wrapper (the desugaring's primary call),
+            // emit a poisoning Conforms so a non-conforming receiver poisons
+            // recv_tv. The downstream Member constraint then sees an Error
+            // receiver and absorbs without emitting "no member" cascades.
+            if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
+                ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+            } else {
+                ctx.conforms(recv_tv, *protocol, span.clone());
+            }
             let Some(method_str) = method.as_str() else {
                 ctx.poison(result_tv);
                 return result_tv;
@@ -560,11 +568,56 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Block { body, .. } => gen_block(ctx, hir, body),
 
         HirExpr::Error { span } => ctx.report_error(InferError::FromHir { span: span.clone() }),
+
+        // Sugar wrapper: kind-aware primary-constraint emission for cascade
+        // suppression. The relevant inner ProtocolCall expr_id is recorded in
+        // `poison_protocol_call_recv_on_failure` BEFORE recursing, so when
+        // `gen_expr` reaches that ProtocolCall it emits a poisoning Conforms.
+        // Type-of(Sugar) == type-of(inner) (structurally transparent).
+        HirExpr::Sugar { kind, inner, .. } => {
+            mark_sugar_primary(ctx, hir, *kind, *inner);
+            gen_expr(ctx, hir, *inner)
+        },
     };
 
     // Record the type for this expression
     ctx.expr_types.insert(id, tv);
     tv
+}
+
+/// Record which inner `ProtocolCall` expr_id is the "primary" for a Sugar
+/// wrapper, so the ProtocolCall arm of `gen_expr` emits a poisoning
+/// `Conforms` constraint (cascade suppression). Walks the inner shape
+/// per-kind; bails silently if the shape doesn't match (defensive — desugar
+/// should always produce the canonical shape, but a malformed inner from
+/// error recovery shouldn't crash inference).
+fn mark_sugar_primary(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    kind: kestrel_hir::body::SugarKind,
+    inner: HirExprId,
+) {
+    use kestrel_hir::body::SugarKind;
+    match kind {
+        SugarKind::ForLoop => {
+            // inner is `Block { stmts: [Let { value: Some(iter_pcall) }], tail_expr: Some(loop) }`.
+            // The iter_pcall is the IterableProtocol "iter" call we want to poison.
+            let HirExpr::Block { body, .. } = &hir.exprs[inner] else { return };
+            let Some(first_stmt) = body.stmts.first() else { return };
+            let HirStmt::Let { value: Some(pcall_id), .. } = &hir.stmts[*first_stmt] else { return };
+            ctx.poison_protocol_call_recv_on_failure.insert(*pcall_id);
+        },
+        SugarKind::Try => {
+            // inner is `Match { scrutinee: tryExtract_pcall, ..., source: TryOp }`.
+            let HirExpr::Match { scrutinee, .. } = &hir.exprs[inner] else { return };
+            ctx.poison_protocol_call_recv_on_failure.insert(*scrutinee);
+        },
+        SugarKind::CompoundAssign => {
+            // inner is the addAssign ProtocolCall (or HirExpr::Error if the
+            // AST place check rejected the LHS at desugar time).
+            ctx.poison_protocol_call_recv_on_failure.insert(inner);
+        },
+    }
 }
 
 // ===== Statement generation =====
@@ -1705,7 +1758,8 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Return { span, .. }
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
-        | HirExpr::Error { span } => span.clone(),
+        | HirExpr::Error { span }
+        | HirExpr::Sugar { span, .. } => span.clone(),
     }
 }
 

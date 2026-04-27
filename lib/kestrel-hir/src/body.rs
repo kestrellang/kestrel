@@ -81,6 +81,26 @@ impl MatchSource {
     }
 }
 
+/// Identifies the user-facing language construct that produced a `HirExpr::Sugar`
+/// wrapper's `inner` subtree. Lets post-typing analyzers fire user-language
+/// diagnostics anchored on the surface keyword without re-deriving the source
+/// from protocol identity, and serves as the anchor for cascade suppression
+/// (inference emits a kind-specific primary `Conforms` whose failure poisons
+/// the receiver TyVar so synthesized inner Member/ImplicitMember errors absorb).
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum SugarKind {
+    /// `for pat in iter { ... }` — `inner` is the outer `Block`
+    /// (`let $iter = iter.iter(); loop { match $iter.next() { … } }`).
+    ForLoop,
+    /// `try expr` — `inner` is the `Match { source: TryOp, … }` whose
+    /// scrutinee is `ProtocolCall(operand, Tryable, "tryExtract")`.
+    Try,
+    /// `lhs += rhs` (and other `CompoundAssignOp`s) — `inner` is the
+    /// `ProtocolCall(lhs, AddAssign, "addAssign", [rhs])`, or `HirExpr::Error`
+    /// if the AST-level place check rejected the LHS at desugar time.
+    CompoundAssign,
+}
+
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
 #[derive(Clone, Debug, Hash)]
 pub struct HirBlock {
@@ -142,7 +162,7 @@ impl std::fmt::Display for HirName {
     }
 }
 
-// ===== Expressions (19 variants) =====
+// ===== Expressions (20 variants) =====
 
 /// Desugared expression. All operators, for-loops, while-loops, try/throw,
 /// and string interpolation have been lowered into calls and control flow.
@@ -277,6 +297,18 @@ pub enum HirExpr {
     },
     /// Malformed expression (error recovery)
     Error {
+        span: Span,
+    },
+
+    /// Transparent wrapper marking that `inner` was synthesized from
+    /// desugaring a user-language construct identified by `kind`.
+    /// Type-of(Sugar) == type-of(inner); `span` is the user-typed span
+    /// (covers the keyword like `for`/`try` or operator like `+=`).
+    /// All consumers of `HirExpr` must recurse into `inner` transparently
+    /// — see `SugarKind` for the per-kind cascade-suppression contract.
+    Sugar {
+        kind: SugarKind,
+        inner: HirExprId,
         span: Span,
     },
 }

@@ -90,18 +90,27 @@ Emits witness-based method dispatch.
 ### Source: compound assignment
 
 - Trigger: `AstExpr::CompoundAssignment`.
-- Site: `desugar.rs:158` (`desugar_compound_assign`). Emits at `desugar.rs:170-181`:
+- Site: `desugar.rs` (`desugar_compound_assign`). Wraps the resulting
+  `ProtocolCall` (or `HirExpr::Error` if the AST place check rejected the LHS)
+  in `HirExpr::Sugar { kind: CompoundAssign, inner, span }`:
   ```
-  ProtocolCall {
-      receiver: lhs,
-      protocol: <compound-assign protocol>,
-      method: ...,
-      args: [HirCallArg { label, value: rhs }],
+  Sugar {
+      kind: CompoundAssign,
+      inner: ProtocolCall {
+          receiver: lhs,
+          protocol: <compound-assign protocol>,
+          method: ...,
+          args: [HirCallArg { label, value: rhs }],
+      },
   }
   ```
+- AST place check: `ast_is_place_expr(body, lhs)` runs before lowering and
+  rejects literals/calls/blocks/etc. with "left-hand side of compound
+  assignment is not assignable", returning `Sugar { CompoundAssign, inner: Error }`.
 - Gotcha: this is **not** `HirExpr::Assign(lhs, ProtocolCall(lhs, add, rhs))`. The
   compound-assign method mutates the receiver in place. Analyzers that scan for
-  `HirExpr::Assign` targets won't see `+=`.
+  `HirExpr::Assign` targets won't see `+=` — they need to check Sugar of kind
+  `CompoundAssign` (or recurse through Sugar transparently).
 
 ### Source: while-let negation
 
@@ -121,17 +130,26 @@ Emits witness-based method dispatch.
 
 - Trigger: `AstExpr::For`.
 - Sites:
-  - `desugar.rs:351-358` — `iterable.iter()` via `IterableProtocol`.
-  - `desugar.rs:380-387` — `$iter.next()` via `IteratorProtocol`.
-- Fallback: if the protocol isn't resolvable, emits a plain `HirExpr::MethodCall`
-  instead (`desugar.rs:360, 389`).
+  - `desugar.rs` (`desugar_for_loop`) — `iterable.iter()` via `IterableProtocol`.
+  - Same function — `$iter.next()` via `IteratorProtocol`.
+- The whole desugaring (outer `Block { let $iter; loop { match $iter.next() } }`)
+  is wrapped in `HirExpr::Sugar { kind: ForLoop, inner: Block, span }`.
+- If `IterableProtocol` isn't resolvable (e.g. `stdlib: false` tests), the
+  desugar emits "`for` loop requires the `Iterable` protocol" directly and
+  returns `Sugar { ForLoop, inner: HirExpr::Error }`. The `next()` fallback
+  to a plain `MethodCall` only matters when Iterable resolved but Iterator
+  didn't (inconsistent stdlib state).
 
 ### Source: try-expr `tryExtract()`
 
 - Trigger: `AstExpr::Try`.
-- Site: `desugar.rs:509-516` — `operand.tryExtract()` via `TryableProtocol`. If the
-  protocol isn't resolvable, the match scrutinee becomes the raw operand
-  (`desugar.rs:517-520`) and the arms switch to `.Ok` / `.Err`.
+- Site: `desugar.rs` (`desugar_try`) — `operand.tryExtract()` via `TryableProtocol`.
+  The whole desugaring (the `Match { source: TryOp, ... }`) is wrapped in
+  `HirExpr::Sugar { kind: Try, inner: Match, span }`.
+- If `TryableProtocol` isn't resolvable, the desugar emits "`try` expression
+  requires the `Tryable` protocol" directly and returns
+  `Sugar { Try, inner: HirExpr::Error }` — no `.Ok`/`.Err` fallback (it would
+  cascade into "implicit member not found" garbage).
 
 ### Source: interpolated-string concatenation
 

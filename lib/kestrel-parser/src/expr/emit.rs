@@ -191,7 +191,7 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             emit_return_expr(sink, return_span.clone(), value.as_deref());
         },
         ExprVariant::Throw { throw_span, value } => {
-            emit_throw_expr(sink, throw_span.clone(), value);
+            emit_throw_expr(sink, throw_span.clone(), value.as_deref());
         },
         ExprVariant::Try { try_span, operand } => {
             emit_try_expr(sink, try_span.clone(), operand);
@@ -831,11 +831,13 @@ fn emit_return_expr(sink: &mut EventSink, return_span: Span, value: Option<&Expr
     sink.finish_node();
 }
 
-fn emit_throw_expr(sink: &mut EventSink, throw_span: Span, value: &ExprVariant) {
+fn emit_throw_expr(sink: &mut EventSink, throw_span: Span, value: Option<&ExprVariant>) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprThrow);
     sink.add_token(SyntaxKind::Throw, throw_span);
-    emit_expr_variant(sink, value);
+    if let Some(val) = value {
+        emit_expr_variant(sink, val);
+    }
     sink.finish_node();
     sink.finish_node();
 }

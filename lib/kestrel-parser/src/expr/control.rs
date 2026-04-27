@@ -65,15 +65,39 @@ where
 }
 
 /// Parser for `throw expr`.
+///
+/// The expression after `throw` is parsed via `.or_not()` so a half-typed
+/// `throw` (no expression yet) doesn't poison the enclosing block — without
+/// this, a function body like `{ throw\n}` couldn't reach its closing `}`
+/// and the editor saw a phantom "expected `}`" on the opening brace. A
+/// peek at the next non-trivia token gives the diagnostic an anchor at the
+/// position where the expression *should* have appeared (matching where
+/// chumsky's old "found `<token>`" error used to land), instead of pinning
+/// the squiggle on the rule's start.
 pub(super) fn throw_parser<'tokens, P>(
     expr: P,
 ) -> impl Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone
 where
     P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
+    let next_token_span = skip_trivia()
+        .ignore_then(any().rewind().map_with(|_, e| to_kestrel_span(e.span())));
     skip_trivia()
         .ignore_then(just(Token::Throw).map_with(|_, e| to_kestrel_span(e.span())))
-        .then(expr.map(Box::new))
+        .then(expr.map(Box::new).or_not())
+        .then(next_token_span.or_not())
+        .validate(|((throw_span, value), next_span), e, emitter| {
+            if value.is_none() {
+                let span = next_span
+                    .map(|s| chumsky::span::SimpleSpan::new((), s.start..s.end))
+                    .unwrap_or_else(|| e.span());
+                emitter.emit(chumsky::error::Rich::custom(
+                    span,
+                    "expected expression after `throw`",
+                ));
+            }
+            (throw_span, value)
+        })
         .map(|(throw_span, value)| ExprVariant::Throw { throw_span, value })
         .boxed()
 }

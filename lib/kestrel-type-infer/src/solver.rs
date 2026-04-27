@@ -320,7 +320,8 @@ fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Return { span, .. }
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
-        | HirExpr::Error { span } => span,
+        | HirExpr::Error { span }
+        | HirExpr::Sugar { span, .. } => span,
     }
 }
 
@@ -419,9 +420,17 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 report_and_poison(ctx, err, from, to);
                 continue;
             },
-            Constraint::Conforms { ty, protocol, span } => {
+            Constraint::Conforms {
+                ty,
+                protocol,
+                span,
+                poison_ty_on_failure,
+            } => {
                 if ctx.is_error(ctx.resolve(ty)) {
                     continue;
+                }
+                if poison_ty_on_failure {
+                    ctx.poison(ty);
                 }
                 (InferError::DoesNotConform { ty, protocol, span }, Some(ty))
             },
@@ -617,7 +626,12 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             }
             r
         },
-        Constraint::Conforms { ty, protocol, span } => solve_conforms(ctx, ty, protocol, span),
+        Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure,
+        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure),
         Constraint::Associated {
             container,
             name,
@@ -1331,17 +1345,24 @@ fn solve_conforms(
     ty: TyVar,
     protocol: kestrel_hecs::Entity,
     span: Span,
+    poison_ty_on_failure: bool,
 ) -> SolveResult {
     let resolved = ctx.resolve(ty);
     match ctx.slot(resolved) {
-        TySlot::Unresolved { .. } => {
-            SolveResult::Deferred(Constraint::Conforms { ty, protocol, span })
-        },
+        TySlot::Unresolved { .. } => SolveResult::Deferred(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure,
+        }),
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
         TySlot::Resolved(kind) => {
             if ctx.resolver.conforms_to(kind, protocol) {
                 SolveResult::Solved
             } else {
+                if poison_ty_on_failure {
+                    ctx.poison(ty);
+                }
                 SolveResult::Error(InferError::DoesNotConform { ty, protocol, span })
             }
         },

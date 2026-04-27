@@ -480,6 +480,11 @@ fn analyze_expr(
         | HirExpr::Def(..)
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {},
+
+        // Sugar wrapper: analyze the inner desugared expression transparently.
+        HirExpr::Sugar { inner, .. } => {
+            state = analyze_expr(mcx, *inner, state, is_assign_target, diags);
+        },
     }
 
     // Unified divergence: any Never-typed expr diverges, with one exception:

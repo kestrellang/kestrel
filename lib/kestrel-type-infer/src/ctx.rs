@@ -43,6 +43,15 @@ pub struct InferCtx<'a> {
     /// `Point(x: "a", y: "b")` — emit once, not per field).
     pub(crate) errored_coerce_exprs: HashSet<HirExprId>,
 
+    /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
+    /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
+    /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
+    /// emits a poison-on-failure `Conforms` so a non-conforming receiver
+    /// stops the cascade by poisoning downstream Member/ImplicitMember
+    /// errors inside the desugared subtree. Populated by Sugar's per-kind
+    /// gen helpers before they recurse into `inner`.
+    pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
+
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
@@ -161,6 +170,7 @@ impl<'a> InferCtx<'a> {
             errors: Vec::new(),
             error_details: Vec::new(),
             errored_coerce_exprs: HashSet::new(),
+            poison_protocol_call_recv_on_failure: HashSet::new(),
             resolutions: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),
@@ -458,8 +468,25 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints
-            .push(Constraint::Conforms { ty, protocol, span });
+        self.constraints.push(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+        });
+    }
+
+    /// Conforms variant that poisons `ty` on failure. Used by Sugar's
+    /// primary-constraint emission so cascading Member/ImplicitMember errors
+    /// inside the desugared subtree absorb silently when the receiver type
+    /// doesn't conform to the expected protocol.
+    pub fn conforms_poisoning(&mut self, ty: TyVar, protocol: Entity, span: Span) {
+        self.constraints.push(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: true,
+        });
     }
 
     pub fn associated(&mut self, container: TyVar, name: &str, result: TyVar, span: Span) {

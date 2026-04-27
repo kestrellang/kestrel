@@ -34,6 +34,11 @@ pub enum Constraint {
         ty: TyVar,
         protocol: Entity,
         span: Span,
+        /// When true, a failure poisons `ty` (sets it to `TyKind::Error`)
+        /// before emitting the diagnostic. Used by Sugar-emitted Conforms
+        /// constraints so cascading Member/ImplicitMember constraints inside
+        /// the desugared subtree see an Error receiver and absorb silently.
+        poison_ty_on_failure: bool,
     },
 
     /// `Container.Name → result` — associated type projection.

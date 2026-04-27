@@ -328,6 +328,9 @@ impl<'a> LowerCtx<'a> {
                 }
             },
             HirExpr::Closure { .. } => {}, // already handled
+            HirExpr::Sugar { inner, .. } => {
+                self.walk_expr_for_captures(*inner, entry_depth, seen, captures);
+            },
         }
     }
 }

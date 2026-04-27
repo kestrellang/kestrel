@@ -199,9 +199,16 @@ pub enum ExprVariant {
         value: Option<Box<ExprVariant>>,
     },
     /// Throw expression: throw expr
+    ///
+    /// `value` is `None` when the parser recovered from a missing expression
+    /// after `throw` (e.g. `throw\n}` mid-edit). The CST emits an `ExprThrow`
+    /// node with no expression child; the ast-builder turns the absent child
+    /// into `AstExpr::Error`, and a parse-level diagnostic ("expected
+    /// expression after `throw`") is emitted from `throw_parser`'s
+    /// `.validate`.
     Throw {
         throw_span: Span,
-        value: Box<ExprVariant>,
+        value: Option<Box<ExprVariant>>,
     },
     /// Try expression: try expr
     Try {

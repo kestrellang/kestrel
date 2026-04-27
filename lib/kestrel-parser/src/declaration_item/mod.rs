@@ -294,14 +294,12 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
             emit_type_alias_declaration(sink, data);
         },
         DeclarationItemData::Error(span) => {
-            // The span came from `to_kestrel_span`, which defaults file_id to
-            // 0 because Chumsky spans don't carry file IDs. Rebuild the span
-            // with the sink's file_id so diagnostics point at the real file.
+            // Chumsky's primary parse error already explains *what* the token
+            // was (e.g. "expected 'module', 'import', ..., found 'throw'");
+            // the recovery just wraps the skipped range as an `Error` node so
+            // the tree round-trips and downstream consumers can see the gap.
+            // Mirrors `block_item_recovery`'s no-extra-diagnostic behaviour.
             let span = Span::new(sink.file_id(), span.start..span.end);
-            sink.error_at_span(
-                "expected a declaration; skipped to the next declaration starter".to_string(),
-                span.clone(),
-            );
             sink.start_node(SyntaxKind::Error);
             sink.add_token(SyntaxKind::Error, span);
             sink.finish_node();

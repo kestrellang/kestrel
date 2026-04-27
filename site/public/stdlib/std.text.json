@@ -317,6 +317,31 @@
       ]
     },
     {
+      "kind": "protocol",
+      "name": "BytesSubstringIndex",
+      "anchor": "protocol-BytesSubstringIndex",
+      "signature": "public protocol BytesSubstringIndex",
+      "doc": "Range-only index for `BytesView.substring`. Conformed by every\nrange type so a single generic `substring` can dispatch over all of\nthem. Single-element indexes (`Int64`) deliberately don't conform —\n`substring` is range-flavored only.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "readBytesSubstring",
+              "anchor": "function-readBytesSubstring",
+              "signature": "func readBytesSubstring(from: BytesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "kind": "struct",
       "name": "BytesView",
       "anchor": "struct-BytesView",
@@ -334,7 +359,7 @@
               "name": "Checked Index",
               "anchor": "subscript-Checked-Index",
               "signature": "public subscript[I](checked: I) -> I.BytesYield? { get }",
-              "doc": "Reads at `index`, returning `.None` on out-of-bounds (or invalid\nUTF-8 boundary for range indexes).",
+              "doc": "Reads at `index`, returning `.None` on out-of-bounds.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -342,7 +367,7 @@
               "name": "Clamping",
               "anchor": "subscript-Clamping",
               "signature": "public subscript[I](clamped: I) -> I.BytesClampedYield { get }",
-              "doc": "Reads at `index` with bounds saturated to `[0, count)`. Single-\nbyte indexes yield `UInt8?` (`None` on empty view); range indexes\nyield `String` (always valid, possibly empty).",
+              "doc": "Reads at `index` with bounds saturated to `[0, count)`. Single-\nbyte indexes yield `UInt8?` (`None` on empty view); range indexes\nyield `BytesView` (always valid, possibly empty).",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -355,10 +380,10 @@
             },
             {
               "kind": "subscript",
-              "name": "Indexed Byte / Substring",
-              "anchor": "subscript-Indexed-Byte---Substring",
+              "name": "Indexed Byte / Sub-view",
+              "anchor": "subscript-Indexed-Byte---Sub-view",
               "signature": "public subscript[I](I) -> I.BytesYield { get }",
-              "doc": "Reads a single byte (`UInt8`) for `Int64` indexes, or a substring\n(`String`) for `Range[Int64]` / `ClosedRange[Int64]`. Panics on\nout-of-bounds or UTF-8 boundary violations for ranges. Use\n`(checked:)` for an `Optional` instead of a panic.",
+              "doc": "Reads a single byte (`UInt8`) for `Int64` indexes, or a zero-copy\nsub-view (`BytesView`) for `Range[Int64]` / `ClosedRange[Int64]`.\nPanics on out-of-bounds. Range slicing does not validate UTF-8\nboundaries — call `.toString()` on the sub-view if you need an\nowned `String` (which validates).",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -366,7 +391,7 @@
               "name": "Unchecked Index",
               "anchor": "subscript-Unchecked-Index",
               "signature": "public subscript[I](unchecked: I) -> I.BytesYield { get }",
-              "doc": "Reads at `index` with no bounds check.\n\n# Safety\n\nCaller must guarantee `0 <= index < count`. For ranges, both\nendpoints must be valid UTF-8 boundaries; otherwise the resulting\nstring contains malformed UTF-8.",
+              "doc": "Reads at `index` with no bounds check.\n\n# Safety\n\nCaller must guarantee `0 <= index < count`. For ranges, the\nendpoints must be in `0..=count`; otherwise the resulting\nsub-view aliases out-of-bounds memory.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -391,6 +416,22 @@
               "anchor": "function-isEmpty",
               "signature": "public func isEmpty() -> Bool",
               "doc": "Returns true if the view spans zero bytes.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring[I](I) -> String where I: BytesSubstringIndex",
+              "doc": "Convenience: dispatches to a `BytesSubstringIndex` to produce\nan owned `String` covering the requested byte range. Equivalent\nto `self(range).toString()` for both `Range[Int64]` and\n`ClosedRange[Int64]`.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toString",
+              "anchor": "function-toString",
+              "signature": "public func toString() -> String",
+              "doc": "Materializes the view as an owned `String`. Copies all bytes\ninto a fresh buffer; the result is independent of the source.\nBytes are copied verbatim — no UTF-8 validation is performed.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -832,11 +873,36 @@
       ]
     },
     {
+      "kind": "protocol",
+      "name": "CharsSubstringIndex",
+      "anchor": "protocol-CharsSubstringIndex",
+      "signature": "public protocol CharsSubstringIndex",
+      "doc": "Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "readCharsSubstring",
+              "anchor": "function-readCharsSubstring",
+              "signature": "func readCharsSubstring(from: CharsView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "kind": "struct",
       "name": "CharsView",
       "anchor": "struct-CharsView",
       "signature": "public struct CharsView { /* private fields */ }",
-      "doc": "A view over the Unicode code points in a `String`.\n\nReturned by `String.chars`. Iteration is O(1) per code point but\n`count()` is O(n) because UTF-8 is variable-width. Likewise,\nrange subscripts on this view are O(n) — to index in O(1), use\n`BytesView` and convert byte offsets back yourself.\n\n# Examples\n\n```\nlet s = \"héllo\";\ns.chars.count;                  // 5 (code points)\ns.bytes.count;                  // 6 (bytes — 'é' is 2 bytes)\ns.chars(0..<4);                 // \"héll\"\n```\n\n# Representation\n\nA `(ptr, length)` pair, plus the on-demand UTF-8 decoder.\n\n# Memory Model\n\nBorrows the source string's buffer. Invalidated by any mutation\nthat reallocates the storage.",
+      "doc": "A view over the Unicode code points in a `String`.\n\nReturned by `String.chars`. Iteration is O(1) per code point but\n`count()` is O(n) because UTF-8 is variable-width. Range subscripts\nare O(n) (the segment-walk dominates) but yield a zero-copy\n`CharsView` sub-view — call `.toString()` to materialize an owned\n`String`. To index in O(1), use `BytesView` and convert byte offsets\nback yourself.\n\n# Examples\n\n```\nlet s = \"héllo\";\ns.chars.count;                       // 5 (code points)\ns.bytes.count;                       // 6 (bytes — 'é' is 2 bytes)\ns.chars(0..<4).toString();           // \"héll\"\ns.chars.substring(0..<4);            // \"héll\"\n```\n\n# Representation\n\nA `(ptr, length)` pair, plus the on-demand UTF-8 decoder.\n\n# Memory Model\n\nBorrows the source string's buffer. Invalidated by any mutation\nthat reallocates the storage.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -857,7 +923,7 @@
               "name": "Clamping",
               "anchor": "subscript-Clamping",
               "signature": "public subscript[I](clamped: I) -> I.CharsClampedYield { get }",
-              "doc": "Reads at `index` with bounds saturated to `[0, count)`. Single-\nchar indexes yield `Char?` (`None` on empty view); range indexes\nyield `String` (always valid, possibly empty).",
+              "doc": "Reads at `index` with bounds saturated to `[0, count)`. Single-\nchar indexes yield `Char?` (`None` on empty view); range indexes\nyield `CharsView` (always valid, possibly empty).",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -870,10 +936,10 @@
             },
             {
               "kind": "subscript",
-              "name": "Indexed Char / Substring",
-              "anchor": "subscript-Indexed-Char---Substring",
+              "name": "Indexed Char / Sub-view",
+              "anchor": "subscript-Indexed-Char---Sub-view",
               "signature": "public subscript[I](I) -> I.CharsYield { get }",
-              "doc": "Reads a single code point (`Char`) for `Int64` indexes, or a\nsubstring (`String`) for `Range[Int64]` / `ClosedRange[Int64]`.\nAll access is O(n) because UTF-8 is variable-width. Panics on\nout-of-bounds.",
+              "doc": "Reads a single code point (`Char`) for `Int64` indexes, or a\nzero-copy `CharsView` sub-view for `Range[Int64]` /\n`ClosedRange[Int64]`. All access is O(n) because UTF-8 is\nvariable-width. Panics on out-of-bounds.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -882,6 +948,22 @@
               "anchor": "field-count",
               "signature": "public var count: Int64 { get }",
               "doc": "Number of code points. **O(n)** — walks the buffer counting\nUTF-8 leading bytes (those whose top two bits are not `10`). For\nASCII strings this equals `byteCount`. Cache the result if you\nneed it more than once; each access re-walks the string.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring[I](I) -> String where I: CharsSubstringIndex",
+              "doc": "Convenience: dispatches to a `CharsSubstringIndex` to produce\nan owned `String` covering the requested code-point range.\nEquivalent to `self(range).toString()` for both `Range[Int64]`\nand `ClosedRange[Int64]`.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toString",
+              "anchor": "function-toString",
+              "signature": "public func toString() -> String",
+              "doc": "Materializes the view as an owned `String`. O(n) — copies bytes.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1486,6 +1568,31 @@
       ]
     },
     {
+      "kind": "protocol",
+      "name": "GraphemesSubstringIndex",
+      "anchor": "protocol-GraphemesSubstringIndex",
+      "signature": "public protocol GraphemesSubstringIndex",
+      "doc": "Range-only index for `GraphemesView.substring`. See `BytesSubstringIndex`.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "readGraphemesSubstring",
+              "anchor": "function-readGraphemesSubstring",
+              "signature": "func readGraphemesSubstring(from: GraphemesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "kind": "struct",
       "name": "GraphemesView",
       "anchor": "struct-GraphemesView",
@@ -1511,7 +1618,7 @@
               "name": "Clamping",
               "anchor": "subscript-Clamping",
               "signature": "public subscript[I](clamped: I) -> I.GraphemesClampedYield { get }",
-              "doc": "Reads at `index` saturated to `[0, count)`. Yields `Grapheme?`\n(`.None` only when the view is empty).",
+              "doc": "Reads at `index` saturated to `[0, count)`. Single-grapheme\nindexes yield `Grapheme?` (`.None` only when the view is empty);\nrange indexes yield `GraphemesView` (always valid, possibly empty).",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1524,10 +1631,10 @@
             },
             {
               "kind": "subscript",
-              "name": "Indexed Grapheme / Substring",
-              "anchor": "subscript-Indexed-Grapheme---Substring",
+              "name": "Indexed Grapheme / Sub-view",
+              "anchor": "subscript-Indexed-Grapheme---Sub-view",
               "signature": "public subscript[I](I) -> I.GraphemesYield { get }",
-              "doc": "`Int64` reads a single cluster; `Range[Int64]` /\n`ClosedRange[Int64]` read a substring across cluster\nboundaries. **O(n)** — walks the segmenter from the start.\nPanics on out-of-bounds.",
+              "doc": "`Int64` reads a single cluster; `Range[Int64]` /\n`ClosedRange[Int64]` yield a zero-copy `GraphemesView` sub-view\ncovering those clusters. **O(n)** — walks the segmenter from the\nstart. Panics on out-of-bounds.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1536,6 +1643,22 @@
               "anchor": "field-count",
               "signature": "public var count: Int64 { get }",
               "doc": "Number of grapheme clusters. **O(n)** — walks the entire string\nthrough the UAX #29 segmenter. Cache the result if you need it\nmore than once; each access re-walks the string.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring[I](I) -> String where I: GraphemesSubstringIndex",
+              "doc": "Convenience: dispatches to a `GraphemesSubstringIndex` to\nproduce an owned `String` covering the requested cluster range.\nEquivalent to `self(range).toString()` for both `Range[Int64]`\nand `ClosedRange[Int64]`.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toString",
+              "anchor": "function-toString",
+              "signature": "public func toString() -> String",
+              "doc": "Materializes the view as an owned `String`. O(n) — copies bytes.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1622,11 +1745,36 @@
       ]
     },
     {
+      "kind": "protocol",
+      "name": "LinesSubstringIndex",
+      "anchor": "protocol-LinesSubstringIndex",
+      "signature": "public protocol LinesSubstringIndex",
+      "doc": "Range-only index for `LinesView.substring`. See `BytesSubstringIndex`.",
+      "source_path": "lang/std/text/views.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "function",
+              "name": "readLinesSubstring",
+              "anchor": "function-readLinesSubstring",
+              "signature": "func readLinesSubstring(from: LinesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "kind": "struct",
       "name": "LinesView",
       "anchor": "struct-LinesView",
       "signature": "public struct LinesView { /* private fields */ }",
-      "doc": "A view over the lines of a `String`, split on `\\n`, `\\r\\n`, or `\\r`.\n\nReturned by `String.lines`. The yielded strings do not include\nthe terminator; a trailing line without a terminator is still\nemitted. To re-join with a specific separator, collect the\niterator output and use `String.append`.\n\n# Examples\n\n```\nvar lines = Array[String]();\nfor line in \"a\\nb\\nc\".lines {\n    lines.append(line);\n}\nlines.count;  // 3\n```\n\n# Representation\n\nA `(ptr, length)` pair pointing into the source string.",
+      "doc": "A view over the lines of a `String`, split on `\\n`, `\\r\\n`, or `\\r`.\n\nReturned by `String.lines`. The yielded strings (from iteration or\nsingle-line subscripting) do not include the terminator; a trailing\nline without a terminator is still emitted. Range subscripts\n(`lines(0..<n)`) yield a zero-copy `LinesView` sub-view whose\nunderlying byte range still includes the original terminators —\niterating the sub-view round-trips the same line strings, and\n`.toString()` reconstructs the original substring exactly.\n\n# Examples\n\n```\nvar lines = Array[String]();\nfor line in \"a\\nb\\nc\".lines {\n    lines.append(line);\n}\nlines.count;  // 3\n\n// Range subscript preserves terminators in the underlying bytes:\n\"a\\r\\nb\\nc\".lines(0..<2).toString();  // \"a\\r\\nb\\n\"\n```\n\n# Representation\n\nA `(ptr, length)` pair pointing into the source string.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1647,7 +1795,7 @@
               "name": "Clamping",
               "anchor": "subscript-Clamping",
               "signature": "public subscript[I](clamped: I) -> I.LinesClampedYield { get }",
-              "doc": "Reads at `index` saturated to `[0, count)`. Yields `String?`\n(`.None` only when the view holds no lines).",
+              "doc": "Reads at `index` saturated to `[0, count)`. Single-line indexes\nyield `String?` (`.None` only when the view holds no lines);\nrange indexes yield `LinesView` (always valid, possibly empty).",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1660,10 +1808,10 @@
             },
             {
               "kind": "subscript",
-              "name": "Indexed Line",
-              "anchor": "subscript-Indexed-Line",
+              "name": "Indexed Line / Sub-view",
+              "anchor": "subscript-Indexed-Line---Sub-view",
               "signature": "public subscript[I](I) -> I.LinesYield { get }",
-              "doc": "Reads the line at index `index`. **O(n)** — walks the buffer\nfrom the start. Panics on out-of-bounds.",
+              "doc": "`Int64` reads a single line as a `String` (without terminator).\n`Range[Int64]` / `ClosedRange[Int64]` yield a zero-copy\n`LinesView` sub-view covering those lines (terminators preserved\nin the underlying bytes). **O(n)** — walks the buffer from the\nstart. Panics on out-of-bounds.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1672,6 +1820,22 @@
               "anchor": "field-count",
               "signature": "public var count: Int64 { get }",
               "doc": "Number of lines in the view. **O(n)** — walks the buffer\nscanning for terminators. Cache the result if you need it more\nthan once.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring[I](I) -> String where I: LinesSubstringIndex",
+              "doc": "Convenience: dispatches to a `LinesSubstringIndex` to produce\nan owned `String` covering the requested line range, with their\noriginal terminators preserved. Equivalent to\n`self(range).toString()` for both `Range[Int64]` and\n`ClosedRange[Int64]`.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "toString",
+              "anchor": "function-toString",
+              "signature": "public func toString() -> String",
+              "doc": "Materializes the view as an owned `String` covering the entire\nunderlying buffer (terminators included). O(n) — copies bytes.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -2199,6 +2363,14 @@
               "anchor": "function-starts",
               "signature": "public func starts(with: String) -> Bool",
               "doc": "Returns true if the string begins with `prefix`. O(prefix length).\n\n# Examples\n\n```\n\"hello\".starts(with: \"he\");   // true\n\"hello\".starts(with: \"lo\");   // false\n```",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "substring",
+              "anchor": "function-substring",
+              "signature": "public func substring[I](I) -> String where I: CharsSubstringIndex",
+              "doc": "Returns the substring covering code points in `range`. Defaults\nto **chars** semantics — use `self.graphemes.substring(range)`\nfor grapheme-cluster slicing or `self.bytes.substring(range)`\n(or `substringBytes`) for raw byte ranges. Accepts any range\ntype that conforms to `std.text.CharsSubstringIndex`\n(`Range[Int64]` and `ClosedRange[Int64]` today).\n\nEquivalent to `self.chars.substring(range)`. Panics on\nout-of-bounds.\n\n# Examples\n\n```\n\"héllo\".substring(0..<4);   // \"héll\"\n\"héllo\".substring(0..=3);   // \"héll\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {

@@ -13,6 +13,24 @@ use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 
+/// True if `expr` is syntactically shaped like a place expression (an
+/// expression that could appear on the LHS of `=`/`+=`). Conservative —
+/// rejects literals, calls, blocks, control-flow expressions, etc. and
+/// accepts paths (which may resolve to bindings or fields), member access,
+/// tuple indexing, and parenthesized place expressions.
+///
+/// This is a syntactic check used by `desugar_compound_assign`. Mutability
+/// of the resolved binding is enforced later by the assignment analyzer.
+fn ast_is_place_expr(body: &AstBody, expr: ExprId) -> bool {
+    match &body.exprs[expr] {
+        AstExpr::Path { .. }
+        | AstExpr::MemberAccess { .. }
+        | AstExpr::TupleIndex { .. } => true,
+        AstExpr::Paren { inner, .. } => ast_is_place_expr(body, *inner),
+        _ => false,
+    }
+}
+
 impl LowerCtx<'_> {
     // ===== Binary operators =====
 
@@ -154,7 +172,15 @@ impl LowerCtx<'_> {
 
     // ===== Compound assignment =====
 
-    /// Desugar compound assignment (+=, -=, etc.) to a ProtocolCall.
+    /// Desugar compound assignment (+=, -=, etc.) to a ProtocolCall, wrapped
+    /// in a `SugarKind::CompoundAssign` Sugar node.
+    ///
+    /// Compound-assign requires the LHS to be a place expression. Inference
+    /// can't detect this — `5.addAssign(1)` is type-correct on its own — so
+    /// we check the AST shape here and emit `HirExpr::Error` for the inner
+    /// when the LHS isn't assignable. The Sugar wrapper is emitted in both
+    /// the success and failure paths so downstream consumers see a uniform
+    /// shape.
     pub(crate) fn desugar_compound_assign(
         &mut self,
         body: &AstBody,
@@ -163,12 +189,30 @@ impl LowerCtx<'_> {
         rhs: ExprId,
         span: &Span,
     ) -> HirExprId {
+        // AST-level place check: compound-assign requires a settable LHS.
+        // Detected shapes are syntactic; deeper validity (mutability of the
+        // resolved binding) is checked later by the assignment analyzer once
+        // the desugared `addAssign` is treated as a write to its receiver.
+        if !ast_is_place_expr(body, lhs) {
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_message("left-hand side of compound assignment is not assignable")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+            );
+            let err = self.alloc_expr(HirExpr::Error { span: span.clone() });
+            return self.alloc_expr(HirExpr::Sugar {
+                kind: SugarKind::CompoundAssign,
+                inner: err,
+                span: span.clone(),
+            });
+        }
+
         let lowered_lhs = self.lower_expr(body, lhs);
         let lowered_rhs = self.lower_expr(body, rhs);
 
         if let Some((proto, method, label)) = lookup_compound_assign_op(op) {
             if let Some(protocol) = self.resolve_builtin(proto) {
-                return self.alloc_expr(HirExpr::ProtocolCall {
+                let pcall = self.alloc_expr(HirExpr::ProtocolCall {
                     receiver: lowered_lhs,
                     protocol,
                     method: HirName::name(method),
@@ -177,6 +221,11 @@ impl LowerCtx<'_> {
                         label: label.map(|l| l.to_string()),
                         value: lowered_rhs,
                     }],
+                    span: span.clone(),
+                });
+                return self.alloc_expr(HirExpr::Sugar {
+                    kind: SugarKind::CompoundAssign,
+                    inner: pcall,
                     span: span.clone(),
                 });
             }
@@ -191,7 +240,12 @@ impl LowerCtx<'_> {
                 .with_labels(vec![Label::primary(span.file_id, span.range())])
                 .with_notes(vec!["is the standard library imported?".to_string()]),
         );
-        self.alloc_expr(HirExpr::Error { span: span.clone() })
+        let err = self.alloc_expr(HirExpr::Error { span: span.clone() });
+        self.alloc_expr(HirExpr::Sugar {
+            kind: SugarKind::CompoundAssign,
+            inner: err,
+            span: span.clone(),
+        })
     }
 
     // ===== While → Loop =====
@@ -346,25 +400,33 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         let lowered_iterable = self.lower_expr(body, iterable);
 
-        // $iter = iterable.iter() via Iterable protocol
-        let iterate_call = if let Some(protocol) = self.resolve_builtin(Builtin::IterableProtocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                receiver: lowered_iterable,
-                protocol,
-                method: HirName::name("iter"),
-                type_args: None,
-                args: Vec::new(),
+        // $iter = iterable.iter() via Iterable protocol.
+        // If the IterableProtocol builtin isn't available (e.g. tests with
+        // `stdlib: false`), `for ... in` cannot work — emit the user-language
+        // diagnostic mentioning the protocol name and short-circuit to a
+        // Sugar-wrapped Error so downstream inference absorbs silently.
+        let Some(iter_protocol) = self.resolve_builtin(Builtin::IterableProtocol) else {
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_message("`for` loop requires the `Iterable` protocol")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec!["is the standard library imported?".to_string()]),
+            );
+            let err = self.alloc_expr(HirExpr::Error { span: span.clone() });
+            return self.alloc_expr(HirExpr::Sugar {
+                kind: SugarKind::ForLoop,
+                inner: err,
                 span: span.clone(),
-            })
-        } else {
-            self.alloc_expr(HirExpr::MethodCall {
-                receiver: lowered_iterable,
-                method: HirName::name("iter"),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            })
+            });
         };
+        let iterate_call = self.alloc_expr(HirExpr::ProtocolCall {
+            receiver: lowered_iterable,
+            protocol: iter_protocol,
+            method: HirName::name("iter"),
+            type_args: None,
+            args: Vec::new(),
+            span: span.clone(),
+        });
 
         let iter_local = self.define_local("$iter", true, span.clone());
         let iter_let = self.alloc_stmt(HirStmt::Let {
@@ -465,11 +527,20 @@ impl LowerCtx<'_> {
         });
 
         // Wrap in a block: { let $iter = iterable.iter(); loop { ... } }
-        self.alloc_expr(HirExpr::Block {
+        let block_expr = self.alloc_expr(HirExpr::Block {
             body: HirBlock {
                 stmts: vec![iter_let],
                 tail_expr: Some(loop_expr),
             },
+            span: span.clone(),
+        });
+
+        // Mark the desugared subtree with a Sugar wrapper so post-typing
+        // analyzers and inference's primary-constraint emission can recognize
+        // the user-facing `for` construct without re-deriving from protocol id.
+        self.alloc_expr(HirExpr::Sugar {
+            kind: SugarKind::ForLoop,
+            inner: block_expr,
             span: span.clone(),
         })
     }
@@ -504,28 +575,36 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         let lowered_operand = self.lower_expr(body, operand);
 
-        // Try protocol-based desugaring: operand.tryExtract()
-        let scrutinee = if let Some(protocol) = self.resolve_builtin(Builtin::TryableProtocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                receiver: lowered_operand,
-                protocol,
-                method: HirName::name("tryExtract"),
-                type_args: None,
-                args: vec![],
+        // Try requires the Tryable protocol. Without it (e.g. tests with
+        // `stdlib: false`) the desugaring would produce a malformed match
+        // whose .Ok/.Err arms cascade into "implicit member not found"
+        // errors. Emit the user-language Tryable diagnostic directly and
+        // return Sugar wrapping HirExpr::Error so downstream absorbs.
+        let Some(try_protocol) = self.resolve_builtin(Builtin::TryableProtocol) else {
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_message("`try` expression requires the `Tryable` protocol")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec!["is the standard library imported?".to_string()]),
+            );
+            let err = self.alloc_expr(HirExpr::Error { span: span.clone() });
+            return self.alloc_expr(HirExpr::Sugar {
+                kind: SugarKind::Try,
+                inner: err,
                 span: span.clone(),
-            })
-        } else {
-            // Fallback: match directly on operand (assumes .Ok/.Err)
-            lowered_operand
+            });
         };
+        let scrutinee = self.alloc_expr(HirExpr::ProtocolCall {
+            receiver: lowered_operand,
+            protocol: try_protocol,
+            method: HirName::name("tryExtract"),
+            type_args: None,
+            args: vec![],
+            span: span.clone(),
+        });
 
-        // Determine match arm variant names based on whether we have the protocol
-        let has_tryable = self.resolve_builtin(Builtin::TryableProtocol).is_some();
-        let (success_name, failure_name) = if has_tryable {
-            ("Continue", "Break")
-        } else {
-            ("Ok", "Err")
-        };
+        // Tryable is available — arms unwrap ControlFlow.
+        let (success_name, failure_name) = ("Continue", "Break");
 
         // .Continue($value) => $value  (or .Ok($value) => $value)
         let value_local = self.define_local("$try_value", false, span.clone());
@@ -560,34 +639,21 @@ impl LowerCtx<'_> {
         });
         let early_ref = self.alloc_expr(HirExpr::Local(early_local, span.clone()));
 
-        // Build the early return value
-        let return_value = if has_tryable {
-            // .fromResidual($early) — resolved against the function's return type
-            self.alloc_expr(HirExpr::ImplicitMember {
-                name: HirName::name("fromResidual"),
-                args: Some(vec![HirCallArg {
-                    label: Some("residual".to_string()),
-                    value: early_ref,
-                }]),
-                span: span.clone(),
-            })
-        } else {
-            // .Err($early) fallback
-            self.alloc_expr(HirExpr::ImplicitMember {
-                name: HirName::name("Err"),
-                args: Some(vec![HirCallArg {
-                    label: None,
-                    value: early_ref,
-                }]),
-                span: span.clone(),
-            })
-        };
+        // .fromResidual($early) — resolved against the function's return type
+        let return_value = self.alloc_expr(HirExpr::ImplicitMember {
+            name: HirName::name("fromResidual"),
+            args: Some(vec![HirCallArg {
+                label: Some("residual".to_string()),
+                value: early_ref,
+            }]),
+            span: span.clone(),
+        });
         let return_early = self.alloc_expr(HirExpr::Return {
             value: Some(return_value),
             span: span.clone(),
         });
 
-        self.alloc_expr(HirExpr::Match {
+        let match_expr = self.alloc_expr(HirExpr::Match {
             scrutinee,
             arms: vec![
                 HirMatchArm {
@@ -603,10 +669,26 @@ impl LowerCtx<'_> {
             ],
             source: MatchSource::TryOp,
             span: span.clone(),
+        });
+
+        // Sugar wrapper marks the user-facing `try` so cascade suppression
+        // can fire a single Tryable-conformance error in place of the
+        // synthesized `tryExtract` Member + `.Continue`/`.fromResidual`
+        // ImplicitMember failures inside `inner`.
+        self.alloc_expr(HirExpr::Sugar {
+            kind: SugarKind::Try,
+            inner: match_expr,
+            span: span.clone(),
         })
     }
 
     /// Desugar `throw value` → `return .Err(value)`
+    ///
+    /// If `value` already lowered to `HirExpr::Error` (e.g. parser recovered
+    /// from `throw\n}`), short-circuit to `HirExpr::Error` so inference
+    /// doesn't cascade — without this the `.Err` member resolution fires
+    /// and reports a confusing follow-up like "implicit member '.Err' not
+    /// found on Error".
     pub(crate) fn desugar_throw(
         &mut self,
         body: &AstBody,
@@ -614,6 +696,10 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> HirExprId {
         let lowered_value = self.lower_expr(body, value);
+
+        if matches!(&self.exprs[lowered_value], HirExpr::Error { .. }) {
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        }
 
         let err_wrap = self.alloc_expr(HirExpr::ImplicitMember {
             name: HirName::name("Err"),

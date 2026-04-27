@@ -8,5 +8,5 @@ func getValue() -> lang.i64 {
 }
 
 func test() {
-    let x = try getValue(); // ERROR: tryExtract
+    let x = try getValue(); // ERROR: Tryable
 }
