@@ -16,6 +16,7 @@ lang/flock/flock
 lang/jessup/jessup
 examples/breakout/breakout
 examples/counter/counter
+examples/life/life
 examples/pong/pong
 examples/sdl_pong/pong
 examples/sdl_pong/sdl_pong
