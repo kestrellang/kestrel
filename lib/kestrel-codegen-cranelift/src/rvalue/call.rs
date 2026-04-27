@@ -591,13 +591,20 @@ fn is_aggregate_for_call(ty: &MirTy) -> bool {
 
 /// Compile a call argument for an `@extern(.C)` callee.
 ///
-/// `create_signature` flattens small Named wrappers (Int32, UInt32, Bool, …)
-/// to their scalar Cranelift type for extern signatures, so the arg must be
-/// delivered as the inner primitive — not a pointer to the wrapper. Ref/Copy
-/// passing modes are ignored here; Kestrel's move/borrow semantics don't cross
-/// into C ABI. We compile the value (which yields a pointer for aggregate
-/// places) and, if the expected scalar width differs from the pointer width,
-/// load the inner scalar from that pointer.
+/// `create_signature` flattens small Named wrappers (Int32, UInt32, Bool,
+/// CString, Pointer[T], …) to their scalar Cranelift type for extern
+/// signatures, so the arg must be delivered as the inner primitive — not a
+/// pointer to the wrapper. Ref/Copy passing modes are ignored here; Kestrel's
+/// move/borrow semantics don't cross into C ABI.
+///
+/// `compile_value` yields a pointer-to-stack-slot for any Named place (all
+/// Named types are aggregate; `compile_place_read` returns the local's
+/// address). For scalar-flattened wrappers we must always load through that
+/// pointer to recover the inner value. The previous heuristic — "load only
+/// when the scalar width differs from the SSA pointer width" — silently
+/// failed for 8-byte wrappers (CString, Int64, UInt64, Pointer[T]) because
+/// their flattened scalar is also i64, so the load was skipped and the
+/// callee received the address of the wrapper instead of its contents.
 fn compile_extern_call_arg(
     ctx: &mut CodegenContext,
     state: &FunctionState,
@@ -614,12 +621,13 @@ fn compile_extern_call_arg(
     if !matches!(expected, MirTy::Named { .. }) {
         return Ok(val);
     }
-    let expected_cl = types::translate_type_with_layout(expected, ctx.target, &mut ctx.layouts);
-    let actual_cl = builder.func.dfg.value_type(val);
-    if actual_cl == expected_cl {
+    // Wrappers larger than a register stay pointer-passed; the C side reads
+    // them as a struct address, not a scalar.
+    let layout = ctx.layouts.layout_of(expected);
+    if layout.size > 8 {
         return Ok(val);
     }
-    // `val` is a pointer to the wrapper aggregate; load the inner scalar.
+    let expected_cl = types::translate_type_with_layout(expected, ctx.target, &mut ctx.layouts);
     Ok(builder
         .ins()
         .load(expected_cl, MemFlags::new(), val, Offset32::new(0)))
