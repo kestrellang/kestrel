@@ -6,10 +6,11 @@
 // step so reads always see the previous generation.
 //
 // Controls:
+//   1..5   pick a pattern: glider, blinker, LWSS, pulsar, Gosper gun
+//   click  stamp the selected pattern centered on the clicked cell
 //   Space  pause / resume
 //   R      reseed with random noise
 //   C      clear the grid (auto-pauses so you can plant patterns)
-//   G      drop a glider near the top-left corner
 //   Esc    quit
 
 module Life
@@ -23,7 +24,7 @@ struct Config {
     static var stepDelayMs: Int64 { 80 }
 }
 
-struct Grid : not Copyable {
+struct Grid {
     var cells: Array[Bool]
     var next: Array[Bool]
 
@@ -100,8 +101,10 @@ struct Grid : not Copyable {
     }
 
     // ~30% density gives a busy field that takes a while to settle but
-    // doesn't immediately collapse to overpopulation.
-    mutating func randomize(mutating using rng: Lcg64) {
+    // doesn't immediately collapse to overpopulation. The rng is owned
+    // locally so we don't depend on `mutating`-mode argument plumbing.
+    mutating func randomize(seed seed: UInt64) {
+        var rng = Lcg64(seed: seed);
         var i: Int64 = 0;
         while i < self.cells.count {
             self.cells(i) = rng.nextInt(below: 10) < 3;
@@ -109,13 +112,159 @@ struct Grid : not Copyable {
         }
     }
 
-    // Classic 5-cell glider, travels south-east one step per 4 generations.
-    mutating func seedGlider(x x: Int64, y y: Int64) {
+    // === Patterns ===
+    //
+    // Each `stamp*` method draws the pattern centred at `(cx, cy)`. Bounds
+    // wrap toroidally via `setCell`, so it doesn't matter if the click was
+    // close to the edge.
+
+    mutating func stampGlider(centerX cx: Int64, centerY cy: Int64) {
+        let x = cx - 1; let y = cy - 1;
         self.setCell(x: x + 1, y: y + 0, alive: true);
         self.setCell(x: x + 2, y: y + 1, alive: true);
         self.setCell(x: x + 0, y: y + 2, alive: true);
         self.setCell(x: x + 1, y: y + 2, alive: true);
         self.setCell(x: x + 2, y: y + 2, alive: true);
+    }
+
+    mutating func stampBlinker(centerX cx: Int64, centerY cy: Int64) {
+        // 3x1 horizontal — period-2 oscillator.
+        self.setCell(x: cx - 1, y: cy, alive: true);
+        self.setCell(x: cx,     y: cy, alive: true);
+        self.setCell(x: cx + 1, y: cy, alive: true);
+    }
+
+    mutating func stampLwss(centerX cx: Int64, centerY cy: Int64) {
+        // Light-Weight Spaceship, 5x4. Travels left-to-right.
+        let x = cx - 2; let y = cy - 2;
+        self.setCell(x: x + 1, y: y + 0, alive: true);
+        self.setCell(x: x + 4, y: y + 0, alive: true);
+        self.setCell(x: x + 0, y: y + 1, alive: true);
+        self.setCell(x: x + 0, y: y + 2, alive: true);
+        self.setCell(x: x + 4, y: y + 2, alive: true);
+        self.setCell(x: x + 0, y: y + 3, alive: true);
+        self.setCell(x: x + 1, y: y + 3, alive: true);
+        self.setCell(x: x + 2, y: y + 3, alive: true);
+        self.setCell(x: x + 3, y: y + 3, alive: true);
+    }
+
+    mutating func stampPulsar(centerX cx: Int64, centerY cy: Int64) {
+        // 13x13 period-3 oscillator. Built from four mirrored arms; we
+        // unroll all 48 lit cells rather than trying to share code with
+        // arithmetic loops.
+        let x = cx - 6; let y = cy - 6;
+        // top horizontals
+        self.setCell(x: x + 2, y: y + 0, alive: true);
+        self.setCell(x: x + 3, y: y + 0, alive: true);
+        self.setCell(x: x + 4, y: y + 0, alive: true);
+        self.setCell(x: x + 8, y: y + 0, alive: true);
+        self.setCell(x: x + 9, y: y + 0, alive: true);
+        self.setCell(x: x + 10, y: y + 0, alive: true);
+        // upper sides
+        self.setCell(x: x + 0, y: y + 2, alive: true);
+        self.setCell(x: x + 5, y: y + 2, alive: true);
+        self.setCell(x: x + 7, y: y + 2, alive: true);
+        self.setCell(x: x + 12, y: y + 2, alive: true);
+        self.setCell(x: x + 0, y: y + 3, alive: true);
+        self.setCell(x: x + 5, y: y + 3, alive: true);
+        self.setCell(x: x + 7, y: y + 3, alive: true);
+        self.setCell(x: x + 12, y: y + 3, alive: true);
+        self.setCell(x: x + 0, y: y + 4, alive: true);
+        self.setCell(x: x + 5, y: y + 4, alive: true);
+        self.setCell(x: x + 7, y: y + 4, alive: true);
+        self.setCell(x: x + 12, y: y + 4, alive: true);
+        // middle horizontals
+        self.setCell(x: x + 2, y: y + 5, alive: true);
+        self.setCell(x: x + 3, y: y + 5, alive: true);
+        self.setCell(x: x + 4, y: y + 5, alive: true);
+        self.setCell(x: x + 8, y: y + 5, alive: true);
+        self.setCell(x: x + 9, y: y + 5, alive: true);
+        self.setCell(x: x + 10, y: y + 5, alive: true);
+        self.setCell(x: x + 2, y: y + 7, alive: true);
+        self.setCell(x: x + 3, y: y + 7, alive: true);
+        self.setCell(x: x + 4, y: y + 7, alive: true);
+        self.setCell(x: x + 8, y: y + 7, alive: true);
+        self.setCell(x: x + 9, y: y + 7, alive: true);
+        self.setCell(x: x + 10, y: y + 7, alive: true);
+        // lower sides
+        self.setCell(x: x + 0, y: y + 8, alive: true);
+        self.setCell(x: x + 5, y: y + 8, alive: true);
+        self.setCell(x: x + 7, y: y + 8, alive: true);
+        self.setCell(x: x + 12, y: y + 8, alive: true);
+        self.setCell(x: x + 0, y: y + 9, alive: true);
+        self.setCell(x: x + 5, y: y + 9, alive: true);
+        self.setCell(x: x + 7, y: y + 9, alive: true);
+        self.setCell(x: x + 12, y: y + 9, alive: true);
+        self.setCell(x: x + 0, y: y + 10, alive: true);
+        self.setCell(x: x + 5, y: y + 10, alive: true);
+        self.setCell(x: x + 7, y: y + 10, alive: true);
+        self.setCell(x: x + 12, y: y + 10, alive: true);
+        // bottom horizontals
+        self.setCell(x: x + 2, y: y + 12, alive: true);
+        self.setCell(x: x + 3, y: y + 12, alive: true);
+        self.setCell(x: x + 4, y: y + 12, alive: true);
+        self.setCell(x: x + 8, y: y + 12, alive: true);
+        self.setCell(x: x + 9, y: y + 12, alive: true);
+        self.setCell(x: x + 10, y: y + 12, alive: true);
+    }
+
+    mutating func stampGosperGun(centerX cx: Int64, centerY cy: Int64) {
+        // Gosper glider gun: 36x9. Emits a glider every 30 generations.
+        let x = cx - 18; let y = cy - 4;
+        // Left block
+        self.setCell(x: x + 0, y: y + 4, alive: true);
+        self.setCell(x: x + 1, y: y + 4, alive: true);
+        self.setCell(x: x + 0, y: y + 5, alive: true);
+        self.setCell(x: x + 1, y: y + 5, alive: true);
+        // Left arm
+        self.setCell(x: x + 10, y: y + 4, alive: true);
+        self.setCell(x: x + 10, y: y + 5, alive: true);
+        self.setCell(x: x + 10, y: y + 6, alive: true);
+        self.setCell(x: x + 11, y: y + 3, alive: true);
+        self.setCell(x: x + 11, y: y + 7, alive: true);
+        self.setCell(x: x + 12, y: y + 2, alive: true);
+        self.setCell(x: x + 12, y: y + 8, alive: true);
+        self.setCell(x: x + 13, y: y + 2, alive: true);
+        self.setCell(x: x + 13, y: y + 8, alive: true);
+        self.setCell(x: x + 14, y: y + 5, alive: true);
+        self.setCell(x: x + 15, y: y + 3, alive: true);
+        self.setCell(x: x + 15, y: y + 7, alive: true);
+        self.setCell(x: x + 16, y: y + 4, alive: true);
+        self.setCell(x: x + 16, y: y + 5, alive: true);
+        self.setCell(x: x + 16, y: y + 6, alive: true);
+        self.setCell(x: x + 17, y: y + 5, alive: true);
+        // Right arm
+        self.setCell(x: x + 20, y: y + 2, alive: true);
+        self.setCell(x: x + 20, y: y + 3, alive: true);
+        self.setCell(x: x + 20, y: y + 4, alive: true);
+        self.setCell(x: x + 21, y: y + 2, alive: true);
+        self.setCell(x: x + 21, y: y + 3, alive: true);
+        self.setCell(x: x + 21, y: y + 4, alive: true);
+        self.setCell(x: x + 22, y: y + 1, alive: true);
+        self.setCell(x: x + 22, y: y + 5, alive: true);
+        self.setCell(x: x + 24, y: y + 0, alive: true);
+        self.setCell(x: x + 24, y: y + 1, alive: true);
+        self.setCell(x: x + 24, y: y + 5, alive: true);
+        self.setCell(x: x + 24, y: y + 6, alive: true);
+        // Right block
+        self.setCell(x: x + 34, y: y + 2, alive: true);
+        self.setCell(x: x + 34, y: y + 3, alive: true);
+        self.setCell(x: x + 35, y: y + 2, alive: true);
+        self.setCell(x: x + 35, y: y + 3, alive: true);
+    }
+
+    mutating func stamp(kind kind: Int64, centerX cx: Int64, centerY cy: Int64) {
+        if kind == 0 {
+            self.stampGlider(centerX: cx, centerY: cy);
+        } else if kind == 1 {
+            self.stampBlinker(centerX: cx, centerY: cy);
+        } else if kind == 2 {
+            self.stampLwss(centerX: cx, centerY: cy);
+        } else if kind == 3 {
+            self.stampPulsar(centerX: cx, centerY: cy);
+        } else if kind == 4 {
+            self.stampGosperGun(centerX: cx, centerY: cy);
+        }
     }
 
     func render(renderer: Renderer) {
@@ -142,14 +291,32 @@ struct Grid : not Copyable {
     }
 }
 
+func patternName(kind kind: Int64) -> String {
+    if kind == 0 {
+        "GLIDER"
+    } else if kind == 1 {
+        "BLINKER"
+    } else if kind == 2 {
+        "LWSS"
+    } else if kind == 3 {
+        "PULSAR"
+    } else {
+        "GOSPER GUN"
+    }
+}
+
 func main() -> Int32 {
-    var app = SDLApp();
+    var app = SDLApp(title: "Game of Life");
     var grid = Grid();
-    var rng = Lcg64(seed: UInt64(intLiteral: 12648430));
     var paused = false;
     var running = true;
+    // 0..4 — see `patternName` for the labels.
+    var selectedPattern: Int64 = 0;
+    // Bumped each time we reseed so successive R-presses give a different
+    // pattern instead of replaying the same starting field.
+    var seedCounter: UInt64 = UInt64(intLiteral: 12648430);
 
-    grid.randomize(using: rng);
+    grid.randomize(seed: seedCounter);
 
     while running {
         while let .Some(event) = app.pollEvent() {
@@ -159,19 +326,29 @@ func main() -> Int32 {
                     match key {
                         .Space => { paused = not paused },
                         .R => {
-                            grid.randomize(using: rng);
+                            seedCounter = seedCounter + UInt64(intLiteral: 1);
+                            grid.randomize(seed: seedCounter);
                             paused = false;
                         },
                         .C => {
                             grid.clear();
                             paused = true;
                         },
-                        .G => { grid.seedGlider(x: 5, y: 5) },
+                        .Digit1 => { selectedPattern = 0 },
+                        .Digit2 => { selectedPattern = 1 },
+                        .Digit3 => { selectedPattern = 2 },
+                        .Digit4 => { selectedPattern = 3 },
+                        .Digit5 => { selectedPattern = 4 },
                         .Escape => { running = false },
                         _ => {}
                     }
                 },
-                .KeyUp(_) => {}
+                .KeyUp(_) => {},
+                .MouseDown(px, py) => {
+                    let gx = px / Config.cellSize;
+                    let gy = py / Config.cellSize;
+                    grid.stamp(kind: selectedPattern, centerX: gx, centerY: gy);
+                }
             }
         }
 
@@ -182,6 +359,8 @@ func main() -> Int32 {
         app.render { (renderer) in
             renderer.clear(Color.black());
             grid.render(renderer);
+            // HUD: current pattern selection in the top-left, scale 2.
+            renderer.drawText("PATTERN: " + patternName(kind: selectedPattern), 8, 8, 2);
         };
 
         app.delay(Milliseconds(Config.stepDelayMs));

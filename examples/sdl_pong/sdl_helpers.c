@@ -8,6 +8,16 @@ int32_t Kestrel_GetKeyScancode(SDL_Event* event) {
     if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) return event->key.keysym.scancode;
     return 0;
 }
+int32_t Kestrel_GetMouseX(SDL_Event* event) {
+    if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP) return event->button.x;
+    if (event->type == SDL_MOUSEMOTION) return event->motion.x;
+    return 0;
+}
+int32_t Kestrel_GetMouseY(SDL_Event* event) {
+    if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP) return event->button.y;
+    if (event->type == SDL_MOUSEMOTION) return event->motion.y;
+    return 0;
+}
 
 // Pointer helpers
 int32_t Kestrel_IsNull(void* ptr) { return ptr == NULL; }

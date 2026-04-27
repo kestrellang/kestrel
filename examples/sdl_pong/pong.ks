@@ -165,7 +165,7 @@ struct InputState {
 // --- Main Game ---
 
 func main() -> Int32 {
-    var app = SDLApp();
+    var app = SDLApp(title: "Pong");
     var ball = Ball.create();
     var paddle1 = Paddle.left();
     var paddle2 = Paddle.right();
@@ -201,7 +201,8 @@ func main() -> Int32 {
                         .S or .DownArrow => { input.down = false },
                         _ => {}
                     }
-                }
+                },
+                _ => {}
             }
         }
 

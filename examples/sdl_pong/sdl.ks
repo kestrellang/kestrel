@@ -41,6 +41,12 @@ func sdlGetEventType(event: lang.ptr[lang.i8]) -> UInt32
 @extern(.C, mangleName: "Kestrel_GetKeyScancode")
 func sdlGetKeyScancode(event: lang.ptr[lang.i8]) -> Int32
 
+@extern(.C, mangleName: "Kestrel_GetMouseX")
+func sdlGetMouseX(event: lang.ptr[lang.i8]) -> Int32
+
+@extern(.C, mangleName: "Kestrel_GetMouseY")
+func sdlGetMouseY(event: lang.ptr[lang.i8]) -> Int32
+
 @extern(.C, mangleName: "SDL_Delay")
 func sdlDelay(ms: UInt32)
 
@@ -112,6 +118,11 @@ public enum Key {
     case C
     case G
     case R
+    case Digit1
+    case Digit2
+    case Digit3
+    case Digit4
+    case Digit5
     case UpArrow
     case DownArrow
     case Space
@@ -123,6 +134,7 @@ public enum Event {
     case Quit
     case KeyDown(Key)
     case KeyUp(Key)
+    case MouseDown(Int64, Int64)
 }
 
 public struct Renderer {
@@ -154,12 +166,12 @@ public struct SDLApp : not Copyable {
     var rendererPtr: lang.ptr[lang.i8]
     var eventBuffer: Array[Int8]
 
-    public init() {
+    public init(title title: String) {
         if sdlInit(UInt32(intLiteral: 0x20)) < 0 {
             lang.panic("SDL Init failed");
         }
 
-        let titleCStr = "Pong".toCString();
+        let titleCStr = title.toCString();
         let win = sdlCreateWindow(titleCStr, 800, 600);
         titleCStr.free();
 
@@ -211,6 +223,12 @@ public struct SDLApp : not Copyable {
 
                 .Some(Event.KeyUp(scancodeToKey(code)))
             },
+            0x401 => {
+                let mx = sdlGetMouseX(eventPtr);
+                let my = sdlGetMouseY(eventPtr);
+
+                .Some(Event.MouseDown(Int64(from: mx), Int64(from: my)))
+            },
             _ => null
         }
     }
@@ -237,6 +255,16 @@ func scancodeToKey(code: Int32) -> Key {
         Key.G
     } else if code == 21 {
         Key.R
+    } else if code == 30 {
+        Key.Digit1
+    } else if code == 31 {
+        Key.Digit2
+    } else if code == 32 {
+        Key.Digit3
+    } else if code == 33 {
+        Key.Digit4
+    } else if code == 34 {
+        Key.Digit5
     } else if code == 82 {
         Key.UpArrow
     } else if code == 81 {
