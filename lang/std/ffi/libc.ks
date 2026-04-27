@@ -4,6 +4,9 @@
 
 module std.ffi
 
+import std.memory.(RawPointer)
+import std.num.(Int64, Int32)
+
 // Memory allocation
 
 /// Wraps `malloc(3)` — allocates `size` bytes of uninitialised memory.
@@ -27,7 +30,7 @@ module std.ffi
 /// free(buf);
 /// ```
 @extern(.C, mangleName: "malloc")
-public func malloc(consuming size: lang.i64) -> lang.ptr[lang.i8]
+public func malloc(consuming size: Int64) -> RawPointer
 
 /// Wraps `free(3)` — releases memory previously returned by `malloc` / `realloc`.
 ///
@@ -41,7 +44,7 @@ public func malloc(consuming size: lang.i64) -> lang.ptr[lang.i8]
 /// previous `malloc` / `realloc`. After `free`, the pointer is
 /// dangling — do not read, write, or free it again.
 @extern(.C, mangleName: "free")
-public func free(consuming ptr: lang.ptr[lang.i8])
+public func free(consuming ptr: RawPointer)
 
 /// Wraps `realloc(3)` — resizes a previously-`malloc`'d block.
 ///
@@ -65,7 +68,7 @@ public func free(consuming ptr: lang.ptr[lang.i8])
 /// // buf is no longer valid; use bigger
 /// ```
 @extern(.C, mangleName: "realloc")
-public func realloc(consuming ptr: lang.ptr[lang.i8], consuming size: lang.i64) -> lang.ptr[lang.i8]
+public func realloc(consuming ptr: RawPointer, consuming size: Int64) -> RawPointer
 
 // Memory operations
 
@@ -81,10 +84,10 @@ public func realloc(consuming ptr: lang.ptr[lang.i8], consuming size: lang.i64) 
 /// regions must not overlap.
 @extern(.C, mangleName: "memcpy")
 public func memcpy(
-    consuming dest: lang.ptr[lang.i8],
-    consuming src: lang.ptr[lang.i8],
-    consuming n: lang.i64
-) -> lang.ptr[lang.i8]
+    consuming dest: RawPointer,
+    consuming src: RawPointer,
+    consuming n: Int64
+) -> RawPointer
 
 /// Wraps `memmove(3)` — copies `n` bytes from `src` to `dest`, allowing overlap.
 ///
@@ -98,10 +101,10 @@ public func memcpy(
 /// permitted.
 @extern(.C, mangleName: "memmove")
 public func memmove(
-    consuming dest: lang.ptr[lang.i8],
-    consuming src: lang.ptr[lang.i8],
-    consuming n: lang.i64
-) -> lang.ptr[lang.i8]
+    consuming dest: RawPointer,
+    consuming src: RawPointer,
+    consuming n: Int64
+) -> RawPointer
 
 /// Wraps `memset(3)` — fills `n` bytes starting at `dest` with the low byte of `c`.
 ///
@@ -114,7 +117,43 @@ public func memmove(
 /// `dest` must be valid for `n` bytes of writes.
 @extern(.C, mangleName: "memset")
 public func memset(
-    consuming dest: lang.ptr[lang.i8],
-    consuming c: lang.i64,
-    consuming n: lang.i64
-) -> lang.ptr[lang.i8]
+    consuming dest: RawPointer,
+    consuming c: Int64,
+    consuming n: Int64
+) -> RawPointer
+
+/// Wraps `memmem(3)` — locates the first occurrence of the `needleLen`-byte
+/// `needle` in the `haystackLen`-byte `haystack`.
+///
+/// Returns a pointer to the start of the match, or null if not found.
+/// `needleLen == 0` returns `haystack` (per glibc/macOS conventions —
+/// callers should check this before calling). Available on Linux and
+/// macOS; not on Windows.
+///
+/// # Safety
+///
+/// `haystack` must be valid for `haystackLen` bytes; `needle` must be
+/// valid for `needleLen` bytes.
+@extern(.C, mangleName: "memmem")
+public func memmem(
+    consuming haystack: RawPointer,
+    consuming haystackLen: Int64,
+    consuming needle: RawPointer,
+    consuming needleLen: Int64
+) -> RawPointer
+
+/// Wraps `memcmp(3)` — compares the first `n` bytes of `a` and `b`.
+///
+/// Returns a negative value if the first differing byte in `a` is less
+/// than the corresponding byte in `b`, zero if all bytes are equal,
+/// positive otherwise. Comparison is unsigned, byte-by-byte.
+///
+/// # Safety
+///
+/// Both `a` and `b` must be valid for `n` bytes.
+@extern(.C, mangleName: "memcmp")
+public func memcmp(
+    consuming a: RawPointer,
+    consuming b: RawPointer,
+    consuming n: Int64
+) -> Int32

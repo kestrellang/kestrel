@@ -127,7 +127,7 @@ public struct CString: FFISafe {
     /// etc.) is undefined behaviour.
     public func free() {
         if not self.raw.isNull {
-            std.ffi.free(self.raw.asRaw().raw);
+            std.ffi.free(self.raw.asRaw());
         }
     }
 }
@@ -160,21 +160,17 @@ extend String {
     /// ```
     public func toCString() -> CString {
         let byteCount = self.byteCount;
-        let totalSize = byteCount + Int64(intLiteral: 1); // +1 for null terminator
+        let totalSize = byteCount + 1;
 
-        // Allocate memory
-        let rawPtr: lang.ptr[lang.i8] = malloc(totalSize.raw);
-        let ptr = Pointer(raw: lang.cast_ptr[_, UInt8](rawPtr));
+        let rawPtr = malloc(totalSize);
+        let ptr = rawPtr.cast[UInt8]();
 
-        // Copy bytes if allocation succeeded
         if ptr.isNull == false {
-            // Copy bytes from source to destination if there are bytes to copy
             if byteCount > 0 {
-                let srcPtr: lang.ptr[lang.i8] = self.bytes.asRaw();
-                let _ = memcpy(rawPtr, srcPtr, byteCount.raw);
+                let srcPtr = RawPointer(raw: self.bytes.asRaw());
+                let _ = memcpy(rawPtr, srcPtr, byteCount);
             }
 
-            // Write null terminator
             ptr.offset(by: byteCount).write(UInt8(intLiteral: 0));
         }
 

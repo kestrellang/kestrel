@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable)
+import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable, fatalError)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hash)
 import std.text.(Formattable, FormatOptions)
@@ -377,7 +377,7 @@ struct ArrayStorage[T]: Cloneable {
     func clone() -> ArrayStorage[T] {
         if self.len == Int64(intLiteral: 0) {
             return ArrayStorage(
-                ptr: Pointer(raw: lang.ptr_null[T]()),
+                ptr: Pointer[T].nullPointer(),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
             )
@@ -393,7 +393,7 @@ struct ArrayStorage[T]: Cloneable {
             }
             ArrayStorage(ptr: newPtr, len: self.len, cap: self.len)
         } else {
-            lang.panic("ArrayStorage clone allocation failed")
+            fatalError("ArrayStorage clone allocation failed")
         }
     }
 
@@ -624,7 +624,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public init() {
         self.storage = RcBox(ArrayStorage(
-            ptr: Pointer(raw: lang.ptr_null[T]()),
+            ptr: Pointer[T].nullPointer(),
             len: Int64(intLiteral: 0),
             cap: Int64(intLiteral: 0)
         ));
@@ -656,11 +656,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                     cap: capacity
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         } else {
             self.storage = RcBox(ArrayStorage(
-                ptr: Pointer(raw: lang.ptr_null[T]()),
+                ptr: Pointer[T].nullPointer(),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
             ))
@@ -724,11 +724,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                     cap: elementCount
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         } else {
             self.storage = RcBox(ArrayStorage(
-                ptr: Pointer(raw: lang.ptr_null[T]()),
+                ptr: Pointer[T].nullPointer(),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
             ))
@@ -771,7 +771,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                     cap: count
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         }
     }
@@ -833,7 +833,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                     cap: count
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         }
     }
@@ -1155,7 +1155,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             }
             self.storage.setValue(ArrayStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
         } else {
-            lang.panic("Array grow failed")
+            fatalError("Array grow failed")
         }
     }
 
@@ -1267,7 +1267,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func insert(element: T, at index: Int64) {
         let myLen = self.len();
         if index < Int64(intLiteral: 0) or index > myLen {
-            lang.panic("Array.insert: index out of bounds")
+            fatalError("Array.insert: index out of bounds")
         }
         self.makeUnique();
         self.grow(myLen + Int64(intLiteral: 1));
@@ -1361,7 +1361,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func remove(at index: Int64) -> T {
         let myLen = self.len();
         if index < Int64(intLiteral: 0) or index >= myLen {
-            lang.panic("Array.remove: index out of bounds")
+            fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
         var s = self.storage.getValue();
@@ -1401,7 +1401,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let end = range.end;
         let myLen = self.len();
         if start < Int64(intLiteral: 0) or end > myLen or start > end {
-            lang.panic("Array.removeSubrange: range out of bounds")
+            fatalError("Array.removeSubrange: range out of bounds")
         }
         let removeCount = end - start;
         if removeCount == Int64(intLiteral: 0) {
@@ -1510,7 +1510,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func swap(at i: Int64, with j: Int64) {
         let myLen = self.len();
         if i < Int64(intLiteral: 0) or i >= myLen or j < Int64(intLiteral: 0) or j >= myLen {
-            lang.panic("Array.swap: index out of bounds")
+            fatalError("Array.swap: index out of bounds")
         }
         if i == j {
             return
@@ -1648,7 +1648,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let end = range.end;
         let myLen = self.len();
         if start < Int64(intLiteral: 0) or end > myLen or start > end {
-            lang.panic("Array.replaceSubrange: range out of bounds")
+            fatalError("Array.replaceSubrange: range out of bounds")
         }
 
         let removeCount = end - start;
@@ -1829,7 +1829,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 let layout = Layout.array[T](myCap);
                 var allocator = SystemAllocator();
                 allocator.deallocate(s.ptr.asRaw(), layout);
-                s.ptr = Pointer(raw: lang.ptr_null[T]());
+                s.ptr = Pointer[T].nullPointer();
                 s.cap = Int64(intLiteral: 0);
                 self.storage.setValue(s)
             }
@@ -2119,7 +2119,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public func prefix(count: Int64) -> Slice[T] {
         let myLen = self.len();
         if count > myLen {
-            lang.panic("Array.prefix: count exceeds array length")
+            fatalError("Array.prefix: count exceeds array length")
         }
         Slice(pointer: self.ptr(), count: count)
     }
@@ -2142,7 +2142,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public func suffix(count: Int64) -> Slice[T] {
         let myLen = self.len();
         if count > myLen {
-            lang.panic("Array.suffix: count exceeds array length")
+            fatalError("Array.suffix: count exceeds array length")
         }
         Slice(pointer: self.ptr().offset(by: myLen - count), count: count)
     }
@@ -2165,7 +2165,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public func drop(first count: Int64) -> Slice[T] {
         let myLen = self.len();
         if count > myLen {
-            lang.panic("Array.drop(first:): count exceeds array length")
+            fatalError("Array.drop(first:): count exceeds array length")
         }
         Slice(pointer: self.ptr().offset(by: count), count: myLen - count)
     }
@@ -2188,7 +2188,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public func drop(last count: Int64) -> Slice[T] {
         let myLen = self.len();
         if count > myLen {
-            lang.panic("Array.drop(last:): count exceeds array length")
+            fatalError("Array.drop(last:): count exceeds array length")
         }
         Slice(pointer: self.ptr(), count: myLen - count)
     }
@@ -2219,7 +2219,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public func chunks(of size: Int64) -> ChunksIterator[T] {
         if size <= Int64(intLiteral: 0) {
-            lang.panic("Array.chunks: size must be positive")
+            fatalError("Array.chunks: size must be positive")
         }
         ChunksIterator(ptr: self.ptr(), remaining: self.len(), chunkSize: size)
     }
@@ -2248,10 +2248,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public func windows(of size: Int64) -> WindowsIterator[T] {
         if size <= Int64(intLiteral: 0) {
-            lang.panic("Array.windows: size must be positive")
+            fatalError("Array.windows: size must be positive")
         }
         if size > self.len() {
-            lang.panic("Array.windows: size exceeds array length")
+            fatalError("Array.windows: size exceeds array length")
         }
         WindowsIterator(ptr: self.ptr(), totalCount: self.len(), windowSize: size)
     }
@@ -2373,7 +2373,7 @@ extend Int64: ArrayIndex[T] {
 
     public func readArray(from array: Array[T]) -> T {
         if self < Int64(intLiteral: 0) or self >= array.len() {
-            lang.panic("Array index out of bounds")
+            fatalError("Array index out of bounds")
         }
         array.ptr().offset(by: self).read()
     }
@@ -2392,7 +2392,7 @@ extend Int64: ArrayIndex[T] {
 
     public func writeArray(mutating to array: Array[T], value value: T) {
         if self < Int64(intLiteral: 0) or self >= array.len() {
-            lang.panic("Array index out of bounds")
+            fatalError("Array index out of bounds")
         }
         array.makeUnique();
         array.ptr().offset(by: self).write(value)
@@ -2475,7 +2475,7 @@ extend Range[Int64]: ArrayIndex[T] {
         let start = self.start;
         let end = self.end;
         if start < Int64(intLiteral: 0) or end > array.len() or start > end {
-            lang.panic("Array range out of bounds")
+            fatalError("Array range out of bounds")
         }
         Slice(pointer: array.ptr().offset(by: start), count: end - start)
     }
@@ -2498,11 +2498,11 @@ extend Range[Int64]: ArrayIndex[T] {
         let start = self.start;
         let end = self.end;
         if start < Int64(intLiteral: 0) or end > array.len() or start > end {
-            lang.panic("Array range out of bounds")
+            fatalError("Array range out of bounds")
         }
         let rangeLen = end - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
         var i = Int64(intLiteral: 0);
@@ -2516,7 +2516,7 @@ extend Range[Int64]: ArrayIndex[T] {
         let start = self.start;
         let rangeLen = self.end - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
         var i = Int64(intLiteral: 0);
@@ -2552,7 +2552,7 @@ extend Range[Int64]: ArrayClampable[T] {
         if start > end { start = end }
         let rangeLen = end - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match clamped range length")
+            fatalError("Slice length doesn't match clamped range length")
         }
         array.makeUnique();
         var i = Int64(intLiteral: 0);
@@ -2573,7 +2573,7 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
         let start = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if start < Int64(intLiteral: 0) or endExclusive > array.len() or start > endExclusive {
-            lang.panic("Array range out of bounds")
+            fatalError("Array range out of bounds")
         }
         Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
     }
@@ -2598,11 +2598,11 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
         let start = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if start < Int64(intLiteral: 0) or endExclusive > array.len() or start > endExclusive {
-            lang.panic("Array range out of bounds")
+            fatalError("Array range out of bounds")
         }
         let rangeLen = endExclusive - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
         var i = Int64(intLiteral: 0);
@@ -2616,7 +2616,7 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
         let start = self.start;
         let rangeLen = self.end + Int64(intLiteral: 1) - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
         var i = Int64(intLiteral: 0);

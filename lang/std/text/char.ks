@@ -360,10 +360,10 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// ```
     public func utf8Length() -> Int64 {
         let v = self._value;
-        if v < UInt32(intLiteral: 128) { Int64(intLiteral: 1) }
-        else if v < UInt32(intLiteral: 2048) { Int64(intLiteral: 2) }
-        else if v < UInt32(intLiteral: 65536) { Int64(intLiteral: 3) }
-        else { Int64(intLiteral: 4) }
+        if v < UInt32(intLiteral: 128) { 1 }
+        else if v < UInt32(intLiteral: 2048) { 2 }
+        else if v < UInt32(intLiteral: 65536) { 3 }
+        else { 4 }
     }
 
     // ========================================================================
@@ -455,7 +455,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: 4)))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
@@ -500,7 +500,11 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 ///
 /// An `Array[Char]` of the constituent code points in scalar order.
 public struct Grapheme: Equatable, Cloneable {
-    private var _chars: Array[Char]
+    // Single-char clusters store just `_first` and leave `_rest = .None`,
+    // which is the common path for ASCII text. Multi-char clusters carry
+    // the trailing code points in `_rest` (does not include `_first`).
+    private var _first: Char
+    private var _rest: Array[Char]?
 
     // ========================================================================
     // CONSTRUCTORS
@@ -509,8 +513,8 @@ public struct Grapheme: Equatable, Cloneable {
     /// @name Single Char
     /// Constructs a one-`Char` grapheme.
     ///
-    /// Convenience for the common single-scalar case so callers don't
-    /// have to build an `Array[Char]` first.
+    /// Allocation-free — the common path for ASCII iteration through
+    /// `GraphemesView`.
     ///
     /// # Examples
     ///
@@ -519,8 +523,8 @@ public struct Grapheme: Equatable, Cloneable {
     /// g.charCount();  // 1
     /// ```
     public init(char char: Char) {
-        self._chars = Array[Char]();
-        self._chars.append(char);
+        self._first = char;
+        self._rest = .None;
     }
 
     /// @name From Chars
@@ -529,7 +533,8 @@ public struct Grapheme: Equatable, Cloneable {
     /// The caller is responsible for the chars actually forming a
     /// single UAX #29 cluster — the constructor does not segment or
     /// validate. `GraphemesIterator` is the canonical producer of valid
-    /// clusters.
+    /// clusters. Single-char input avoids allocating; multi-char input
+    /// keeps the trailing code points in a separate array.
     ///
     /// # Examples
     ///
@@ -541,12 +546,40 @@ public struct Grapheme: Equatable, Cloneable {
     /// g.charCount();  // 2
     /// ```
     public init(chars chars: Array[Char]) {
-        self._chars = chars;
+        let n = chars.count;
+        if n == 0 {
+            self._first = Char(value: UInt32(intLiteral: 0));
+            self._rest = .None
+        } else if n == 1 {
+            self._first = chars(unchecked: 0);
+            self._rest = .None
+        } else {
+            self._first = chars(unchecked: 0);
+            var rest = Array[Char]();
+            var i: Int64 = 1;
+            while i < n {
+                rest.append(chars(unchecked: i));
+                i = i + 1
+            }
+            self._rest = .Some(rest)
+        }
     }
 
-    /// Returns a deep copy of this grapheme (clones the underlying char array).
+    /// Returns a deep copy of this grapheme.
     public func clone() -> Grapheme {
-        Grapheme(chars: self._chars.clone())
+        if let .Some(r) = self._rest {
+            var copy = Array[Char]();
+            copy.append(self._first);
+            let rn = r.count;
+            var i: Int64 = 0;
+            while i < rn {
+                copy.append(r(unchecked: i));
+                i = i + 1
+            }
+            Grapheme(chars: copy)
+        } else {
+            Grapheme(char: self._first)
+        }
     }
 
     // ========================================================================
@@ -555,22 +588,38 @@ public struct Grapheme: Equatable, Cloneable {
 
     /// Returns the constituent code points in scalar order.
     ///
-    /// The returned array is a clone of the internal storage; mutating
-    /// it does not affect the grapheme.
-    public func chars() -> Array[Char] { self._chars }
+    /// Materializes a fresh `Array[Char]` on every call.
+    public func chars() -> Array[Char] {
+        var arr = Array[Char]();
+        arr.append(self._first);
+        if let .Some(r) = self._rest {
+            let n = r.count;
+            var i: Int64 = 0;
+            while i < n {
+                arr.append(r(unchecked: i));
+                i = i + 1
+            }
+        }
+        arr
+    }
 
     /// Returns the number of `Char`s in this cluster — `1` for plain ASCII, more for combining sequences and ZWJ-joined emoji.
     public func charCount() -> Int64 {
-        self._chars.count
+        if let .Some(r) = self._rest {
+            1 + r.count
+        } else {
+            1
+        }
     }
 
-    /// Returns the first `Char` of the cluster, or `None` if the grapheme is empty.
+    /// Returns the first `Char` of the cluster.
     ///
+    /// Always `.Some` — every grapheme has at least one code point.
     /// Useful as a cheap "what kind of grapheme is this?" check
     /// (alphabetic, digit, emoji-base, …) without inspecting the full
     /// cluster.
     public func firstChar() -> Char? {
-        self._chars.first()
+        .Some(self._first)
     }
 
     /// Returns true iff the cluster is exactly one ASCII `Char`.
@@ -579,11 +628,9 @@ public struct Grapheme: Equatable, Cloneable {
     /// `U+00E9`) returns `false`. Multi-`Char` clusters always return
     /// `false` even if every component is ASCII.
     public func isAscii() -> Bool {
-        let count = self._chars.count;
-        if count == Int64(intLiteral: 1) {
-            self._chars(unchecked: Int64(intLiteral: 0)).isAscii()
-        } else {
-            false
+        match self._rest {
+            .None => self._first.isAscii(),
+            .Some(_) => false
         }
     }
 
@@ -592,10 +639,14 @@ public struct Grapheme: Equatable, Cloneable {
     /// Sum of each `Char.utf8Length()`. Use this to size a buffer
     /// before re-encoding the cluster.
     public func utf8Length() -> Int64 {
-        var len: Int64 = Int64(intLiteral: 0);
-        let count = self._chars.count;
-        for i in Int64(intLiteral: 0)..<count {
-            len = len + self._chars(unchecked: i).utf8Length()
+        var len = self._first.utf8Length();
+        if let .Some(r) = self._rest {
+            let n = r.count;
+            var i: Int64 = 0;
+            while i < n {
+                len = len + r(unchecked: i).utf8Length();
+                i = i + 1
+            }
         }
         len
     }
@@ -619,18 +670,27 @@ public struct Grapheme: Equatable, Cloneable {
     /// a.equals(b);  // true
     /// ```
     public func equals(other: Grapheme) -> Bool {
-        let selfCount = self._chars.count;
-        let otherCount = other._chars.count;
-        if selfCount != otherCount {
+        if self._first.equals(other._first) == false {
             return false
         }
-        var equal: Bool = true;
-        for i in Int64(intLiteral: 0)..<selfCount {
-            if self._chars(unchecked: i).equals(other._chars(unchecked: i)) == false {
-                equal = false
-            }
+        match (self._rest, other._rest) {
+            (.None, .None) => true,
+            (.Some(a), .Some(b)) => {
+                let an = a.count;
+                if an != b.count {
+                    return false
+                }
+                var i: Int64 = 0;
+                while i < an {
+                    if a(unchecked: i).equals(b(unchecked: i)) == false {
+                        return false
+                    }
+                    i = i + 1
+                }
+                true
+            },
+            _ => false
         }
-        equal
     }
 }
 
@@ -737,6 +797,9 @@ public struct Utf8DecodeResult {
 // UTF-8 ENCODING/DECODING FUNCTIONS
 // ============================================================================
 
+// TODO: replace lang.i32_*/lang.ptr_*/lang.cast_* intrinsics in UTF-8 codec
+// with UInt8/Int32/RawPointer wrappers after LLVM switch
+
 /// Reads the byte at `ptr + offset` as an unsigned `lang.i32` in `0..=255`.
 ///
 /// Helper used by `decodeUtf8` so the bit-twiddling in the main path
@@ -800,13 +863,13 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
     if lang.i32_unsigned_lt(firstU, 0x80) {
         // Single byte (ASCII): 0xxxxxxx
         let c = Char(UInt32(raw: firstU));
-        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 1)))
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: 1))
     } else if lang.i32_unsigned_lt(firstU, 0xC0) {
         // Continuation byte as start - invalid
         return .None
     } else if lang.i32_unsigned_lt(firstU, 0xE0) {
         // Two bytes: 110xxxxx 10xxxxxx
-        let idx1 = index + Int64(intLiteral: 1);
+        let idx1 = index + 1;
         if idx1 >= length { return .None }
         let second: lang.i32 = readByteAt(ptr, idx1);
         if lang.i32_ne(lang.i32_and(second, 0xC0), 0x80) { return .None }
@@ -815,11 +878,11 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             lang.i32_and(second, 0x3F)
         );
         let c = Char(UInt32(raw: v));
-        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 2)))
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: 2))
     } else if lang.i32_unsigned_lt(firstU, 0xF0) {
         // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
-        let idx1 = index + Int64(intLiteral: 1);
-        let idx2 = index + Int64(intLiteral: 2);
+        let idx1 = index + 1;
+        let idx2 = index + 2;
         if idx2 >= length { return .None }
         let second: lang.i32 = readByteAt(ptr, idx1);
         let third: lang.i32 = readByteAt(ptr, idx2);
@@ -833,12 +896,12 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             lang.i32_and(third, 0x3F)
         );
         let c = Char(UInt32(raw: v));
-        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 3)))
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: 3))
     } else if lang.i32_unsigned_lt(firstU, 0xF8) {
         // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-        let idx1 = index + Int64(intLiteral: 1);
-        let idx2 = index + Int64(intLiteral: 2);
-        let idx3 = index + Int64(intLiteral: 3);
+        let idx1 = index + 1;
+        let idx2 = index + 2;
+        let idx3 = index + 3;
         if idx3 >= length { return .None }
         let second: lang.i32 = readByteAt(ptr, idx1);
         let third: lang.i32 = readByteAt(ptr, idx2);
@@ -857,7 +920,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             lang.i32_and(fourth, 0x3F)
         );
         let c = Char(UInt32(raw: v));
-        return .Some(Utf8DecodeResult(char: c, bytesConsumed: Int64(intLiteral: 4)))
+        return .Some(Utf8DecodeResult(char: c, bytesConsumed: 4))
     } else {
         // Invalid start byte
         return .None
@@ -889,39 +952,39 @@ public func encodeUtf8(c: Char, ptr: lang.ptr[lang.i8], at index: Int64) -> Int6
     if lang.i32_unsigned_lt(v, 0x80) {
         // Single byte: 0xxxxxxx
         writeByteAt(ptr, index, lang.cast_i32_i8(v));
-        Int64(intLiteral: 1)
+        1
     } else if lang.i32_unsigned_lt(v, 0x800) {
         // Two bytes: 110xxxxx 10xxxxxx
         let b1: lang.i8 = lang.cast_i32_i8(lang.i32_or(0xC0, lang.i32_and(lang.i32_unsigned_shr(v, 6), 0x1F)));
         let b2: lang.i8 = lang.cast_i32_i8(lang.i32_or(0x80, lang.i32_and(v, 0x3F)));
-        let idx1 = index + Int64(intLiteral: 1);
+        let idx1 = index + 1;
         writeByteAt(ptr, index, b1);
         writeByteAt(ptr, idx1, b2);
-        Int64(intLiteral: 2)
+        2
     } else if lang.i32_unsigned_lt(v, 0x10000) {
         // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
         let b1: lang.i8 = lang.cast_i32_i8(lang.i32_or(0xE0, lang.i32_and(lang.i32_unsigned_shr(v, 12), 0x0F)));
         let b2: lang.i8 = lang.cast_i32_i8(lang.i32_or(0x80, lang.i32_and(lang.i32_unsigned_shr(v, 6), 0x3F)));
         let b3: lang.i8 = lang.cast_i32_i8(lang.i32_or(0x80, lang.i32_and(v, 0x3F)));
-        let idx1 = index + Int64(intLiteral: 1);
-        let idx2 = index + Int64(intLiteral: 2);
+        let idx1 = index + 1;
+        let idx2 = index + 2;
         writeByteAt(ptr, index, b1);
         writeByteAt(ptr, idx1, b2);
         writeByteAt(ptr, idx2, b3);
-        Int64(intLiteral: 3)
+        3
     } else {
         // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         let b1: lang.i8 = lang.cast_i32_i8(lang.i32_or(0xF0, lang.i32_and(lang.i32_unsigned_shr(v, 18), 0x07)));
         let b2: lang.i8 = lang.cast_i32_i8(lang.i32_or(0x80, lang.i32_and(lang.i32_unsigned_shr(v, 12), 0x3F)));
         let b3: lang.i8 = lang.cast_i32_i8(lang.i32_or(0x80, lang.i32_and(lang.i32_unsigned_shr(v, 6), 0x3F)));
         let b4: lang.i8 = lang.cast_i32_i8(lang.i32_or(0x80, lang.i32_and(v, 0x3F)));
-        let idx1 = index + Int64(intLiteral: 1);
-        let idx2 = index + Int64(intLiteral: 2);
-        let idx3 = index + Int64(intLiteral: 3);
+        let idx1 = index + 1;
+        let idx2 = index + 2;
+        let idx3 = index + 3;
         writeByteAt(ptr, index, b1);
         writeByteAt(ptr, idx1, b2);
         writeByteAt(ptr, idx2, b3);
         writeByteAt(ptr, idx3, b4);
-        Int64(intLiteral: 4)
+        4
     }
 }

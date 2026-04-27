@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable)
+import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable, fatalError)
 import std.text.(Formattable, FormatOptions, String)
 import std.num.(Int64, UInt64)
 import std.result.(Optional)
@@ -222,7 +222,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
     func clone() -> DictionaryStorage[K, V, H] {
         if self.cap == Int64(intLiteral: 0) {
             return DictionaryStorage(
-                buckets: Pointer(raw: lang.ptr_null[Bucket[K, V]]()),
+                buckets: Pointer[Bucket[K, V]].nullPointer(),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
             )
@@ -242,7 +242,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
                 cap: self.cap
             )
         } else {
-            lang.panic("DictionaryStorage clone allocation failed")
+            fatalError("DictionaryStorage clone allocation failed")
         }
     }
 
@@ -385,7 +385,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public init() {
         self.storage = RcBox(DictionaryStorage(
-            buckets: Pointer(raw: lang.ptr_null[Bucket[K, V]]()),
+            buckets: Pointer[Bucket[K, V]].nullPointer(),
             len: Int64(intLiteral: 0),
             cap: Int64(intLiteral: 0)
         ));
@@ -424,11 +424,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                     cap: actualCap
                 ))
             } else {
-                lang.panic("Dictionary allocation failed")
+                fatalError("Dictionary allocation failed")
             }
         } else {
             self.storage = RcBox(DictionaryStorage(
-                buckets: Pointer(raw: lang.ptr_null[Bucket[K, V]]()),
+                buckets: Pointer[Bucket[K, V]].nullPointer(),
                 len: Int64(intLiteral: 0),
                 cap: Int64(intLiteral: 0)
             ))
@@ -528,7 +528,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
             if self.contains( pair.0) {
-                lang.panic("Dictionary(uniqueKeysWithValues:): duplicate key")
+                fatalError("Dictionary(uniqueKeysWithValues:): duplicate key")
             }
             let _ = self.insert( pair.0, pair.1);
         }
@@ -727,7 +727,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let maybeValue = self(key);
             match maybeValue {
                 .Some(v) => v,
-                .None => lang.panic("Dictionary subscript(unwrap:): key not found")
+                .None => fatalError("Dictionary subscript(unwrap:): key not found")
             }
         }
         set {
@@ -895,7 +895,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 cap: newCap
             ))
         } else {
-            lang.panic("Dictionary resize failed")
+            fatalError("Dictionary resize failed")
         }
     }
 
@@ -962,7 +962,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 cap: newCap
             ))
         } else {
-            lang.panic("Dictionary resize failed")
+            fatalError("Dictionary resize failed")
         }
     }
 
@@ -1031,7 +1031,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             s.len = s.len + Int64(intLiteral: 1);
             self.storage.setValue(s)
         } else {
-            lang.panic("Dictionary insert failed - no empty slot")
+            fatalError("Dictionary insert failed - no empty slot")
         }
 
         .None

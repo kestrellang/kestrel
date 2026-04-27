@@ -6,7 +6,7 @@
 module std.net.libc
 
 import std.num.(Int64, Int32, UInt8, UInt16)
-import std.memory.(Pointer)
+import std.memory.(Pointer, RawPointer)
 
 // ============================================================================
 // SOCKET CONSTANTS (macOS)
@@ -35,11 +35,11 @@ public func IPPROTO_TCP() -> Int32 { 6 }
 // errno access
 @platform(.darwin)
 @extern(.C, mangleName: "__error")
-func __errno_ptr() -> lang.ptr[lang.i32]
+func __errno_ptr() -> Pointer[Int32]
 
 @platform(.linux)
 @extern(.C, mangleName: "__errno_location")
-func __errno_ptr() -> lang.ptr[lang.i32]
+func __errno_ptr() -> Pointer[Int32]
 
 // Socket constants (platform-specific values)
 
@@ -87,40 +87,40 @@ public func SOCKADDR_IN_SIZE() -> Int32 { 16 }
 // ============================================================================
 
 @extern(.C, mangleName: "socket")
-func libc_socket(domain: lang.i32, type_: lang.i32, proto: lang.i32) -> lang.i32
+func libc_socket(domain: Int32, type_: Int32, proto: Int32) -> Int32
 
 @extern(.C, mangleName: "bind")
-func libc_bind(sockfd: lang.i32, addr: lang.ptr[lang.i8], addrlen: lang.i32) -> lang.i32
+func libc_bind(sockfd: Int32, addr: RawPointer, addrlen: Int32) -> Int32
 
 @extern(.C, mangleName: "listen")
-func libc_listen(sockfd: lang.i32, backlog: lang.i32) -> lang.i32
+func libc_listen(sockfd: Int32, backlog: Int32) -> Int32
 
 @extern(.C, mangleName: "accept")
-func libc_accept(sockfd: lang.i32, addr: lang.ptr[lang.i8], addrlen: lang.ptr[lang.i32]) -> lang.i32
+func libc_accept(sockfd: Int32, addr: RawPointer, addrlen: RawPointer) -> Int32
 
 @extern(.C, mangleName: "recv")
-func libc_recv(sockfd: lang.i32, buf: lang.ptr[lang.i8], len: lang.i64, flags: lang.i32) -> lang.i64
+func libc_recv(sockfd: Int32, buf: RawPointer, len: Int64, flags: Int32) -> Int64
 
 @extern(.C, mangleName: "send")
-func libc_send(sockfd: lang.i32, buf: lang.ptr[lang.i8], len: lang.i64, flags: lang.i32) -> lang.i64
+func libc_send(sockfd: Int32, buf: RawPointer, len: Int64, flags: Int32) -> Int64
 
 @extern(.C, mangleName: "close")
-func libc_close(fd: lang.i32) -> lang.i32
+func libc_close(fd: Int32) -> Int32
 
 @extern(.C, mangleName: "setsockopt")
-func libc_setsockopt(sockfd: lang.i32, level: lang.i32, optname: lang.i32, optval: lang.ptr[lang.i8], optlen: lang.i32) -> lang.i32
+func libc_setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: RawPointer, optlen: Int32) -> Int32
 
 @extern(.C, mangleName: "htons")
-func libc_htons(hostshort: lang.i16) -> lang.i16
+func libc_htons(hostshort: UInt16) -> UInt16
 
 @extern(.C, mangleName: "connect")
-func libc_connect(sockfd: lang.i32, addr: lang.ptr[lang.i8], addrlen: lang.i32) -> lang.i32
+func libc_connect(sockfd: Int32, addr: RawPointer, addrlen: Int32) -> Int32
 
 @extern(.C, mangleName: "getaddrinfo")
-func libc_getaddrinfo(node: lang.ptr[lang.i8], service: lang.ptr[lang.i8], hints: lang.ptr[lang.i8], res: lang.ptr[lang.ptr[lang.i8]]) -> lang.i32
+func libc_getaddrinfo(node: RawPointer, service: RawPointer, hints: RawPointer, res: RawPointer) -> Int32
 
 @extern(.C, mangleName: "freeaddrinfo")
-func libc_freeaddrinfo(res: lang.ptr[lang.i8])
+func libc_freeaddrinfo(res: RawPointer)
 
 
 // ============================================================================
@@ -140,7 +140,7 @@ func libc_freeaddrinfo(res: lang.ptr[lang.i8])
 /// if fd < 0 { /* errno() */ }
 /// ```
 public func socket(domain: Int32, type_: Int32, proto: Int32) -> Int32 {
-    Int32(raw: libc_socket(domain.raw, type_.raw, proto.raw))
+    libc_socket(domain, type_, proto)
 }
 
 /// Wraps `bind(2)` — assigns a local address to `sockfd`.
@@ -149,7 +149,7 @@ public func socket(domain: Int32, type_: Int32, proto: Int32) -> Int32 {
 /// appropriate layout) of length `addrlen`. Returns `0` on success,
 /// `-1` on error.
 public func bind(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
-    Int32(raw: libc_bind(sockfd.raw, lang.cast_ptr[_, lang.i8](addr.raw), addrlen.raw))
+    libc_bind(sockfd, addr.asRaw(), addrlen)
 }
 
 /// Wraps `listen(2)` — marks `sockfd` as accepting incoming connections.
@@ -158,7 +158,7 @@ public func bind(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
 /// connection queue; once full, further connect attempts are
 /// refused. Returns `0` on success, `-1` on error.
 public func listen(sockfd: Int32, backlog: Int32) -> Int32 {
-    Int32(raw: libc_listen(sockfd.raw, backlog.raw))
+    libc_listen(sockfd, backlog)
 }
 
 /// Wraps `accept(2)` — pulls the next connection off `sockfd`'s queue.
@@ -167,7 +167,7 @@ public func listen(sockfd: Int32, backlog: Int32) -> Int32 {
 /// on success, `-1` on error. Pass null pointers for `addr` and
 /// `addrlen` if you don't need the client's address.
 public func accept(sockfd: Int32, addr: Pointer[UInt8], addrlen: Pointer[Int32]) -> Int32 {
-    Int32(raw: libc_accept(sockfd.raw, lang.cast_ptr[_, lang.i8](addr.raw), lang.cast_ptr[_, lang.i32](addrlen.raw)))
+    libc_accept(sockfd, addr.asRaw(), addrlen.asRaw())
 }
 
 /// Wraps `recv(2)` — reads up to `len` bytes from `sockfd` into `buf`.
@@ -176,7 +176,7 @@ public func accept(sockfd: Int32, addr: Pointer[UInt8], addrlen: Pointer[Int32])
 /// `0` on orderly shutdown by the peer, or `-1` on error. `flags`
 /// is a bitmask of `MSG_*` modifiers (`0` for the default).
 public func recv(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -> Int64 {
-    Int64(raw: libc_recv(sockfd.raw, lang.cast_ptr[_, lang.i8](buf.raw), len.raw, flags.raw))
+    libc_recv(sockfd, buf.asRaw(), len, flags)
 }
 
 /// Wraps `send(2)` — writes up to `len` bytes from `buf` to `sockfd`.
@@ -185,7 +185,7 @@ public func recv(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -
 /// caller must loop until the buffer is drained. Returns the byte
 /// count on success or `-1` on error.
 public func send(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -> Int64 {
-    Int64(raw: libc_send(sockfd.raw, lang.cast_ptr[_, lang.i8](buf.raw), len.raw, flags.raw))
+    libc_send(sockfd, buf.asRaw(), len, flags)
 }
 
 /// Wraps `close(2)` — releases a file descriptor.
@@ -194,7 +194,7 @@ public func send(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -
 /// success, `-1` on error. After `close`, `fd` becomes available for
 /// reuse by the kernel — do not use the value again.
 public func close(fd: Int32) -> Int32 {
-    Int32(raw: libc_close(fd.raw))
+    libc_close(fd)
 }
 
 /// Wraps `setsockopt(2)` — configures one option on `sockfd`.
@@ -204,7 +204,7 @@ public func close(fd: Int32) -> Int32 {
 /// `optlen` describe the value. Returns `0` on success, `-1` on
 /// error.
 public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Pointer[UInt8], optlen: Int32) -> Int32 {
-    Int32(raw: libc_setsockopt(sockfd.raw, level.raw, optname.raw, lang.cast_ptr[_, lang.i8](optval.raw), optlen.raw))
+    libc_setsockopt(sockfd, level, optname, optval.asRaw(), optlen)
 }
 
 /// Wraps `htons(3)` — host-to-network byte order for 16-bit values.
@@ -213,7 +213,7 @@ public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Poin
 /// hosts it is the identity. Use to convert a port number before
 /// writing it into a `sockaddr_in.sin_port` field.
 public func htons(hostshort: UInt16) -> UInt16 {
-    UInt16(raw: libc_htons(hostshort.raw))
+    libc_htons(hostshort)
 }
 
 /// Wraps `connect(2)` — initiates a connection on `sockfd` to the address at `addr`.
@@ -221,7 +221,7 @@ public func htons(hostshort: UInt16) -> UInt16 {
 /// Blocks until the handshake completes (for connection-oriented
 /// sockets). Returns `0` on success, `-1` on error.
 public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
-    Int32(raw: libc_connect(sockfd.raw, lang.cast_ptr[_, lang.i8](addr.raw), addrlen.raw))
+    libc_connect(sockfd, addr.asRaw(), addrlen)
 }
 
 /// Wraps `getaddrinfo(3)` — DNS / service-name resolution.
@@ -247,12 +247,7 @@ public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int3
 ///   offset 40: ai_next     (ptr)
 /// ```
 public func getaddrinfo(node: Pointer[UInt8], service: Pointer[UInt8], hints: Pointer[UInt8], res: Pointer[Pointer[UInt8]]) -> Int32 {
-    Int32(raw: libc_getaddrinfo(
-        lang.cast_ptr[_, lang.i8](node.raw),
-        lang.cast_ptr[_, lang.i8](service.raw),
-        lang.cast_ptr[_, lang.i8](hints.raw),
-        lang.cast_ptr[_, lang.ptr[lang.i8]](res.raw)
-    ))
+    libc_getaddrinfo(node.asRaw(), service.asRaw(), hints.asRaw(), res.asRaw())
 }
 
 /// Wraps `freeaddrinfo(3)` — frees the linked list returned by `getaddrinfo`.
@@ -262,7 +257,7 @@ public func getaddrinfo(node: Pointer[UInt8], service: Pointer[UInt8], hints: Po
 /// Always pair every successful `getaddrinfo` with one
 /// `freeaddrinfo` to avoid leaking the resolver's allocation.
 public func freeaddrinfo(res: Pointer[UInt8]) {
-    libc_freeaddrinfo(lang.cast_ptr[_, lang.i8](res.raw))
+    libc_freeaddrinfo(res.asRaw())
 }
 
 /// Returns the current value of `errno` for the calling thread.
@@ -272,6 +267,5 @@ public func freeaddrinfo(res: Pointer[UInt8]) {
 /// it. Implementation forwards to the platform-specific accessor:
 /// `__error` on darwin, `__errno_location` on linux.
 public func errno() -> Int32 {
-    let ptr = __errno_ptr();
-    Int32(raw: lang.ptr_read(ptr))
+    __errno_ptr().read()
 }

@@ -2,39 +2,40 @@
 
 module std.memory
 
-import std.core.(Bool)
+import std.core.(Bool, fatalError)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
+import std.memory.(Pointer)
 
 /// Iterator yielded by `LiteralSlice.iter()`. Walks the backing buffer
-/// element-by-element, advancing a raw pointer.
+/// element-by-element, advancing a typed pointer.
 ///
 /// # Representation
 ///
-/// A raw pointer plus a primitive-typed remaining count. No `Slice`
-/// indirection — the iterator is what `LiteralSlice` hands out instead of
-/// exposing its raw pointer directly.
+/// A `Pointer[T]` plus a remaining count. No `Slice` indirection — the
+/// iterator is what `LiteralSlice` hands out instead of exposing its
+/// pointer directly.
 public struct LiteralSliceIterator[T]: Iterator {
     type Item = T
 
-    private var ptr: lang.ptr[T]
-    private var remaining: lang.i64
+    private var ptr: Pointer[T]
+    private var remaining: Int64
 
     /// @name From Storage
-    /// Builds an iterator from the raw pointer and length the compiler
-    /// hands to a literal init. Not normally called by user code.
-    public init(ptr ptr: lang.ptr[T], remaining remaining: lang.i64) {
+    /// Builds an iterator from a typed pointer and element count.
+    /// Not normally called by user code.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
         self.ptr = ptr;
         self.remaining = remaining;
     }
 
     /// Yields the next element, or `.None` once the buffer is exhausted.
     public mutating func next() -> T? {
-        if lang.i64_signed_gt(self.remaining, 0) {
-            let value = lang.ptr_read(self.ptr);
-            self.ptr = lang.ptr_offset[T](self.ptr, lang.sizeof[T]());
-            self.remaining = lang.i64_sub(self.remaining, 1);
+        if self.remaining > Int64(intLiteral: 0) {
+            let value = self.ptr.read();
+            self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
+            self.remaining = self.remaining - Int64(intLiteral: 1);
             .Some(value)
         } else {
             .None
@@ -74,21 +75,21 @@ public struct LiteralSlice[T]: Iterable {
     type Item = T
     type Iter = LiteralSliceIterator[T]
 
-    private var ptr: lang.ptr[T]
-    private var len: lang.i64
+    private var ptr: Pointer[T]
+    private var len: Int64
 
     /// @name From Storage
     /// Builds the slice from the raw pointer and count the compiler emits.
     public init(pointer pointer: lang.ptr[T], count count: lang.i64) {
-        self.ptr = pointer;
-        self.len = count;
+        self.ptr = Pointer(raw: pointer);
+        self.len = Int64(intLiteral: count);
     }
 
     /// Number of elements in the literal.
-    public func count() -> Int64 { Int64(intLiteral: self.len) }
+    public func count() -> Int64 { self.len }
 
     /// Returns `true` for `[]`.
-    public func isEmpty() -> Bool { Bool(boolLiteral: lang.i64_eq(self.len, 0)) }
+    public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
 
     /// Iterator over the elements in source order.
     public func iter() -> LiteralSliceIterator[T] {
@@ -109,11 +110,10 @@ public struct LiteralSlice[T]: Iterable {
     /// or `index >= count`.
     public subscript(index: Int64) -> T {
         get {
-            if index < Int64(intLiteral: 0) or Bool(boolLiteral: lang.i64_signed_lt(self.len, index.raw)) or Bool(boolLiteral: lang.i64_eq(self.len, index.raw)) {
-                lang.panic("LiteralSlice index out of bounds")
+            if index < Int64(intLiteral: 0) or index >= self.len {
+                fatalError("LiteralSlice index out of bounds")
             }
-            let offset = lang.i64_mul(index.raw, lang.sizeof[T]());
-            lang.ptr_read(lang.ptr_offset[T](self.ptr, offset))
+            self.ptr.offset(by: index).read()
         }
     }
 
@@ -121,11 +121,10 @@ public struct LiteralSlice[T]: Iterable {
     /// Reads element `index`, returning `.None` on out-of-bounds.
     public subscript(checked index: Int64) -> T? {
         get {
-            if index < Int64(intLiteral: 0) or Bool(boolLiteral: lang.i64_signed_lt(self.len, index.raw)) or Bool(boolLiteral: lang.i64_eq(self.len, index.raw)) {
+            if index < Int64(intLiteral: 0) or index >= self.len {
                 .None
             } else {
-                let offset = lang.i64_mul(index.raw, lang.sizeof[T]());
-                .Some(lang.ptr_read(lang.ptr_offset[T](self.ptr, offset)))
+                .Some(self.ptr.offset(by: index).read())
             }
         }
     }
@@ -141,8 +140,7 @@ public struct LiteralSlice[T]: Iterable {
     /// `count` first.
     public subscript(unchecked index: Int64) -> T {
         get {
-            let offset = lang.i64_mul(index.raw, lang.sizeof[T]());
-            lang.ptr_read(lang.ptr_offset[T](self.ptr, offset))
+            self.ptr.offset(by: index).read()
         }
     }
 }

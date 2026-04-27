@@ -1,4 +1,6 @@
 //! kestrel-test-suite — hybrid test framework for the lib compiler pipeline.
+//
+// (cache-bust: 2026-04-27d)
 //!
 //! Supports file-based `.ks` tests (auto-discovered via datatest-stable) and
 //! a programmatic Rust API for complex/multi-file tests.
@@ -10,7 +12,7 @@
 
 #[used]
 #[unsafe(no_mangle)]
-pub static BUILD_NONCE: u32 = 20;
+pub static BUILD_NONCE: u32 = 24;
 
 pub mod annotation;
 pub mod compiler;

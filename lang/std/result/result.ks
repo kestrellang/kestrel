@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue)
+import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, fatalError)
 import std.text.(String, Formattable, FormatOptions)
 import std.result.(Optional)
 
@@ -119,7 +119,7 @@ public enum Result[T, E]: Tryable {
     public func unwrap() -> T {
         match self {
             .Ok(value) => value,
-            .Err(_) => lang.panic("called unwrap() on Err")
+            .Err(_) => fatalError("called unwrap() on Err")
         }
     }
 
@@ -155,7 +155,7 @@ public enum Result[T, E]: Tryable {
     /// Panics with `"called unwrapErr() on Ok"` when invoked on `.Ok`.
     public func unwrapErr() -> E {
         match self {
-            .Ok(_) => lang.panic("called unwrapErr() on Ok"),
+            .Ok(_) => fatalError("called unwrapErr() on Ok"),
             .Err(error) => error
         }
     }

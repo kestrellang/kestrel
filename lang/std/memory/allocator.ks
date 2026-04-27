@@ -62,28 +62,28 @@ public struct SystemAllocator: Allocator {
     /// alignment (typically 16) is **not** honoured — types that need
     /// larger alignment should use a different allocator.
     public mutating func allocate(layout: Layout) -> RawPointer? {
-        let ptr = malloc(layout.size.raw);
-        if lang.ptr_is_null(ptr) {
+        let ptr = malloc(layout.size);
+        if ptr.isNull {
             .None
         } else {
-            .Some(RawPointer(raw: ptr))
+            .Some(ptr)
         }
     }
 
     /// Calls `free(ptr)`. The `layout` argument is ignored — kept for
     /// protocol conformance; allocators that need it (arenas) use it.
     public mutating func deallocate(ptr: RawPointer, layout: Layout) {
-        free(ptr.raw)
+        free(ptr)
     }
 
     /// Calls `realloc(ptr, newLayout.size)`. As with `allocate`, only
     /// `malloc`-natural alignment is guaranteed.
     public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
-        let newPtr = realloc(ptr.raw, newLayout.size.raw);
-        if lang.ptr_is_null(newPtr) {
+        let newPtr = realloc(ptr, newLayout.size);
+        if newPtr.isNull {
             .None
         } else {
-            .Some(RawPointer(raw: newPtr))
+            .Some(newPtr)
         }
     }
 }

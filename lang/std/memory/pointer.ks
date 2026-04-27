@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hash, Hasher, ArrayMatchable, Range, ClosedRange)
+import std.core.(Equatable, Bool, Hash, Hasher, ArrayMatchable, Range, ClosedRange, fatalError)
 import std.num.(Int64, UInt64, UInt8)
 import std.memory.(Slice)
 import std.result.(Optional)
@@ -471,7 +471,7 @@ extend Int64: SliceIndex[T] {
 
     public func readSlice(from slice: Slice[T]) -> T {
         if self < Int64(intLiteral: 0) or self >= slice.count {
-            lang.panic("Slice index out of bounds")
+            fatalError("Slice index out of bounds")
         }
         slice.pointer.offset(by: self).read()
     }
@@ -490,7 +490,7 @@ extend Int64: SliceIndex[T] {
 
     public func writeSlice(to slice: Slice[T], value value: T) {
         if self < Int64(intLiteral: 0) or self >= slice.count {
-            lang.panic("Slice index out of bounds")
+            fatalError("Slice index out of bounds")
         }
         slice.pointer.offset(by: self).write(value)
     }
@@ -561,7 +561,7 @@ extend Range[Int64]: SliceIndex[T] {
         let start = self.start;
         let end = self.end;
         if start < Int64(intLiteral: 0) or end > slice.count or start > end {
-            lang.panic("Slice range out of bounds")
+            fatalError("Slice range out of bounds")
         }
         Slice(pointer: slice.pointer.offset(by: start), count: end - start)
     }
@@ -584,11 +584,11 @@ extend Range[Int64]: SliceIndex[T] {
         let start = self.start;
         let end = self.end;
         if start < Int64(intLiteral: 0) or end > slice.count or start > end {
-            lang.panic("Slice range out of bounds")
+            fatalError("Slice range out of bounds")
         }
         let rangeLen = end - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         var i = Int64(intLiteral: 0);
         while i < rangeLen {
@@ -601,7 +601,7 @@ extend Range[Int64]: SliceIndex[T] {
         let start = self.start;
         let rangeLen = self.end - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         var i = Int64(intLiteral: 0);
         while i < rangeLen {
@@ -633,7 +633,7 @@ extend Range[Int64]: SliceClampable[T] {
         if start > end { start = end }
         let rangeLen = end - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match clamped range length")
+            fatalError("Slice length doesn't match clamped range length")
         }
         var i = Int64(intLiteral: 0);
         while i < rangeLen {
@@ -650,7 +650,7 @@ extend ClosedRange[Int64]: SliceIndex[T] {
         let start = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if start < Int64(intLiteral: 0) or endExclusive > slice.count or start > endExclusive {
-            lang.panic("Slice range out of bounds")
+            fatalError("Slice range out of bounds")
         }
         Slice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
     }
@@ -675,11 +675,11 @@ extend ClosedRange[Int64]: SliceIndex[T] {
         let start = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if start < Int64(intLiteral: 0) or endExclusive > slice.count or start > endExclusive {
-            lang.panic("Slice range out of bounds")
+            fatalError("Slice range out of bounds")
         }
         let rangeLen = endExclusive - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         var i = Int64(intLiteral: 0);
         while i < rangeLen {
@@ -692,7 +692,7 @@ extend ClosedRange[Int64]: SliceIndex[T] {
         let start = self.start;
         let rangeLen = self.end + Int64(intLiteral: 1) - start;
         if value.count != rangeLen {
-            lang.panic("Slice length doesn't match range length")
+            fatalError("Slice length doesn't match range length")
         }
         var i = Int64(intLiteral: 0);
         while i < rangeLen {

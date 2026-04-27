@@ -155,7 +155,7 @@ public enum Optional[T] {
     public func unwrap() -> T {
         match self {
             .Some(value) => value,
-            .None => lang.panic("called unwrap() on None")
+            .None => fatalError("called unwrap() on None")
         }
     }
 

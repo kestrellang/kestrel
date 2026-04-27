@@ -4,7 +4,7 @@ module std.os.proc
 
 import std.num.(Int64, Int32)
 import std.num.(UInt8)
-import std.memory.(Pointer)
+import std.memory.(Pointer, RawPointer)
 import std.text.(String)
 import std.core.(Bool)
 import std.ffi.(CString)
@@ -15,19 +15,19 @@ import std.ffi.(malloc, free)
 // ============================================================================
 
 @extern(.C, mangleName: "system")
-func libc_system(cmd: lang.ptr[lang.i8]) -> lang.i32
+func libc_system(cmd: RawPointer) -> Int32
 
 @extern(.C, mangleName: "popen")
-func libc_popen(cmd: lang.ptr[lang.i8], mode: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
+func libc_popen(cmd: RawPointer, mode: RawPointer) -> RawPointer
 
 @extern(.C, mangleName: "pclose")
-func libc_pclose(stream: lang.ptr[lang.i8]) -> lang.i32
+func libc_pclose(stream: RawPointer) -> Int32
 
 @extern(.C, mangleName: "fgets")
-func libc_fgets(buf: lang.ptr[lang.i8], size: lang.i32, stream: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
+func libc_fgets(buf: RawPointer, size: Int32, stream: RawPointer) -> RawPointer
 
 @extern(.C, mangleName: "exit")
-func libc_exit(code: lang.i32)
+func libc_exit(code: Int32)
 
 // ============================================================================
 // PUBLIC API
@@ -52,12 +52,9 @@ func libc_exit(code: lang.i32)
 /// ```
 public func spawn(command: String) -> Int32 {
     let ccmd = command.toCString();
-    let rawStatus = libc_system(lang.cast_ptr[_, lang.i8](ccmd.raw.raw));
+    let rawStatus = libc_system(ccmd.raw.asRaw());
     ccmd.free();
-    // system() returns the exit status in the upper bits on POSIX
-    // Shift right by 8 to get the actual exit code
-    let status = Int32(raw: rawStatus);
-    status >> 8
+    rawStatus >> 8
 }
 
 /// Runs `command` through the system shell and returns its captured stdout.
@@ -77,27 +74,24 @@ public func spawn(command: String) -> Int32 {
 public func captureOutput(command: String) -> String {
     let ccmd = command.toCString();
     let modeStr = "r".toCString();
-    let stream = libc_popen(
-        lang.cast_ptr[_, lang.i8](ccmd.raw.raw),
-        lang.cast_ptr[_, lang.i8](modeStr.raw.raw)
-    );
+    let stream = libc_popen(ccmd.raw.asRaw(), modeStr.raw.asRaw());
     ccmd.free();
     modeStr.free();
 
-    if Bool(boolLiteral: lang.ptr_is_null(stream)) {
+    if stream.isNull {
         return String()
     }
 
     var output = String();
     let bufSize: Int32 = 1024;
-    let buf = malloc(Int64(from: bufSize).raw);
+    let buf = malloc(Int64(from: bufSize));
 
     while true {
-        let line = libc_fgets(buf, bufSize.raw, stream);
-        if Bool(boolLiteral: lang.ptr_is_null(line)) {
+        let line = libc_fgets(buf, bufSize, stream);
+        if line.isNull {
             break
         }
-        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](buf)));
+        let cstr = CString(raw: buf.cast[UInt8]());
         output = output + String(from: cstr)
     }
 
@@ -122,7 +116,7 @@ public func captureOutput(command: String) -> String {
 /// exit(code: Int32(intLiteral: 0));   // success — does not return
 /// ```
 public func exit(code: Int32) {
-    libc_exit(code.raw)
+    libc_exit(code)
 }
 
 /// Strips a trailing run of ASCII whitespace (space, tab, LF, CR) from `s`.

@@ -3,7 +3,7 @@
 module std.os.env
 
 import std.num.(UInt8)
-import std.memory.(Pointer)
+import std.memory.(Pointer, RawPointer)
 import std.text.(String)
 import std.core.(Bool)
 import std.ffi.(CString)
@@ -14,7 +14,7 @@ import std.result.(Optional)
 // ============================================================================
 
 @extern(.C, mangleName: "getenv")
-func libc_getenv(name: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
+func libc_getenv(name: RawPointer) -> RawPointer
 
 // ============================================================================
 // PUBLIC API
@@ -38,14 +38,13 @@ func libc_getenv(name: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
 /// ```
 public func getenv(name: String) -> Optional[String] {
     let cname = name.toCString();
-    let result = libc_getenv(lang.cast_ptr[_, lang.i8](cname.raw.raw));
+    let result = libc_getenv(cname.raw.asRaw());
     cname.free();
 
-    if Bool(boolLiteral: lang.ptr_is_null(result)) {
+    if result.isNull {
         return .None
     }
 
-    let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](result)));
+    let cstr = CString(raw: result.cast[UInt8]());
     .Some(String(from: cstr))
-    // Note: do not free result - it points to environ memory
 }

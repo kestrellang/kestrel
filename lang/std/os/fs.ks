@@ -4,8 +4,8 @@
 
 module std.os.fs
 
-import std.num.(Int64, Int32)
-import std.memory.(Pointer)
+import std.num.(Int64, Int32, Int16)
+import std.memory.(Pointer, RawPointer)
 import std.num.(UInt8)
 import std.text.(String)
 import std.core.(Bool)
@@ -21,52 +21,52 @@ import std.io.error.(IoError)
 // ============================================================================
 
 @extern(.C, mangleName: "mkdir")
-func libc_mkdir(path: lang.ptr[lang.i8], mode: lang.i32) -> lang.i32
+func libc_mkdir(path: RawPointer, mode: Int32) -> Int32
 
 @extern(.C, mangleName: "rmdir")
-func libc_rmdir(path: lang.ptr[lang.i8]) -> lang.i32
+func libc_rmdir(path: RawPointer) -> Int32
 
 @extern(.C, mangleName: "unlink")
-func libc_unlink(path: lang.ptr[lang.i8]) -> lang.i32
+func libc_unlink(path: RawPointer) -> Int32
 
 @extern(.C, mangleName: "rename")
-func libc_rename(old: lang.ptr[lang.i8], new: lang.ptr[lang.i8]) -> lang.i32
+func libc_rename(old: RawPointer, new: RawPointer) -> Int32
 
 @extern(.C, mangleName: "symlink")
-func libc_symlink(target: lang.ptr[lang.i8], linkpath: lang.ptr[lang.i8]) -> lang.i32
+func libc_symlink(target: RawPointer, linkpath: RawPointer) -> Int32
 
 @extern(.C, mangleName: "readlink")
-func libc_readlink(path: lang.ptr[lang.i8], buf: lang.ptr[lang.i8], bufsize: lang.i64) -> lang.i64
+func libc_readlink(path: RawPointer, buf: RawPointer, bufsize: Int64) -> Int64
 
 @extern(.C, mangleName: "chmod")
-func libc_chmod(path: lang.ptr[lang.i8], mode: lang.i32) -> lang.i32
+func libc_chmod(path: RawPointer, mode: Int32) -> Int32
 
 @extern(.C, mangleName: "access")
-func libc_access(path: lang.ptr[lang.i8], mode: lang.i32) -> lang.i32
+func libc_access(path: RawPointer, mode: Int32) -> Int32
 
 @extern(.C, mangleName: "stat")
-func libc_stat(path: lang.ptr[lang.i8], buf: lang.ptr[lang.i8]) -> lang.i32
+func libc_stat(path: RawPointer, buf: RawPointer) -> Int32
 
 @extern(.C, mangleName: "opendir")
-func libc_opendir(path: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
+func libc_opendir(path: RawPointer) -> RawPointer
 
 @extern(.C, mangleName: "readdir")
-func libc_readdir(dirp: lang.ptr[lang.i8]) -> lang.ptr[lang.i8]
+func libc_readdir(dirp: RawPointer) -> RawPointer
 
 @extern(.C, mangleName: "closedir")
-func libc_closedir(dirp: lang.ptr[lang.i8]) -> lang.i32
+func libc_closedir(dirp: RawPointer) -> Int32
 
 @extern(.C, mangleName: "getcwd")
-func libc_getcwd(buf: lang.ptr[lang.i8], size: lang.i64) -> lang.ptr[lang.i8]
+func libc_getcwd(buf: RawPointer, size: Int64) -> RawPointer
 
 // errno access
 @platform(.darwin)
 @extern(.C, mangleName: "__error")
-func __errno_ptr() -> lang.ptr[lang.i32]
+func __errno_ptr() -> Pointer[Int32]
 
 @platform(.linux)
 @extern(.C, mangleName: "__errno_location")
-func __errno_ptr() -> lang.ptr[lang.i32]
+func __errno_ptr() -> Pointer[Int32]
 
 // ============================================================================
 // CONSTANTS
@@ -108,8 +108,7 @@ func MODE_DIR_DEFAULT() -> Int32 { 493 }
 
 /// Reads the current value of `errno`. Platform-specific access via `__error` (darwin) or `__errno_location` (linux).
 func fsErrno() -> Int32 {
-    let ptr = __errno_ptr();
-    Int32(raw: lang.ptr_read(ptr))
+    __errno_ptr().read()
 }
 
 /// Snapshots `errno` into a typed `IoError`. Call this immediately after a failing libc call before any other syscall could perturb `errno`.
@@ -137,9 +136,9 @@ func lastError() -> IoError {
 /// ```
 public func fileExists(path: String) -> Bool {
     let cpath = path.toCString();
-    let result = libc_access(lang.cast_ptr[_, lang.i8](cpath.raw.raw), F_OK().raw);
+    let result = libc_access(cpath.raw.asRaw(), F_OK());
     cpath.free();
-    Int32(raw: result) == 0
+    result == 0
 }
 
 /// Returns true if `path` exists and is a directory.
@@ -156,10 +155,7 @@ public func fileExists(path: String) -> Bool {
 public func isDirectory(path: String) -> Bool {
     let mode = statMode(path);
     match mode {
-        .Some(m) => {
-            let masked = Int32(raw: lang.i32_and(m.raw, S_IFMT().raw));
-            masked == S_IFDIR()
-        },
+        .Some(m) => m.bitwiseAnd(S_IFMT()) == S_IFDIR(),
         .None => false
     }
 }
@@ -171,10 +167,7 @@ public func isDirectory(path: String) -> Bool {
 public func isFile(path: String) -> Bool {
     let mode = statMode(path);
     match mode {
-        .Some(m) => {
-            let masked = Int32(raw: lang.i32_and(m.raw, S_IFMT().raw));
-            masked == S_IFREG()
-        },
+        .Some(m) => m.bitwiseAnd(S_IFMT()) == S_IFREG(),
         .None => false
     }
 }
@@ -192,20 +185,20 @@ public func isFile(path: String) -> Bool {
 /// matching the host's `struct stat`.
 func statMode(path: String) -> Optional[Int32] {
     let cpath = path.toCString();
-    let buf = malloc(STAT_BUF_SIZE().raw);
-    let _ = memset(buf, 0, STAT_BUF_SIZE().raw);
+    let buf = malloc(STAT_BUF_SIZE());
+    let _ = memset(buf, 0, STAT_BUF_SIZE());
 
-    let result = libc_stat(lang.cast_ptr[_, lang.i8](cpath.raw.raw), buf);
+    let result = libc_stat(cpath.raw.asRaw(), buf);
     cpath.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         free(buf);
         return .None
     }
 
-    let modePtr = lang.ptr_offset(buf, ST_MODE_OFFSET().raw);
-    let modeRaw = lang.ptr_read(lang.cast_ptr[_, lang.i16](modePtr));
-    let mode = Int32(raw: lang.cast_i16_i32(modeRaw));
+    let modePtr = buf.offset(by: ST_MODE_OFFSET());
+    let modeRaw = modePtr.cast[Int16]().read();
+    let mode = Int32(from: modeRaw);
 
     free(buf);
     .Some(mode)
@@ -237,10 +230,10 @@ func statMode(path: String) -> Optional[Int32] {
 /// ```
 public func mkdir(path: String) -> Result[(), IoError] {
     let cpath = path.toCString();
-    let result = libc_mkdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw), MODE_DIR_DEFAULT().raw);
+    let result = libc_mkdir(cpath.raw.asRaw(), MODE_DIR_DEFAULT());
     cpath.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         return .Err(lastError())
     }
     .Ok(())
@@ -296,10 +289,10 @@ public func mkdirAll(path: String) -> Result[(), IoError] {
 /// Returns `Err(IoError)` on any libc failure; `errno` is captured.
 public func removeDir(path: String) -> Result[(), IoError] {
     let cpath = path.toCString();
-    let result = libc_rmdir(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
+    let result = libc_rmdir(cpath.raw.asRaw());
     cpath.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         return .Err(lastError())
     }
     .Ok(())
@@ -323,21 +316,21 @@ public func removeDir(path: String) -> Result[(), IoError] {
 public func listDir(path: String) -> Array[String] {
     var result = Array[String]();
     let cpath = path.toCString();
-    let dirp = libc_opendir(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
+    let dirp = libc_opendir(cpath.raw.asRaw());
     cpath.free();
 
-    if Bool(boolLiteral: lang.ptr_is_null(dirp)) {
+    if dirp.isNull {
         return result
     }
 
     while true {
         let entry = libc_readdir(dirp);
-        if Bool(boolLiteral: lang.ptr_is_null(entry)) {
+        if entry.isNull {
             break
         }
 
-        let namePtr = lang.ptr_offset(entry, DIRENT_NAME_OFFSET().raw);
-        let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](namePtr)));
+        let namePtr = entry.offset(by: DIRENT_NAME_OFFSET());
+        let cstr = CString(raw: namePtr.cast[UInt8]());
         let name = String(from: cstr);
 
         if name.equals(".") or name.equals("..") {
@@ -366,10 +359,10 @@ public func listDir(path: String) -> Array[String] {
 /// Returns `Err(IoError)` on any libc failure; `errno` is captured.
 public func remove(path: String) -> Result[(), IoError] {
     let cpath = path.toCString();
-    let result = libc_unlink(lang.cast_ptr[_, lang.i8](cpath.raw.raw));
+    let result = libc_unlink(cpath.raw.asRaw());
     cpath.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         return .Err(lastError())
     }
     .Ok(())
@@ -388,11 +381,11 @@ public func remove(path: String) -> Result[(), IoError] {
 public func rename(from: String, to: String) -> Result[(), IoError] {
     let cfrom = from.toCString();
     let cto = to.toCString();
-    let result = libc_rename(lang.cast_ptr[_, lang.i8](cfrom.raw.raw), lang.cast_ptr[_, lang.i8](cto.raw.raw));
+    let result = libc_rename(cfrom.raw.asRaw(), cto.raw.asRaw());
     cfrom.free();
     cto.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         return .Err(lastError())
     }
     .Ok(())
@@ -414,11 +407,11 @@ public func rename(from: String, to: String) -> Result[(), IoError] {
 public func symlink(target: String, path: String) -> Result[(), IoError] {
     let ctarget = target.toCString();
     let cpath = path.toCString();
-    let result = libc_symlink(lang.cast_ptr[_, lang.i8](ctarget.raw.raw), lang.cast_ptr[_, lang.i8](cpath.raw.raw));
+    let result = libc_symlink(ctarget.raw.asRaw(), cpath.raw.asRaw());
     ctarget.free();
     cpath.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         return .Err(lastError())
     }
     .Ok(())
@@ -439,23 +432,21 @@ public func symlink(target: String, path: String) -> Result[(), IoError] {
 public func readlink(path: String) -> Result[String, IoError] {
     let cpath = path.toCString();
     let bufsize: Int64 = 1024;
-    let buf = malloc(bufsize.raw);
+    let buf = malloc(bufsize);
 
-    let bytesRead = libc_readlink(lang.cast_ptr[_, lang.i8](cpath.raw.raw), buf, bufsize.raw);
+    let bytesRead = libc_readlink(cpath.raw.asRaw(), buf, bufsize);
     cpath.free();
 
-    if Int64(raw: bytesRead) < 0 {
+    if bytesRead < 0 {
         free(buf);
         return .Err(lastError())
     }
 
-    // Build string from bytes (readlink does not null-terminate)
     var result = String();
     var i: Int64 = 0;
-    let count = Int64(raw: bytesRead);
-    while i < count {
-        let byte = lang.ptr_read(lang.cast_ptr[_, lang.i8](lang.ptr_offset(buf, i.raw)));
-        let ch = UInt8(raw: byte);
+    while i < bytesRead {
+        let bytePtr = buf.offset(by: i).cast[UInt8]();
+        let ch = bytePtr.read();
         result.appendByte(ch);
         i = i + 1
     }
@@ -486,10 +477,10 @@ public func readlink(path: String) -> Result[String, IoError] {
 /// ```
 public func chmod(path: String, mode: Int32) -> Result[(), IoError] {
     let cpath = path.toCString();
-    let result = libc_chmod(lang.cast_ptr[_, lang.i8](cpath.raw.raw), mode.raw);
+    let result = libc_chmod(cpath.raw.asRaw(), mode);
     cpath.free();
 
-    if Int32(raw: result) != 0 {
+    if result != 0 {
         return .Err(lastError())
     }
     .Ok(())
@@ -513,15 +504,15 @@ public func chmod(path: String, mode: Int32) -> Result[(), IoError] {
 /// ```
 public func getcwd() -> String {
     let size: Int64 = 1024;
-    let buf = malloc(size.raw);
-    let result = libc_getcwd(buf, size.raw);
+    let buf = malloc(size);
+    let result = libc_getcwd(buf, size);
 
-    if Bool(boolLiteral: lang.ptr_is_null(result)) {
+    if result.isNull {
         free(buf);
         return String()
     }
 
-    let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](buf)));
+    let cstr = CString(raw: buf.cast[UInt8]());
     let s = String(from: cstr);
     free(buf);
     s

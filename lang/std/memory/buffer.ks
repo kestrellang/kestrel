@@ -3,7 +3,7 @@
 module std.memory
 
 import std.result.(Optional)
-import std.core.(Bool, Copyable)
+import std.core.(Bool, Copyable, fatalError)
 import std.num.(Int64)
 import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
 import std.ffi.(memcpy, memmove, memset)
@@ -59,7 +59,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[T]()
         } else {
-            lang.panic("Buffer allocation failed")
+            fatalError("Buffer allocation failed")
         }
     }
 
@@ -170,7 +170,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
             self.ptr = rawPtr.cast[T]();
             self.cap = newCapacity
         } else {
-            lang.panic("Buffer resize failed")
+            fatalError("Buffer resize failed")
         }
     }
 

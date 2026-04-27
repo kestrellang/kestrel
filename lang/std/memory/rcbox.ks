@@ -2,7 +2,7 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable, Copyable)
+import std.core.(Bool, Cloneable, Copyable, fatalError)
 import std.num.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
@@ -66,7 +66,7 @@ public struct RcBox[T] {
             self.ptr = rawPtr.cast[RcBoxStorage[T]]();
             self.ptr.write(RcBoxStorage(refCount: Int64(intLiteral: 1), value: value));
         } else {
-            lang.panic("RcBox allocation failed")
+            fatalError("RcBox allocation failed")
         }
     }
 
