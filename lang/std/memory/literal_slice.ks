@@ -32,10 +32,10 @@ public struct LiteralSliceIterator[T]: Iterator {
 
     /// Yields the next element, or `.None` once the buffer is exhausted.
     public mutating func next() -> T? {
-        if self.remaining > Int64(intLiteral: 0) {
+        if self.remaining > 0 {
             let value = self.ptr.read();
-            self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
-            self.remaining = self.remaining - Int64(intLiteral: 1);
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
             .Some(value)
         } else {
             .None
@@ -89,7 +89,7 @@ public struct LiteralSlice[T]: Iterable {
     public func count() -> Int64 { self.len }
 
     /// Returns `true` for `[]`.
-    public func isEmpty() -> Bool { self.len == Int64(intLiteral: 0) }
+    public func isEmpty() -> Bool { self.len == 0 }
 
     /// Iterator over the elements in source order.
     public func iter() -> LiteralSliceIterator[T] {
@@ -110,7 +110,7 @@ public struct LiteralSlice[T]: Iterable {
     /// or `index >= count`.
     public subscript(index: Int64) -> T {
         get {
-            if index < Int64(intLiteral: 0) or index >= self.len {
+            if index < 0 or index >= self.len {
                 fatalError("LiteralSlice index out of bounds")
             }
             self.ptr.offset(by: index).read()
@@ -121,7 +121,7 @@ public struct LiteralSlice[T]: Iterable {
     /// Reads element `index`, returning `.None` on out-of-bounds.
     public subscript(checked index: Int64) -> T? {
         get {
-            if index < Int64(intLiteral: 0) or index >= self.len {
+            if index < 0 or index >= self.len {
                 .None
             } else {
                 .Some(self.ptr.offset(by: index).read())

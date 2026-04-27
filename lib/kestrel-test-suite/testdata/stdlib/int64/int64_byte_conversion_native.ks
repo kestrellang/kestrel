@@ -22,9 +22,9 @@ module Test
 
             // fromBytes with wrong number of bytes returns None
             var shortBytes = std.collections.Array[std.num.UInt8]();
-            shortBytes.append(std.num.UInt8(intLiteral: 1));
-            shortBytes.append(std.num.UInt8(intLiteral: 2));
-            shortBytes.append(std.num.UInt8(intLiteral: 3));
+            shortBytes.append(1);
+            shortBytes.append(2);
+            shortBytes.append(3);
             let shortResult = std.num.Int64.fromBytes(shortBytes);
             if shortResult.isSome() { return 6 }
 

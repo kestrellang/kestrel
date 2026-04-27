@@ -8,7 +8,7 @@
       "name": "TcpListener",
       "anchor": "struct-TcpListener",
       "signature": "public struct TcpListener { /* private fields */ }",
-      "doc": "A bound, listening TCP server socket.\n\nCreated by `TcpListener.bind(port:)` — sets `SO_REUSEADDR`,\nbinds to `INADDR_ANY:port`, and calls `listen(2)` with backlog\n`128`. Accept connections via `accept()`, which blocks until\nthe next client arrives. The owned fd is closed by the deinit.\n\n# Examples\n\n```\nlet listener = match TcpListener.bind(port: UInt16(intLiteral: 8080)) {\n    .Ok(l) => l,\n    .Err(e) => return .Err(e)\n};\nwhile true {\n    match listener.accept() {\n        .Ok(stream) => /* handle stream */ {},\n        .Err(e) => break\n    }\n}\n```\n\n# Representation\n\nA single `Int32` field — the listening socket fd.\n\n# Memory Model\n\nOwns its fd; closed on drop.",
+      "doc": "A bound, listening TCP server socket.\n\nCreated by `TcpListener.bind(port:)` — sets `SO_REUSEADDR`,\nbinds to `INADDR_ANY:port`, and calls `listen(2)` with backlog\n`128`. Accept connections via `accept()`, which blocks until\nthe next client arrives. The owned fd is closed by the deinit.\n\n# Examples\n\n```\nlet listener = match TcpListener.bind(port: 8080) {\n    .Ok(l) => l,\n    .Err(e) => return .Err(e)\n};\nwhile true {\n    match listener.accept() {\n        .Ok(stream) => /* handle stream */ {},\n        .Err(e) => break\n    }\n}\n```\n\n# Representation\n\nA single `Int32` field — the listening socket fd.\n\n# Memory Model\n\nOwns its fd; closed on drop.",
       "source_path": "lang/std/net/socket.ks",
       "member_groups": [
         {
@@ -37,7 +37,7 @@
               "name": "bind",
               "anchor": "function-bind",
               "signature": "public static func bind(UInt16) -> Result[TcpListener, IoError]",
-              "doc": "Creates a server socket bound to `0.0.0.0:port` with `SO_REUSEADDR` and a backlog of 128.\n\nWalks the full setup — `socket` → `setsockopt` → `bind` →\n`listen` — and cleans up the partial fd on any failure.\n\n# Errors\n\nReturns `Err(IoError.last())` (captured `errno`) at any of the\nfour steps; the most common case is `EADDRINUSE` if another\nprocess holds the port and `SO_REUSEADDR` is not enough.\n\n# Examples\n\n```\nlet listener = TcpListener.bind(port: UInt16(intLiteral: 8080));\n```",
+              "doc": "Creates a server socket bound to `0.0.0.0:port` with `SO_REUSEADDR` and a backlog of 128.\n\nWalks the full setup — `socket` → `setsockopt` → `bind` →\n`listen` — and cleans up the partial fd on any failure.\n\n# Errors\n\nReturns `Err(IoError.last())` (captured `errno`) at any of the\nfour steps; the most common case is `EADDRINUSE` if another\nprocess holds the port and `SO_REUSEADDR` is not enough.\n\n# Examples\n\n```\nlet listener = TcpListener.bind(port: 8080);\n```",
               "source_path": "lang/std/net/socket.ks"
             },
             {
@@ -65,7 +65,7 @@
       "name": "TcpStream",
       "anchor": "struct-TcpStream",
       "signature": "public struct TcpStream { /* private fields */ }",
-      "doc": "A connected TCP byte stream — implements `Read` and `Write` on top of a POSIX socket fd.\n\nReturned by `TcpListener.accept()` (server side) and\n`TcpStream.connect(host:port:)` (client side). Reads and writes\ngo directly through `recv(2)` / `send(2)`; partial reads/writes\nare surfaced — the caller is responsible for looping. The owned\nfd is closed automatically by the deinit unless `detachFd` has\nbeen called first.\n\n# Examples\n\n```\nvar stream = match TcpStream.connect(host: \"example.com\", port: UInt16(intLiteral: 80)) {\n    .Ok(s) => s,\n    .Err(e) => return .Err(e)\n};\n// stream is Read + Write\n```\n\n# Representation\n\nA single `Int32` field holding the file descriptor; `-1` means\n\"detached, do not close on drop\".\n\n# Memory Model\n\nOwns its fd. Cloning is not provided — duplicate explicitly via\n`dup(2)` if you need it.",
+      "doc": "A connected TCP byte stream — implements `Read` and `Write` on top of a POSIX socket fd.\n\nReturned by `TcpListener.accept()` (server side) and\n`TcpStream.connect(host:port:)` (client side). Reads and writes\ngo directly through `recv(2)` / `send(2)`; partial reads/writes\nare surfaced — the caller is responsible for looping. The owned\nfd is closed automatically by the deinit unless `detachFd` has\nbeen called first.\n\n# Examples\n\n```\nvar stream = match TcpStream.connect(host: \"example.com\", port: 80) {\n    .Ok(s) => s,\n    .Err(e) => return .Err(e)\n};\n// stream is Read + Write\n```\n\n# Representation\n\nA single `Int32` field holding the file descriptor; `-1` means\n\"detached, do not close on drop\".\n\n# Memory Model\n\nOwns its fd. Cloning is not provided — duplicate explicitly via\n`dup(2)` if you need it.",
       "source_path": "lang/std/net/socket.ks",
       "member_groups": [
         {
@@ -86,7 +86,7 @@
               "name": "connect",
               "anchor": "function-connect",
               "signature": "public static func connect(String, UInt16) -> Result[TcpStream, IoError]",
-              "doc": "Resolves `host`:`port` and returns a connected `TcpStream`.\n\nUses `getaddrinfo` for resolution and tries the first result.\nConstrained to IPv4 / TCP via the `hints` block. On any\nfailure the partially-built fd is closed and the resolver\nlist is freed before returning. Does not currently fall\nthrough to the next `addrinfo` entry on a failed\n`connect` — try one address.\n\n# Errors\n\n- Returns `Err(IoError(code: eai))` with the `EAI_*` resolver code if\n  `getaddrinfo` fails (note: this is a libc resolver code,\n  not an `errno`).\n- Returns `Err(IoError.last())` from `errno` if `socket()` or\n  `connect()` fail.\n\n# Examples\n\n```\nmatch TcpStream.connect(host: \"example.com\", port: UInt16(intLiteral: 80)) {\n    .Ok(stream) => /* use stream */ {},\n    .Err(e) => print(e.message)\n}\n```",
+              "doc": "Resolves `host`:`port` and returns a connected `TcpStream`.\n\nUses `getaddrinfo` for resolution and tries the first result.\nConstrained to IPv4 / TCP via the `hints` block. On any\nfailure the partially-built fd is closed and the resolver\nlist is freed before returning. Does not currently fall\nthrough to the next `addrinfo` entry on a failed\n`connect` — try one address.\n\n# Errors\n\n- Returns `Err(IoError(code: eai))` with the `EAI_*` resolver code if\n  `getaddrinfo` fails (note: this is a libc resolver code,\n  not an `errno`).\n- Returns `Err(IoError.last())` from `errno` if `socket()` or\n  `connect()` fail.\n\n# Examples\n\n```\nmatch TcpStream.connect(host: \"example.com\", port: 80) {\n    .Ok(stream) => /* use stream */ {},\n    .Err(e) => print(e.message)\n}\n```",
               "source_path": "lang/std/net/socket.ks"
             },
             {

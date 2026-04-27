@@ -242,7 +242,7 @@ public func toUppercase(c: Char) -> Char {
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = UPPER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let stage2_idx = Int64(from: blockIdx).multiply(Int64(intLiteral: 256)).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = UPPER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
@@ -259,7 +259,7 @@ public func toLowercase(c: Char) -> Char {
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = LOWER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let stage2_idx = Int64(from: blockIdx).multiply(Int64(intLiteral: 256)).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = LOWER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
@@ -277,7 +277,7 @@ public func toTitlecase(c: Char) -> Char {
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = TITLE_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let stage2_idx = Int64(from: blockIdx).multiply(Int64(intLiteral: 256)).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = TITLE_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))

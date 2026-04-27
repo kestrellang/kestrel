@@ -77,9 +77,9 @@ public struct Bool:
     /// stdlib hashes other primitives — equal `Bool`s always hash equal.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         if self.value {
-            hasher.write(Slice(pointer: Pointer(to: UInt8(intLiteral: 1)), count: std.num.Int64(intLiteral: 1)))
+            hasher.write(Slice(pointer: Pointer(to: 1), count: std.num.1))
         } else {
-            hasher.write(Slice(pointer: Pointer(to: UInt8(intLiteral: 0)), count: std.num.Int64(intLiteral: 1)))
+            hasher.write(Slice(pointer: Pointer(to: 0), count: std.num.1))
         }
     }
 

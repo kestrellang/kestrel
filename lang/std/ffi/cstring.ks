@@ -106,8 +106,8 @@ public struct CString: FFISafe {
         if self.raw.isNull {
             return 0
         }
-        var len = Int64(intLiteral: 0);
-        while self.raw.offset(by: len).read() != UInt8(intLiteral: 0) {
+        var len = 0;
+        while self.raw.offset(by: len).read() != 0 {
             len = len + 1;
         }
         len
@@ -171,7 +171,7 @@ extend String {
                 let _ = memcpy(rawPtr, srcPtr, byteCount);
             }
 
-            ptr.offset(by: byteCount).write(UInt8(intLiteral: 0));
+            ptr.offset(by: byteCount).write(0);
         }
 
         return CString(raw: ptr);

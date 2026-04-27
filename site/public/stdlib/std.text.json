@@ -511,7 +511,7 @@
               "name": "fromDigit",
               "anchor": "function-fromDigit",
               "signature": "public static func fromDigit(UInt32) -> Char?",
-              "doc": "Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.\n\nInverse of `digitValue`. Values outside `0..=9` return `None`.\n\n# Examples\n\n```\nChar.fromDigit(d: UInt32(intLiteral: 7));   // Some('7')\nChar.fromDigit(d: UInt32(intLiteral: 12));  // None\n```",
+              "doc": "Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.\n\nInverse of `digitValue`. Values outside `0..=9` return `None`.\n\n# Examples\n\n```\nChar.fromDigit(d: 7);   // Some('7')\nChar.fromDigit(d: 12);  // None\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -947,7 +947,7 @@
               "name": "count",
               "anchor": "field-count",
               "signature": "public var count: Int64 { get }",
-              "doc": "Number of code points. **O(n)** — walks the buffer counting\nUTF-8 leading bytes (those whose top two bits are not `10`). For\nASCII strings this equals `byteCount`. Cache the result if you\nneed it more than once; each access re-walks the string.",
+              "doc": "",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1386,7 +1386,7 @@
               "name": "From Chars",
               "anchor": "initializer-From-Chars",
               "signature": "public init(chars: Array[Char])",
-              "doc": "Constructs a grapheme from a sequence of `Char`s.\n\nThe caller is responsible for the chars actually forming a\nsingle UAX #29 cluster — the constructor does not segment or\nvalidate. `GraphemesIterator` is the canonical producer of valid\nclusters.\n\n# Examples\n\n```\nvar chars = Array[Char]();\nchars.append('e');\nchars.append('\\u{0301}');  // combining acute\nlet g = Grapheme(chars: chars);\ng.charCount();  // 2\n```",
+              "doc": "Constructs a grapheme from a sequence of `Char`s.\n\nThe caller is responsible for the chars actually forming a\nsingle UAX #29 cluster — the constructor does not segment or\nvalidate. `GraphemesIterator` is the canonical producer of valid\nclusters. Single-char input avoids allocating; multi-char input\nkeeps the trailing code points in a separate array.\n\n# Examples\n\n```\nvar chars = Array[Char]();\nchars.append('e');\nchars.append('\\u{0301}');  // combining acute\nlet g = Grapheme(chars: chars);\ng.charCount();  // 2\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1394,7 +1394,7 @@
               "name": "Single Char",
               "anchor": "initializer-Single-Char",
               "signature": "public init(char: Char)",
-              "doc": "Constructs a one-`Char` grapheme.\n\nConvenience for the common single-scalar case so callers don't\nhave to build an `Array[Char]` first.\n\n# Examples\n\n```\nlet g = Grapheme(char: 'a');\ng.charCount();  // 1\n```",
+              "doc": "Constructs a one-`Char` grapheme.\n\nAllocation-free — the common path for ASCII iteration through\n`GraphemesView`.\n\n# Examples\n\n```\nlet g = Grapheme(char: 'a');\ng.charCount();  // 1\n```",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1410,7 +1410,7 @@
               "name": "chars",
               "anchor": "function-chars",
               "signature": "public func chars() -> Array[Char]",
-              "doc": "Returns the constituent code points in scalar order.\n\nThe returned array is a clone of the internal storage; mutating\nit does not affect the grapheme.",
+              "doc": "Returns the constituent code points in scalar order.\n\nMaterializes a fresh `Array[Char]` on every call.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1418,7 +1418,7 @@
               "name": "firstChar",
               "anchor": "function-firstChar",
               "signature": "public func firstChar() -> Char?",
-              "doc": "Returns the first `Char` of the cluster, or `None` if the grapheme is empty.\n\nUseful as a cheap \"what kind of grapheme is this?\" check\n(alphabetic, digit, emoji-base, …) without inspecting the full\ncluster.",
+              "doc": "Returns the first `Char` of the cluster.\n\nAlways `.Some` — every grapheme has at least one code point.\nUseful as a cheap \"what kind of grapheme is this?\" check\n(alphabetic, digit, emoji-base, …) without inspecting the full\ncluster.",
               "source_path": "lang/std/text/char.ks"
             },
             {
@@ -1464,7 +1464,7 @@
               "name": "clone",
               "anchor": "function-clone",
               "signature": "public func clone() -> Grapheme",
-              "doc": "Returns a deep copy of this grapheme (clones the underlying char array).",
+              "doc": "Returns a deep copy of this grapheme.",
               "source_path": "lang/std/text/char.ks"
             }
           ]
@@ -2087,6 +2087,14 @@
             },
             {
               "kind": "function",
+              "name": "_appendBytes",
+              "anchor": "function--appendBytes",
+              "signature": "mutating func _appendBytes(Pointer[UInt8], Int64)",
+              "doc": "Appends `n` bytes from `ptr` via `memcpy`. Internal — caller\nensures the bytes preserve UTF-8 validity.\n\n# Safety\n\n`ptr` must reference at least `n` valid UTF-8 bytes that, when\nconcatenated to the current buffer, yield valid UTF-8.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
               "name": "append",
               "anchor": "function-append",
               "signature": "public mutating func append(String)",
@@ -2170,7 +2178,7 @@
               "name": "count",
               "anchor": "field-count",
               "signature": "public var count: Int64 { get }",
-              "doc": "The number of Unicode code points. O(n).\n\nWalks the buffer counting UTF-8 leading bytes (those whose top\ntwo bits are not `10`). Cache the result if you need it more\nthan once.\n\n# Examples\n\n```\n\"hi\".count;     // 2\n\"héllo\".count;  // 5 (code points; bytes is 6)\n```",
+              "doc": "",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2219,6 +2227,14 @@
               "anchor": "function-fromBytesUnchecked",
               "signature": "static func fromBytesUnchecked(Pointer[UInt8], Int64) -> String",
               "doc": "Constructs a string by copying `count` bytes starting at `ptr`, without UTF-8 validation.\n\nInternal helper used by split iterators and substring helpers\nthat already know the byte range falls on UTF-8 boundaries.\n\n# Safety\n\n`ptr` must reference at least `count` valid UTF-8 bytes; the\nrange starting at `ptr` and ending at `ptr + count` must not\nsplit a multi-byte sequence.",
+              "source_path": "lang/std/text/string.ks"
+            },
+            {
+              "kind": "function",
+              "name": "fromRawBytes",
+              "anchor": "function-fromRawBytes",
+              "signature": "static func fromRawBytes(lang.ptr[lang.i8], Int64) -> String",
+              "doc": "Constructs a string by copying `count` bytes from a raw `lang.ptr[lang.i8]`.\n\nInternal helper for view-side code that holds raw pointers but\nneeds to materialize an owned `String`. No UTF-8 validation.\n\n# Safety\n\n`rawPtr` must reference at least `count` valid UTF-8 bytes; the\nrange must not split a multi-byte sequence.",
               "source_path": "lang/std/text/string.ks"
             },
             {

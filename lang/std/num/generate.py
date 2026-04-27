@@ -705,10 +705,10 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         # Per-type magnitude bounds for the UInt64 accumulator.
         if type_name == "Int64":
             pos_max_expr = "UInt64(from: Int64.maxValue)"
-            neg_max_expr = "UInt64(from: Int64.maxValue) + UInt64(intLiteral: 1)"
+            neg_max_expr = "UInt64(from: Int64.maxValue) + 1"
         else:
             pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
-            neg_max_expr = f"UInt64(from: {type_name}.maxValue) + UInt64(intLiteral: 1)"
+            neg_max_expr = f"UInt64(from: {type_name}.maxValue) + 1"
         radix_parse = f'''
     /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
     /// case-insensitive and represent digit values 10–35. Returns `None`
@@ -965,7 +965,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     out each byte.
     """
     byte_count = bits // 8
-    bc = f"Int64(intLiteral: {byte_count})"
+    bc = f"{byte_count}"
     # Same-width same-type means no Convertible[UInt64] conformance exists for
     # UInt64 itself (no self-conversion); use plain identifiers in that case.
     widen_self = "self" if type_name == "UInt64" else "UInt64(from: self)"
@@ -997,10 +997,10 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {{
         var result = std.collections.Array[UInt8](capacity: {bc});
         let value = {widen_self};
-        let mask = UInt64(intLiteral: 255);
+        let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < {bc} {{
-            let shift = ({bc} - Int64(intLiteral: 1) - i) * Int64(intLiteral: 8);
+            let shift = ({bc} - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -1013,10 +1013,10 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {{
         var result = std.collections.Array[UInt8](capacity: {bc});
         let value = {widen_self};
-        let mask = UInt64(intLiteral: 255);
+        let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < {bc} {{
-            let shift = i * Int64(intLiteral: 8);
+            let shift = i * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -1046,11 +1046,11 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         if bytes.count != {bc} {{
             return .None
         }}
-        var result = UInt64(intLiteral: 0);
+        var result: UInt64 = 0;
         var i: Int64 = 0;
         while i < {bc} {{
             let byteVal = UInt64(from: bytes(unchecked: i));
-            result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
+            result = (result << 8) | byteVal;
             i = i + 1
         }}
         .Some({narrow_result})
@@ -1062,12 +1062,12 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         if bytes.count != {bc} {{
             return .None
         }}
-        var result = UInt64(intLiteral: 0);
+        var result: UInt64 = 0;
         var i: Int64 = 0;
         while i < {bc} {{
-            let shift = i * Int64(intLiteral: 8);
+            let shift = i * 8;
             let byteVal = UInt64(from: bytes(unchecked: i));
-            result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
+            result = result | (byteVal << shift);
             i = i + 1
         }}
         .Some({narrow_result})

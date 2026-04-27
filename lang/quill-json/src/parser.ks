@@ -323,21 +323,21 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
         let esc = try cursor.advanceChar();
         // \" \\ \/ \b \f \n \r \t \uXXXX
         if esc == '"' {
-            result.appendByte(UInt8(intLiteral: 34))
+            result.appendByte(34)
         } else if esc == '\\' {
-            result.appendByte(UInt8(intLiteral: 92))
+            result.appendByte(92)
         } else if esc == '/' {
-            result.appendByte(UInt8(intLiteral: 47))
+            result.appendByte(47)
         } else if esc == 'b' {
-            result.appendByte(UInt8(intLiteral: 8))
+            result.appendByte(8)
         } else if esc == 'f' {
-            result.appendByte(UInt8(intLiteral: 12))
+            result.appendByte(12)
         } else if esc == 'n' {
-            result.appendByte(UInt8(intLiteral: 10))
+            result.appendByte(10)
         } else if esc == 'r' {
-            result.appendByte(UInt8(intLiteral: 13))
+            result.appendByte(13)
         } else if esc == 't' {
-            result.appendByte(UInt8(intLiteral: 9))
+            result.appendByte(9)
         } else if esc == 'u' {
             let codepoint = try parseUnicodeEscape(cursor);
             result.appendChar(Char(UInt32(from: codepoint)))

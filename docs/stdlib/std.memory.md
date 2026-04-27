@@ -526,13 +526,13 @@ public struct LiteralSliceIterator[T] { /* private fields */ }
 ```
 
 Iterator yielded by `LiteralSlice.iter()`. Walks the backing buffer
-element-by-element, advancing a raw pointer.
+element-by-element, advancing a typed pointer.
 
 ### Representation
 
-A raw pointer plus a primitive-typed remaining count. No `Slice`
-indirection — the iterator is what `LiteralSlice` hands out instead of
-exposing its raw pointer directly.
+A `Pointer[T]` plus a remaining count. No `Slice` indirection — the
+iterator is what `LiteralSlice` hands out instead of exposing its
+pointer directly.
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 
@@ -541,11 +541,11 @@ _Defined in `lang/std/memory/literal_slice.ks`._
 #### initializer `From Storage`
 
 ```kestrel
-public init(ptr: lang.ptr[T], remaining: lang.i64)
+public init(ptr: Pointer[T], remaining: Int64)
 ```
 
-Builds an iterator from the raw pointer and length the compiler
-hands to a literal init. Not normally called by user code.
+Builds an iterator from a typed pointer and element count.
+Not normally called by user code.
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 

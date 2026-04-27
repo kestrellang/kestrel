@@ -1815,7 +1815,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a Int16.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i16`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a Int16.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i16`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/int16.ks"
             },
             {
@@ -2974,7 +2974,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a Int32.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i32`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a Int32.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i32`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/int32.ks"
             },
             {
@@ -4133,7 +4133,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a Int64.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i64`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a Int64.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i64`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/int64.ks"
             },
             {
@@ -5750,7 +5750,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a Int8.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i8`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a Int8.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i8`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/int8.ks"
             },
             {
@@ -7071,7 +7071,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt16.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i16`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt16.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i16`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/uint16.ks"
             },
             {
@@ -8152,7 +8152,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt32.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i32`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt32.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i32`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/uint32.ks"
             },
             {
@@ -9233,7 +9233,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt64.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i64`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt64.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i64`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/uint64.ks"
             },
             {
@@ -10314,7 +10314,7 @@
               "name": "Int Literal",
               "anchor": "initializer-Int-Literal",
               "signature": "public init(intLiteral: lang.i64)",
-              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt8.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i8`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\nlet m = Int64(intLiteral: 42);  // explicit\n```",
+              "doc": "Compiler-emitted bridge that turns an integer literal into a UInt8.\n\nYou will rarely call this directly — write the literal and let the\n`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than\n64 bits the literal is truncated with `lang.cast_i64_i8`.\n\n# Examples\n\n```\nlet n: Int64 = 42;            // implicit\n```",
               "source_path": "lang/std/num/uint8.ks"
             },
             {

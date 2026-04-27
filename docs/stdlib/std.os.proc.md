@@ -41,7 +41,7 @@ errors, `>128` typically encodes a fatal signal).
 ### Examples
 
 ```
-exit(code: Int32(intLiteral: 0));   // success — does not return
+exit(code: 0);   // success — does not return
 ```
 
 _Defined in `lang/std/os/proc.ks`._
@@ -65,7 +65,7 @@ captured output, use `captureOutput`.
 
 ```
 let code = spawn(command: "ls -la");
-if code != Int32(intLiteral: 0) {
+if code != 0 {
     print("ls failed");
 }
 ```

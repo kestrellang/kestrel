@@ -78,33 +78,33 @@ func parseConfig() -> Config {
 
     // Detect headless mode: argv[1] == "--headless", argv[2] == iterations.
     // Width/height shift to argv[3]/argv[4] in that case.
-    var posStart: Int32 = Int32(intLiteral: 1);
-    if argc >= Int32(intLiteral: 3) and argString(Int32(intLiteral: 1)).equals("--headless") {
-        if let .Some(n) = Int64.parse(argString(Int32(intLiteral: 2))) {
+    var posStart: Int32 = 1;
+    if argc >= 3 and argString(1).equals("--headless") {
+        if let .Some(n) = Int64.parse(argString(2)) {
             if n > 0 {
                 headlessIters = n;
             }
         }
-        posStart = Int32(intLiteral: 3);
+        posStart = 3;
     }
 
-    if argc >= posStart + Int32(intLiteral: 1) {
+    if argc >= posStart + 1 {
         if let .Some(w) = Int64.parse(argString(posStart)) {
             if w >= 5 and w <= 2000 {
                 width = w;
             }
         }
     }
-    if argc >= posStart + Int32(intLiteral: 2) {
-        if let .Some(h) = Int64.parse(argString(posStart + Int32(intLiteral: 1))) {
+    if argc >= posStart + 2 {
+        if let .Some(h) = Int64.parse(argString(posStart + 1)) {
             if h >= 5 and h <= 2000 {
                 height = h;
             }
         }
     }
     // cellPx only applies in interactive mode.
-    if headlessIters == 0 and argc >= posStart + Int32(intLiteral: 3) {
-        if let .Some(c) = Int64.parse(argString(posStart + Int32(intLiteral: 2))) {
+    if headlessIters == 0 and argc >= posStart + 3 {
+        if let .Some(c) = Int64.parse(argString(posStart + 2)) {
             if c >= 1 and c <= 40 {
                 cellOverride = c;
             }
@@ -419,7 +419,7 @@ func patternName(kind kind: Int64) -> String {
 // board and prints `gens / ms / gens-per-sec`. Exits 0.
 func runHeadless(cfg: Config) -> Int32 {
     var grid = Grid(width: cfg.width, height: cfg.height, cellSize: 1);
-    grid.randomize(seed: UInt64(intLiteral: 12648430));
+    grid.randomize(seed: 12648430);
 
     let start = monotonicMs();
     var i: Int64 = 0;
@@ -456,7 +456,7 @@ func main() -> Int32 {
     var selectedPattern: Int64 = 0;
     // Bumped each time we reseed so successive R-presses give a different
     // pattern instead of replaying the same starting field.
-    var seedCounter: UInt64 = UInt64(intLiteral: 12648430);
+    var seedCounter: UInt64 = 12648430;
 
     grid.randomize(seed: seedCounter);
 
@@ -482,7 +482,7 @@ func main() -> Int32 {
                     match key {
                         .Space => { paused = not paused },
                         .R => {
-                            seedCounter = seedCounter + UInt64(intLiteral: 1);
+                            seedCounter = seedCounter + 1;
                             grid.randomize(seed: seedCounter);
                             paused = false;
                         },

@@ -72,47 +72,63 @@
       "kind": "function",
       "name": "free",
       "anchor": "function-free",
-      "signature": "public func free(consuming lang.ptr[lang.i8])",
-      "doc": "",
+      "signature": "public func free(consuming RawPointer)",
+      "doc": "Wraps `free(3)` — releases memory previously returned by `malloc` / `realloc`.\n\nCalling `free` on a null pointer is defined as a no-op. Calling\nit on any other pointer that was not produced by these\nallocators (or has already been freed) is undefined behaviour.\n\n# Safety\n\n`ptr` must be either null or the original pointer returned by a\nprevious `malloc` / `realloc`. After `free`, the pointer is\ndangling — do not read, write, or free it again.",
       "source_path": "lang/std/ffi/libc.ks"
     },
     {
       "kind": "function",
       "name": "malloc",
       "anchor": "function-malloc",
-      "signature": "public func malloc(consuming lang.i64) -> lang.ptr[lang.i8]",
+      "signature": "public func malloc(consuming Int64) -> RawPointer",
       "doc": "Wraps `malloc(3)` — allocates `size` bytes of uninitialised memory.\n\nReturns a pointer to the start of the block, or null on failure.\nThe memory is **uninitialised** — read it only after writing\nevery byte you intend to use, or follow up with `memset` /\n`calloc` (not exposed here). Free with `free`.\n\n# Safety\n\nThe returned pointer is raw. Callers are responsible for not\nreading uninitialised bytes, not exceeding `size`, and pairing\nevery successful call with exactly one `free`.\n\n# Examples\n\n```\nlet buf = malloc(1024);\n// ... use buf ...\nfree(buf);\n```",
+      "source_path": "lang/std/ffi/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "memcmp",
+      "anchor": "function-memcmp",
+      "signature": "public func memcmp(consuming RawPointer, consuming RawPointer, consuming Int64) -> Int32",
+      "doc": "Wraps `memcmp(3)` — compares the first `n` bytes of `a` and `b`.\n\nReturns a negative value if the first differing byte in `a` is less\nthan the corresponding byte in `b`, zero if all bytes are equal,\npositive otherwise. Comparison is unsigned, byte-by-byte.\n\n# Safety\n\nBoth `a` and `b` must be valid for `n` bytes.",
       "source_path": "lang/std/ffi/libc.ks"
     },
     {
       "kind": "function",
       "name": "memcpy",
       "anchor": "function-memcpy",
-      "signature": "public func memcpy(consuming lang.ptr[lang.i8], consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
-      "doc": "",
+      "signature": "public func memcpy(consuming RawPointer, consuming RawPointer, consuming Int64) -> RawPointer",
+      "doc": "Wraps `memcpy(3)` — copies `n` bytes from `src` to `dest`.\n\n**Source and destination must not overlap** — use `memmove` if\nthey might. Returns `dest` for convenience. No bounds checking;\nthe caller must ensure both regions are valid for `n` bytes.\n\n# Safety\n\n`src` and `dest` must be valid for `n` bytes each, and the two\nregions must not overlap.",
+      "source_path": "lang/std/ffi/libc.ks"
+    },
+    {
+      "kind": "function",
+      "name": "memmem",
+      "anchor": "function-memmem",
+      "signature": "public func memmem(consuming RawPointer, consuming Int64, consuming RawPointer, consuming Int64) -> RawPointer",
+      "doc": "Wraps `memmem(3)` — locates the first occurrence of the `needleLen`-byte\n`needle` in the `haystackLen`-byte `haystack`.\n\nReturns a pointer to the start of the match, or null if not found.\n`needleLen == 0` returns `haystack` (per glibc/macOS conventions —\ncallers should check this before calling). Available on Linux and\nmacOS; not on Windows.\n\n# Safety\n\n`haystack` must be valid for `haystackLen` bytes; `needle` must be\nvalid for `needleLen` bytes.",
       "source_path": "lang/std/ffi/libc.ks"
     },
     {
       "kind": "function",
       "name": "memmove",
       "anchor": "function-memmove",
-      "signature": "public func memmove(consuming lang.ptr[lang.i8], consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
-      "doc": "",
+      "signature": "public func memmove(consuming RawPointer, consuming RawPointer, consuming Int64) -> RawPointer",
+      "doc": "Wraps `memmove(3)` — copies `n` bytes from `src` to `dest`, allowing overlap.\n\nSlightly slower than `memcpy` because it has to detect direction;\nuse `memcpy` when you know the regions are disjoint. Returns\n`dest`.\n\n# Safety\n\n`src` and `dest` must each be valid for `n` bytes. Overlap is\npermitted.",
       "source_path": "lang/std/ffi/libc.ks"
     },
     {
       "kind": "function",
       "name": "memset",
       "anchor": "function-memset",
-      "signature": "public func memset(consuming lang.ptr[lang.i8], consuming lang.i64, consuming lang.i64) -> lang.ptr[lang.i8]",
-      "doc": "",
+      "signature": "public func memset(consuming RawPointer, consuming Int64, consuming Int64) -> RawPointer",
+      "doc": "Wraps `memset(3)` — fills `n` bytes starting at `dest` with the low byte of `c`.\n\n`c` is widened to `i64` to match the libc signature, but only\nthe low 8 bits are used; pass `0` to zero the region. Returns\n`dest`.\n\n# Safety\n\n`dest` must be valid for `n` bytes of writes.",
       "source_path": "lang/std/ffi/libc.ks"
     },
     {
       "kind": "function",
       "name": "realloc",
       "anchor": "function-realloc",
-      "signature": "public func realloc(consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]",
+      "signature": "public func realloc(consuming RawPointer, consuming Int64) -> RawPointer",
       "doc": "Wraps `realloc(3)` — resizes a previously-`malloc`'d block.\n\nMay return the same pointer or a new one; either way, the original\npointer becomes invalid. Returns null on failure, in which case\nthe original block is **not** freed — capture the return value\nbefore reassigning. Bytes beyond the old size in a grown block\nare uninitialised.\n\n# Safety\n\n`ptr` must be null or a pointer from a previous `malloc` /\n`realloc`. After a successful call, only the returned pointer is\nvalid; after a failed call, only the original pointer is valid.\n\n# Examples\n\n```\nvar buf = malloc(64);\nlet bigger = realloc(buf, 256);\n// buf is no longer valid; use bigger\n```",
       "source_path": "lang/std/ffi/libc.ks"
     }

@@ -360,9 +360,9 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// ```
     public func utf8Length() -> Int64 {
         let v = self._value;
-        if v < UInt32(intLiteral: 128) { 1 }
-        else if v < UInt32(intLiteral: 2048) { 2 }
-        else if v < UInt32(intLiteral: 65536) { 3 }
+        if v < 128 { 1 }
+        else if v < 2048 { 2 }
+        else if v < 65536 { 3 }
         else { 4 }
     }
 
@@ -397,11 +397,11 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// Char.fromDigit(d: UInt32(intLiteral: 7));   // Some('7')
-    /// Char.fromDigit(d: UInt32(intLiteral: 12));  // None
+    /// Char.fromDigit(d: 7);   // Some('7')
+    /// Char.fromDigit(d: 12);  // None
     /// ```
     public static func fromDigit(d: UInt32) -> Char? {
-        if d <= UInt32(intLiteral: 9) {
+        if d <= 9 {
             let zero: Char = '0';
             .Some(Char(d + zero.value()))
         } else {
@@ -548,7 +548,7 @@ public struct Grapheme: Equatable, Cloneable {
     public init(chars chars: Array[Char]) {
         let n = chars.count;
         if n == 0 {
-            self._first = Char(value: UInt32(intLiteral: 0));
+            self._first = Char(value: 0);
             self._rest = .None
         } else if n == 1 {
             self._first = chars(unchecked: 0);

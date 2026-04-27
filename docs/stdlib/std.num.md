@@ -2822,7 +2822,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/int16.ks`._
@@ -4207,7 +4206,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/int32.ks`._
@@ -5592,7 +5590,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/int64.ks`._
@@ -7365,7 +7362,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/int8.ks`._
@@ -8978,7 +8974,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/uint16.ks`._
@@ -10278,7 +10273,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/uint32.ks`._
@@ -11578,7 +11572,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/uint64.ks`._
@@ -12878,7 +12871,6 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
-let m = Int64(intLiteral: 42);  // explicit
 ```
 
 _Defined in `lang/std/num/uint8.ks`._

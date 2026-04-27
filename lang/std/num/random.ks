@@ -53,8 +53,8 @@ extend RandomNumberGenerator {
     /// let roll = rng.nextInt(below: 6);   // 0..5
     /// ```
     public mutating func nextInt(below upperBound: Int64) -> Int64 {
-        if upperBound <= Int64(intLiteral: 0) {
-            return Int64(intLiteral: 0)
+        if upperBound <= 0 {
+            return 0
         }
         let bound = UInt64(from: upperBound);
         let value = self.nextUInt64();
@@ -111,15 +111,15 @@ public struct Lcg64: RandomNumberGenerator, Defaultable {
     /// explicit seed via `init(seed:)` when you need variation between runs.
     public init() {
         // Default seed
-        self.state = UInt64(intLiteral: 88172645463325252);
+        self.state = 88172645463325252;
     }
 
     /// Advances the state once and returns the new value. `O(1)` and
     /// allocation-free.
     public mutating func nextUInt64() -> UInt64 {
         // LCG formula: state = state * a + c
-        let a = UInt64(intLiteral: 6364136223846793005);
-        let c = UInt64(intLiteral: 1442695040888963407);
+        let a = 6364136223846793005;
+        let c = 1442695040888963407;
         self.state = self.state.multiply(a).add(c);
         self.state
     }

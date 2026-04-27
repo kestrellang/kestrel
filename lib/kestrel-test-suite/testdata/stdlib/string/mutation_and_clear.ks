@@ -14,8 +14,8 @@ module Test
             // Test appendByte
             var s2 = std.text.String();
             // Append ASCII 'A' (65)
-            s2.appendByte(std.num.UInt8(intLiteral: 65));
-            s2.appendByte(std.num.UInt8(intLiteral: 66));
+            s2.appendByte(65);
+            s2.appendByte(66);
             if s2.byteCount != 2 { return 3 }
             if s2.equals("AB") == false { return 4 }
 

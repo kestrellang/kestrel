@@ -16,7 +16,7 @@ the next client arrives. The owned fd is closed by the deinit.
 ### Examples
 
 ```
-let listener = match TcpListener.bind(port: UInt16(intLiteral: 8080)) {
+let listener = match TcpListener.bind(port: 8080) {
     .Ok(l) => l,
     .Err(e) => return .Err(e)
 };
@@ -90,7 +90,7 @@ process holds the port and `SO_REUSEADDR` is not enough.
 ##### Examples
 
 ```
-let listener = TcpListener.bind(port: UInt16(intLiteral: 8080));
+let listener = TcpListener.bind(port: 8080);
 ```
 
 _Defined in `lang/std/net/socket.ks`._
@@ -131,7 +131,7 @@ been called first.
 ### Examples
 
 ```
-var stream = match TcpStream.connect(host: "example.com", port: UInt16(intLiteral: 80)) {
+var stream = match TcpStream.connect(host: "example.com", port: 80) {
     .Ok(s) => s,
     .Err(e) => return .Err(e)
 };
@@ -192,7 +192,7 @@ through to the next `addrinfo` entry on a failed
 ##### Examples
 
 ```
-match TcpStream.connect(host: "example.com", port: UInt16(intLiteral: 80)) {
+match TcpStream.connect(host: "example.com", port: 80) {
     .Ok(stream) => /* use stream */ {},
     .Err(e) => print(e.message)
 }

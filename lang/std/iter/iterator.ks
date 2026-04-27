@@ -551,9 +551,9 @@ extend Iterator {
     /// [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).count();   // 2
     /// ```
     public consuming func count() -> Int64 {
-        var count = Int64(intLiteral: 0);
+        var count = 0;
         while let .Some(_) = self.next() {
-            count = count + Int64(intLiteral: 1);
+            count = count + 1;
         }
         count
     }
@@ -776,12 +776,12 @@ extend Iterator {
     /// [1, 2, 3].iter().position({ it > 10 });           // None
     /// ```
     public mutating func position(predicate: (Item) -> Bool) -> Int64? {
-        var index = Int64(intLiteral: 0);
+        var index = 0;
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return .Some(index)
             }
-            index = index + Int64(intLiteral: 1);
+            index = index + 1;
         }
         .None
     }
@@ -797,12 +797,12 @@ extend Iterator {
     /// [10, 20, 30].iter().nth(n: 0);       // Some(10)
     /// ```
     public mutating func nth(n: Int64) -> Item? {
-        var index = Int64(intLiteral: 0);
+        var index = 0;
         while let .Some(item) = self.next() {
             if index == n {
                 return .Some(item)
             }
-            index = index + Int64(intLiteral: 1);
+            index = index + 1;
         }
         .None
     }
@@ -1118,6 +1118,6 @@ extend ExactSizeIterator {
 
     /// True when no elements remain. Equivalent to `remaining == 0`.
     public func isEmpty() -> Bool {
-        self.remaining == Int64(intLiteral: 0)
+        self.remaining == 0
     }
 }

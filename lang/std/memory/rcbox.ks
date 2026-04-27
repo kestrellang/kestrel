@@ -64,7 +64,7 @@ public struct RcBox[T] {
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[RcBoxStorage[T]]();
-            self.ptr.write(RcBoxStorage(refCount: Int64(intLiteral: 1), value: value));
+            self.ptr.write(RcBoxStorage(refCount: 1, value: value));
         } else {
             fatalError("RcBox allocation failed")
         }
@@ -96,7 +96,7 @@ public struct RcBox[T] {
     /// Returns `true` when no other clone is sharing storage. The litmus
     /// test for "safe to mutate in place" in COW collections.
     public func isUnique() -> Bool {
-        self.ptr.read().refCount == Int64(intLiteral: 1)
+        self.ptr.read().refCount == 1
     }
 
     /// Current strong reference count. Mostly useful for tests and
@@ -111,7 +111,7 @@ public struct RcBox[T] {
     public func clone() -> RcBox[T] {
         // TODO: Should use atomic increment
         var storage = self.ptr.read();
-        storage.refCount = storage.refCount + Int64(intLiteral: 1);
+        storage.refCount = storage.refCount + 1;
         self.ptr.write(storage);
         RcBox(inner: self.ptr)
     }
@@ -128,9 +128,9 @@ public struct RcBox[T] {
     private func release() {
         // TODO: Should use atomic decrement
         var storage = self.ptr.read();
-        storage.refCount = storage.refCount - Int64(intLiteral: 1);
+        storage.refCount = storage.refCount - 1;
 
-        if storage.refCount == Int64(intLiteral: 0) {
+        if storage.refCount == 0 {
             // Last reference, deallocate
             let layout = Layout.of[RcBoxStorage[T]]();
             var allocator = SystemAllocator();

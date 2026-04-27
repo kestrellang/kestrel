@@ -40,7 +40,7 @@ module Test
             let b0 = s.bytes(checked: 0);
             if b0.isNone() { return 12 }
             // 'h' is ASCII 104
-            if b0.unwrap() != std.num.UInt8(intLiteral: 104) { return 13 }
+            if b0.unwrap() != 104 { return 13 }
 
             // Test bytes()(checked: i) out of bounds
             let bOob = s.bytes(checked: 100);
@@ -49,7 +49,7 @@ module Test
             // Test bytes()(unchecked: i)
             let bu = s.bytes(unchecked: 1);
             // 'e' is ASCII 101
-            if bu != std.num.UInt8(intLiteral: 101) { return 15 }
+            if bu != 101 { return 15 }
 
             // Test count (Unicode code point count)
             if s.count != 5 { return 16 }

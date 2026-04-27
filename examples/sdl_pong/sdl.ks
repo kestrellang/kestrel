@@ -194,7 +194,7 @@ public struct SDLApp : not Copyable {
         var buf = Array[Int8]();
         var j: Int64 = 0;
         while j < 64 {
-            buf.append(Int8(intLiteral: 0));
+            buf.append(0);
             j = j + 1;
         }
 

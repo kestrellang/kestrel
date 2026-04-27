@@ -2218,7 +2218,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Check if inference resolved the call expression itself (e.g., init calls
-        // where Int64(intLiteral: 0) resolves to the specific init function entity,
+        // where 0 resolves to the specific init function entity,
         // or subscript calls where arr(index) resolves to the subscript function)
         if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
             let func_entity = self.resolve_callee_entity(resolved, args);
@@ -2867,7 +2867,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let result_ty = self.resolve_expr_type(expr_id);
 
         // If the type is a Named struct, wrap the primitive via init call.
-        // e.g. `42` with result type Int64 → Int64(intLiteral: 42)
+        // e.g. `42` with result type Int64 → 42
         if let MirTy::Named { entity, .. } = &result_ty {
             let (label, protocol) = match lit {
                 HirLiteral::Bool(_) => (

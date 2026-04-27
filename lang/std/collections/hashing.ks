@@ -69,7 +69,7 @@ public struct DefaultHasher: Hasher, Defaultable {
     /// random seeding).
     public init() {
         // SplitMix64 / wyhash seed (golden ratio).
-        self.state = UInt64(intLiteral: 11400714819323198485);
+        self.state = 11400714819323198485;
     }
 
     // ========================================================================
@@ -94,8 +94,8 @@ public struct DefaultHasher: Hasher, Defaultable {
         let count = bytes.count;
         let ptr = bytes.pointer;
         // FNV prime, reused as the per-byte multiplier.
-        let mult = UInt64(intLiteral: 1099511628211);
-        var i: Int64 = Int64(intLiteral: 0);
+        let mult = 1099511628211;
+        var i: Int64 = 0;
         while i < count {
             let byte = ptr.offset(by: i).read();
             self.state = self.state.bitwiseXor(UInt64(from: byte));
@@ -103,7 +103,7 @@ public struct DefaultHasher: Hasher, Defaultable {
             // Per-byte avalanche: mix high bits down so adjacent
             // states diverge faster than plain FNV-1a.
             self.state = self.state.bitwiseXor(self.state.shiftRight(by: 32));
-            i = i + Int64(intLiteral: 1)
+            i = i + 1
         }
     }
 
@@ -120,8 +120,8 @@ public struct DefaultHasher: Hasher, Defaultable {
     /// is undefined — construct a fresh `DefaultHasher()` per logical
     /// hash.
     public mutating func finish() -> UInt64 {
-        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
-        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        let m1 = 18397679294719823053;  // 0xff51afd7ed558ccd
+        let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
         var x = self.state;
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m1);

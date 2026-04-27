@@ -166,15 +166,27 @@ _Defined in `lang/std/ffi/ffi.ks`._
 ## function `free`
 
 ```kestrel
-public func free(consuming lang.ptr[lang.i8])
+public func free(consuming RawPointer)
 ```
+
+Wraps `free(3)` — releases memory previously returned by `malloc` / `realloc`.
+
+Calling `free` on a null pointer is defined as a no-op. Calling
+it on any other pointer that was not produced by these
+allocators (or has already been freed) is undefined behaviour.
+
+### Safety
+
+`ptr` must be either null or the original pointer returned by a
+previous `malloc` / `realloc`. After `free`, the pointer is
+dangling — do not read, write, or free it again.
 
 _Defined in `lang/std/ffi/libc.ks`._
 
 ## function `malloc`
 
 ```kestrel
-public func malloc(consuming lang.i64) -> lang.ptr[lang.i8]
+public func malloc(consuming Int64) -> RawPointer
 ```
 
 Wraps `malloc(3)` — allocates `size` bytes of uninitialised memory.
@@ -200,34 +212,105 @@ free(buf);
 
 _Defined in `lang/std/ffi/libc.ks`._
 
+## function `memcmp`
+
+```kestrel
+public func memcmp(consuming RawPointer, consuming RawPointer, consuming Int64) -> Int32
+```
+
+Wraps `memcmp(3)` — compares the first `n` bytes of `a` and `b`.
+
+Returns a negative value if the first differing byte in `a` is less
+than the corresponding byte in `b`, zero if all bytes are equal,
+positive otherwise. Comparison is unsigned, byte-by-byte.
+
+### Safety
+
+Both `a` and `b` must be valid for `n` bytes.
+
+_Defined in `lang/std/ffi/libc.ks`._
+
 ## function `memcpy`
 
 ```kestrel
-public func memcpy(consuming lang.ptr[lang.i8], consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]
+public func memcpy(consuming RawPointer, consuming RawPointer, consuming Int64) -> RawPointer
 ```
+
+Wraps `memcpy(3)` — copies `n` bytes from `src` to `dest`.
+
+**Source and destination must not overlap** — use `memmove` if
+they might. Returns `dest` for convenience. No bounds checking;
+the caller must ensure both regions are valid for `n` bytes.
+
+### Safety
+
+`src` and `dest` must be valid for `n` bytes each, and the two
+regions must not overlap.
+
+_Defined in `lang/std/ffi/libc.ks`._
+
+## function `memmem`
+
+```kestrel
+public func memmem(consuming RawPointer, consuming Int64, consuming RawPointer, consuming Int64) -> RawPointer
+```
+
+Wraps `memmem(3)` — locates the first occurrence of the `needleLen`-byte
+`needle` in the `haystackLen`-byte `haystack`.
+
+Returns a pointer to the start of the match, or null if not found.
+`needleLen == 0` returns `haystack` (per glibc/macOS conventions —
+callers should check this before calling). Available on Linux and
+macOS; not on Windows.
+
+### Safety
+
+`haystack` must be valid for `haystackLen` bytes; `needle` must be
+valid for `needleLen` bytes.
 
 _Defined in `lang/std/ffi/libc.ks`._
 
 ## function `memmove`
 
 ```kestrel
-public func memmove(consuming lang.ptr[lang.i8], consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]
+public func memmove(consuming RawPointer, consuming RawPointer, consuming Int64) -> RawPointer
 ```
+
+Wraps `memmove(3)` — copies `n` bytes from `src` to `dest`, allowing overlap.
+
+Slightly slower than `memcpy` because it has to detect direction;
+use `memcpy` when you know the regions are disjoint. Returns
+`dest`.
+
+### Safety
+
+`src` and `dest` must each be valid for `n` bytes. Overlap is
+permitted.
 
 _Defined in `lang/std/ffi/libc.ks`._
 
 ## function `memset`
 
 ```kestrel
-public func memset(consuming lang.ptr[lang.i8], consuming lang.i64, consuming lang.i64) -> lang.ptr[lang.i8]
+public func memset(consuming RawPointer, consuming Int64, consuming Int64) -> RawPointer
 ```
+
+Wraps `memset(3)` — fills `n` bytes starting at `dest` with the low byte of `c`.
+
+`c` is widened to `i64` to match the libc signature, but only
+the low 8 bits are used; pass `0` to zero the region. Returns
+`dest`.
+
+### Safety
+
+`dest` must be valid for `n` bytes of writes.
 
 _Defined in `lang/std/ffi/libc.ks`._
 
 ## function `realloc`
 
 ```kestrel
-public func realloc(consuming lang.ptr[lang.i8], consuming lang.i64) -> lang.ptr[lang.i8]
+public func realloc(consuming RawPointer, consuming Int64) -> RawPointer
 ```
 
 Wraps `realloc(3)` — resizes a previously-`malloc`'d block.

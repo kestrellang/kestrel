@@ -386,7 +386,7 @@ func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), IoError] where 
         let slice = Slice(pointer: ptr, count: remaining);
         let n = try mutStream.write(from: slice);
         if n == 0 {
-            return .Err(IoError(code: Int32(intLiteral: 32)))
+            return .Err(IoError(code: 32))
         }
         sent = sent + n
     }

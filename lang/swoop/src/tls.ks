@@ -142,7 +142,7 @@ extend TlsStream {
         let ctx = libc_SSL_CTX_new(method);
         if lang.ptr_is_null(ctx) {
             let _ = posix_close(fd.raw);
-            return .Err(IoError(code: Int32(intLiteral: 1)))
+            return .Err(IoError(code: 1))
         }
 
         // Load system CA certificates and enable peer verification
@@ -155,7 +155,7 @@ extend TlsStream {
         if lang.ptr_is_null(ssl) {
             libc_SSL_CTX_free(ctx);
             let _ = posix_close(fd.raw);
-            return .Err(IoError(code: Int32(intLiteral: 2)))
+            return .Err(IoError(code: 2))
         }
 
         // Attach socket fd

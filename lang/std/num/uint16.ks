@@ -98,10 +98,10 @@ public struct UInt16:
     // ========================================================================
 
     /// The additive identity, `0`.
-    public static var zero: UInt16 { UInt16(intLiteral: 0) }
+    public static var zero: UInt16 { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: UInt16 { UInt16(intLiteral: 1) }
+    public static var one: UInt16 { 0 }
 
     /// The smallest representable value.
     /// This is always 0 for unsigned types.
@@ -111,10 +111,10 @@ public struct UInt16:
 
     /// The largest representable value.
     /// This is 2^16 - 1 (65_535).
-    public static var maxValue: UInt16 { UInt16(intLiteral: 65535) }
+    public static var maxValue: UInt16 { 65535 }
 
     /// The width in bits (16). Useful for shift bounds and bit-walks.
-    public static var bitWidth: Int64 { Int64(intLiteral: 16) }
+    public static var bitWidth: Int64 { 16 }
 
     // ========================================================================
     // INITIALIZERS
@@ -131,7 +131,6 @@ public struct UInt16:
     ///
     /// ```
     /// let n: Int64 = 42;            // implicit
-    /// let m = Int64(intLiteral: 42);  // explicit
     /// ```
     public init(intLiteral value: lang.i64) {
         self.raw = lang.cast_i64_i16(value)
@@ -251,7 +250,7 @@ public struct UInt16:
 
     /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
     public var countZeros: Int64 { get {
-        Int64(intLiteral: 16) - self.countOnes
+        16 - self.countOnes
     }}
 
     /// Number of leading zero bits, counting from the most-significant end.
@@ -347,7 +346,7 @@ public struct UInt16:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: lang.sizeof[UInt16]())))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[UInt16]()))
     }
 
     // ========================================================================
@@ -660,11 +659,11 @@ public struct UInt16:
     /// let bytes = UInt16.maxValue.toBytes();   // 2 bytes, host order
     /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 2));
+        var result = std.collections.Array[UInt8](capacity: 2);
         let value = self;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 2) {
+        while i < 2 {
             result.append(ptr.offset(by: i).read());
             i = i + 1
         }
@@ -674,12 +673,12 @@ public struct UInt16:
     /// Splits this integer into 2 bytes in big-endian order (most
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 2));
+        var result = std.collections.Array[UInt8](capacity: 2);
         let value = UInt64(from: self);
-        let mask = UInt64(intLiteral: 255);
+        let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 2) {
-            let shift = (Int64(intLiteral: 2) - Int64(intLiteral: 1) - i) * Int64(intLiteral: 8);
+        while i < 2 {
+            let shift = (2 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -690,12 +689,12 @@ public struct UInt16:
     /// Splits this integer into 2 bytes in little-endian order (least
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 2));
+        var result = std.collections.Array[UInt8](capacity: 2);
         let value = UInt64(from: self);
-        let mask = UInt64(intLiteral: 255);
+        let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 2) {
-            let shift = i * Int64(intLiteral: 8);
+        while i < 2 {
+            let shift = i * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -706,13 +705,13 @@ public struct UInt16:
     /// Reassembles a `UInt16` from 2 bytes in native (host) byte
     /// order. Returns `None` if the input is not exactly 2 bytes long.
     public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt16? {
-        if bytes.count != Int64(intLiteral: 2) {
+        if bytes.count != 2 {
             return .None
         }
         var value = UInt16.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 2) {
+        while i < 2 {
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
@@ -722,14 +721,14 @@ public struct UInt16:
     /// Reassembles a `UInt16` from 2 bytes in big-endian order.
     /// Returns `None` if the input is not exactly 2 bytes long.
     public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt16? {
-        if bytes.count != Int64(intLiteral: 2) {
+        if bytes.count != 2 {
             return .None
         }
-        var result = UInt64(intLiteral: 0);
+        var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 2) {
+        while i < 2 {
             let byteVal = UInt64(from: bytes(unchecked: i));
-            result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
+            result = (result << 8) | byteVal;
             i = i + 1
         }
         .Some(UInt16(from: result))
@@ -738,15 +737,15 @@ public struct UInt16:
     /// Reassembles a `UInt16` from 2 bytes in little-endian order.
     /// Returns `None` if the input is not exactly 2 bytes long.
     public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt16? {
-        if bytes.count != Int64(intLiteral: 2) {
+        if bytes.count != 2 {
             return .None
         }
-        var result = UInt64(intLiteral: 0);
+        var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 2) {
-            let shift = i * Int64(intLiteral: 8);
+        while i < 2 {
+            let shift = i * 8;
             let byteVal = UInt64(from: bytes(unchecked: i));
-            result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
+            result = result | (byteVal << shift);
             i = i + 1
         }
         .Some(UInt16(from: result))

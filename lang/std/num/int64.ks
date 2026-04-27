@@ -98,10 +98,10 @@ public struct Int64:
     // ========================================================================
 
     /// The additive identity, `0`.
-    public static var zero: Int64 { Int64(intLiteral: 0) }
+    public static var zero: Int64 { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: Int64 { Int64(intLiteral: 1) }
+    public static var one: Int64 { 0 }
 
     /// The smallest representable value.
     /// This is -2^63 (-9_223_372_036_854_775_808).
@@ -111,10 +111,10 @@ public struct Int64:
 
     /// The largest representable value.
     /// This is 2^63 - 1 (9_223_372_036_854_775_807).
-    public static var maxValue: Int64 { Int64(intLiteral: 9223372036854775807) }
+    public static var maxValue: Int64 { 9223372036854775807 }
 
     /// The width in bits (64). Useful for shift bounds and bit-walks.
-    public static var bitWidth: Int64 { Int64(intLiteral: 64) }
+    public static var bitWidth: Int64 { 64 }
 
     // ========================================================================
     // INITIALIZERS
@@ -131,7 +131,6 @@ public struct Int64:
     ///
     /// ```
     /// let n: Int64 = 42;            // implicit
-    /// let m = Int64(intLiteral: 42);  // explicit
     /// ```
     public init(intLiteral value: lang.i64) {
         self.raw = value
@@ -250,7 +249,7 @@ public struct Int64:
 
     /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
     public var countZeros: Int64 { get {
-        Int64(intLiteral: 64) - self.countOnes
+        64 - self.countOnes
     }}
 
     /// Number of leading zero bits, counting from the most-significant end.
@@ -346,7 +345,7 @@ public struct Int64:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: lang.sizeof[Int64]())))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[Int64]()))
     }
 
     // ========================================================================
@@ -716,11 +715,11 @@ public struct Int64:
     /// let bytes = Int64.maxValue.toBytes();   // 8 bytes, host order
     /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 8));
+        var result = std.collections.Array[UInt8](capacity: 8);
         let value = self;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 8) {
+        while i < 8 {
             result.append(ptr.offset(by: i).read());
             i = i + 1
         }
@@ -730,12 +729,12 @@ public struct Int64:
     /// Splits this integer into 8 bytes in big-endian order (most
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 8));
+        var result = std.collections.Array[UInt8](capacity: 8);
         let value = UInt64(from: self);
-        let mask = UInt64(intLiteral: 255);
+        let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 8) {
-            let shift = (Int64(intLiteral: 8) - Int64(intLiteral: 1) - i) * Int64(intLiteral: 8);
+        while i < 8 {
+            let shift = (8 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -746,12 +745,12 @@ public struct Int64:
     /// Splits this integer into 8 bytes in little-endian order (least
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: Int64(intLiteral: 8));
+        var result = std.collections.Array[UInt8](capacity: 8);
         let value = UInt64(from: self);
-        let mask = UInt64(intLiteral: 255);
+        let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 8) {
-            let shift = i * Int64(intLiteral: 8);
+        while i < 8 {
+            let shift = i * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -762,13 +761,13 @@ public struct Int64:
     /// Reassembles a `Int64` from 8 bytes in native (host) byte
     /// order. Returns `None` if the input is not exactly 8 bytes long.
     public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int64? {
-        if bytes.count != Int64(intLiteral: 8) {
+        if bytes.count != 8 {
             return .None
         }
         var value = Int64.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 8) {
+        while i < 8 {
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
@@ -778,14 +777,14 @@ public struct Int64:
     /// Reassembles a `Int64` from 8 bytes in big-endian order.
     /// Returns `None` if the input is not exactly 8 bytes long.
     public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
-        if bytes.count != Int64(intLiteral: 8) {
+        if bytes.count != 8 {
             return .None
         }
-        var result = UInt64(intLiteral: 0);
+        var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 8) {
+        while i < 8 {
             let byteVal = UInt64(from: bytes(unchecked: i));
-            result = result.shiftLeft(by: Int64(intLiteral: 8).raw).bitwiseOr(byteVal);
+            result = (result << 8) | byteVal;
             i = i + 1
         }
         .Some(Int64(from: result))
@@ -794,15 +793,15 @@ public struct Int64:
     /// Reassembles a `Int64` from 8 bytes in little-endian order.
     /// Returns `None` if the input is not exactly 8 bytes long.
     public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int64? {
-        if bytes.count != Int64(intLiteral: 8) {
+        if bytes.count != 8 {
             return .None
         }
-        var result = UInt64(intLiteral: 0);
+        var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < Int64(intLiteral: 8) {
-            let shift = i * Int64(intLiteral: 8);
+        while i < 8 {
+            let shift = i * 8;
             let byteVal = UInt64(from: bytes(unchecked: i));
-            result = result.bitwiseOr(byteVal.shiftLeft(by: shift.raw));
+            result = result | (byteVal << shift);
             i = i + 1
         }
         .Some(Int64(from: result))
@@ -934,7 +933,7 @@ public struct Int64:
 
         let radixU: UInt64 = UInt64(from: radix);
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int64.maxValue) + UInt64(intLiteral: 1)
+            UInt64(from: Int64.maxValue) + 1
         } else {
             UInt64(from: Int64.maxValue)
         };

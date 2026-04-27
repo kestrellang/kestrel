@@ -18,7 +18,7 @@
     {
       "path": "std.ffi",
       "name": "ffi",
-      "item_count": 13
+      "item_count": 15
     },
     {
       "path": "std.io",
@@ -113,7 +113,7 @@
     {
       "path": "std.text",
       "name": "text",
-      "item_count": 284
+      "item_count": 286
     },
     {
       "path": "std.text.unicode",

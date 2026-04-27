@@ -26,7 +26,7 @@ module Test
             if hashA != hashA2 { return 2 }
 
             // Equal chars constructed differently should hash identically
-            let a2 = std.text.Char(std.num.UInt32(intLiteral: 97));  // 'a' = 97
+            let a2 = std.text.Char(97);  // 'a' = 97
             var hasher4 = std.collections.DefaultHasher();
             a2.hash(into: hasher4);
             let hashA3 = hasher4.finish();

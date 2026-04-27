@@ -90,7 +90,7 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 /// # Examples
 ///
 /// ```
-/// var stream = match TcpStream.connect(host: "example.com", port: UInt16(intLiteral: 80)) {
+/// var stream = match TcpStream.connect(host: "example.com", port: 80) {
 ///     .Ok(s) => s,
 ///     .Err(e) => return .Err(e)
 /// };
@@ -212,7 +212,7 @@ extend TcpStream {
     /// # Examples
     ///
     /// ```
-    /// match TcpStream.connect(host: "example.com", port: UInt16(intLiteral: 80)) {
+    /// match TcpStream.connect(host: "example.com", port: 80) {
     ///     .Ok(stream) => /* use stream */ {},
     ///     .Err(e) => print(e.message)
     /// }
@@ -307,7 +307,7 @@ extend TcpStream {
 /// # Examples
 ///
 /// ```
-/// let listener = match TcpListener.bind(port: UInt16(intLiteral: 8080)) {
+/// let listener = match TcpListener.bind(port: 8080) {
 ///     .Ok(l) => l,
 ///     .Err(e) => return .Err(e)
 /// };
@@ -349,7 +349,7 @@ public struct TcpListener {
     /// # Examples
     ///
     /// ```
-    /// let listener = TcpListener.bind(port: UInt16(intLiteral: 8080));
+    /// let listener = TcpListener.bind(port: 8080);
     /// ```
     public static func bind(port: UInt16) -> Result[TcpListener, IoError] {
         let fd = libc.socket(libc.AF_INET(), libc.SOCK_STREAM(), libc.IPPROTO_TCP());

@@ -338,7 +338,7 @@
       "name": "LiteralSliceIterator",
       "anchor": "struct-LiteralSliceIterator",
       "signature": "public struct LiteralSliceIterator[T] { /* private fields */ }",
-      "doc": "Iterator yielded by `LiteralSlice.iter()`. Walks the backing buffer\nelement-by-element, advancing a raw pointer.\n\n# Representation\n\nA raw pointer plus a primitive-typed remaining count. No `Slice`\nindirection — the iterator is what `LiteralSlice` hands out instead of\nexposing its raw pointer directly.",
+      "doc": "Iterator yielded by `LiteralSlice.iter()`. Walks the backing buffer\nelement-by-element, advancing a typed pointer.\n\n# Representation\n\nA `Pointer[T]` plus a remaining count. No `Slice` indirection — the\niterator is what `LiteralSlice` hands out instead of exposing its\npointer directly.",
       "source_path": "lang/std/memory/literal_slice.ks",
       "member_groups": [
         {
@@ -350,8 +350,8 @@
               "kind": "initializer",
               "name": "From Storage",
               "anchor": "initializer-From-Storage",
-              "signature": "public init(ptr: lang.ptr[T], remaining: lang.i64)",
-              "doc": "Builds an iterator from the raw pointer and length the compiler\nhands to a literal init. Not normally called by user code.",
+              "signature": "public init(ptr: Pointer[T], remaining: Int64)",
+              "doc": "Builds an iterator from a typed pointer and element count.\nNot normally called by user code.",
               "source_path": "lang/std/memory/literal_slice.ks"
             }
           ]

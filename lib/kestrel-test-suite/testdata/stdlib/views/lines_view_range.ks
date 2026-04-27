@@ -7,7 +7,7 @@ module Test
             // ---- half-open Range over LF-only buffer ----
             let s: std.text.String = "alpha\nbeta\ngamma";
             let sub = s.lines(std.core.Range[std.num.Int64](0, 2));
-            if sub.count != std.num.Int64(intLiteral: 2) { return 1 }
+            if sub.count != 2 { return 1 }
             // Sub-view re-iterates as the same lines
             var it = sub.iter();
             if it.next().unwrap().equals("alpha") == false { return 2 }
@@ -32,12 +32,12 @@ module Test
             // ---- lone \r preservation ----
             let cr: std.text.String = "a\rb\rc";
             let crSub = cr.lines(std.core.Range[std.num.Int64](1, 3));
-            if crSub.count != std.num.Int64(intLiteral: 2) { return 9 }
+            if crSub.count != 2 { return 9 }
             if crSub.toString().equals("b\rc") == false { return 10 }
 
             // ---- trailing line without terminator ----
             let trail: std.text.String = "a\nb";
-            if trail.lines.count != std.num.Int64(intLiteral: 2) { return 11 }
+            if trail.lines.count != 2 { return 11 }
             let trailHead = trail.lines(std.core.Range[std.num.Int64](0, 1));
             if trailHead.toString().equals("a\n") == false { return 12 }
             let trailTail = trail.lines(std.core.Range[std.num.Int64](1, 2));
@@ -45,7 +45,7 @@ module Test
 
             // ---- empty range ----
             let emptyRange = s.lines(std.core.Range[std.num.Int64](0, 0));
-            if emptyRange.count != std.num.Int64(intLiteral: 0) { return 14 }
+            if emptyRange.count != 0 { return 14 }
             if emptyRange.toString().isEmpty == false { return 15 }
 
             // ---- one-past-end as endpoint ----
@@ -67,14 +67,14 @@ module Test
             // ---- mixed terminators round-trip ----
             let mixed: std.text.String = "a\nb\r\nc\rd";
             let midSlice = mixed.lines(std.core.Range[std.num.Int64](1, 3));
-            if midSlice.count != std.num.Int64(intLiteral: 2) { return 20 }
+            if midSlice.count != 2 { return 20 }
             // bytes covered: from start of "b" (offset 2) to start of "d" (offset 7)
             if midSlice.toString().equals("b\r\nc\r") == false { return 21 }
 
             // ---- empty source ----
             let emptyStr = std.text.String();
             let emptyLines = emptyStr.lines(std.core.Range[std.num.Int64](0, 0));
-            if emptyLines.count != std.num.Int64(intLiteral: 0) { return 22 }
+            if emptyLines.count != 0 { return 22 }
 
             // ---- lines.substring (Range and ClosedRange) ----
             if s.lines.substring(std.core.Range[std.num.Int64](0, 2)).equals("alpha\nbeta\n") == false { return 23 }

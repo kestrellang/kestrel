@@ -94,15 +94,15 @@ public struct RawPointer: Equatable, FFISafe, Hash {
     /// the 64-bit output. Without this, pointer-keyed maps see
     /// collision clustering driven by the allocator's stride.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
-        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        let m1 = 18397679294719823053;  // 0xff51afd7ed558ccd
+        let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
         var x = self.address;
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m1);
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -228,15 +228,15 @@ public struct Pointer[T]: Equatable, Hash {
     /// the 64-bit output. Without this, pointer-keyed maps see
     /// collision clustering driven by the allocator's stride.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let m1 = UInt64(intLiteral: 18397679294719823053);  // 0xff51afd7ed558ccd
-        let m2 = UInt64(intLiteral: 14181476777654086739);  // 0xc4ceb9fe1a85ec53
+        let m1 = 18397679294719823053;  // 0xff51afd7ed558ccd
+        let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
         var x = self.address;
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m1);
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: Int64(intLiteral: 8)))
+        hasher.write(Slice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -470,14 +470,14 @@ extend Int64: SliceIndex[T] {
     type SliceYield = T
 
     public func readSlice(from slice: Slice[T]) -> T {
-        if self < Int64(intLiteral: 0) or self >= slice.count {
+        if self < 0 or self >= slice.count {
             fatalError("Slice index out of bounds")
         }
         slice.pointer.offset(by: self).read()
     }
 
     public func readSliceChecked(from slice: Slice[T]) -> T? {
-        if self >= Int64(intLiteral: 0) and self < slice.count {
+        if self >= 0 and self < slice.count {
             .Some(slice.pointer.offset(by: self).read())
         } else {
             .None
@@ -489,7 +489,7 @@ extend Int64: SliceIndex[T] {
     }
 
     public func writeSlice(to slice: Slice[T], value value: T) {
-        if self < Int64(intLiteral: 0) or self >= slice.count {
+        if self < 0 or self >= slice.count {
             fatalError("Slice index out of bounds")
         }
         slice.pointer.offset(by: self).write(value)
@@ -505,24 +505,24 @@ extend Int64: SliceClampable[T] {
 
     public func readSliceClamped(from slice: Slice[T]) -> T? {
         let len = slice.count;
-        if len == Int64(intLiteral: 0) {
+        if len == 0 {
             return .None
         }
         var idx = self;
-        if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
-        if idx >= len { idx = len - Int64(intLiteral: 1) }
+        if idx < 0 { idx = 0 }
+        if idx >= len { idx = len - 1 }
         .Some(slice.pointer.offset(by: idx).read())
     }
 
     public func writeSliceClamped(to slice: Slice[T], value value: T?) {
         if let .Some(v) = value {
             let len = slice.count;
-            if len == Int64(intLiteral: 0) {
+            if len == 0 {
                 return
             }
             var idx = self;
-            if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
-            if idx >= len { idx = len - Int64(intLiteral: 1) }
+            if idx < 0 { idx = 0 }
+            if idx >= len { idx = len - 1 }
             slice.pointer.offset(by: idx).write(v)
         }
     }
@@ -533,22 +533,22 @@ extend Int64: SliceWrappable[T] {
 
     public func readSliceWrapped(from slice: Slice[T]) -> T? {
         let len = slice.count;
-        if len == Int64(intLiteral: 0) {
+        if len == 0 {
             return .None
         }
         var idx = self % len;
-        if idx < Int64(intLiteral: 0) { idx = idx + len }
+        if idx < 0 { idx = idx + len }
         .Some(slice.pointer.offset(by: idx).read())
     }
 
     public func writeSliceWrapped(to slice: Slice[T], value value: T?) {
         if let .Some(v) = value {
             let len = slice.count;
-            if len == Int64(intLiteral: 0) {
+            if len == 0 {
                 return
             }
             var idx = self % len;
-            if idx < Int64(intLiteral: 0) { idx = idx + len }
+            if idx < 0 { idx = idx + len }
             slice.pointer.offset(by: idx).write(v)
         }
     }
@@ -560,7 +560,7 @@ extend Range[Int64]: SliceIndex[T] {
     public func readSlice(from slice: Slice[T]) -> Slice[T] {
         let start = self.start;
         let end = self.end;
-        if start < Int64(intLiteral: 0) or end > slice.count or start > end {
+        if start < 0 or end > slice.count or start > end {
             fatalError("Slice range out of bounds")
         }
         Slice(pointer: slice.pointer.offset(by: start), count: end - start)
@@ -569,7 +569,7 @@ extend Range[Int64]: SliceIndex[T] {
     public func readSliceChecked(from slice: Slice[T]) -> Slice[T]? {
         let start = self.start;
         let end = self.end;
-        if start >= Int64(intLiteral: 0) and end <= slice.count and start <= end {
+        if start >= 0 and end <= slice.count and start <= end {
             .Some(Slice(pointer: slice.pointer.offset(by: start), count: end - start))
         } else {
             .None
@@ -583,17 +583,17 @@ extend Range[Int64]: SliceIndex[T] {
     public func writeSlice(to slice: Slice[T], value value: Slice[T]) {
         let start = self.start;
         let end = self.end;
-        if start < Int64(intLiteral: 0) or end > slice.count or start > end {
+        if start < 0 or end > slice.count or start > end {
             fatalError("Slice range out of bounds")
         }
         let rangeLen = end - start;
         if value.count != rangeLen {
             fatalError("Slice length doesn't match range length")
         }
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 
@@ -603,10 +603,10 @@ extend Range[Int64]: SliceIndex[T] {
         if value.count != rangeLen {
             fatalError("Slice length doesn't match range length")
         }
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 }
@@ -618,7 +618,7 @@ extend Range[Int64]: SliceClampable[T] {
         let len = slice.count;
         var start = self.start;
         var end = self.end;
-        if start < Int64(intLiteral: 0) { start = Int64(intLiteral: 0) }
+        if start < 0 { start = 0 }
         if end > len { end = len }
         if start > end { start = end }
         Slice(pointer: slice.pointer.offset(by: start), count: end - start)
@@ -628,17 +628,17 @@ extend Range[Int64]: SliceClampable[T] {
         let len = slice.count;
         var start = self.start;
         var end = self.end;
-        if start < Int64(intLiteral: 0) { start = Int64(intLiteral: 0) }
+        if start < 0 { start = 0 }
         if end > len { end = len }
         if start > end { start = end }
         let rangeLen = end - start;
         if value.count != rangeLen {
             fatalError("Slice length doesn't match clamped range length")
         }
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 }
@@ -648,8 +648,8 @@ extend ClosedRange[Int64]: SliceIndex[T] {
 
     public func readSlice(from slice: Slice[T]) -> Slice[T] {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
-        if start < Int64(intLiteral: 0) or endExclusive > slice.count or start > endExclusive {
+        let endExclusive = self.end + 1;
+        if start < 0 or endExclusive > slice.count or start > endExclusive {
             fatalError("Slice range out of bounds")
         }
         Slice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
@@ -657,8 +657,8 @@ extend ClosedRange[Int64]: SliceIndex[T] {
 
     public func readSliceChecked(from slice: Slice[T]) -> Slice[T]? {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
-        if start >= Int64(intLiteral: 0) and endExclusive <= slice.count and start <= endExclusive {
+        let endExclusive = self.end + 1;
+        if start >= 0 and endExclusive <= slice.count and start <= endExclusive {
             .Some(Slice(pointer: slice.pointer.offset(by: start), count: endExclusive - start))
         } else {
             .None
@@ -667,37 +667,37 @@ extend ClosedRange[Int64]: SliceIndex[T] {
 
     public func readSliceUnchecked(from slice: Slice[T]) -> Slice[T] {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
+        let endExclusive = self.end + 1;
         Slice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
     }
 
     public func writeSlice(to slice: Slice[T], value value: Slice[T]) {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
-        if start < Int64(intLiteral: 0) or endExclusive > slice.count or start > endExclusive {
+        let endExclusive = self.end + 1;
+        if start < 0 or endExclusive > slice.count or start > endExclusive {
             fatalError("Slice range out of bounds")
         }
         let rangeLen = endExclusive - start;
         if value.count != rangeLen {
             fatalError("Slice length doesn't match range length")
         }
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 
     public func writeSliceUnchecked(to slice: Slice[T], value value: Slice[T]) {
         let start = self.start;
-        let rangeLen = self.end + Int64(intLiteral: 1) - start;
+        let rangeLen = self.end + 1 - start;
         if value.count != rangeLen {
             fatalError("Slice length doesn't match range length")
         }
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 }

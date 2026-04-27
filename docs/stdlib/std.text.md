@@ -745,8 +745,8 @@ Inverse of `digitValue`. Values outside `0..=9` return `None`.
 ##### Examples
 
 ```
-Char.fromDigit(d: UInt32(intLiteral: 7));   // Some('7')
-Char.fromDigit(d: UInt32(intLiteral: 12));  // None
+Char.fromDigit(d: 7);   // Some('7')
+Char.fromDigit(d: 12);  // None
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -1477,11 +1477,6 @@ _Defined in `lang/std/text/views.ks`._
 public var count: Int64 { get }
 ```
 
-Number of code points. **O(n)** — walks the buffer counting
-UTF-8 leading bytes (those whose top two bits are not `10`). For
-ASCII strings this equals `byteCount`. Cache the result if you
-need it more than once; each access re-walks the string.
-
 _Defined in `lang/std/text/views.ks`._
 
 #### function `substring`
@@ -2132,7 +2127,8 @@ Constructs a grapheme from a sequence of `Char`s.
 The caller is responsible for the chars actually forming a
 single UAX #29 cluster — the constructor does not segment or
 validate. `GraphemesIterator` is the canonical producer of valid
-clusters.
+clusters. Single-char input avoids allocating; multi-char input
+keeps the trailing code points in a separate array.
 
 ##### Examples
 
@@ -2154,8 +2150,8 @@ public init(char: Char)
 
 Constructs a one-`Char` grapheme.
 
-Convenience for the common single-scalar case so callers don't
-have to build an `Array[Char]` first.
+Allocation-free — the common path for ASCII iteration through
+`GraphemesView`.
 
 ##### Examples
 
@@ -2184,8 +2180,7 @@ public func chars() -> Array[Char]
 
 Returns the constituent code points in scalar order.
 
-The returned array is a clone of the internal storage; mutating
-it does not affect the grapheme.
+Materializes a fresh `Array[Char]` on every call.
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -2195,8 +2190,9 @@ _Defined in `lang/std/text/char.ks`._
 public func firstChar() -> Char?
 ```
 
-Returns the first `Char` of the cluster, or `None` if the grapheme is empty.
+Returns the first `Char` of the cluster.
 
+Always `.Some` — every grapheme has at least one code point.
 Useful as a cheap "what kind of grapheme is this?" check
 (alphabetic, digit, emoji-base, …) without inspecting the full
 cluster.
@@ -2263,7 +2259,7 @@ _Defined in `lang/std/text/char.ks`._
 public func clone() -> Grapheme
 ```
 
-Returns a deep copy of this grapheme (clones the underlying char array).
+Returns a deep copy of this grapheme.
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -3225,6 +3221,22 @@ s.capacity;   // 64
 
 _Defined in `lang/std/text/string.ks`._
 
+#### function `_appendBytes`
+
+```kestrel
+mutating func _appendBytes(Pointer[UInt8], Int64)
+```
+
+Appends `n` bytes from `ptr` via `memcpy`. Internal — caller
+ensures the bytes preserve UTF-8 validity.
+
+##### Safety
+
+`ptr` must reference at least `n` valid UTF-8 bytes that, when
+concatenated to the current buffer, yield valid UTF-8.
+
+_Defined in `lang/std/text/string.ks`._
+
 #### function `append`
 
 ```kestrel
@@ -3378,19 +3390,6 @@ _Defined in `lang/std/text/string.ks`._
 public var count: Int64 { get }
 ```
 
-The number of Unicode code points. O(n).
-
-Walks the buffer counting UTF-8 leading bytes (those whose top
-two bits are not `10`). Cache the result if you need it more
-than once.
-
-##### Examples
-
-```
-"hi".count;     // 2
-"héllo".count;  // 5 (code points; bytes is 6)
-```
-
 _Defined in `lang/std/text/string.ks`._
 
 #### function `ends`
@@ -3500,6 +3499,24 @@ that already know the byte range falls on UTF-8 boundaries.
 `ptr` must reference at least `count` valid UTF-8 bytes; the
 range starting at `ptr` and ending at `ptr + count` must not
 split a multi-byte sequence.
+
+_Defined in `lang/std/text/string.ks`._
+
+#### function `fromRawBytes`
+
+```kestrel
+static func fromRawBytes(lang.ptr[lang.i8], Int64) -> String
+```
+
+Constructs a string by copying `count` bytes from a raw `lang.ptr[lang.i8]`.
+
+Internal helper for view-side code that holds raw pointers but
+needs to materialize an owned `String`. No UTF-8 validation.
+
+##### Safety
+
+`rawPtr` must reference at least `count` valid UTF-8 bytes; the
+range must not split a multi-byte sequence.
 
 _Defined in `lang/std/text/string.ks`._
 

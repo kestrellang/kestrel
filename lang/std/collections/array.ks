@@ -92,10 +92,10 @@ public struct ArrayIterator[T]: Iterator {
     /// it.next();  // None
     /// ```
     public mutating func next() -> T? {
-        if self.remaining > Int64(intLiteral: 0) {
+        if self.remaining > 0 {
             let value = self.ptr.read();
-            self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
-            self.remaining = self.remaining - Int64(intLiteral: 1);
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
             .Some(value)
         } else {
             .None
@@ -184,7 +184,7 @@ public struct ChunksIterator[T]: Iterator {
     /// it.next();  // None
     /// ```
     public mutating func next() -> Slice[T]? {
-        if self.remaining <= Int64(intLiteral: 0) {
+        if self.remaining <= 0 {
             return .None
         }
 
@@ -267,11 +267,11 @@ public struct WindowsIterator[T]: Iterator {
         self.ptr = ptr;
         self.windowSize = windowSize;
         // Number of windows = totalCount - windowSize + 1 (if positive)
-        let windowCount = totalCount - windowSize + Int64(intLiteral: 1);
-        self.remaining = if windowCount > Int64(intLiteral: 0) {
+        let windowCount = totalCount - windowSize + 1;
+        self.remaining = if windowCount > 0 {
             windowCount
         } else {
-            Int64(intLiteral: 0)
+            0
         };
     }
 
@@ -289,13 +289,13 @@ public struct WindowsIterator[T]: Iterator {
     /// it.next();  // None
     /// ```
     public mutating func next() -> Slice[T]? {
-        if self.remaining <= Int64(intLiteral: 0) {
+        if self.remaining <= 0 {
             return .None
         }
 
         let slice = Slice(pointer: self.ptr, count: self.windowSize);
-        self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
-        self.remaining = self.remaining - Int64(intLiteral: 1);
+        self.ptr = self.ptr.offset(by: 1);
+        self.remaining = self.remaining - 1;
         .Some(slice)
     }
 }
@@ -375,11 +375,11 @@ struct ArrayStorage[T]: Cloneable {
     /// let copy = storage.clone();
     /// ```
     func clone() -> ArrayStorage[T] {
-        if self.len == Int64(intLiteral: 0) {
+        if self.len == 0 {
             return ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+                len: 0,
+                cap: 0
             )
         }
         let layout = Layout.array[T](self.len);
@@ -404,7 +404,7 @@ struct ArrayStorage[T]: Cloneable {
     /// allocated). Element destructors are not invoked individually here —
     /// `T` is treated as trivially droppable at the storage level.
     deinit {
-        if self.cap > Int64(intLiteral: 0) {
+        if self.cap > 0 {
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
@@ -625,8 +625,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public init() {
         self.storage = RcBox(ArrayStorage(
             ptr: Pointer[T].nullPointer(),
-            len: Int64(intLiteral: 0),
-            cap: Int64(intLiteral: 0)
+            len: 0,
+            cap: 0
         ));
     }
 
@@ -645,14 +645,14 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// arr.capacity;  // >= 1000 — no reallocation for first 1000 appends
     /// ```
     public init(capacity capacity: Int64) {
-        if capacity > Int64(intLiteral: 0) {
+        if capacity > 0 {
             let layout = Layout.array[T](capacity);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if let .Some(rawPtr) = result {
                 self.storage = RcBox(ArrayStorage(
                     ptr: rawPtr.cast[T](),
-                    len: Int64(intLiteral: 0),
+                    len: 0,
                     cap: capacity
                 ))
             } else {
@@ -661,8 +661,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         } else {
             self.storage = RcBox(ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+                len: 0,
+                cap: 0
             ))
         }
     }
@@ -705,18 +705,18 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public init(arrayLiteral elements: LiteralSlice[T]) {
         let elementCount = elements.count();
-        if elementCount > Int64(intLiteral: 0) {
+        if elementCount > 0 {
             let layout = Layout.array[T](elementCount);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if let .Some(rawPtr) = result {
                 let newPtr = rawPtr.cast[T]();
-                var currentLen: Int64 = Int64(intLiteral: 0);
+                var currentLen: Int64 = 0;
                 // Copy elements from literal slice
                 var iter = elements.iter();
                 while let .Some(item) = iter.next() {
                     newPtr.offset(by: currentLen).write(item);
-                    currentLen = currentLen + Int64(intLiteral: 1)
+                    currentLen = currentLen + 1
                 }
                 self.storage = RcBox(ArrayStorage(
                     ptr: newPtr,
@@ -729,8 +729,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         } else {
             self.storage = RcBox(ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+                len: 0,
+                cap: 0
             ))
         }
     }
@@ -751,7 +751,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
     /// ```
     public init(repeating value: T, count count: Int64) {
-        if count <= Int64(intLiteral: 0) {
+        if count <= 0 {
             self.init()
         } else {
             let layout = Layout.array[T](count);
@@ -816,7 +816,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// let empty   = Array(of: 0, generatedBy: { (i) in i });      // []
     /// ```
     public init(of count: Int64, generatedBy gen: (Int64) -> T) {
-        if count <= Int64(intLiteral: 0) {
+        if count <= 0 {
             self.init()
         } else {
             let layout = Layout.array[T](count);
@@ -884,7 +884,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// [1].isEmpty;               // false
     /// Array[Int64]().isEmpty;    // true
     /// ```
-    public var isEmpty: Bool { self.len() == Int64(intLiteral: 0) }
+    public var isEmpty: Bool { self.len() == 0 }
 
     /// The valid index range `0..<count` as a `Range[Int64]`.
     ///
@@ -902,7 +902,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// }
     /// ```
     public var indices: Range[Int64] {
-        Range(Int64(intLiteral: 0), self.len())
+        Range(0, self.len())
     }
 
     // ========================================================================
@@ -963,7 +963,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// arr.isValidIndex(index: -1);  // false
     /// ```
     public func isValidIndex(index: Int64) -> Bool {
-        index >= Int64(intLiteral: 0) and index < self.len()
+        index >= 0 and index < self.len()
     }
 
     // ========================================================================
@@ -1130,11 +1130,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
         // Calculate new capacity
         var newCap: Int64 = myCap;
-        if newCap == Int64(intLiteral: 0) {
-            newCap = Int64(intLiteral: 4)
+        if newCap == 0 {
+            newCap = 4
         }
         while newCap < minCapacity {
-            newCap = newCap * Int64(intLiteral: 2)
+            newCap = newCap * 2
         }
 
         // Allocate new buffer
@@ -1149,7 +1149,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
             }
             // Free old buffer
-            if oldStorage.cap > Int64(intLiteral: 0) {
+            if oldStorage.cap > 0 {
                 let oldLayout = Layout.array[T](oldStorage.cap);
                 allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
@@ -1184,10 +1184,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func append(element: T) {
         let myLen = self.len();
         self.makeUnique();
-        self.grow(myLen + Int64(intLiteral: 1));
+        self.grow(myLen + 1);
         var s = self.storage.getValue();
         s.ptr.offset(by: s.len).write(element);
-        s.len = s.len + Int64(intLiteral: 1);
+        s.len = s.len + 1;
         self.storage.setValue(s)
     }
 
@@ -1209,7 +1209,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func append(contentsOf other: Array[T]) {
         let otherLen = other.count;
-        if otherLen == Int64(intLiteral: 0) {
+        if otherLen == 0 {
             return
         }
         let myLen = self.len();
@@ -1219,7 +1219,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let otherPtr = other.asPointer();
         for i in 0..<otherLen {
             s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
-            s.len = s.len + Int64(intLiteral: 1)
+            s.len = s.len + 1
         }
         self.storage.setValue(s)
     }
@@ -1266,20 +1266,20 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func insert(element: T, at index: Int64) {
         let myLen = self.len();
-        if index < Int64(intLiteral: 0) or index > myLen {
+        if index < 0 or index > myLen {
             fatalError("Array.insert: index out of bounds")
         }
         self.makeUnique();
-        self.grow(myLen + Int64(intLiteral: 1));
+        self.grow(myLen + 1);
         var s = self.storage.getValue();
         // Shift elements right
         var i: Int64 = s.len;
         while i > index {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i - Int64(intLiteral: 1)).read());
-            i = i - Int64(intLiteral: 1)
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).read());
+            i = i - 1
         }
         s.ptr.offset(by: index).write(element);
-        s.len = s.len + Int64(intLiteral: 1);
+        s.len = s.len + 1;
         self.storage.setValue(s)
     }
 
@@ -1305,10 +1305,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func pop() -> T? {
         let myLen = self.len();
-        if myLen > Int64(intLiteral: 0) {
+        if myLen > 0 {
             self.makeUnique();
             var s = self.storage.getValue();
-            s.len = s.len - Int64(intLiteral: 1);
+            s.len = s.len - 1;
             let value = s.ptr.offset(by: s.len).read();
             self.storage.setValue(s);
             .Some(value)
@@ -1332,10 +1332,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// arr.popFirst();  // Some(2), arr is [3]
     /// ```
     public mutating func popFirst() -> T? {
-        if self.len() == Int64(intLiteral: 0) {
+        if self.len() == 0 {
             return .None
         }
-        .Some(self.remove(at: Int64(intLiteral: 0)))
+        .Some(self.remove(at: 0))
     }
 
     /// Removes and returns the element at `index`, shifting later
@@ -1360,7 +1360,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func remove(at index: Int64) -> T {
         let myLen = self.len();
-        if index < Int64(intLiteral: 0) or index >= myLen {
+        if index < 0 or index >= myLen {
             fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
@@ -1368,11 +1368,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let removed = s.ptr.offset(by: index).read();
         // Shift elements left
         var i: Int64 = index;
-        while i < s.len - Int64(intLiteral: 1) {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i + Int64(intLiteral: 1)).read());
-            i = i + Int64(intLiteral: 1)
+        while i < s.len - 1 {
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).read());
+            i = i + 1
         }
-        s.len = s.len - Int64(intLiteral: 1);
+        s.len = s.len - 1;
         self.storage.setValue(s);
         removed
     }
@@ -1400,11 +1400,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let start = range.start;
         let end = range.end;
         let myLen = self.len();
-        if start < Int64(intLiteral: 0) or end > myLen or start > end {
+        if start < 0 or end > myLen or start > end {
             fatalError("Array.removeSubrange: range out of bounds")
         }
         let removeCount = end - start;
-        if removeCount == Int64(intLiteral: 0) {
+        if removeCount == 0 {
             return
         }
         self.makeUnique();
@@ -1413,7 +1413,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         var i = start;
         while i < myLen - removeCount {
             s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).read());
-            i = i + Int64(intLiteral: 1)
+            i = i + 1
         }
         s.len = s.len - removeCount;
         self.storage.setValue(s)
@@ -1434,7 +1434,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func clear() {
         self.makeUnique();
         var s = self.storage.getValue();
-        s.len = Int64(intLiteral: 0);
+        s.len = 0;
         self.storage.setValue(s)
     }
 
@@ -1454,14 +1454,14 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func retain(matching predicate: (T) -> Bool) {
         self.makeUnique();
         var s = self.storage.getValue();
-        var writeIdx: Int64 = Int64(intLiteral: 0);
+        var writeIdx: Int64 = 0;
         for readIdx in 0..<s.len {
             let element = s.ptr.offset(by: readIdx).read();
             if predicate(element) {
                 if writeIdx != readIdx {
                     s.ptr.offset(by: writeIdx).write(element)
                 }
-                writeIdx = writeIdx + Int64(intLiteral: 1)
+                writeIdx = writeIdx + 1
             }
         }
         s.len = writeIdx;
@@ -1509,7 +1509,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func swap(at i: Int64, with j: Int64) {
         let myLen = self.len();
-        if i < Int64(intLiteral: 0) or i >= myLen or j < Int64(intLiteral: 0) or j >= myLen {
+        if i < 0 or i >= myLen or j < 0 or j >= myLen {
             fatalError("Array.swap: index out of bounds")
         }
         if i == j {
@@ -1536,14 +1536,14 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func reverse() {
         self.makeUnique();
         var s = self.storage.getValue();
-        var left: Int64 = Int64(intLiteral: 0);
-        var right: Int64 = s.len - Int64(intLiteral: 1);
+        var left: Int64 = 0;
+        var right: Int64 = s.len - 1;
         while left < right {
             let temp = s.ptr.offset(by: left).read();
             s.ptr.offset(by: left).write(s.ptr.offset(by: right).read());
             s.ptr.offset(by: right).write(temp);
-            left = left + Int64(intLiteral: 1);
-            right = right - Int64(intLiteral: 1)
+            left = left + 1;
+            right = right - 1
         }
         self.storage.setValue(s)
     }
@@ -1584,20 +1584,20 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func rotate(by amount: Int64) {
         let myLen = self.len();
-        if myLen <= Int64(intLiteral: 1) {
+        if myLen <= 1 {
             return
         }
         var normalized = amount % myLen;
-        if normalized < Int64(intLiteral: 0) {
+        if normalized < 0 {
             normalized = normalized + myLen
         }
-        if normalized == Int64(intLiteral: 0) {
+        if normalized == 0 {
             return
         }
         // Three-reversal algorithm
         self.makeUnique();
         // Reverse first part [0, normalized)
-        self.reverseRange(from: Int64(intLiteral: 0), to: normalized);
+        self.reverseRange(from: 0, to: normalized);
         // Reverse second part [normalized, len)
         self.reverseRange(from: normalized, to: myLen);
         // Reverse entire array
@@ -1610,14 +1610,14 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Does not bounds-check; callers must pass valid indices.
     private mutating func reverseRange(from start: Int64, to end: Int64) {
         var left = start;
-        var right = end - Int64(intLiteral: 1);
+        var right = end - 1;
         let ptr = self.ptr();
         while left < right {
             let temp = ptr.offset(by: left).read();
             ptr.offset(by: left).write(ptr.offset(by: right).read());
             ptr.offset(by: right).write(temp);
-            left = left + Int64(intLiteral: 1);
-            right = right - Int64(intLiteral: 1)
+            left = left + 1;
+            right = right - 1
         }
     }
 
@@ -1647,7 +1647,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let start = range.start;
         let end = range.end;
         let myLen = self.len();
-        if start < Int64(intLiteral: 0) or end > myLen or start > end {
+        if start < 0 or end > myLen or start > end {
             fatalError("Array.replaceSubrange: range out of bounds")
         }
 
@@ -1661,17 +1661,17 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
         if insertCount > removeCount {
             // Shift elements right
-            var i = myLen - Int64(intLiteral: 1);
+            var i = myLen - 1;
             while i >= end {
                 s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).read());
-                i = i - Int64(intLiteral: 1)
+                i = i - 1
             }
         } else if insertCount < removeCount {
             // Shift elements left
             var i = end;
             while i < myLen {
                 s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).read());
-                i = i + Int64(intLiteral: 1)
+                i = i + 1
             }
         }
 
@@ -1700,7 +1700,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public mutating func shuffle[R](using rng: R) where R: RandomNumberGenerator {
         let n = self.len();
-        if n <= Int64(intLiteral: 1) {
+        if n <= 1 {
             return
         }
         self.makeUnique();
@@ -1708,17 +1708,17 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         var generator = rng;
 
         // Fisher-Yates shuffle
-        var i: Int64 = n - Int64(intLiteral: 1);
-        while i > Int64(intLiteral: 0) {
+        var i: Int64 = n - 1;
+        while i > 0 {
             // Inline nextInt(below:) since extension methods may not be visible on generic R
-            let bound = UInt64(from: i) + UInt64(intLiteral: 1);
+            let bound = UInt64(from: i) + 1;
             let rngValue = generator.nextUInt64();
             let j = Int64(from: rngValue.modulo(bound));
             // Swap elements at i and j
             let temp = s.ptr.offset(by: i).read();
             s.ptr.offset(by: i).write(s.ptr.offset(by: j).read());
             s.ptr.offset(by: j).write(temp);
-            i = i - Int64(intLiteral: 1)
+            i = i - 1
         }
 
         self.storage.setValue(s)
@@ -1821,8 +1821,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func shrinkToFit() {
         let myLen = self.len();
         let myCap = self.cap();
-        if myLen == myCap or myLen == Int64(intLiteral: 0) {
-            if myLen == Int64(intLiteral: 0) and myCap > Int64(intLiteral: 0) {
+        if myLen == myCap or myLen == 0 {
+            if myLen == 0 and myCap > 0 {
                 // Deallocate entirely for empty array
                 self.makeUnique();
                 var s = self.storage.getValue();
@@ -1830,7 +1830,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 var allocator = SystemAllocator();
                 allocator.deallocate(s.ptr.asRaw(), layout);
                 s.ptr = Pointer[T].nullPointer();
-                s.cap = Int64(intLiteral: 0);
+                s.cap = 0;
                 self.storage.setValue(s)
             }
             return
@@ -1848,7 +1848,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             for i in 0..<myLen {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read())
             }
-            if myCap > Int64(intLiteral: 0) {
+            if myCap > 0 {
                 let oldLayout = Layout.array[T](myCap);
                 allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
@@ -1873,7 +1873,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// [].first();         // None
     /// ```
     public func first() -> T? {
-        if self.len() > Int64(intLiteral: 0) {
+        if self.len() > 0 {
             .Some(self.ptr().read())
         } else {
             .None
@@ -1893,8 +1893,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public func last() -> T? {
         let myLen = self.len();
-        if myLen > Int64(intLiteral: 0) {
-            .Some(self.ptr().offset(by: myLen - Int64(intLiteral: 1)).read())
+        if myLen > 0 {
+            .Some(self.ptr().offset(by: myLen - 1).read())
         } else {
             .None
         }
@@ -1966,16 +1966,16 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public func lastIndex(matching predicate: (T) -> Bool) -> Int64? {
         let myLen = self.len();
-        if myLen == Int64(intLiteral: 0) {
+        if myLen == 0 {
             return .None
         }
         let myPtr = self.ptr();
-        var i = myLen - Int64(intLiteral: 1);
-        while i >= Int64(intLiteral: 0) {
+        var i = myLen - 1;
+        while i >= 0 {
             if predicate(myPtr.offset(by: i).read()) {
                 return .Some(i)
             }
-            i = i - Int64(intLiteral: 1)
+            i = i - 1
         }
         .None
     }
@@ -2085,10 +2085,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public func countItems(matching predicate: (T) -> Bool) -> Int64 {
         let myLen = self.len();
         let myPtr = self.ptr();
-        var result: Int64 = Int64(intLiteral: 0);
+        var result: Int64 = 0;
         for i in 0..<myLen {
             if predicate(myPtr.offset(by: i).read()) {
-                result = result + Int64(intLiteral: 1)
+                result = result + 1
             }
         }
         result
@@ -2218,7 +2218,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// arr.chunks(of: 0);  // PANIC
     /// ```
     public func chunks(of size: Int64) -> ChunksIterator[T] {
-        if size <= Int64(intLiteral: 0) {
+        if size <= 0 {
             fatalError("Array.chunks: size must be positive")
         }
         ChunksIterator(ptr: self.ptr(), remaining: self.len(), chunkSize: size)
@@ -2247,7 +2247,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// [1, 2].windows(of: 5);  // PANIC: size exceeds array length
     /// ```
     public func windows(of size: Int64) -> WindowsIterator[T] {
-        if size <= Int64(intLiteral: 0) {
+        if size <= 0 {
             fatalError("Array.windows: size must be positive")
         }
         if size > self.len() {
@@ -2280,17 +2280,17 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     public mutating func partition(by predicate: (T) -> Bool) -> Int64 {
         self.makeUnique();
         var s = self.storage.getValue();
-        var lo: Int64 = Int64(intLiteral: 0);
-        var hi: Int64 = s.len - Int64(intLiteral: 1);
+        var lo: Int64 = 0;
+        var hi: Int64 = s.len - 1;
 
         while true {
             // Find first element that doesn't satisfy predicate
             while lo < s.len and predicate(s.ptr.offset(by: lo).read()) {
-                lo = lo + Int64(intLiteral: 1)
+                lo = lo + 1
             }
             // Find last element that satisfies predicate
-            while hi >= Int64(intLiteral: 0) and predicate(s.ptr.offset(by: hi).read()) == false {
-                hi = hi - Int64(intLiteral: 1)
+            while hi >= 0 and predicate(s.ptr.offset(by: hi).read()) == false {
+                hi = hi - 1
             }
 
             if lo >= hi {
@@ -2301,8 +2301,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             let temp = s.ptr.offset(by: lo).read();
             s.ptr.offset(by: lo).write(s.ptr.offset(by: hi).read());
             s.ptr.offset(by: hi).write(temp);
-            lo = lo + Int64(intLiteral: 1);
-            hi = hi - Int64(intLiteral: 1)
+            lo = lo + 1;
+            hi = hi - 1
         }
 
         self.storage.setValue(s);
@@ -2372,14 +2372,14 @@ extend Int64: ArrayIndex[T] {
     type ArrayYield = T
 
     public func readArray(from array: Array[T]) -> T {
-        if self < Int64(intLiteral: 0) or self >= array.len() {
+        if self < 0 or self >= array.len() {
             fatalError("Array index out of bounds")
         }
         array.ptr().offset(by: self).read()
     }
 
     public func readArrayChecked(from array: Array[T]) -> T? {
-        if self >= Int64(intLiteral: 0) and self < array.len() {
+        if self >= 0 and self < array.len() {
             .Some(array.ptr().offset(by: self).read())
         } else {
             .None
@@ -2391,7 +2391,7 @@ extend Int64: ArrayIndex[T] {
     }
 
     public func writeArray(mutating to array: Array[T], value value: T) {
-        if self < Int64(intLiteral: 0) or self >= array.len() {
+        if self < 0 or self >= array.len() {
             fatalError("Array index out of bounds")
         }
         array.makeUnique();
@@ -2411,24 +2411,24 @@ extend Int64: ArrayClampable[T] {
 
     public func readArrayClamped(from array: Array[T]) -> T? {
         let len = array.len();
-        if len == Int64(intLiteral: 0) {
+        if len == 0 {
             return .None
         }
         var idx = self;
-        if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
-        if idx >= len { idx = len - Int64(intLiteral: 1) }
+        if idx < 0 { idx = 0 }
+        if idx >= len { idx = len - 1 }
         .Some(array.ptr().offset(by: idx).read())
     }
 
     public func writeArrayClamped(mutating to array: Array[T], value value: T?) {
         if let .Some(v) = value {
             let len = array.len();
-            if len == Int64(intLiteral: 0) {
+            if len == 0 {
                 return
             }
             var idx = self;
-            if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
-            if idx >= len { idx = len - Int64(intLiteral: 1) }
+            if idx < 0 { idx = 0 }
+            if idx >= len { idx = len - 1 }
             array.makeUnique();
             array.ptr().offset(by: idx).write(v)
         }
@@ -2441,22 +2441,22 @@ extend Int64: ArrayWrappable[T] {
 
     public func readArrayWrapped(from array: Array[T]) -> T? {
         let len = array.len();
-        if len == Int64(intLiteral: 0) {
+        if len == 0 {
             return .None
         }
         var idx = self % len;
-        if idx < Int64(intLiteral: 0) { idx = idx + len }
+        if idx < 0 { idx = idx + len }
         .Some(array.ptr().offset(by: idx).read())
     }
 
     public func writeArrayWrapped(mutating to array: Array[T], value value: T?) {
         if let .Some(v) = value {
             let len = array.len();
-            if len == Int64(intLiteral: 0) {
+            if len == 0 {
                 return
             }
             var idx = self % len;
-            if idx < Int64(intLiteral: 0) { idx = idx + len }
+            if idx < 0 { idx = idx + len }
             array.makeUnique();
             array.ptr().offset(by: idx).write(v)
         }
@@ -2474,7 +2474,7 @@ extend Range[Int64]: ArrayIndex[T] {
     public func readArray(from array: Array[T]) -> Slice[T] {
         let start = self.start;
         let end = self.end;
-        if start < Int64(intLiteral: 0) or end > array.len() or start > end {
+        if start < 0 or end > array.len() or start > end {
             fatalError("Array range out of bounds")
         }
         Slice(pointer: array.ptr().offset(by: start), count: end - start)
@@ -2483,7 +2483,7 @@ extend Range[Int64]: ArrayIndex[T] {
     public func readArrayChecked(from array: Array[T]) -> Slice[T]? {
         let start = self.start;
         let end = self.end;
-        if start >= Int64(intLiteral: 0) and end <= array.len() and start <= end {
+        if start >= 0 and end <= array.len() and start <= end {
             .Some(Slice(pointer: array.ptr().offset(by: start), count: end - start))
         } else {
             .None
@@ -2497,7 +2497,7 @@ extend Range[Int64]: ArrayIndex[T] {
     public func writeArray(mutating to array: Array[T], value value: Slice[T]) {
         let start = self.start;
         let end = self.end;
-        if start < Int64(intLiteral: 0) or end > array.len() or start > end {
+        if start < 0 or end > array.len() or start > end {
             fatalError("Array range out of bounds")
         }
         let rangeLen = end - start;
@@ -2505,10 +2505,10 @@ extend Range[Int64]: ArrayIndex[T] {
             fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             array.ptr().offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 
@@ -2519,10 +2519,10 @@ extend Range[Int64]: ArrayIndex[T] {
             fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             array.ptr().offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 }
@@ -2537,7 +2537,7 @@ extend Range[Int64]: ArrayClampable[T] {
         let len = array.len();
         var start = self.start;
         var end = self.end;
-        if start < Int64(intLiteral: 0) { start = Int64(intLiteral: 0) }
+        if start < 0 { start = 0 }
         if end > len { end = len }
         if start > end { start = end }
         Slice(pointer: array.ptr().offset(by: start), count: end - start)
@@ -2547,7 +2547,7 @@ extend Range[Int64]: ArrayClampable[T] {
         let len = array.len();
         var start = self.start;
         var end = self.end;
-        if start < Int64(intLiteral: 0) { start = Int64(intLiteral: 0) }
+        if start < 0 { start = 0 }
         if end > len { end = len }
         if start > end { start = end }
         let rangeLen = end - start;
@@ -2555,10 +2555,10 @@ extend Range[Int64]: ArrayClampable[T] {
             fatalError("Slice length doesn't match clamped range length")
         }
         array.makeUnique();
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             array.ptr().offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 }
@@ -2571,8 +2571,8 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
 
     public func readArray(from array: Array[T]) -> Slice[T] {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
-        if start < Int64(intLiteral: 0) or endExclusive > array.len() or start > endExclusive {
+        let endExclusive = self.end + 1;
+        if start < 0 or endExclusive > array.len() or start > endExclusive {
             fatalError("Array range out of bounds")
         }
         Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
@@ -2580,8 +2580,8 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
 
     public func readArrayChecked(from array: Array[T]) -> Slice[T]? {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
-        if start >= Int64(intLiteral: 0) and endExclusive <= array.len() and start <= endExclusive {
+        let endExclusive = self.end + 1;
+        if start >= 0 and endExclusive <= array.len() and start <= endExclusive {
             .Some(Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start))
         } else {
             .None
@@ -2590,14 +2590,14 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
 
     public func readArrayUnchecked(from array: Array[T]) -> Slice[T] {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
+        let endExclusive = self.end + 1;
         Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
     }
 
     public func writeArray(mutating to array: Array[T], value value: Slice[T]) {
         let start = self.start;
-        let endExclusive = self.end + Int64(intLiteral: 1);
-        if start < Int64(intLiteral: 0) or endExclusive > array.len() or start > endExclusive {
+        let endExclusive = self.end + 1;
+        if start < 0 or endExclusive > array.len() or start > endExclusive {
             fatalError("Array range out of bounds")
         }
         let rangeLen = endExclusive - start;
@@ -2605,24 +2605,24 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
             fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             array.ptr().offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 
     public func writeArrayUnchecked(mutating to array: Array[T], value value: Slice[T]) {
         let start = self.start;
-        let rangeLen = self.end + Int64(intLiteral: 1) - start;
+        let rangeLen = self.end + 1 - start;
         if value.count != rangeLen {
             fatalError("Slice length doesn't match range length")
         }
         array.makeUnique();
-        var i = Int64(intLiteral: 0);
+        var i = 0;
         while i < rangeLen {
             array.ptr().offset(by: start + i).write(value.pointer.offset(by: i).read());
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
     }
 }
@@ -2653,13 +2653,13 @@ extend Array[T]: Equatable where T: Equatable {
         if selfCount != otherCount {
             return false
         }
-        var i: Int64 = Int64(intLiteral: 0);
+        var i: Int64 = 0;
         var equal: Bool = true;
         while i < selfCount and equal {
             if self(unchecked: i).equals(other(unchecked: i)) == false {
                 equal = false
             }
-            i = i + Int64(intLiteral: 1)
+            i = i + 1
         }
         equal
     }
@@ -2791,11 +2791,11 @@ extend Array[T]: Equatable where T: Equatable {
     public func split(separator: T) -> Array[Slice[T]] {
         var result = Array[Slice[T]]();
         let myLen = self.count;
-        var start: Int64 = Int64(intLiteral: 0);
+        var start: Int64 = 0;
         for i in 0..<myLen {
             if self(unchecked: i).equals(separator) {
                 result.append( Slice(pointer: self.asPointer().offset(by: start), count: i - start));
-                start = i + Int64(intLiteral: 1)
+                start = i + 1
             }
         }
         result.append( Slice(pointer: self.asPointer().offset(by: start), count: myLen - start));
@@ -2854,20 +2854,20 @@ extend Array[T]: Equatable where T: Equatable {
     /// arr.dedup();  // [1, 2, 3, 1] — trailing 1s survive (not adjacent to first run)
     /// ```
     public mutating func dedup() {
-        if self.count <= Int64(intLiteral: 1) {
+        if self.count <= 1 {
             return
         }
         self.makeUnique();
         var s = self.storage.getValue();
-        var writeIdx: Int64 = Int64(intLiteral: 1);
+        var writeIdx: Int64 = 1;
         for readIdx in 1..<s.len {
             let current = s.ptr.offset(by: readIdx).read();
-            let previous = s.ptr.offset(by: writeIdx - Int64(intLiteral: 1)).read();
+            let previous = s.ptr.offset(by: writeIdx - 1).read();
             if current.equals(previous) == false {
                 if writeIdx != readIdx {
                     s.ptr.offset(by: writeIdx).write(current)
                 }
-                writeIdx = writeIdx + Int64(intLiteral: 1)
+                writeIdx = writeIdx + 1
             }
         }
         s.len = writeIdx;
@@ -2982,10 +2982,10 @@ extend Array[T] where T: Comparable {
     /// [].min();         // None
     /// ```
     public func min() -> T? {
-        if self.count == Int64(intLiteral: 0) {
+        if self.count == 0 {
             return .None
         }
-        var result = self(unchecked: Int64(intLiteral: 0));
+        var result = self(unchecked: 0);
         for i in 1..<self.count {
             let element = self(unchecked: i);
             if element < result {
@@ -3007,10 +3007,10 @@ extend Array[T] where T: Comparable {
     /// [].max();         // None
     /// ```
     public func max() -> T? {
-        if self.count == Int64(intLiteral: 0) {
+        if self.count == 0 {
             return .None
         }
-        var result = self(unchecked: Int64(intLiteral: 0));
+        var result = self(unchecked: 0);
         for i in 1..<self.count {
             let element = self(unchecked: i);
             if element > result {
@@ -3035,11 +3035,11 @@ extend Array[T] where T: Comparable {
     /// [].isSorted();         // true (vacuous)
     /// ```
     public func isSorted() -> Bool {
-        if self.count <= Int64(intLiteral: 1) {
+        if self.count <= 1 {
             return true
         }
         for i in 1..<self.count {
-            if self(unchecked: i) < self(unchecked: i - Int64(intLiteral: 1)) {
+            if self(unchecked: i) < self(unchecked: i - 1) {
                 return false
             }
         }
@@ -3066,13 +3066,13 @@ extend Array[T] where T: Comparable {
     /// arr.binarySearch(element: 6);  // None
     /// ```
     public func binarySearch(element: T) -> Int64? {
-        var lo: Int64 = Int64(intLiteral: 0);
+        var lo: Int64 = 0;
         var hi: Int64 = self.count;
         while lo < hi {
-            let mid = lo + (hi - lo) / Int64(intLiteral: 2);
+            let mid = lo + (hi - lo) / 2;
             let midVal = self(unchecked: mid);
             if midVal < element {
-                lo = mid + Int64(intLiteral: 1)
+                lo = mid + 1
             } else if midVal > element {
                 hi = mid
             } else {
@@ -3160,19 +3160,19 @@ extend Array[T] {
     /// ```
     public mutating func sort(by comparator: (T, T) -> Bool) {
         let n = self.count;
-        if n <= Int64(intLiteral: 1) {
+        if n <= 1 {
             return
         }
         self.makeUnique();
         // Insertion sort (simple and stable)
         for i in 1..<n {
             let key = self(unchecked: i);
-            var j = i - Int64(intLiteral: 1);
-            while j >= Int64(intLiteral: 0) and comparator(key, self(unchecked: j)) {
-                self(unchecked: j + Int64(intLiteral: 1)) = self(unchecked: j);
-                j = j - Int64(intLiteral: 1)
+            var j = i - 1;
+            while j >= 0 and comparator(key, self(unchecked: j)) {
+                self(unchecked: j + 1) = self(unchecked: j);
+                j = j - 1
             }
-            self(unchecked: j + Int64(intLiteral: 1)) = key
+            self(unchecked: j + 1) = key
         }
     }
 
@@ -3280,10 +3280,10 @@ extend Array[T] where T: Formattable {
     /// [].joined(separator: ", ");         // ""
     /// ```
     public func joined(separator: String = "") -> String {
-        if self.count == Int64(intLiteral: 0) {
+        if self.count == 0 {
             return ""
         }
-        var result = self(unchecked: Int64(intLiteral: 0)).format();
+        var result = self(unchecked: 0).format();
         for i in 1..<self.count {
             result = result + separator;
             result = result + self(unchecked: i).format()
@@ -3318,7 +3318,7 @@ extend Array[T]: Formattable where T: Formattable {
         var result = "[";
         let myLen = self.count;
         for i in 0..<myLen {
-            if i > Int64(intLiteral: 0) {
+            if i > 0 {
                 result = result + ", "
             }
             result = result + self(unchecked: i).format(options)

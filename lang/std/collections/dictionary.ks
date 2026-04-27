@@ -62,16 +62,16 @@ enum Bucket[K, V] {
 /// last representable power of two on `Int64` overflow rather than
 /// wrapping.
 func nextPowerOfTwo(n: Int64) -> Int64 {
-    var p: Int64 = Int64(intLiteral: 1);
+    var p: Int64 = 1;
     while p < n {
-        let next = p * Int64(intLiteral: 2);
+        let next = p * 2;
         // Check for overflow (since Int64 is signed)
         if next <= p {
             return p
         }
         p = next
     }
-    let minCap = Int64(intLiteral: 8);
+    let minCap = 8;
     if p < minCap { minCap } else { p }
 }
 
@@ -133,7 +133,7 @@ public struct DictionaryIterator[K, V]: Iterator {
     init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
         self.buckets = buckets;
         self.capacity = capacity;
-        self.index = Int64(intLiteral: 0);
+        self.index = 0;
     }
 
     /// Advances the scan to the next occupied slot and returns its
@@ -152,7 +152,7 @@ public struct DictionaryIterator[K, V]: Iterator {
     public mutating func next() -> (K, V)? {
         while self.index < self.capacity {
             let bucket = self.buckets.offset(by: self.index).read();
-            self.index = self.index + Int64(intLiteral: 1);
+            self.index = self.index + 1;
             match bucket {
                 .Occupied(key, value, _) => return .Some((key, value)),
                 _ => {}
@@ -220,11 +220,11 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
     /// slow half of COW, fired by `Dictionary.makeUnique()` when
     /// storage is shared.
     func clone() -> DictionaryStorage[K, V, H] {
-        if self.cap == Int64(intLiteral: 0) {
+        if self.cap == 0 {
             return DictionaryStorage(
                 buckets: Pointer[Bucket[K, V]].nullPointer(),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+                len: 0,
+                cap: 0
             )
         }
         let layout = Layout.array[Bucket[K, V]](self.cap);
@@ -253,7 +253,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
     /// allocated). Bucket payloads are not destructed individually —
     /// `K` and `V` are treated as trivially droppable here.
     deinit {
-        if self.cap > Int64(intLiteral: 0) {
+        if self.cap > 0 {
             let layout = Layout.array[Bucket[K, V]](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.buckets.asRaw(), layout)
@@ -386,8 +386,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     public init() {
         self.storage = RcBox(DictionaryStorage(
             buckets: Pointer[Bucket[K, V]].nullPointer(),
-            len: Int64(intLiteral: 0),
-            cap: Int64(intLiteral: 0)
+            len: 0,
+            cap: 0
         ));
     }
 
@@ -408,7 +408,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public init(capacity capacity: Int64) {
         let actualCap = nextPowerOfTwo(capacity);
-        if actualCap > Int64(intLiteral: 0) {
+        if actualCap > 0 {
             let layout = Layout.array[Bucket[K, V]](actualCap);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
@@ -420,7 +420,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 }
                 self.storage = RcBox(DictionaryStorage(
                     buckets: newBuckets,
-                    len: Int64(intLiteral: 0),
+                    len: 0,
                     cap: actualCap
                 ))
             } else {
@@ -429,8 +429,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         } else {
             self.storage = RcBox(DictionaryStorage(
                 buckets: Pointer[Bucket[K, V]].nullPointer(),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+                len: 0,
+                cap: 0
             ))
         }
     }
@@ -591,7 +591,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// [:].isEmpty;           // true
     /// ["a": 1].isEmpty;      // false
     /// ```
-    public var isEmpty: Bool { get { self.len() == Int64(intLiteral: 0) } }
+    public var isEmpty: Bool { get { self.len() == 0 } }
 
     /// Lazy view of the dictionary's keys, iterable in unspecified
     /// order.
@@ -747,7 +747,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// wrap-around without finding the key.
     private func findEntry(key: K) -> Int64? {
         let myCap = self.cap();
-        if myCap == Int64(intLiteral: 0) {
+        if myCap == 0 {
             return .None
         }
 
@@ -756,7 +756,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let mod: UInt64 = hashValue.modulo(capU);
         var index: Int64 = Int64(from: mod);
         let myBuckets = self.buckets();
-        var i: Int64 = Int64(intLiteral: 0);
+        var i: Int64 = 0;
 
         while i < myCap {
             let bucket = myBuckets.offset(by: index).read();
@@ -770,8 +770,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 .Deleted => {}
             }
             // Linear probing
-            index = (index + Int64(intLiteral: 1)) % myCap;
-            i = i + Int64(intLiteral: 1)
+            index = (index + 1) % myCap;
+            i = i + 1
         }
         .None
     }
@@ -784,7 +784,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// after many removes followed by inserts.
     private func findEmptySlot(hashValue: UInt64) -> Int64? {
         let myCap = self.cap();
-        if myCap == Int64(intLiteral: 0) {
+        if myCap == 0 {
             return .None
         }
 
@@ -792,7 +792,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let mod: UInt64 = hashValue.modulo(capU);
         var index: Int64 = Int64(from: mod);
         let myBuckets = self.buckets();
-        var i: Int64 = Int64(intLiteral: 0);
+        var i: Int64 = 0;
 
         while i < myCap {
             let bucket = myBuckets.offset(by: index).read();
@@ -801,8 +801,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 _ => return .Some(index)
             }
             // Linear probing
-            index = (index + Int64(intLiteral: 1)) % myCap;
-            i = i + Int64(intLiteral: 1)
+            index = (index + 1) % myCap;
+            i = i + 1
         }
         .None
     }
@@ -820,8 +820,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     private mutating func ensureCapacity() {
         let myCap = self.cap();
         let myLen = self.len();
-        let threshold = myCap * Int64(intLiteral: 3) / Int64(intLiteral: 4);
-        if myLen >= threshold or myCap == Int64(intLiteral: 0) {
+        let threshold = myCap * 3 / 4;
+        if myLen >= threshold or myCap == 0 {
             self.resize()
         }
     }
@@ -835,10 +835,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     private mutating func resize() {
         self.makeUnique();
         let s = self.storage.getValue();
-        let newCap: Int64 = if s.cap == Int64(intLiteral: 0) {
-            Int64(intLiteral: 8)
+        let newCap: Int64 = if s.cap == 0 {
+            8
         } else {
-            s.cap * Int64(intLiteral: 2)
+            s.cap * 2
         };
 
         let oldBuckets = s.buckets;
@@ -857,7 +857,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
 
             // Copy occupied buckets
-            var newLen: Int64 = Int64(intLiteral: 0);
+            var newLen: Int64 = 0;
             for i in 0..<oldCap {
                 let bucket = oldBuckets.offset(by: i).read();
                 match bucket {
@@ -872,10 +872,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                             match slotBucket {
                                 .Empty => {
                                     newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                                    newLen = newLen + Int64(intLiteral: 1);
+                                    newLen = newLen + 1;
                                     foundSlot = true
                                 },
-                                _ => slotIndex = (slotIndex + Int64(intLiteral: 1)) % newCap
+                                _ => slotIndex = (slotIndex + 1) % newCap
                             }
                         }
                     },
@@ -884,7 +884,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
 
             // Free old table
-            if oldCap > Int64(intLiteral: 0) {
+            if oldCap > 0 {
                 let oldLayout = Layout.array[Bucket[K, V]](oldCap);
                 allocator.deallocate(oldBuckets.asRaw(), oldLayout)
             }
@@ -924,7 +924,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
 
             // Copy occupied buckets
-            var newLen: Int64 = Int64(intLiteral: 0);
+            var newLen: Int64 = 0;
             for i in 0..<oldCap {
                 let bucket = oldBuckets.offset(by: i).read();
                 match bucket {
@@ -939,10 +939,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                             match slotBucket {
                                 .Empty => {
                                     newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                                    newLen = newLen + Int64(intLiteral: 1);
+                                    newLen = newLen + 1;
                                     foundSlot = true
                                 },
-                                _ => slotIndex = (slotIndex + Int64(intLiteral: 1)) % newCap
+                                _ => slotIndex = (slotIndex + 1) % newCap
                             }
                         }
                     },
@@ -951,7 +951,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
 
             // Free old table
-            if oldCap > Int64(intLiteral: 0) {
+            if oldCap > 0 {
                 let oldLayout = Layout.array[Bucket[K, V]](oldCap);
                 allocator.deallocate(oldBuckets.asRaw(), oldLayout)
             }
@@ -1028,7 +1028,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(slotIndex) = maybeSlot {
             var s = self.storage.getValue();
             s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-            s.len = s.len + Int64(intLiteral: 1);
+            s.len = s.len + 1;
             self.storage.setValue(s)
         } else {
             fatalError("Dictionary insert failed - no empty slot")
@@ -1064,7 +1064,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
             // Mark as deleted (tombstone)
             s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - Int64(intLiteral: 1);
+            s.len = s.len - 1;
             self.storage.setValue(s);
 
             return removedValue
@@ -1092,7 +1092,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         for i in 0..<s.cap {
             s.buckets.offset(by: i).write(.Empty);
         }
-        s.len = Int64(intLiteral: 0);
+        s.len = 0;
         self.storage.setValue(s)
     }
 
@@ -1284,7 +1284,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             return
         }
         // Calculate target capacity (accounting for load factor)
-        let targetCap = nextPowerOfTwo(minimumCapacity * Int64(intLiteral: 4) / Int64(intLiteral: 3));
+        let targetCap = nextPowerOfTwo(minimumCapacity * 4 / 3);
         self.resizeToCapacity(targetCap)
     }
 
@@ -1305,12 +1305,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public mutating func shrinkToFit() {
         let currentCount = self.count;
-        if currentCount == Int64(intLiteral: 0) {
+        if currentCount == 0 {
             self.clear();
             return
         }
 
-        let targetCap = nextPowerOfTwo(currentCount * Int64(intLiteral: 4) / Int64(intLiteral: 3));
+        let targetCap = nextPowerOfTwo(currentCount * 4 / 3);
         if targetCap < self.capacity {
             self.resizeToCapacity(targetCap)
         }
@@ -1467,7 +1467,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// [:].countItems(matching: { (k, v) in true });                        // 0
     /// ```
     public func countItems(matching predicate: (K, V) -> Bool) -> Int64 {
-        var result: Int64 = Int64(intLiteral: 0);
+        var result: Int64 = 0;
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1476,7 +1476,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
-                        result = result + Int64(intLiteral: 1);
+                        result = result + 1;
                     }
                 },
                 _ => {}

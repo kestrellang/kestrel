@@ -262,7 +262,7 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
     /// Prefer `inner.enumerate()`.
     public init(inner inner: I) {
         self.inner = inner;
-        self.index = Int64(intLiteral: 0);
+        self.index = 0;
     }
 
     /// Pulls the next element and pairs it with the current index, then
@@ -270,7 +270,7 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
     public mutating func next() -> (Int64, I.Item)? {
         if let .Some(item) = self.inner.next() {
             let i = self.index;
-            self.index = self.index + Int64(intLiteral: 1);
+            self.index = self.index + 1;
             .Some((i, item))
         } else {
             .None
@@ -304,8 +304,8 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
     /// Decrements `remaining` and forwards `next()`; returns `None` once
     /// the budget hits zero.
     public mutating func next() -> I.Item? {
-        if self.remaining > Int64(intLiteral: 0) {
-            self.remaining = self.remaining - Int64(intLiteral: 1);
+        if self.remaining > 0 {
+            self.remaining = self.remaining - 1;
             self.inner.next()
         } else {
             .None
@@ -338,9 +338,9 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
     /// calls forward `next()` directly.
     public mutating func next() -> I.Item? {
         // Skip remaining elements first
-        while self.remaining > Int64(intLiteral: 0) {
+        while self.remaining > 0 {
             if let .Some(_) = self.inner.next() {
-                self.remaining = self.remaining - Int64(intLiteral: 1)
+                self.remaining = self.remaining - 1
             } else {
                 return .None
             }
@@ -594,8 +594,8 @@ public struct RepeatNIterator[T]: Iterator {
     /// Decrements `remaining` and returns a fresh copy of the value;
     /// returns `None` once the counter hits zero.
     public mutating func next() -> T? {
-        if self.remaining > Int64(intLiteral: 0) {
-            self.remaining = self.remaining - Int64(intLiteral: 1);
+        if self.remaining > 0 {
+            self.remaining = self.remaining - 1;
             .Some(self.value)
         } else {
             .None
@@ -773,10 +773,10 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
             return self.inner.next()
         }
 
-        var i = Int64(intLiteral: 0);
-        while i < self.step - Int64(intLiteral: 1) {
+        var i = 0;
+        while i < self.step - 1 {
             let _ = self.inner.next();
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
         self.inner.next()
     }

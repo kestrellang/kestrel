@@ -8,7 +8,7 @@ module Test
 
             // ---- bytes(Range) - default subscript with range yields BytesView ----
             let sub = s.bytes(std.core.Range[std.num.Int64](0, 5));
-            if sub.count != std.num.Int64(intLiteral: 5) { return 1 }
+            if sub.count != 5 { return 1 }
             if sub.toString().equals("hello") == false { return 2 }
 
             let sub2 = s.bytes(std.core.Range[std.num.Int64](6, 11));
@@ -39,7 +39,7 @@ module Test
             // Empty range
             let empty = s.bytes(checked: std.core.Range[std.num.Int64](3, 3));
             if empty.isNone() { return 10 }
-            if empty.unwrap().count != std.num.Int64(intLiteral: 0) { return 11 }
+            if empty.unwrap().count != 0 { return 11 }
             if empty.unwrap().toString().isEmpty == false { return 12 }
 
             0

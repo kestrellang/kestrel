@@ -91,10 +91,10 @@ public struct {{TYPE_NAME}}:
     // ========================================================================
 
     /// The additive identity, `0`.
-    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 0) }
+    public static var zero: {{TYPE_NAME}} { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: 1) }
+    public static var one: {{TYPE_NAME}} { 0 }
 
     /// The smallest representable value.
     {{MIN_VALUE_DOC}}
@@ -104,10 +104,10 @@ public struct {{TYPE_NAME}}:
 
     /// The largest representable value.
     {{MAX_VALUE_DOC}}
-    public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(intLiteral: {{MAX_VALUE}}) }
+    public static var maxValue: {{TYPE_NAME}} { {{MAX_VALUE}} }
 
     /// The width in bits ({{BITS}}). Useful for shift bounds and bit-walks.
-    public static var bitWidth: Int64 { Int64(intLiteral: {{BITS}}) }
+    public static var bitWidth: Int64 { {{BITS}} }
 
     // ========================================================================
     // INITIALIZERS
@@ -124,7 +124,6 @@ public struct {{TYPE_NAME}}:
     ///
     /// ```
     /// let n: Int64 = 42;            // implicit
-    /// let m = Int64(intLiteral: 42);  // explicit
     /// ```
     public init(intLiteral value: lang.i64) {
         {{INT_LITERAL_INIT}}
@@ -193,7 +192,7 @@ public struct {{TYPE_NAME}}:
 
     /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
     public var countZeros: Int64 { get {
-        Int64(intLiteral: {{BITS}}) - self.countOnes
+        {{BITS}} - self.countOnes
     }}
 
     /// Number of leading zero bits, counting from the most-significant end.
@@ -289,7 +288,7 @@ public struct {{TYPE_NAME}}:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Int64(intLiteral: lang.sizeof[{{TYPE_NAME}}]())))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[{{TYPE_NAME}}]()))
     }
 
     // ========================================================================

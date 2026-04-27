@@ -46,7 +46,7 @@ func libc_exit(code: Int32)
 ///
 /// ```
 /// let code = spawn(command: "ls -la");
-/// if code != Int32(intLiteral: 0) {
+/// if code != 0 {
 ///     print("ls failed");
 /// }
 /// ```
@@ -113,7 +113,7 @@ public func captureOutput(command: String) -> String {
 /// # Examples
 ///
 /// ```
-/// exit(code: Int32(intLiteral: 0));   // success — does not return
+/// exit(code: 0);   // success — does not return
 /// ```
 public func exit(code: Int32) {
     libc_exit(code)
@@ -128,7 +128,7 @@ func trimEnd(s: String) -> String {
     var end = s.byteCount;
     while end > 0 {
         let b = s.bytes(unchecked: end - 1);
-        if b == UInt8(intLiteral: 32) or b == UInt8(intLiteral: 9) or b == UInt8(intLiteral: 10) or b == UInt8(intLiteral: 13) {
+        if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {
             break

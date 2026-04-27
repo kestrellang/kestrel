@@ -86,20 +86,20 @@ public enum IoErrorKind {
     /// for all named variants and `.Other`.
     public func errno() -> Int32 {
         match self {
-            .NotPermitted      => Int32(intLiteral: 1),
-            .NotFound          => Int32(intLiteral: 2),
-            .Interrupted       => Int32(intLiteral: 4),
-            .IoFailure         => Int32(intLiteral: 5),
-            .BadFileDescriptor => Int32(intLiteral: 9),
-            .WouldBlock        => Int32(intLiteral: 11),
-            .OutOfMemory       => Int32(intLiteral: 12),
-            .PermissionDenied  => Int32(intLiteral: 13),
-            .AlreadyExists     => Int32(intLiteral: 17),
-            .NotADirectory     => Int32(intLiteral: 20),
-            .IsADirectory      => Int32(intLiteral: 21),
-            .InvalidInput      => Int32(intLiteral: 22),
-            .NoSpaceLeft       => Int32(intLiteral: 28),
-            .BrokenPipe        => Int32(intLiteral: 32),
+            .NotPermitted      => 1,
+            .NotFound          => 2,
+            .Interrupted       => 4,
+            .IoFailure         => 5,
+            .BadFileDescriptor => 9,
+            .WouldBlock        => 11,
+            .OutOfMemory       => 12,
+            .PermissionDenied  => 13,
+            .AlreadyExists     => 17,
+            .NotADirectory     => 20,
+            .IsADirectory      => 21,
+            .InvalidInput      => 22,
+            .NoSpaceLeft       => 28,
+            .BrokenPipe        => 32,
             .Other(c)          => c
         }
     }
