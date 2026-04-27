@@ -13,8 +13,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
-    AttributeData, ConformanceListData, TypeDeclarationBodyItem, deinit_declaration_parser_internal,
-    emit_attribute_list, emit_name, emit_type_declaration_body_item, emit_visibility, identifier,
+    AttributeData, ConformanceListData, TypeDeclarationBodyItem,
+    deinit_declaration_parser_internal, emit_attribute_list, emit_name,
+    emit_type_declaration_body_item, emit_visibility, identifier,
     initializer_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
@@ -215,10 +216,7 @@ where
                     (
                         (
                             (
-                                (
-                                    (((attributes, visibility), struct_span), name_span),
-                                    type_params,
-                                ),
+                                ((((attributes, visibility), struct_span), name_span), type_params),
                                 conformances,
                             ),
                             where_clause,
@@ -342,8 +340,8 @@ mod emit_syntax_trait_tests {
         let tree_fn = TreeBuilder::new(source, sink_fn.into_events()).build();
 
         // Build the same tree by calling `.emit(sink)` through the trait.
-        use chumsky::Parser;
         use crate::input::{create_input, prepare_tokens};
+        use chumsky::Parser;
         let prepared = prepare_tokens(tokens.into_iter());
         let input = create_input(&prepared, source.len());
         let data = struct_declaration_parser_internal()

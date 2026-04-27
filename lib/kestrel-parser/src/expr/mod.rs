@@ -363,11 +363,10 @@ pub fn expr_parser<'tokens>()
                                             )
                                             .then(expr.clone())
                                             .then(
-                                                skip_trivia().ignore_then(
-                                                    just(Token::Colon).map_with(|_, e| {
-                                                        to_kestrel_span(e.span())
-                                                    }),
-                                                ),
+                                                skip_trivia()
+                                                    .ignore_then(just(Token::Colon).map_with(
+                                                        |_, e| to_kestrel_span(e.span()),
+                                                    )),
                                             )
                                             .then(expr.clone())
                                             .map(|(((comma, key), colon), value)| {
@@ -422,11 +421,10 @@ pub fn expr_parser<'tokens>()
                                                     .collect::<Vec<_>>(),
                                             )
                                             .then(
-                                                skip_trivia().ignore_then(
-                                                    just(Token::RBracket).map_with(|_, e| {
-                                                        to_kestrel_span(e.span())
-                                                    }),
-                                                ),
+                                                skip_trivia()
+                                                    .ignore_then(just(Token::RBracket).map_with(
+                                                        |_, e| to_kestrel_span(e.span()),
+                                                    )),
                                             )
                                             .map(|((first_comma, more), rbracket)| {
                                                 BracketContentAfterFirst::ArrayMore {
@@ -534,11 +532,10 @@ pub fn expr_parser<'tokens>()
                                         // After comma: either more elements or just rparen
                                         expr.clone()
                                             .separated_by(
-                                                skip_trivia().ignore_then(
-                                                    just(Token::Comma).map_with(|_, e| {
-                                                        to_kestrel_span(e.span())
-                                                    }),
-                                                ),
+                                                skip_trivia()
+                                                    .ignore_then(just(Token::Comma).map_with(
+                                                        |_, e| to_kestrel_span(e.span()),
+                                                    )),
                                             )
                                             .allow_trailing()
                                             .collect::<Vec<_>>()
@@ -550,11 +547,13 @@ pub fn expr_parser<'tokens>()
                                     .or(empty().to((false, Span::new(0, 0..0), vec![]))),
                             )
                             // RParen is recoverable. Emitter anchors via `add_token_or_missing`.
-                            .then(skip_trivia().ignore_then(
-                                just(Token::RParen)
-                                    .map_with(|_, e| to_kestrel_span(e.span()))
-                                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
-                            ))
+                            .then(
+                                skip_trivia().ignore_then(
+                                    just(Token::RParen)
+                                        .map_with(|_, e| to_kestrel_span(e.span()))
+                                        .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+                                ),
+                            )
                             .map(|((first, (has_comma, _first_comma, more)), rparen)| {
                                 if !has_comma {
                                     // (expr) - grouping
@@ -683,10 +682,7 @@ pub fn expr_parser<'tokens>()
                     .then(full_type_args_parser().or_not())
                     .validate(|((dot, member), type_args), e, emitter| {
                         if member.is_none() {
-                            emitter.emit(Rich::custom(
-                                e.span(),
-                                "expected identifier after `.`",
-                            ));
+                            emitter.emit(Rich::custom(e.span(), "expected identifier after `.`"));
                         }
                         ((dot, member), type_args)
                     })
@@ -1016,9 +1012,7 @@ pub fn expr_parser<'tokens>()
                 let match_arm = pattern_parser()
                     .then(
                         skip_trivia()
-                            .ignore_then(
-                                just(Token::If).map_with(|_, e| to_kestrel_span(e.span())),
-                            )
+                            .ignore_then(just(Token::If).map_with(|_, e| to_kestrel_span(e.span())))
                             .then(condition_binary.clone())
                             .map(|(if_span, condition)| MatchGuardData {
                                 if_span,
@@ -1209,7 +1203,6 @@ pub fn expr_parser<'tokens>()
             .then_ignore(skip_trivia())
     })
 }
-
 
 /// Recovery for a malformed match arm. Skips trivia and one non-boundary
 /// token, then keeps consuming up to (but not including) the next arm

@@ -17,15 +17,13 @@ use kestrel_hir::body::HirStmt;
 use kestrel_hir_lower::LowerBody;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::result::ResolvedTy;
 use rowan::TextSize;
-use tower_lsp::lsp_types::{
-    InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams,
-};
+use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams};
 
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 use crate::ty_format::format_ty;
 
 pub async fn handle(state: SharedState, params: InlayHintParams) -> Option<Vec<InlayHint>> {
@@ -44,63 +42,94 @@ pub async fn handle(state: SharedState, params: InlayHintParams) -> Option<Vec<I
     let range_end = line_index.position_to_offset(params.range.end);
 
     let li = line_index.clone();
-    handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<InlayHint> {
-        let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
-            return vec![];
-        };
-        let world = compiler.world();
-        let root = compiler.root();
-        let ctx = world.query_context();
+    handle
+        .with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<InlayHint> {
+            let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
+                return vec![];
+            };
+            let world = compiler.world();
+            let root = compiler.root();
+            let ctx = world.query_context();
 
-        let mut hints: Vec<InlayHint> = Vec::new();
+            let mut hints: Vec<InlayHint> = Vec::new();
 
-        let body_entities: Vec<_> = world
-            .iter_component::<Body>()
-            .filter_map(|(e, _)| {
-                let fid = world.get::<FileId>(e)?;
-                (fid.0 == file_entity).then_some(e)
-            })
-            .collect();
+            let body_entities: Vec<_> = world
+                .iter_component::<Body>()
+                .filter_map(|(e, _)| {
+                    let fid = world.get::<FileId>(e)?;
+                    (fid.0 == file_entity).then_some(e)
+                })
+                .collect();
 
-        for body_entity in body_entities {
-            let Some(hir) = ctx.query(LowerBody { entity: body_entity, root }) else { continue };
-            let Some(typed) = ctx.query(InferBody { entity: body_entity, root }) else { continue };
-            let Some(cst) = world.get::<Valued>(body_entity).map(|v| v.0.clone()) else { continue };
+            for body_entity in body_entities {
+                let Some(hir) = ctx.query(LowerBody {
+                    entity: body_entity,
+                    root,
+                }) else {
+                    continue;
+                };
+                let Some(typed) = ctx.query(InferBody {
+                    entity: body_entity,
+                    root,
+                }) else {
+                    continue;
+                };
+                let Some(cst) = world.get::<Valued>(body_entity).map(|v| v.0.clone()) else {
+                    continue;
+                };
 
-            for (_id, stmt) in hir.stmts.iter() {
-                let HirStmt::Let { local, ty: None, span, .. } = stmt else { continue };
-                if span.end < range_start || span.start > range_end { continue }
+                for (_id, stmt) in hir.stmts.iter() {
+                    let HirStmt::Let {
+                        local,
+                        ty: None,
+                        span,
+                        ..
+                    } = stmt
+                    else {
+                        continue;
+                    };
+                    if span.end < range_start || span.start > range_end {
+                        continue;
+                    }
 
-                let local_data = &hir.locals[*local];
-                // Synthetic locals from desugaring (`$let_tmp`, `$iter`, …)
-                // share the HirStmt::Let shape but have no source binding to
-                // hint against.
-                if local_data.name.starts_with('$') { continue }
+                    let local_data = &hir.locals[*local];
+                    // Synthetic locals from desugaring (`$let_tmp`, `$iter`, …)
+                    // share the HirStmt::Let shape but have no source binding to
+                    // hint against.
+                    if local_data.name.starts_with('$') {
+                        continue;
+                    }
 
-                let Some(ty) = typed.local_types.get(local) else { continue };
-                if matches!(ty, ResolvedTy::Error) { continue }
+                    let Some(ty) = typed.local_types.get(local) else {
+                        continue;
+                    };
+                    if matches!(ty, ResolvedTy::Error) {
+                        continue;
+                    }
 
-                let Some(end_offset) = binding_pattern_end(&cst, span) else { continue };
+                    let Some(end_offset) = binding_pattern_end(&cst, span) else {
+                        continue;
+                    };
 
-                let label = format!(": {}", format_ty(world, ty));
-                hints.push(InlayHint {
-                    position: li.offset_to_position(end_offset),
-                    label: InlayHintLabel::String(label),
-                    kind: Some(InlayHintKind::TYPE),
-                    text_edits: None,
-                    tooltip: None,
-                    padding_left: Some(false),
-                    padding_right: Some(false),
-                    data: None,
-                });
+                    let label = format!(": {}", format_ty(world, ty));
+                    hints.push(InlayHint {
+                        position: li.offset_to_position(end_offset),
+                        label: InlayHintLabel::String(label),
+                        kind: Some(InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: Some(false),
+                        padding_right: Some(false),
+                        data: None,
+                    });
+                }
             }
-        }
 
-        hints
-    })
-    .await
-    .unwrap_or_default()
-    .into()
+            hints
+        })
+        .await
+        .unwrap_or_default()
+        .into()
 }
 
 /// Find the end offset of the `BindingPattern` inside the `VariableDeclaration`
@@ -110,9 +139,13 @@ fn binding_pattern_end(cst: &SyntaxNode, let_span: &Span) -> Option<usize> {
     let start = TextSize::from(let_span.start as u32);
     let end = TextSize::from(let_span.end as u32);
     for n in cst.descendants() {
-        if n.kind() != SyntaxKind::VariableDeclaration { continue }
+        if n.kind() != SyntaxKind::VariableDeclaration {
+            continue;
+        }
         let r = n.text_range();
-        if r.start() > start || r.end() < end { continue }
+        if r.start() > start || r.end() < end {
+            continue;
+        }
         for desc in n.descendants() {
             if desc.kind() == SyntaxKind::BindingPattern {
                 return Some(desc.text_range().end().into());
@@ -145,16 +178,44 @@ mod tests {
             .collect();
         let mut out: Vec<(usize, String)> = Vec::new();
         for body_entity in body_entities {
-            let Some(hir) = ctx.query(LowerBody { entity: body_entity, root }) else { continue };
-            let Some(typed) = ctx.query(InferBody { entity: body_entity, root }) else { continue };
-            let Some(cst) = world.get::<Valued>(body_entity).map(|v| v.0.clone()) else { continue };
+            let Some(hir) = ctx.query(LowerBody {
+                entity: body_entity,
+                root,
+            }) else {
+                continue;
+            };
+            let Some(typed) = ctx.query(InferBody {
+                entity: body_entity,
+                root,
+            }) else {
+                continue;
+            };
+            let Some(cst) = world.get::<Valued>(body_entity).map(|v| v.0.clone()) else {
+                continue;
+            };
             for (_id, stmt) in hir.stmts.iter() {
-                let HirStmt::Let { local, ty: None, span, .. } = stmt else { continue };
+                let HirStmt::Let {
+                    local,
+                    ty: None,
+                    span,
+                    ..
+                } = stmt
+                else {
+                    continue;
+                };
                 let local_data = &hir.locals[*local];
-                if local_data.name.starts_with('$') { continue }
-                let Some(ty) = typed.local_types.get(local) else { continue };
-                if matches!(ty, ResolvedTy::Error) { continue }
-                let Some(end_offset) = binding_pattern_end(&cst, span) else { continue };
+                if local_data.name.starts_with('$') {
+                    continue;
+                }
+                let Some(ty) = typed.local_types.get(local) else {
+                    continue;
+                };
+                if matches!(ty, ResolvedTy::Error) {
+                    continue;
+                }
+                let Some(end_offset) = binding_pattern_end(&cst, span) else {
+                    continue;
+                };
                 out.push((end_offset, format!(": {}", format_ty(world, ty))));
             }
         }
@@ -193,7 +254,8 @@ mod tests {
         // `let (a, b) = …` lowers via a `$let_tmp` plus a desugared match
         // — both are filtered out by the `$` name check, so no hint surfaces
         // until destructured-binding hints are wired up explicitly.
-        let src = "module T\nstruct P { var x: lang.i64 }\nfunc f(p: P, q: P) { let (a, b) = (p, q); }\n";
+        let src =
+            "module T\nstruct P { var x: lang.i64 }\nfunc f(p: P, q: P) { let (a, b) = (p, q); }\n";
         let hints = collect_hints(src);
         assert!(hints.is_empty(), "{:?}", hints);
     }

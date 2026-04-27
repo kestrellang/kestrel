@@ -62,7 +62,8 @@ pub(super) fn literal_parser<'tokens>()
         .ignore_then(select! { Token::Null = e => to_kestrel_span(e.span()) })
         .map(ExprVariant::Null);
 
-    float.or(integer)
+    float
+        .or(integer)
         .or(string)
         .or(raw_string)
         .or(char_literal)

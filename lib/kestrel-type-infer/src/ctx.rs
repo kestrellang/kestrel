@@ -196,12 +196,7 @@ impl<'a> InferCtx<'a> {
     /// Record protocol args for a `(container, protocol)` witness pair.
     /// Keyed by the container's canonical TyVar (after redirects) so lookups
     /// in `solve_associated` use the same canonical form.
-    pub(crate) fn record_witness_args(
-        &mut self,
-        tv: TyVar,
-        protocol: Entity,
-        args: Vec<TyVar>,
-    ) {
+    pub(crate) fn record_witness_args(&mut self, tv: TyVar, protocol: Entity, args: Vec<TyVar>) {
         let key = (self.resolve(tv), protocol);
         self.witness_protocol_args.insert(key, args);
     }

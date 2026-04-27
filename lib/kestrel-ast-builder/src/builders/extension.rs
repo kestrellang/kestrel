@@ -103,7 +103,9 @@ fn introduce_rhs_free_type_params(
         let AstType::Named { segments, .. } = proto_ty else {
             continue;
         };
-        let Some(last) = segments.last() else { continue };
+        let Some(last) = segments.last() else {
+            continue;
+        };
         for arg in &last.type_args {
             let AstType::Named {
                 segments: arg_segs,

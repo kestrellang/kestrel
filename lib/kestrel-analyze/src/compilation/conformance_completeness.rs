@@ -981,11 +981,7 @@ fn find_associated_type_binding_entity(
 /// transitively via refinement). Used to decide whether an unqualified
 /// `type Output = …` inside the entity's scope is the binding for
 /// `protocol.Output`.
-fn entity_conforms_to(
-    cx: &CompilationContext<'_>,
-    entity: Entity,
-    protocol: Entity,
-) -> bool {
+fn entity_conforms_to(cx: &CompilationContext<'_>, entity: Entity, protocol: Entity) -> bool {
     let Some(conformances) = cx.query.get::<Conformances>(entity) else {
         return false;
     };
@@ -1334,9 +1330,7 @@ fn check_ambiguous_method_satisfaction(
             // method satisfies them through a single chain — not ambiguous.
             // Example: `extend Equatable: Equal[Self]` makes Equatable types
             // auto-conform to Equal, so a struct's `equals` serves both.
-            if matching_protocols.len() >= 2
-                && !has_unrelated_pair(cx, &matching_protocols)
-            {
+            if matching_protocols.len() >= 2 && !has_unrelated_pair(cx, &matching_protocols) {
                 continue;
             }
 

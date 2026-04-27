@@ -26,12 +26,14 @@ use crate::function::{
     FunctionDeclaration, FunctionDeclarationData, emit_function_declaration,
     function_declaration_parser_internal,
 };
-use crate::import::{ImportDeclaration, emit_import_declaration, import_declaration_parser_internal};
+use crate::import::{
+    ImportDeclaration, emit_import_declaration, import_declaration_parser_internal,
+};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
-use crate::parse_and_emit;
 use crate::module::{
     ModuleDeclaration, emit_module_declaration, module_declaration_parser_internal,
 };
+use crate::parse_and_emit;
 use crate::protocol::{
     ProtocolDeclaration, ProtocolDeclarationData, emit_protocol_declaration,
     protocol_declaration_parser_internal,

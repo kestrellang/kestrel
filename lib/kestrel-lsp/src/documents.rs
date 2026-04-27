@@ -16,7 +16,10 @@ pub struct OpenDoc {
 
 impl OpenDoc {
     pub fn new(text: String, version: i32) -> Self {
-        Self { version, line_index: LineIndex::new(text) }
+        Self {
+            version,
+            line_index: LineIndex::new(text),
+        }
     }
 
     pub fn text(&self) -> &str {

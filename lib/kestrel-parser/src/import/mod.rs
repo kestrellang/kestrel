@@ -5,8 +5,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::common::{emit_module_path, identifier, module_path_parser_internal, token};
 use crate::event::EventSink;
 use crate::input::{ParserExtra, ParserInput};
-use crate::parse_and_emit;
 use crate::module::ModulePath;
+use crate::parse_and_emit;
 
 use chumsky::prelude::*;
 

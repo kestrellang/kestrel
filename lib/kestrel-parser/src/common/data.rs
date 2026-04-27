@@ -196,4 +196,3 @@ pub enum TypeDeclarationBodyItem {
         Option<Vec<(Span, Option<Span>)>>,
     ), // import_span, path, alias, items
 }
-

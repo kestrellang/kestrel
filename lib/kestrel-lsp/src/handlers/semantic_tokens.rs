@@ -13,21 +13,21 @@ use tower_lsp::lsp_types::{
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 
 /// Token-type legend, indexed by the `tokenType` field in the wire format.
 /// Order matters — clients use these indices.
 pub const LEGEND: &[SemanticTokenType] = &[
-    SemanticTokenType::KEYWORD,    // 0
-    SemanticTokenType::TYPE,       // 1
-    SemanticTokenType::FUNCTION,   // 2
-    SemanticTokenType::VARIABLE,   // 3
-    SemanticTokenType::PROPERTY,   // 4
-    SemanticTokenType::NAMESPACE,  // 5
-    SemanticTokenType::COMMENT,    // 6
-    SemanticTokenType::STRING,     // 7
-    SemanticTokenType::NUMBER,     // 8
-    SemanticTokenType::OPERATOR,   // 9
+    SemanticTokenType::KEYWORD,   // 0
+    SemanticTokenType::TYPE,      // 1
+    SemanticTokenType::FUNCTION,  // 2
+    SemanticTokenType::VARIABLE,  // 3
+    SemanticTokenType::PROPERTY,  // 4
+    SemanticTokenType::NAMESPACE, // 5
+    SemanticTokenType::COMMENT,   // 6
+    SemanticTokenType::STRING,    // 7
+    SemanticTokenType::NUMBER,    // 8
+    SemanticTokenType::OPERATOR,  // 9
 ];
 
 const KEYWORD: u32 = 0;
@@ -52,15 +52,23 @@ pub async fn handle(
         (s.compiler_handle.clone(), stdlib, user, line_index)
     };
 
-    let data = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<Vec<SemanticToken>> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let raw_tokens = compiler.lex(file_entity);
-        let source = line_index.text();
-        Some(encode(&raw_tokens, source, &line_index))
-    })
-    .await??;
+    let data = handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<Vec<SemanticToken>> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                let raw_tokens = compiler.lex(file_entity);
+                let source = line_index.text();
+                Some(encode(&raw_tokens, source, &line_index))
+            },
+        )
+        .await??;
 
-    Some(SemanticTokensResult::Tokens(SemanticTokens { result_id: None, data }))
+    Some(SemanticTokensResult::Tokens(SemanticTokens {
+        result_id: None,
+        data,
+    }))
 }
 
 fn classify(token: Token, lexeme: &str) -> Option<u32> {
@@ -77,10 +85,10 @@ fn classify(token: Token, lexeme: &str) -> Option<u32> {
 
         // Keywords (the simple block — every reserved word that isn't an op).
         Extend | Fileprivate | Func | Import | Deinit | Init | Internal | Let | Module
-        | Mutating | Private | Protocol | Public | Static | Struct | Type | Var | Where
-        | Enum | Case | Indirect | And | Not | Or | As | Break | Consuming | Continue | Else
-        | For | If | In | Loop | Return | Throw | Try | Throws | While | Match | Guard | Get
-        | Set | Subscript => KEYWORD,
+        | Mutating | Private | Protocol | Public | Static | Struct | Type | Var | Where | Enum
+        | Case | Indirect | And | Not | Or | As | Break | Consuming | Continue | Else | For
+        | If | In | Loop | Return | Throw | Try | Throws | While | Match | Guard | Get | Set
+        | Subscript => KEYWORD,
 
         // Identifiers — heuristic. PascalCase → type, anything else → variable.
         Identifier => {
@@ -102,7 +110,11 @@ fn classify(token: Token, lexeme: &str) -> Option<u32> {
 /// Encode tokens as LSP delta-encoded quintuples. Skips trivia and any
 /// token that spans multiple lines (LSP requires per-line entries; for
 /// multi-line strings we'd split at newlines — punted to a later pass).
-fn encode(raw: &[kestrel_lexer::SpannedToken], source: &str, idx: &LineIndex) -> Vec<SemanticToken> {
+fn encode(
+    raw: &[kestrel_lexer::SpannedToken],
+    source: &str,
+    idx: &LineIndex,
+) -> Vec<SemanticToken> {
     let mut out = Vec::with_capacity(raw.len());
     let mut prev_line: u32 = 0;
     let mut prev_start: u32 = 0;
@@ -111,7 +123,9 @@ fn encode(raw: &[kestrel_lexer::SpannedToken], source: &str, idx: &LineIndex) ->
         let token = spanned.value.clone();
         let span = &spanned.span;
         let lexeme = source.get(span.start..span.end).unwrap_or("");
-        let Some(ttype) = classify(token, lexeme) else { continue };
+        let Some(ttype) = classify(token, lexeme) else {
+            continue;
+        };
 
         let start_pos = idx.offset_to_position(span.start);
         let end_pos = idx.offset_to_position(span.end);

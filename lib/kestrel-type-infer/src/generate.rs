@@ -262,7 +262,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 } else {
                     Vec::new()
                 };
-                ctx.member_static(recv_tv, method_str, arg_tvs, result_tv, id, true, ext_args, span.clone());
+                ctx.member_static(
+                    recv_tv,
+                    method_str,
+                    arg_tvs,
+                    result_tv,
+                    id,
+                    true,
+                    ext_args,
+                    span.clone(),
+                );
             } else if has_explicit {
                 ctx.member_with_type_args(
                     recv_tv,
@@ -275,7 +284,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     span.clone(),
                 );
             } else {
-                ctx.member(recv_tv, method_str, arg_tvs, result_tv, id, true, span.clone());
+                ctx.member(
+                    recv_tv,
+                    method_str,
+                    arg_tvs,
+                    result_tv,
+                    id,
+                    true,
+                    span.clone(),
+                );
             }
             result_tv
         },
@@ -307,7 +324,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 return result_tv;
             };
             // Resolve method on the protocol
-            ctx.member(recv_tv, method_str, arg_tvs, result_tv, id, true, span.clone());
+            ctx.member(
+                recv_tv,
+                method_str,
+                arg_tvs,
+                result_tv,
+                id,
+                true,
+                span.clone(),
+            );
             result_tv
         },
 
@@ -333,7 +358,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             match name {
                 HirName::Name(name_str) => {
                     // Member constraint with no args (field/property access)
-                    ctx.member(base_tv, name_str, vec![], result_tv, id, false, span.clone());
+                    ctx.member(
+                        base_tv,
+                        name_str,
+                        vec![],
+                        result_tv,
+                        id,
+                        false,
+                        span.clone(),
+                    );
                 },
                 HirName::Missing => {
                     // Parser already reported "expected identifier after `.`".
@@ -350,12 +383,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             let base_tv = gen_expr(ctx, hir, *base);
             let result_tv = ctx.fresh();
-            ctx.constraints.push(crate::constraint::Constraint::TupleIndex {
-                tuple: base_tv,
-                index: *index as usize,
-                result: result_tv,
-                span: span.clone(),
-            });
+            ctx.constraints
+                .push(crate::constraint::Constraint::TupleIndex {
+                    tuple: base_tv,
+                    index: *index as usize,
+                    result: result_tv,
+                    span: span.clone(),
+                });
             result_tv
         },
 
@@ -602,14 +636,26 @@ fn mark_sugar_primary(
         SugarKind::ForLoop => {
             // inner is `Block { stmts: [Let { value: Some(iter_pcall) }], tail_expr: Some(loop) }`.
             // The iter_pcall is the IterableProtocol "iter" call we want to poison.
-            let HirExpr::Block { body, .. } = &hir.exprs[inner] else { return };
-            let Some(first_stmt) = body.stmts.first() else { return };
-            let HirStmt::Let { value: Some(pcall_id), .. } = &hir.stmts[*first_stmt] else { return };
+            let HirExpr::Block { body, .. } = &hir.exprs[inner] else {
+                return;
+            };
+            let Some(first_stmt) = body.stmts.first() else {
+                return;
+            };
+            let HirStmt::Let {
+                value: Some(pcall_id),
+                ..
+            } = &hir.stmts[*first_stmt]
+            else {
+                return;
+            };
             ctx.poison_protocol_call_recv_on_failure.insert(*pcall_id);
         },
         SugarKind::Try => {
             // inner is `Match { scrutinee: tryExtract_pcall, ..., source: TryOp }`.
-            let HirExpr::Match { scrutinee, .. } = &hir.exprs[inner] else { return };
+            let HirExpr::Match { scrutinee, .. } = &hir.exprs[inner] else {
+                return;
+            };
             ctx.poison_protocol_call_recv_on_failure.insert(*scrutinee);
         },
         SugarKind::CompoundAssign => {
@@ -1910,7 +1956,9 @@ fn gen_struct_pat(
         };
         let found = children.iter().find(|&&child| {
             qctx.get::<NodeKind>(child) == Some(&NodeKind::Field)
-                && qctx.get::<Name>(child).is_some_and(|n| n.0 == field_name_str)
+                && qctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == field_name_str)
         });
         let field_tv = found
             .and_then(|&child| {

@@ -40,17 +40,15 @@ use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind,
-    WhereClause as AstWhereClause, WhereConstraint,
+    Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
+    WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
-use kestrel_semantics::{
-    CopyRequirement, ExplicitlyNegatesProtocol, TypeParamCopyRequirement,
-};
+use kestrel_semantics::{CopyRequirement, ExplicitlyNegatesProtocol, TypeParamCopyRequirement};
 use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::BodyContext;
@@ -220,7 +218,14 @@ fn analyze_stmt(
             // `deinit_undeclared` — nothing to do here.
             if let Some(local_id) = local {
                 if let Some(existing) = state.moves.get(local_id).copied() {
-                    emit_use_after_move(mcx.cx, diags, *local_id, span.clone(), existing, name.as_str_or_empty());
+                    emit_use_after_move(
+                        mcx.cx,
+                        diags,
+                        *local_id,
+                        span.clone(),
+                        existing,
+                        name.as_str_or_empty(),
+                    );
                 }
                 // Mark moved using the deinit statement's own span as the
                 // move site. We synthesize a "pseudo" site by pointing at
@@ -447,7 +452,9 @@ fn analyze_expr(
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
             }
-            if let Some(method_entity) = find_protocol_method(mcx.cx, *protocol, method.as_str_or_empty()) {
+            if let Some(method_entity) =
+                find_protocol_method(mcx.cx, *protocol, method.as_str_or_empty())
+            {
                 apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state);
             }
         },

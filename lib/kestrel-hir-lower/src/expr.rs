@@ -636,11 +636,10 @@ impl LowerCtx<'_> {
                                     "instance method '{}' cannot be called on a type",
                                     last.name
                                 ))
-                                .with_labels(vec![kestrel_reporting::Label::primary(
-                                    span.file_id,
-                                    span.range(),
-                                )
-                                .with_message("call this on an instance, not the type")]),
+                                .with_labels(vec![
+                                    kestrel_reporting::Label::primary(span.file_id, span.range())
+                                        .with_message("call this on an instance, not the type"),
+                                ]),
                         );
                         return self.alloc_expr(HirExpr::Error { span: span.clone() });
                     }
@@ -776,11 +775,7 @@ impl LowerCtx<'_> {
     /// or enum) names an *instance* method on that type — i.e. a Function
     /// child with a receiver and no `Static` marker. Used to catch misuses
     /// like `Counter.getValue()` where `getValue` requires a `self`.
-    fn is_instance_method_on_type(
-        &mut self,
-        segments: &[ExprPathSegment],
-        member: &str,
-    ) -> bool {
+    fn is_instance_method_on_type(&mut self, segments: &[ExprPathSegment], member: &str) -> bool {
         use kestrel_ast_builder::{Callable, Name, NodeKind, Static};
 
         if segments.len() < 2 {

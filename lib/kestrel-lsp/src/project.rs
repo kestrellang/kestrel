@@ -117,14 +117,22 @@ fn collect_recursive(
     };
 
     let source_dir = pkg_root.join(
-        manifest.package.as_ref().map(|p| p.source.as_str()).unwrap_or("."),
+        manifest
+            .package
+            .as_ref()
+            .map(|p| p.source.as_str())
+            .unwrap_or("."),
     );
     walk_kestrel_sources(&source_dir, &mut report.sources);
 
     // Path deps from [dependencies] table.
     for (_name, value) in manifest.dependencies.iter() {
-        let Some(table) = value.as_table() else { continue };
-        let Some(path) = table.get("path").and_then(|v| v.as_str()) else { continue };
+        let Some(table) = value.as_table() else {
+            continue;
+        };
+        let Some(path) = table.get("path").and_then(|v| v.as_str()) else {
+            continue;
+        };
         let dep_manifest = pkg_root.join(path).join("flock.toml");
         if dep_manifest.is_file() {
             collect_recursive(&dep_manifest, cache_root, visited, report);
@@ -198,7 +206,10 @@ mod tests {
 
         // Workspace package
         let pkg = root.join("pkg");
-        write(&pkg.join("flock.toml"), "[package]\nname = \"pkg\"\nsource = \".\"\n");
+        write(
+            &pkg.join("flock.toml"),
+            "[package]\nname = \"pkg\"\nsource = \".\"\n",
+        );
         write(&pkg.join("main.ks"), "module Main\n");
         write(
             &pkg.join("flock.lock"),
@@ -213,7 +224,10 @@ checksum = "sha256:dummy"
         // Cached package at <cache>/swoop/1.0.0/
         let cache = root.join("cache");
         let cached = cache.join("swoop").join("1.0.0");
-        write(&cached.join("flock.toml"), "[package]\nname = \"swoop\"\nsource = \".\"\n");
+        write(
+            &cached.join("flock.toml"),
+            "[package]\nname = \"swoop\"\nsource = \".\"\n",
+        );
         write(&cached.join("lib.ks"), "module Swoop\n");
 
         let report = collect_sources(&pkg.join("flock.toml"), Some(&cache));
@@ -224,7 +238,11 @@ checksum = "sha256:dummy"
             .collect();
         assert!(names.contains(&"main.ks".into()), "got {names:?}");
         assert!(names.contains(&"lib.ks".into()), "got {names:?}");
-        assert!(report.missing_cache.is_empty(), "{:?}", report.missing_cache);
+        assert!(
+            report.missing_cache.is_empty(),
+            "{:?}",
+            report.missing_cache
+        );
     }
 
     #[test]

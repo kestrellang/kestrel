@@ -176,12 +176,7 @@ impl EventSink {
     /// diagnostics to invisible squiggles, so we anchor the underline on
     /// the character preceding the cursor (where the missing token should
     /// have appeared).
-    pub fn add_token_or_missing(
-        &mut self,
-        kind: SyntaxKind,
-        span: Span,
-        expected_label: &str,
-    ) {
+    pub fn add_token_or_missing(&mut self, kind: SyntaxKind, span: Span, expected_label: &str) {
         if span.start == span.end {
             // Anchor the diagnostic on the last real (non-trivia) token
             // already emitted into this sink — that's the end of the

@@ -12,9 +12,9 @@ use kestrel_compiler_driver::CompilerDriver;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{Diagnostic as LspDiagnostic, Url};
 
-use crate::convert::{from_analyze, from_codespan, FileMap};
+use crate::convert::{FileMap, from_analyze, from_codespan};
 use crate::position::LineIndex;
-use crate::server::{path_to_url, SharedState};
+use crate::server::{SharedState, path_to_url};
 
 /// Reanalyze + publish. Idempotent — safe to call from any handler.
 pub async fn refresh(state: SharedState, client: Client) {
@@ -25,7 +25,12 @@ pub async fn refresh(state: SharedState, client: Client) {
         let doc_indices: HashMap<String, LineIndex> = s
             .docs
             .iter()
-            .map(|(uri, doc)| (super::super::server::url_to_path(uri), doc.line_index.clone()))
+            .map(|(uri, doc)| {
+                (
+                    super::super::server::url_to_path(uri),
+                    doc.line_index.clone(),
+                )
+            })
             .collect();
         let disk = s.disk_line_indices.clone();
         let pub_set = s.published.clone();
@@ -76,7 +81,9 @@ pub async fn refresh(state: SharedState, client: Client) {
     // line index; fall back to the disk index for files not currently open.
     let mut by_id: HashMap<usize, (Url, &LineIndex)> = HashMap::new();
     for (id, path) in &id_to_path {
-        let Some(url) = path_to_url(path) else { continue };
+        let Some(url) = path_to_url(path) else {
+            continue;
+        };
         let idx = doc_indices.get(path).or_else(|| disk_indices.get(path));
         if let Some(idx) = idx {
             by_id.insert(*id, (url, idx));

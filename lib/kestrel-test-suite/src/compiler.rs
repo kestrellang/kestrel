@@ -6,8 +6,8 @@
 
 use std::cell::OnceCell;
 
-use kestrel_compiler_driver::{AnalyzeSummary, CompilerDriver, InferSummary};
 use kestrel_compiler::{Compiler, SourceText};
+use kestrel_compiler_driver::{AnalyzeSummary, CompilerDriver, InferSummary};
 use kestrel_hecs::Entity;
 use kestrel_mir::MirModule;
 

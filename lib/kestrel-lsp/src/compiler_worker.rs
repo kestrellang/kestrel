@@ -321,10 +321,7 @@ mod tests {
         let count = handle
             .with_compiler(stdlib, user, |compiler, by_path| {
                 assert!(by_path.contains_key("/u/main.ks"));
-                compiler
-                    .world()
-                    .iter_component::<FileId>()
-                    .count()
+                compiler.world().iter_component::<FileId>().count()
             })
             .await
             .unwrap();
@@ -340,9 +337,11 @@ mod tests {
         let user = arc_map(&[("/u/main.ks", "module Main")]);
 
         let e1: Entity = handle
-            .with_compiler(stdlib.clone(), user.clone(), |_, by_path| {
-                by_path["/u/main.ks"]
-            })
+            .with_compiler(
+                stdlib.clone(),
+                user.clone(),
+                |_, by_path| by_path["/u/main.ks"],
+            )
             .await
             .unwrap();
         let e2: Entity = handle
@@ -499,8 +498,7 @@ mod tests {
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
             let _ = d.analyze_all();
-            let mut msgs: Vec<String> =
-                c.diagnostics().iter().map(|d| d.message.clone()).collect();
+            let mut msgs: Vec<String> = c.diagnostics().iter().map(|d| d.message.clone()).collect();
             msgs.sort();
             msgs
         };

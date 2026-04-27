@@ -80,8 +80,8 @@ pub(super) fn throw_parser<'tokens, P>(
 where
     P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
-    let next_token_span = skip_trivia()
-        .ignore_then(any().rewind().map_with(|_, e| to_kestrel_span(e.span())));
+    let next_token_span =
+        skip_trivia().ignore_then(any().rewind().map_with(|_, e| to_kestrel_span(e.span())));
     skip_trivia()
         .ignore_then(just(Token::Throw).map_with(|_, e| to_kestrel_span(e.span())))
         .then(expr.map(Box::new).or_not())
@@ -117,9 +117,10 @@ pub(super) fn label_parser<'tokens>()
 {
     skip_trivia()
         .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
-        .then(skip_trivia().ignore_then(
-            just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())),
-        ))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
         .map(|(name, colon)| super::data::LabelData { name, colon })
         .boxed()
 }

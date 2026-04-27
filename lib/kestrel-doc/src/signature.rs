@@ -24,7 +24,9 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { hide_bind_names: true }
+        Self {
+            hide_bind_names: true,
+        }
     }
 }
 
@@ -62,7 +64,11 @@ pub fn visibility(world: &World, entity: Entity) -> Option<&'static str> {
         });
     }
     let cst = world.get::<CstNode>(entity)?;
-    for tok in cst.0.descendants_with_tokens().filter_map(|e| e.into_token()) {
+    for tok in cst
+        .0
+        .descendants_with_tokens()
+        .filter_map(|e| e.into_token())
+    {
         match tok.kind() {
             SyntaxKind::Public => return Some("public"),
             SyntaxKind::Private => return Some("private"),
@@ -341,24 +347,23 @@ fn where_clause_str(world: &World, entity: Entity) -> String {
     if wc.0.is_empty() {
         return String::new();
     }
-    let parts: Vec<String> = wc
-        .0
-        .iter()
-        .map(|c| match c {
-            WhereConstraint::Bound {
-                subject, protocols, ..
-            } => {
-                let ps: Vec<_> = protocols.iter().map(ty).collect();
-                format!("{}: {}", ty(subject), ps.join(" + "))
-            },
-            WhereConstraint::Equality { lhs, rhs, .. } => {
-                format!("{} == {}", ty(lhs), ty(rhs))
-            },
-            WhereConstraint::NegativeBound {
-                subject, protocol, ..
-            } => format!("{}: not {}", ty(subject), ty(protocol)),
-        })
-        .collect();
+    let parts: Vec<String> =
+        wc.0.iter()
+            .map(|c| match c {
+                WhereConstraint::Bound {
+                    subject, protocols, ..
+                } => {
+                    let ps: Vec<_> = protocols.iter().map(ty).collect();
+                    format!("{}: {}", ty(subject), ps.join(" + "))
+                },
+                WhereConstraint::Equality { lhs, rhs, .. } => {
+                    format!("{} == {}", ty(lhs), ty(rhs))
+                },
+                WhereConstraint::NegativeBound {
+                    subject, protocol, ..
+                } => format!("{}: not {}", ty(subject), ty(protocol)),
+            })
+            .collect();
     format!(" where {}", parts.join(", "))
 }
 

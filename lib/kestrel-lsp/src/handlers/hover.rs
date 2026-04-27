@@ -12,20 +12,20 @@
 //! `Documentation` component attached during AST building.
 
 use kestrel_ast_builder::{CstNode, DeclSpan, Documentation, FileId, FilePath, NodeKind, Valued};
-use kestrel_syntax_tree::utils::get_name_span;
-use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
+use kestrel_syntax_tree::utils::get_name_span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use rowan::TextSize;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Range};
 
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 use crate::ty_format::format_ty;
 
 pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
@@ -37,82 +37,97 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
         let s = state.lock().await;
         let line_index = s.docs.get(&uri).map(|d| d.line_index.clone())?;
         let (stdlib, user) = s.partition_sources();
-        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), line_index)
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            line_index,
+        )
     };
     let offset = line_index.position_to_offset(pos);
 
-    let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<(String, Range)> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let world = compiler.world();
-        let root = compiler.root();
+    let result = handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<(String, Range)> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                let world = compiler.world();
+                let root = compiler.root();
 
-        // Try entity-shaped hover first (functions, types, methods, etc).
-        // Range is the cursor's expression / identifier span — NOT the
-        // entity's whole DeclSpan, otherwise hovering anywhere on a name
-        // would highlight the entire declaration that defines it.
-        if let Some(md) = entity_hover_at(world, &sources, file_entity, offset, root) {
-            let range = entity_hover_range(world, file_entity, offset, root, &line_index);
-            return Some((md, range));
-        }
-
-        // Type-position hover: cursor on `Foo` in `func bar(x: Foo)`. There
-        // is no expression at the cursor, so the body-based fallbacks below
-        // would miss it; resolve via the file CST instead.
-        let file_cst = compiler.parse(file_entity).tree;
-        if let Some((entity, span)) = crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset) {
-            if let Some(md) = render_entity(world, &sources, entity) {
-                let range = line_index.range_for(span.start, span.end);
-                return Some((md, range));
-            }
-        }
-
-        // Fall back to "inferred type of the expression at the cursor".
-        let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
-        let ctx = world.query_context();
-        let hir: HirBody = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        })?;
-        let typed = ctx.query(InferBody {
-            entity: body_entity,
-            root,
-        })?;
-
-        // Pattern-position cursor (e.g. on `x` in `let x = 42`): no HIR
-        // expression covers the binding, so the smallest-expr lookup below
-        // would miss it and the whole hover would return None. Try the CST
-        // BindingPattern path first.
-        if let Some((local_id, ty, range)) = local_at_binding(world, body_entity, &hir, &typed, offset, &line_index) {
-            let local = &hir.locals[local_id];
-            let kw = if local.is_mut { "var" } else { "let" };
-            let rendered = format_ty(world, &ty);
-            let mut md = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
-            if let Some(link) = type_decl_link(world, &sources, &ty) {
-                md.push_str(&format!("\n\n[Go to type definition]({link})"));
-            }
-            return Some((md, range));
-        }
-
-        let expr_id = semantic::hir_expr_at(&hir, offset)?;
-        let ty = typed.expr_types.get(&expr_id)?;
-        let rendered = format_ty(world, ty);
-        let md = match &hir.exprs[expr_id] {
-            HirExpr::Local(local_id, _) => {
-                let local = &hir.locals[*local_id];
-                let kw = if local.is_mut { "var" } else { "let" };
-                let mut s = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
-                if let Some(link) = type_decl_link(world, &sources, ty) {
-                    s.push_str(&format!("\n\n[Go to type definition]({link})"));
+                // Try entity-shaped hover first (functions, types, methods, etc).
+                // Range is the cursor's expression / identifier span — NOT the
+                // entity's whole DeclSpan, otherwise hovering anywhere on a name
+                // would highlight the entire declaration that defines it.
+                if let Some(md) = entity_hover_at(world, &sources, file_entity, offset, root) {
+                    let range = entity_hover_range(world, file_entity, offset, root, &line_index);
+                    return Some((md, range));
                 }
-                s
+
+                // Type-position hover: cursor on `Foo` in `func bar(x: Foo)`. There
+                // is no expression at the cursor, so the body-based fallbacks below
+                // would miss it; resolve via the file CST instead.
+                let file_cst = compiler.parse(file_entity).tree;
+                if let Some((entity, span)) =
+                    crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+                {
+                    if let Some(md) = render_entity(world, &sources, entity) {
+                        let range = line_index.range_for(span.start, span.end);
+                        return Some((md, range));
+                    }
+                }
+
+                // Fall back to "inferred type of the expression at the cursor".
+                let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
+                let ctx = world.query_context();
+                let hir: HirBody = ctx.query(LowerBody {
+                    entity: body_entity,
+                    root,
+                })?;
+                let typed = ctx.query(InferBody {
+                    entity: body_entity,
+                    root,
+                })?;
+
+                // Pattern-position cursor (e.g. on `x` in `let x = 42`): no HIR
+                // expression covers the binding, so the smallest-expr lookup below
+                // would miss it and the whole hover would return None. Try the CST
+                // BindingPattern path first.
+                if let Some((local_id, ty, range)) =
+                    local_at_binding(world, body_entity, &hir, &typed, offset, &line_index)
+                {
+                    let local = &hir.locals[local_id];
+                    let kw = if local.is_mut { "var" } else { "let" };
+                    let rendered = format_ty(world, &ty);
+                    let mut md = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
+                    if let Some(link) = type_decl_link(world, &sources, &ty) {
+                        md.push_str(&format!("\n\n[Go to type definition]({link})"));
+                    }
+                    return Some((md, range));
+                }
+
+                let expr_id = semantic::hir_expr_at(&hir, offset)?;
+                let ty = typed.expr_types.get(&expr_id)?;
+                let rendered = format_ty(world, ty);
+                let md = match &hir.exprs[expr_id] {
+                    HirExpr::Local(local_id, _) => {
+                        let local = &hir.locals[*local_id];
+                        let kw = if local.is_mut { "var" } else { "let" };
+                        let mut s = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
+                        if let Some(link) = type_decl_link(world, &sources, ty) {
+                            s.push_str(&format!("\n\n[Go to type definition]({link})"));
+                        }
+                        s
+                    },
+                    _ => format!("```kestrel\n{}\n```", rendered),
+                };
+                let span = semantic::hir_expr_span(&hir.exprs[expr_id]);
+                let range = line_index.range_for(span.start, span.end);
+                Some((md, range))
             },
-            _ => format!("```kestrel\n{}\n```", rendered),
-        };
-        let span = semantic::hir_expr_span(&hir.exprs[expr_id]);
-        let range = line_index.range_for(span.start, span.end);
-        Some((md, range))
-    })
-    .await??;
+        )
+        .await??;
 
     let (md, range) = result;
     Some(Hover {
@@ -142,7 +157,9 @@ fn local_at_binding(
 
     let mut best: Option<SyntaxNode> = None;
     for n in cst.descendants() {
-        if n.kind() != SyntaxKind::BindingPattern { continue }
+        if n.kind() != SyntaxKind::BindingPattern {
+            continue;
+        }
         let r = n.text_range();
         if r.start() <= pos && pos <= r.end() {
             let smaller = best
@@ -170,10 +187,7 @@ fn local_at_binding(
     // Locals carry the enclosing let/var stmt span. The right local is the
     // one whose name matches and whose span contains the binding token.
     for (id, local) in hir.locals.iter() {
-        if local.name == name
-            && local.span.start <= ident_start
-            && ident_end <= local.span.end
-        {
+        if local.name == name && local.span.start <= ident_start && ident_end <= local.span.end {
             let ty = typed.local_types.get(&id)?.clone();
             let range = line_index.range_for(ident_start, ident_end);
             return Some((id, ty, range));
@@ -231,7 +245,10 @@ fn entity_hover_range(
     }
     // Last resort: zero-length range at the cursor.
     let pos = line_index.offset_to_position(offset);
-    Range { start: pos, end: pos }
+    Range {
+        start: pos,
+        end: pos,
+    }
 }
 
 /// What entity does the cursor refer to? Tries (in order):
@@ -347,7 +364,8 @@ fn signature_text(source: &str, cst: &SyntaxNode, decl_span: &kestrel_span::Span
     let body_start = first_body_block_offset(cst).unwrap_or(decl_span.end);
     let end = body_start.min(decl_span.end);
     let raw = source.get(decl_span.start..end).unwrap_or("");
-    raw.trim_end_matches([';', ' ', '\t', '\n', '\r']).to_string()
+    raw.trim_end_matches([';', ' ', '\t', '\n', '\r'])
+        .to_string()
 }
 
 /// Find the byte offset where the declaration's body block (or computed
@@ -405,10 +423,7 @@ fn type_decl_link(
     let pos = li.offset_to_position(span.start);
     // VS Code's hover renders `file://` URIs as clickable links that open
     // the file at the given line.
-    Some(format!(
-        "file://{path}#L{}",
-        pos.line + 1
-    ))
+    Some(format!("file://{path}#L{}", pos.line + 1))
 }
 
 #[cfg(test)]
@@ -425,7 +440,8 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("/tmp/hover_test.ks".to_string(), src.to_string());
         let offset = src.find(needle).expect("needle not in source");
-        entity_hover_at(c.world(), &sources, f, offset, c.root())    }
+        entity_hover_at(c.world(), &sources, f, offset, c.root())
+    }
 
     #[test]
     fn entity_hover_renders_function_signature_and_doc() {
@@ -440,8 +456,7 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("/tmp/hover_test.ks".to_string(), src.to_string());
 
-        let md = entity_hover_at(c.world(), &sources, f, pos, c.root())
-                        .expect("entity hover");
+        let md = entity_hover_at(c.world(), &sources, f, pos, c.root()).expect("entity hover");
         assert!(md.contains("func bump(x: lang.i64) -> lang.i64"), "{md}");
         assert!(md.contains("Adds one to its argument."), "{md}");
     }
@@ -463,8 +478,7 @@ mod tests {
         // Type-position hovers aren't yet supported (see follow-up note).
         // For now, verify cursor on the struct's declaration name renders.
         let decl_pos = src.find("struct Point").unwrap() + "struct ".len();
-        let md = entity_hover_at(c.world(), &sources, f, decl_pos, c.root())
-                        .expect("entity hover");
+        let md = entity_hover_at(c.world(), &sources, f, decl_pos, c.root()).expect("entity hover");
         assert!(md.contains("struct Point"), "{md}");
         assert!(md.contains("A 2D point."), "{md}");
         // Struct body should be trimmed.
@@ -546,10 +560,16 @@ mod tests {
         )
         .expect("body");
         let hir = ctx
-            .query(LowerBody { entity: body_entity, root })
+            .query(LowerBody {
+                entity: body_entity,
+                root,
+            })
             .expect("hir");
         let typed = ctx
-            .query(InferBody { entity: body_entity, root })
+            .query(InferBody {
+                entity: body_entity,
+                root,
+            })
             .expect("typed");
         let li = crate::position::LineIndex::new(src.to_string());
         let cursor = src.find("let z").unwrap() + "let ".len(); // on `z`
@@ -576,10 +596,16 @@ mod tests {
         )
         .expect("body");
         let hir = ctx
-            .query(LowerBody { entity: body_entity, root })
+            .query(LowerBody {
+                entity: body_entity,
+                root,
+            })
             .expect("hir");
         let typed = ctx
-            .query(InferBody { entity: body_entity, root })
+            .query(InferBody {
+                entity: body_entity,
+                root,
+            })
             .expect("typed");
         let li = crate::position::LineIndex::new(src.to_string());
         let cursor = src.find("var z").unwrap() + "var ".len();

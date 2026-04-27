@@ -455,7 +455,9 @@ fn collect_bindings(
             for field in fields {
                 if let Some(pat) = field.pattern {
                     let mut field_path = path.clone();
-                    field_path.push(PathElement::Field(field.field_name.as_str_or_empty().to_string()));
+                    field_path.push(PathElement::Field(
+                        field.field_name.as_str_or_empty().to_string(),
+                    ));
                     collect_bindings(hir, query, pat, &field_path, bindings);
                 }
             }

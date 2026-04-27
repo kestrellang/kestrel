@@ -23,9 +23,7 @@ use crate::ctx::LowerCtx;
 /// of the resolved binding is enforced later by the assignment analyzer.
 fn ast_is_place_expr(body: &AstBody, expr: ExprId) -> bool {
     match &body.exprs[expr] {
-        AstExpr::Path { .. }
-        | AstExpr::MemberAccess { .. }
-        | AstExpr::TupleIndex { .. } => true,
+        AstExpr::Path { .. } | AstExpr::MemberAccess { .. } | AstExpr::TupleIndex { .. } => true,
         AstExpr::Paren { inner, .. } => ast_is_place_expr(body, *inner),
         _ => false,
     }
@@ -197,7 +195,7 @@ impl LowerCtx<'_> {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_message("left-hand side of compound assignment is not assignable")
-                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_labels(vec![Label::primary(span.file_id, span.range())]),
             );
             let err = self.alloc_expr(HirExpr::Error { span: span.clone() });
             return self.alloc_expr(HirExpr::Sugar {

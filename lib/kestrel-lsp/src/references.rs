@@ -85,13 +85,13 @@ pub fn references_to(world: &World, root: Entity, target: Entity) -> Vec<Referen
                     span: span.clone(),
                     kind: RefKind::Direct,
                 }),
-                HirExpr::ProtocolCall {
-                    protocol, span, ..
-                } if *protocol == target => sites.push(ReferenceSite {
-                    file,
-                    span: span.clone(),
-                    kind: RefKind::Direct,
-                }),
+                HirExpr::ProtocolCall { protocol, span, .. } if *protocol == target => {
+                    sites.push(ReferenceSite {
+                        file,
+                        span: span.clone(),
+                        kind: RefKind::Direct,
+                    })
+                },
                 _ => {},
             }
         }

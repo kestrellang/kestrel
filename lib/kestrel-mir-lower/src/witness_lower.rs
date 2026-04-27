@@ -94,12 +94,14 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
         // (e.g., `extend Int64: ArrayIndex[T]`); otherwise fall back to
         // `type_entity` so existing direct-conformance and inheritance
         // paths keep their historical resolution scope.
-        let owner_for_args =
-            if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
-                *source
-            } else {
-                type_entity
-            };
+        let owner_for_args = if matches!(
+            ctx.world.get::<NodeKind>(*source),
+            Some(NodeKind::Extension)
+        ) {
+            *source
+        } else {
+            type_entity
+        };
         let proto_type_args = lower_protocol_type_args(ctx, owner_for_args, ast_type_args);
 
         let mut witness = WitnessDef::new(impl_ty.clone(), *protocol);
@@ -142,7 +144,10 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
         // params live on the extension entity, not on the conforming type.
         // Record them on the witness so monomorphization can substitute
         // them from the call site's protocol type args.
-        if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
+        if matches!(
+            ctx.world.get::<NodeKind>(*source),
+            Some(NodeKind::Extension)
+        ) {
             if let Some(tp) = ctx.world.get::<TypeParams>(*source) {
                 for &tp_entity in &tp.0 {
                     if witness.type_params.iter().any(|t| t.entity == tp_entity) {

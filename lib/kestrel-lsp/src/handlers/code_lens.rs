@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{CodeLens, CodeLensParams, Command};
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 
 pub async fn handle(state: SharedState, params: CodeLensParams) -> Option<Vec<CodeLens>> {
     let uri = params.text_document.uri.clone();
@@ -26,14 +26,15 @@ pub async fn handle(state: SharedState, params: CodeLensParams) -> Option<Vec<Co
         (s.compiler_handle.clone(), stdlib, user, li)
     };
 
-    let lenses = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<CodeLens> {
-        let world = compiler.world();
-        let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
-            return Vec::new();
-        };
-        collect_main_lenses(world, file_entity, &uri, &line_index)
-    })
-    .await?;
+    let lenses = handle
+        .with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<CodeLens> {
+            let world = compiler.world();
+            let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
+                return Vec::new();
+            };
+            collect_main_lenses(world, file_entity, &uri, &line_index)
+        })
+        .await?;
 
     if lenses.is_empty() {
         None
@@ -120,7 +121,10 @@ mod tests {
         let uri = Url::parse("file:///tmp/main_lens.ks").unwrap();
         let lenses = collect_main_lenses(c.world(), f, &uri, &li);
         assert_eq!(lenses.len(), 1, "expected one Run lens, got {lenses:?}");
-        assert_eq!(lenses[0].command.as_ref().unwrap().command, "kestrel.runMain");
+        assert_eq!(
+            lenses[0].command.as_ref().unwrap().command,
+            "kestrel.runMain"
+        );
     }
 
     #[test]

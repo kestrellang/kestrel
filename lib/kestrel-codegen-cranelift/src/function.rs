@@ -255,10 +255,7 @@ fn bind_witness_protocol_args(
     // satisfies the assoc lookup, but only the one that matches the actual
     // call site is correct). Look up each assoc-name's TypeAlias entity on
     // the protocol and override `subst[entity]` with the witness's binding.
-    let proto_def = module
-        .protocols
-        .iter()
-        .find(|p| p.entity == protocol);
+    let proto_def = module.protocols.iter().find(|p| p.entity == protocol);
     let Some(proto_def) = proto_def else { return };
     for assoc in &proto_def.associated_types {
         let Some(bound) = witness.type_bindings.get(&assoc.name) else {
@@ -308,11 +305,7 @@ fn bind_witness_protocol_args(
 /// in-pattern bindings into the shared `subst` (no overwriting). Mirrors
 /// `monomorphize::witness::match_pattern` but writes directly into the
 /// codegen subst map. `concrete` is assumed to already be substituted.
-fn bind_pattern_into_subst(
-    pattern: &MirTy,
-    concrete: &MirTy,
-    subst: &mut HashMap<Entity, MirTy>,
-) {
+fn bind_pattern_into_subst(pattern: &MirTy, concrete: &MirTy, subst: &mut HashMap<Entity, MirTy>) {
     match (pattern, concrete) {
         (MirTy::TypeParam(entity), _) => {
             subst.entry(*entity).or_insert_with(|| concrete.clone());
@@ -393,9 +386,7 @@ fn ty_has_typeparam(ty: &MirTy) -> bool {
     match ty {
         MirTy::TypeParam(_) => true,
         MirTy::Named { type_args, .. } => type_args.iter().any(ty_has_typeparam),
-        MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => {
-            ty_has_typeparam(inner)
-        },
+        MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => ty_has_typeparam(inner),
         MirTy::Tuple(elems) => elems.iter().any(ty_has_typeparam),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().any(ty_has_typeparam) || ty_has_typeparam(ret)

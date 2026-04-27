@@ -26,8 +26,8 @@ pub use runner::RunResult;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use kestrel_compiler_driver::CompilerDriver;
 use kestrel_compiler::Compiler;
+use kestrel_compiler_driver::CompilerDriver;
 
 /// Cached stdlib compiler state. Built once, cloned per test.
 struct StdlibCache {

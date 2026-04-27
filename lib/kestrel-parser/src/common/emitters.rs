@@ -335,10 +335,7 @@ impl crate::event::EmitSyntax for DeinitDeclarationData {
 }
 
 /// Emit events for a type declaration body item (struct or enum body item)
-pub(crate) fn emit_type_declaration_body_item(
-    sink: &mut EventSink,
-    item: TypeDeclarationBodyItem,
-) {
+pub(crate) fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDeclarationBodyItem) {
     match item {
         TypeDeclarationBodyItem::Field(data) => emit_field_declaration(sink, data),
         TypeDeclarationBodyItem::Function(data) => emit_function_declaration(sink, data),
@@ -357,5 +354,3 @@ pub(crate) fn emit_type_declaration_body_item(
         },
     }
 }
-
-

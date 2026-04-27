@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::{GotoDefinitionParams, GotoDefinitionResponse, Locatio
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{path_to_url, url_to_path, SharedState};
+use crate::server::{SharedState, path_to_url, url_to_path};
 
 pub async fn handle(
     state: SharedState,
@@ -37,37 +37,55 @@ pub async fn handle(
         let s = state.lock().await;
         let line_index = s.docs.get(&uri).map(|d| d.line_index.clone())?;
         let (stdlib, user) = s.partition_sources();
-        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), line_index)
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            line_index,
+        )
     };
     let offset = line_index.position_to_offset(pos);
 
-    let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<(Url, Range)> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let world = compiler.world();
-        let root = compiler.root();
+    let result = handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<(Url, Range)> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                let world = compiler.world();
+                let root = compiler.root();
 
-        // Type-position cursor (`func bar(x: Foo)`): resolve via CST before
-        // falling into the body-based path. The body lookup wouldn't find
-        // anything for type positions because they don't appear in HIR exprs.
-        let file_cst = compiler.parse(file_entity).tree;
-        if let Some((entity, _span)) = crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset) {
-            if let Some(loc) = target_to_location(world, &sources, Target::Entity(entity)) {
-                return Some(loc);
-            }
-        }
+                // Type-position cursor (`func bar(x: Foo)`): resolve via CST before
+                // falling into the body-based path. The body lookup wouldn't find
+                // anything for type positions because they don't appear in HIR exprs.
+                let file_cst = compiler.parse(file_entity).tree;
+                if let Some((entity, _span)) =
+                    crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+                {
+                    if let Some(loc) = target_to_location(world, &sources, Target::Entity(entity)) {
+                        return Some(loc);
+                    }
+                }
 
-        let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
-        let ctx = world.query_context();
-        let hir: HirBody =
-            ctx.query(LowerBody { entity: body_entity, root })?;
-        let typed = ctx.query(InferBody { entity: body_entity, root })?;
+                let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
+                let ctx = world.query_context();
+                let hir: HirBody = ctx.query(LowerBody {
+                    entity: body_entity,
+                    root,
+                })?;
+                let typed = ctx.query(InferBody {
+                    entity: body_entity,
+                    root,
+                })?;
 
-        let expr_id = semantic::hir_expr_at(&hir, offset)?;
-        let target = resolve_target(&hir, &typed, expr_id)?;
+                let expr_id = semantic::hir_expr_at(&hir, offset)?;
+                let target = resolve_target(&hir, &typed, expr_id)?;
 
-        target_to_location(world, &sources, target)
-    })
-    .await??;
+                target_to_location(world, &sources, target)
+            },
+        )
+        .await??;
 
     let (uri, range) = result;
     Some(GotoDefinitionResponse::Scalar(Location { uri, range }))
@@ -92,7 +110,9 @@ fn resolve_target(
         HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
         HirExpr::Local(local_id, _) => {
             let local: &Local = &hir.locals[*local_id];
-            Some(Target::Local { span: local.span.clone() })
+            Some(Target::Local {
+                span: local.span.clone(),
+            })
         },
         HirExpr::MethodCall { .. }
         | HirExpr::Field { .. }

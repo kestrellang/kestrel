@@ -340,7 +340,9 @@ pub fn flatten(
                         .unwrap_or("");
                     let field_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
                     // Find matching pattern field
-                    let matched = fields.iter().find(|f| f.field_name.as_str() == Some(field_name));
+                    let matched = fields
+                        .iter()
+                        .find(|f| f.field_name.as_str() == Some(field_name));
                     match matched.and_then(|f| f.pattern) {
                         Some(pat_id) => flatten(hir, query, pat_id, field_ty),
                         None => FlatPat::Wildcard,

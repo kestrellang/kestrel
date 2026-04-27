@@ -96,7 +96,10 @@ pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<S
     if node.kind() != SyntaxKind::CodeBlock {
         return None;
     }
-    let file_id = ctx.get::<DeclSpan>(entity).map(|s| s.0.file_id).unwrap_or(0);
+    let file_id = ctx
+        .get::<DeclSpan>(entity)
+        .map(|s| s.0.file_id)
+        .unwrap_or(0);
     for elem in node.children_with_tokens() {
         if let SyntaxElement::Token(tok) = elem {
             if tok.kind() == SyntaxKind::RBrace {

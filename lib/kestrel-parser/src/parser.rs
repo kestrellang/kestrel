@@ -659,11 +659,17 @@ public struct B {}
         assert_eq!(line_comments, vec!["// keep this comment"]);
 
         let newlines = token_texts(&result.tree, &[SyntaxKind::Newline]);
-        assert_eq!(newlines.len(), 2, "two \\n separators between the three tokens");
+        assert_eq!(
+            newlines.len(),
+            2,
+            "two \\n separators between the three tokens"
+        );
 
         let whitespace = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
         assert!(
-            whitespace.iter().all(|t| !t.contains('\n') && !t.contains("//")),
+            whitespace
+                .iter()
+                .all(|t| !t.contains('\n') && !t.contains("//")),
             "Whitespace kind holds only spaces/tabs, not newlines or comments"
         );
     }
@@ -708,7 +714,10 @@ public struct B {}
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(count_nodes(&result.tree, SyntaxKind::StructDeclaration), 2);
         assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumDeclaration), 1);
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumCaseDeclaration), 1);
+        assert_eq!(
+            count_nodes(&result.tree, SyntaxKind::EnumCaseDeclaration),
+            1
+        );
     }
 
     #[test]
@@ -775,7 +784,11 @@ public struct B {}
         assert_eq!(
             token_texts(
                 &result.tree,
-                &[SyntaxKind::Plus, SyntaxKind::Star, SyntaxKind::QuestionQuestion],
+                &[
+                    SyntaxKind::Plus,
+                    SyntaxKind::Star,
+                    SyntaxKind::QuestionQuestion
+                ],
             ),
             vec!["+", "*", "??"]
         );

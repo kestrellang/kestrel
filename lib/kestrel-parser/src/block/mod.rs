@@ -145,28 +145,26 @@ where
     P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
     V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
-    let else_item = inline_var_decl
-        .map(ElseBlockItem::Statement)
-        .or(expr
-            .clone()
-            .then(
-                skip_trivia()
-                    .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
-                    .map(Some)
-                    .or(empty().to(None)),
-            )
-            .try_map(|(e, maybe_semi), _extra| {
-                if let Some(semi) = maybe_semi {
-                    Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
-                } else if crate::expr::is_inline_statement_like(&e) {
-                    Ok(ElseBlockItem::StatementExpr(e))
-                } else {
-                    Err(Rich::custom(
-                        chumsky::span::Span::new((), 0..0),
-                        "expected semicolon",
-                    ))
-                }
-            }));
+    let else_item = inline_var_decl.map(ElseBlockItem::Statement).or(expr
+        .clone()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .or(empty().to(None)),
+        )
+        .try_map(|(e, maybe_semi), _extra| {
+            if let Some(semi) = maybe_semi {
+                Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
+            } else if crate::expr::is_inline_statement_like(&e) {
+                Ok(ElseBlockItem::StatementExpr(e))
+            } else {
+                Err(Rich::custom(
+                    chumsky::span::Span::new((), 0..0),
+                    "expected semicolon",
+                ))
+            }
+        }));
 
     else_item
         .repeated()
@@ -235,8 +233,7 @@ where
         .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
         .then(conditions)
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(
             skip_trivia()
@@ -543,8 +540,7 @@ fn code_block_items_parser<'tokens>()
         .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
         .then(guard_conditions)
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .then(
             skip_trivia()

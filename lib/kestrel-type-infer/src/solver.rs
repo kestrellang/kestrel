@@ -263,9 +263,7 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
         match &ctx.types[resolved.0 as usize] {
             // Wildcards (from explicit `_` type args) are intentionally unresolved —
             // don't report them as inference failures.
-            TySlot::Unresolved { literal: None } if ctx.wildcard_tvars.contains(&resolved) => {
-                false
-            },
+            TySlot::Unresolved { literal: None } if ctx.wildcard_tvars.contains(&resolved) => false,
             TySlot::Unresolved { literal: None } => true,
             TySlot::Unresolved { literal: Some(_) } => false,
             TySlot::Redirect(target) => walk(ctx, *target, seen),
@@ -861,10 +859,16 @@ fn is_known_primitive_method(family: PrimitiveFamily, name: &str) -> bool {
                 | "greaterThanOrEqual"
         ),
         PrimitiveFamily::Bool => {
-            matches!(name, "logicalAnd" | "logicalOr" | "logicalNot" | "equals" | "notEquals")
+            matches!(
+                name,
+                "logicalAnd" | "logicalOr" | "logicalNot" | "equals" | "notEquals"
+            )
         },
         PrimitiveFamily::String => {
-            matches!(name, "length" | "isEmpty" | "equals" | "notEquals" | "unsafePtr")
+            matches!(
+                name,
+                "length" | "isEmpty" | "equals" | "notEquals" | "unsafePtr"
+            )
         },
     }
 }
@@ -1264,10 +1268,12 @@ fn solve_coerce(
                 .zip(target_args.iter().copied())
                 .collect();
 
-            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity: method, root }) {
+            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes {
+                entity: method,
+                root,
+            }) {
                 if let Some(Some(value_hir_ty)) = param_hir_tys.first() {
-                    let param_tv =
-                        lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
+                    let param_tv = lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
                     if unify::unify(ctx, from, param_tv).is_err() {
                         ctx.errored_coerce_exprs.insert(expr);
                         return SolveResult::Error(InferError::TypeMismatch {
@@ -1457,12 +1463,7 @@ fn solve_associated(
                     .get::<TypeParams>(ext)
                     .map(|tp| tp.0.clone())
                     .unwrap_or_default();
-                Some(
-                    ext_params
-                        .into_iter()
-                        .zip(proto_args)
-                        .collect::<Vec<_>>(),
-                )
+                Some(ext_params.into_iter().zip(proto_args).collect::<Vec<_>>())
             })()
             .unwrap_or_default();
 
@@ -1492,46 +1493,38 @@ fn solve_associated(
             // where_clause substitutions to find the TyVar already bound to this
             // associated type, otherwise fall through to lower_hir_ty_sub with
             // container_subs applied (handles `type Element = T` on Array[i32]).
-            let assoc_tv =
-                if let kestrel_hir::ty::HirTy::AliasUse { entity, args, .. } = &assoc.resolved {
-                    if args.is_empty() {
-                        if let Some(&(_, tv)) = ctx
-                            .where_clause_assoc_subs
-                            .iter()
-                            .find(|(e, _)| e == entity)
-                        {
-                            if ctx.resolve(tv) == resolved_result {
-                                // Self-referential: the where_clause_assoc_subs TyVar is the same
-                                // as our result. Create a concrete TypeAlias directly to break
-                                // the cycle (lower_hir_ty_plain would also return the same TyVar).
-                                ctx.type_alias(*entity, vec![])
-                            } else {
-                                tv
-                            }
-                        } else if let Some(&(_, tv)) =
-                            ctx.where_clause_assoc_subs.iter().find(|(e, _)| {
-                                // Name-based fallback: different protocols can define the same
-                                // associated type (e.g., Iterator.Item vs Iterable.Item)
-                                ctx.query_ctx.get::<kestrel_ast_builder::Name>(*e)
-                                    == ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity)
-                            })
-                        {
-                            if ctx.resolve(tv) == resolved_result {
-                                ctx.type_alias(*entity, vec![])
-                            } else {
-                                tv
-                            }
-                        } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
-                            tv
+            let assoc_tv = if let kestrel_hir::ty::HirTy::AliasUse { entity, args, .. } =
+                &assoc.resolved
+            {
+                if args.is_empty() {
+                    if let Some(&(_, tv)) = ctx
+                        .where_clause_assoc_subs
+                        .iter()
+                        .find(|(e, _)| e == entity)
+                    {
+                        if ctx.resolve(tv) == resolved_result {
+                            // Self-referential: the where_clause_assoc_subs TyVar is the same
+                            // as our result. Create a concrete TypeAlias directly to break
+                            // the cycle (lower_hir_ty_plain would also return the same TyVar).
+                            ctx.type_alias(*entity, vec![])
                         } else {
-                            lower_hir_ty_sub(
-                                ctx,
-                                &assoc.resolved,
-                                container_entity,
-                                container,
-                                &all_subs,
-                            )
+                            tv
                         }
+                    } else if let Some(&(_, tv)) =
+                        ctx.where_clause_assoc_subs.iter().find(|(e, _)| {
+                            // Name-based fallback: different protocols can define the same
+                            // associated type (e.g., Iterator.Item vs Iterable.Item)
+                            ctx.query_ctx.get::<kestrel_ast_builder::Name>(*e)
+                                == ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity)
+                        })
+                    {
+                        if ctx.resolve(tv) == resolved_result {
+                            ctx.type_alias(*entity, vec![])
+                        } else {
+                            tv
+                        }
+                    } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
+                        tv
                     } else {
                         lower_hir_ty_sub(
                             ctx,
@@ -1542,14 +1535,11 @@ fn solve_associated(
                         )
                     }
                 } else {
-                    lower_hir_ty_sub(
-                        ctx,
-                        &assoc.resolved,
-                        container_entity,
-                        container,
-                        &all_subs,
-                    )
-                };
+                    lower_hir_ty_sub(ctx, &assoc.resolved, container_entity, container, &all_subs)
+                }
+            } else {
+                lower_hir_ty_sub(ctx, &assoc.resolved, container_entity, container, &all_subs)
+            };
 
             // Emit where clause constraints from the resolved TypeAlias entity.
             // E.g., `type Iter: Iterator where Iter.Item = Item` — when we resolve

@@ -370,10 +370,7 @@ fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoun
 /// Destructures `TypeAliasDeclarationData` without a `..` rest pattern:
 /// adding a field forces this function to stop compiling until the new
 /// field is handled in emission.
-pub(crate) fn emit_type_alias_declaration(
-    sink: &mut EventSink,
-    data: TypeAliasDeclarationData,
-) {
+pub(crate) fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarationData) {
     let TypeAliasDeclarationData {
         attributes,
         visibility,

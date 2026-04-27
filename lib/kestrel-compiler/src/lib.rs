@@ -729,9 +729,16 @@ mod tests {
 
         assert!(!c.world.is_alive(f), "file entity should be despawned");
         for e in &owned_before {
-            assert!(!c.world.is_alive(*e), "owned decl {:?} should be despawned", e);
+            assert!(
+                !c.world.is_alive(*e),
+                "owned decl {:?} should be despawned",
+                e
+            );
         }
-        assert!(c.files.get("t.ks").is_none(), "path entry should be dropped");
+        assert!(
+            c.files.get("t.ks").is_none(),
+            "path entry should be dropped"
+        );
     }
 
     #[test]
@@ -754,7 +761,11 @@ mod tests {
 
         assert!(c.world.is_alive(b));
         for e in &b_decls {
-            assert!(c.world.is_alive(*e), "b's decl {:?} should still be alive", e);
+            assert!(
+                c.world.is_alive(*e),
+                "b's decl {:?} should still be alive",
+                e
+            );
         }
     }
 
@@ -774,7 +785,11 @@ mod tests {
         assert!(c.world.is_alive(f2));
         // Parse should reflect the new source.
         let r = c.parse(f2);
-        assert!(r.tree.children().any(|n| n.kind() == kestrel_syntax_tree::SyntaxKind::StructDeclaration));
+        assert!(
+            r.tree
+                .children()
+                .any(|n| n.kind() == kestrel_syntax_tree::SyntaxKind::StructDeclaration)
+        );
     }
 
     #[test]

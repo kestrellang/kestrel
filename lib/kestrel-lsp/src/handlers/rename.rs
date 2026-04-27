@@ -14,7 +14,7 @@ use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
-use kestrel_lexer::{lex, Token};
+use kestrel_lexer::{Token, lex};
 use kestrel_name_res::{NameResolution, ResolveName};
 use kestrel_span::Span;
 use kestrel_syntax_tree::utils::get_name_span;
@@ -27,7 +27,7 @@ use tower_lsp::lsp_types::{
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite};
 use crate::semantic;
-use crate::server::{path_to_url, url_to_path, SharedState};
+use crate::server::{SharedState, path_to_url, url_to_path};
 
 // ===== prepareRename =====
 
@@ -45,24 +45,35 @@ pub async fn prepare(
             return Ok(None);
         };
         let (stdlib, user) = s.partition_sources();
-        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            li,
+        )
     };
     let offset = line_index.position_to_offset(pos);
 
-    let result = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<PrepareRenameResponse> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let world = compiler.world();
-        let root = compiler.root();
+    let result = handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<PrepareRenameResponse> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                let world = compiler.world();
+                let root = compiler.root();
 
-        let target = target_at(world, file_entity, offset, root)?;
-        let (placeholder, span) = identifier_for_target(world, root, &target)?;
-        let li = LineIndex::new(sources.get(&path)?.clone());
-        let range = li.range_for(span.start, span.end);
+                let target = target_at(world, file_entity, offset, root)?;
+                let (placeholder, span) = identifier_for_target(world, root, &target)?;
+                let li = LineIndex::new(sources.get(&path)?.clone());
+                let range = li.range_for(span.start, span.end);
 
-        Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
-    })
-    .await
-    .flatten();
+                Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
+            },
+        )
+        .await
+        .flatten();
 
     Ok(result)
 }
@@ -92,50 +103,57 @@ pub async fn rename(
             return Ok(None);
         };
         let (stdlib, user) = s.partition_sources();
-        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            li,
+        )
     };
     let offset = line_index.position_to_offset(pos);
 
-    let outcome: Result<Option<WorkspaceEdit>, RpcError> = handle.with_compiler(
-        stdlib,
-        user,
-        move |compiler, _by_path| -> Result<Option<WorkspaceEdit>, RpcError> {
-            let file_entity = match semantic::file_entity_for_path(compiler, &path) {
-                Some(f) => f,
-                None => return Ok(None),
-            };
-            let world = compiler.world();
-            let root = compiler.root();
+    let outcome: Result<Option<WorkspaceEdit>, RpcError> = handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Result<Option<WorkspaceEdit>, RpcError> {
+                let file_entity = match semantic::file_entity_for_path(compiler, &path) {
+                    Some(f) => f,
+                    None => return Ok(None),
+                };
+                let world = compiler.world();
+                let root = compiler.root();
 
-            let target = match target_at(world, file_entity, offset, root) {
-                Some(t) => t,
-                None => return Ok(None),
-            };
+                let target = match target_at(world, file_entity, offset, root) {
+                    Some(t) => t,
+                    None => return Ok(None),
+                };
 
-            // Stdlib / overload-set guard. identifier_for_target returns None
-            // for both, so prepareRename already filters most of these — but
-            // a client can call rename without prepareRename, so re-check.
-            if identifier_for_target(world, root, &target).is_none() {
-                return Err(RpcError {
-                    code: ErrorCode::InvalidRequest,
-                    message: "this symbol cannot be renamed".into(),
-                    data: None,
-                });
-            }
+                // Stdlib / overload-set guard. identifier_for_target returns None
+                // for both, so prepareRename already filters most of these — but
+                // a client can call rename without prepareRename, so re-check.
+                if identifier_for_target(world, root, &target).is_none() {
+                    return Err(RpcError {
+                        code: ErrorCode::InvalidRequest,
+                        message: "this symbol cannot be renamed".into(),
+                        data: None,
+                    });
+                }
 
-            let mut sites = collect_sites(world, root, &target);
+                let mut sites = collect_sites(world, root, &target);
 
-            // Add the declaration site itself so its text changes too.
-            push_decl_site(world, root, &target, &mut sites);
+                // Add the declaration site itself so its text changes too.
+                push_decl_site(world, root, &target, &mut sites);
 
-            check_collisions(world, root, &target, &new_name, &sites)?;
+                check_collisions(world, root, &target, &new_name, &sites)?;
 
-            let edit = build_workspace_edit(world, &sources, &sites, &new_name);
-            Ok(Some(edit))
-        },
-    )
-    .await
-    .unwrap_or_else(|| Err(RpcError::internal_error()));
+                let edit = build_workspace_edit(world, &sources, &sites, &new_name);
+                Ok(Some(edit))
+            },
+        )
+        .await
+        .unwrap_or_else(|| Err(RpcError::internal_error()));
 
     outcome
 }

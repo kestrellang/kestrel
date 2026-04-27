@@ -211,19 +211,16 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("'.{}' requires a tuple receiver", index),
         ),
         InferError::TupleIndexOutOfBounds { arity, index, .. } => (
-            format!(
-                "tuple index {index} out of bounds for {arity}-element tuple"
-            ),
+            format!("tuple index {index} out of bounds for {arity}-element tuple"),
             format!("valid indices are 0..{}", arity.saturating_sub(1)),
         ),
         InferError::MemberAccessOnPrimitive { name, .. } => (
             format!("cannot access member on type: {}", detail),
             format!("'{}' not available", name),
         ),
-        InferError::PrimitiveMethodNotCalled { method, .. } => (
-            detail.to_string(),
-            format!("add () to call '{}'", method),
-        ),
+        InferError::PrimitiveMethodNotCalled { method, .. } => {
+            (detail.to_string(), format!("add () to call '{}'", method))
+        },
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

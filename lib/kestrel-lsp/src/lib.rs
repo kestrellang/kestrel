@@ -69,16 +69,22 @@ impl Backend {
             let mut paths: Vec<std::path::PathBuf> = Vec::new();
             project::walk_kestrel_sources(&stdlib, &mut paths);
             for path in paths {
-                let Ok(canon) = path.canonicalize() else { continue };
+                let Ok(canon) = path.canonicalize() else {
+                    continue;
+                };
                 let key = canon.to_string_lossy().into_owned();
-                let Ok(text) = std::fs::read_to_string(&canon) else { continue };
+                let Ok(text) = std::fs::read_to_string(&canon) else {
+                    continue;
+                };
                 new_stdlib_paths.push(key.clone());
                 new_sources.push((key, text));
             }
         }
 
         for folder in &folders {
-            let Ok(root) = folder.uri.to_file_path() else { continue };
+            let Ok(root) = folder.uri.to_file_path() else {
+                continue;
+            };
             // Find every manifest at any depth — workspace folders sometimes
             // contain multiple packages side-by-side (e.g. `examples/`).
             for entry in walkdir::WalkDir::new(&root)
@@ -86,10 +92,11 @@ impl Backend {
                 .filter_map(|e| e.ok())
             {
                 if entry.file_name() == "flock.toml" && entry.file_type().is_file() {
-                    let report =
-                        project::collect_sources(entry.path(), cache_path.as_deref());
+                    let report = project::collect_sources(entry.path(), cache_path.as_deref());
                     for path in report.sources {
-                        let Ok(canon) = path.canonicalize() else { continue };
+                        let Ok(canon) = path.canonicalize() else {
+                            continue;
+                        };
                         let key = canon.to_string_lossy().into_owned();
                         let Ok(text) = std::fs::read_to_string(&canon) else {
                             continue;
@@ -111,7 +118,9 @@ impl Backend {
             state.stdlib_paths.insert(path);
         }
         for (path, text) in new_sources {
-            state.disk_line_indices.insert(path.clone(), position::LineIndex::new(text.clone()));
+            state
+                .disk_line_indices
+                .insert(path.clone(), position::LineIndex::new(text.clone()));
             state.sources.insert(path, text);
         }
         state.revision_token += 1;
@@ -195,15 +204,17 @@ impl LanguageServer for Backend {
                 }),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
-                        legend: SemanticTokensLegend {
-                            token_types: handlers::semantic_tokens::LEGEND.to_vec(),
-                            token_modifiers: vec![],
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: handlers::semantic_tokens::LEGEND.to_vec(),
+                                token_modifiers: vec![],
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            ..Default::default()
                         },
-                        full: Some(SemanticTokensFullOptions::Bool(true)),
-                        range: None,
-                        ..Default::default()
-                    }),
+                    ),
                 ),
                 ..Default::default()
             },
@@ -228,10 +239,7 @@ impl LanguageServer for Backend {
         Ok(handlers::semantic_tokens::handle(self.state.clone(), params).await)
     }
 
-    async fn completion(
-        &self,
-        params: CompletionParams,
-    ) -> Result<Option<CompletionResponse>> {
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         Ok(handlers::completion::handle(self.state.clone(), params).await)
     }
 
@@ -257,10 +265,7 @@ impl LanguageServer for Backend {
         handlers::rename::rename(self.state.clone(), params).await
     }
 
-    async fn code_action(
-        &self,
-        params: CodeActionParams,
-    ) -> Result<Option<CodeActionResponse>> {
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         Ok(handlers::code_actions::handle(self.state.clone(), params).await)
     }
 
@@ -268,10 +273,7 @@ impl LanguageServer for Backend {
         Ok(handlers::code_lens::handle(self.state.clone(), params).await)
     }
 
-    async fn signature_help(
-        &self,
-        params: SignatureHelpParams,
-    ) -> Result<Option<SignatureHelp>> {
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         Ok(handlers::signature_help::handle(self.state.clone(), params).await)
     }
 
@@ -309,7 +311,9 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         // We advertise FULL sync, so there is exactly one content change with
         // the entire new buffer.
-        let Some(change) = params.content_changes.into_iter().next() else { return };
+        let Some(change) = params.content_changes.into_iter().next() else {
+            return;
+        };
         let text = change.text;
         let key = server::url_to_path(&uri);
         {
@@ -409,7 +413,9 @@ impl LanguageServer for Backend {
         } else {
             let mut state = self.state.lock().await;
             for path in to_reload {
-                let Ok(canon) = path.canonicalize() else { continue };
+                let Ok(canon) = path.canonicalize() else {
+                    continue;
+                };
                 let key = canon.to_string_lossy().into_owned();
                 let Ok(text) = std::fs::read_to_string(&canon) else {
                     continue;

@@ -12,12 +12,13 @@
 
 use std::collections::HashMap;
 
-use codespan_reporting::diagnostic::{Diagnostic as CsDiagnostic, LabelStyle, Severity as CsSeverity};
+use codespan_reporting::diagnostic::{
+    Diagnostic as CsDiagnostic, LabelStyle, Severity as CsSeverity,
+};
 use kestrel_analyze::{AnalyzeDiagnostic, DiagLabel, Severity as AnalyzeSeverity};
 use kestrel_span::Span;
 use tower_lsp::lsp_types::{
-    DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
-    Range, Url,
+    DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range, Url,
 };
 
 use crate::position::LineIndex;
@@ -35,7 +36,10 @@ impl<'a> FileMap<'a> {
 
     fn span_to_location(&self, span: &Span) -> Option<Location> {
         let (uri, idx) = self.lookup(span.file_id)?;
-        Some(Location { uri: uri.clone(), range: idx.range_for(span.start, span.end) })
+        Some(Location {
+            uri: uri.clone(),
+            range: idx.range_for(span.start, span.end),
+        })
     }
 }
 
@@ -84,7 +88,11 @@ pub fn from_codespan(
             code_description: None,
             source: Some("kestrel".into()),
             message,
-            related_information: if related.is_empty() { None } else { Some(related) },
+            related_information: if related.is_empty() {
+                None
+            } else {
+                Some(related)
+            },
             tags: None,
             data: None,
         },
@@ -130,7 +138,11 @@ pub fn from_analyze(
             code_description: None,
             source: Some("kestrel".into()),
             message,
-            related_information: if related.is_empty() { None } else { Some(related) },
+            related_information: if related.is_empty() {
+                None
+            } else {
+                Some(related)
+            },
             tags: None,
             data: None,
         },

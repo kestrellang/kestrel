@@ -322,10 +322,7 @@ where
                         (
                             (
                                 (
-                                    (
-                                        (((attributes, visibility), indirect), enum_span),
-                                        name_span,
-                                    ),
+                                    ((((attributes, visibility), indirect), enum_span), name_span),
                                     type_params,
                                 ),
                                 conformances,

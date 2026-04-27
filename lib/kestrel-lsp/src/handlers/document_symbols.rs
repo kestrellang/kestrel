@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::{
 
 use crate::position::LineIndex;
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 
 pub async fn handle(
     state: SharedState,
@@ -32,13 +32,18 @@ pub async fn handle(
         (s.compiler_handle.clone(), stdlib, user, li)
     };
 
-    handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<DocumentSymbolResponse> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let symbols = build_outline(compiler.world(), file_entity, &line_index);
-        Some(DocumentSymbolResponse::Nested(symbols))
-    })
-    .await
-    .flatten()
+    handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<DocumentSymbolResponse> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                let symbols = build_outline(compiler.world(), file_entity, &line_index);
+                Some(DocumentSymbolResponse::Nested(symbols))
+            },
+        )
+        .await
+        .flatten()
 }
 
 /// Build the outline for a single file by walking the decl tree.

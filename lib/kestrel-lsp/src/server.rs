@@ -87,7 +87,9 @@ impl ServerState {
     /// Snapshot the current source set into stdlib + user maps for
     /// shipping to the compiler worker. Both maps are cheap to clone
     /// out of the state lock — they're shared via `Arc` from there on.
-    pub fn partition_sources(&self) -> (Arc<HashMap<String, String>>, Arc<HashMap<String, String>>) {
+    pub fn partition_sources(
+        &self,
+    ) -> (Arc<HashMap<String, String>>, Arc<HashMap<String, String>>) {
         let mut stdlib = HashMap::new();
         let mut user = HashMap::new();
         for (path, text) in &self.sources {
@@ -125,4 +127,3 @@ pub fn url_to_path(uri: &Url) -> String {
     }
     uri.to_string()
 }
-

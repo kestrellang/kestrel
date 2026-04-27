@@ -51,8 +51,10 @@ pub fn resolve_witness_call(
     // type so the Direct/Extension branches below see it in `bindings`.
     if proto_param_count > 0 {
         let proto_call_args = method_type_args.get(..proto_param_count).unwrap_or(&[]);
-        for (witness_arg, call_arg) in
-            witness.protocol_type_args.values().zip(proto_call_args.iter())
+        for (witness_arg, call_arg) in witness
+            .protocol_type_args
+            .values()
+            .zip(proto_call_args.iter())
         {
             match_pattern(witness_arg, call_arg, &mut bindings);
         }

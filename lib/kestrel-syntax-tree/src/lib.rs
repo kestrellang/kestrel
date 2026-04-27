@@ -995,10 +995,7 @@ mod tests {
             SyntaxKind::from(kestrel_lexer::Token::Identifier),
             SyntaxKind::Identifier
         );
-        assert_eq!(
-            SyntaxKind::from(kestrel_lexer::Token::Dot),
-            SyntaxKind::Dot
-        );
+        assert_eq!(SyntaxKind::from(kestrel_lexer::Token::Dot), SyntaxKind::Dot);
     }
 
     #[test]

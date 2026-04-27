@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::{Location, Range, ReferenceParams, Url};
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite};
 use crate::semantic;
-use crate::server::{path_to_url, url_to_path, SharedState};
+use crate::server::{SharedState, path_to_url, url_to_path};
 
 pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<Location>> {
     let uri = params.text_document_position.text_document.uri;
@@ -33,30 +33,42 @@ pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<L
         let s = state.lock().await;
         let li = s.docs.get(&uri).map(|d| d.line_index.clone())?;
         let (stdlib, user) = s.partition_sources();
-        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            li,
+        )
     };
     let offset = line_index.position_to_offset(pos);
 
-    handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<Vec<Location>> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        let world = compiler.world();
-        let root = compiler.root();
+    handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<Vec<Location>> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                let world = compiler.world();
+                let root = compiler.root();
 
-        let target = target_at(world, file_entity, offset, root, compiler)?;
-        let sites = collect_sites(world, root, &target, include_declaration, compiler);
+                let target = target_at(world, file_entity, offset, root, compiler)?;
+                let sites = collect_sites(world, root, &target, include_declaration, compiler);
 
-        let mut by_file: HashMap<Entity, LineIndex> = HashMap::new();
-        let mut out: Vec<Location> = Vec::new();
-        for site in sites {
-            let Some((url, range)) = site_to_location(world, &sources, &site, &mut by_file) else {
-                continue;
-            };
-            out.push(Location { uri: url, range });
-        }
-        Some(out)
-    })
-    .await
-    .flatten()
+                let mut by_file: HashMap<Entity, LineIndex> = HashMap::new();
+                let mut out: Vec<Location> = Vec::new();
+                for site in sites {
+                    let Some((url, range)) = site_to_location(world, &sources, &site, &mut by_file)
+                    else {
+                        continue;
+                    };
+                    out.push(Location { uri: url, range });
+                }
+                Some(out)
+            },
+        )
+        .await
+        .flatten()
 }
 
 /// What the cursor resolves to.
@@ -76,7 +88,9 @@ fn target_at(
 ) -> Option<Target> {
     // Type-position cursor (`func bar(x: Foo)`): resolve via the file CST.
     let file_cst = compiler.parse(file_entity).tree;
-    if let Some((entity, _)) = crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset) {
+    if let Some((entity, _)) =
+        crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+    {
         return Some(Target::Entity(entity));
     }
 
@@ -314,16 +328,16 @@ mod tests {
             .find(|(e, n)| n.0 == "Point" && c.world().get::<F>(*e).map(|f2| f2.0) == Some(f))
             .map(|(e, _)| e)
             .expect("Point");
-        let sites = collect_sites(
-            c.world(),
-            c.root(),
-            &Target::Entity(target),
-            false,
-            &c,
-        );
-        let texts: Vec<&str> = sites.iter().map(|s| &src[s.span.start..s.span.end]).collect();
+        let sites = collect_sites(c.world(), c.root(), &Target::Entity(target), false, &c);
+        let texts: Vec<&str> = sites
+            .iter()
+            .map(|s| &src[s.span.start..s.span.end])
+            .collect();
         let count = texts.iter().filter(|t| **t == "Point").count();
-        assert_eq!(count, 2, "expected 2 type-position Point refs; got {texts:?}");
+        assert_eq!(
+            count, 2,
+            "expected 2 type-position Point refs; got {texts:?}"
+        );
     }
 
     #[test]
@@ -338,11 +352,8 @@ mod tests {
         let mut found = false;
         for (start, end, kind) in &sites {
             if matches!(kind, RefKind::MemberAccess) {
-                let clipped = clip_to_identifier(
-                    src,
-                    &Span::new(0, *start..*end),
-                    RefKind::MemberAccess,
-                );
+                let clipped =
+                    clip_to_identifier(src, &Span::new(0, *start..*end), RefKind::MemberAccess);
                 assert_eq!(&src[clipped.start..clipped.end], "x");
                 found = true;
             }
@@ -380,8 +391,7 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("/tmp/refs_loc.ks".to_string(), src.to_string());
 
-        let loc = site_to_location(c.world(), &sources, &sites[0], &mut by_file)
-            .expect("location");
+        let loc = site_to_location(c.world(), &sources, &sites[0], &mut by_file).expect("location");
         // The first ref is the call `foo()` on line 2 (0-indexed).
         // Confirm by re-extracting the substring from the raw range.
         let li = LineIndex::new(src.to_string());
@@ -389,5 +399,4 @@ mod tests {
         let end_offset = li.position_to_offset(loc.1.end);
         let _ = (start_offset, end_offset, loc); // smoke-only
     }
-
 }

@@ -602,10 +602,7 @@ fn analyze_expr(
                 state.diverged = true;
             } else {
                 // Merge all break exit states into the post-loop state
-                let mut merged = break_states
-                    .into_iter()
-                    .reduce(|a, b| a.merge(b))
-                    .unwrap();
+                let mut merged = break_states.into_iter().reduce(|a, b| a.merge(b)).unwrap();
                 // A merged set of break exits is not itself diverged — the
                 // loop exits normally via the break. `merge` may have set
                 // diverged if all breaks came from diverging paths, but the
@@ -715,4 +712,3 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
         false
     }
 }
-

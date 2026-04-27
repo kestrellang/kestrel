@@ -18,7 +18,7 @@ use tower_lsp::lsp_types::{
     Diagnostic, NumberOrString, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 
 pub async fn handle(state: SharedState, params: CodeActionParams) -> Option<CodeActionResponse> {
     let uri = params.text_document.uri;

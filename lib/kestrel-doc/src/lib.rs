@@ -84,14 +84,14 @@ pub fn extract(world: &World, root: Entity) -> (ModuleIndex, Vec<ModulePage>) {
         .iter()
         .copied()
         .filter(|&e| matches!(world.get::<NodeKind>(e), Some(NodeKind::Module)))
-        .filter(|&e| {
-            world
-                .get::<Name>(e)
-                .map(|n| n.0 != "lang")
-                .unwrap_or(false)
-        })
+        .filter(|&e| world.get::<Name>(e).map(|n| n.0 != "lang").unwrap_or(false))
         .collect();
-    roots.sort_by_key(|&e| world.get::<Name>(e).map(|n| n.0.clone()).unwrap_or_default());
+    roots.sort_by_key(|&e| {
+        world
+            .get::<Name>(e)
+            .map(|n| n.0.clone())
+            .unwrap_or_default()
+    });
 
     let mut stack = roots;
     while let Some(module) = stack.pop() {
@@ -137,7 +137,12 @@ fn build_page(
     let mut items: Vec<Item> = Vec::new();
 
     let mut children: Vec<Entity> = world.children_of(module).iter().copied().collect();
-    children.sort_by_key(|&e| world.get::<Name>(e).map(|n| n.0.clone()).unwrap_or_default());
+    children.sort_by_key(|&e| {
+        world
+            .get::<Name>(e)
+            .map(|n| n.0.clone())
+            .unwrap_or_default()
+    });
 
     for child in children {
         let Some(kind) = world.get::<NodeKind>(child) else {
@@ -215,7 +220,13 @@ fn build_item(
     let member_groups = if has_members(kind) {
         let empty: Vec<Entity> = Vec::new();
         let extensions = extensions_by_target.get(&entity).unwrap_or(&empty);
-        build_member_groups(world, entity, protocol_index, extensions, extensions_by_target)
+        build_member_groups(
+            world,
+            entity,
+            protocol_index,
+            extensions,
+            extensions_by_target,
+        )
     } else {
         Vec::new()
     };
@@ -277,8 +288,7 @@ fn build_member_groups(
     for &source in &sources {
         if let Some(conformances) = world.get::<Conformances>(source) {
             for item in &conformances.0 {
-                let kestrel_ast_builder::ConformanceItem::Positive(conformance_ty, _) = item
-                else {
+                let kestrel_ast_builder::ConformanceItem::Positive(conformance_ty, _) = item else {
                     continue;
                 };
                 let Some(protocol) =
@@ -418,10 +428,7 @@ fn build_extension_index(world: &World) -> HashMap<Entity, Vec<Entity>> {
 fn build_type_index(world: &World) -> HashMap<String, Vec<Entity>> {
     let mut map: HashMap<String, Vec<Entity>> = HashMap::new();
     for (e, kind) in world.iter_component::<NodeKind>() {
-        if !matches!(
-            kind,
-            NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol
-        ) {
+        if !matches!(kind, NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) {
             continue;
         }
         if let Some(name) = world.get::<Name>(e) {
@@ -532,10 +539,7 @@ fn is_documented(kind: &NodeKind) -> bool {
 }
 
 fn has_members(kind: &NodeKind) -> bool {
-    matches!(
-        kind,
-        NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol
-    )
+    matches!(kind, NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
 }
 
 fn is_member_kind(kind: &NodeKind) -> bool {
@@ -698,6 +702,12 @@ fn extract_name_directive(doc: &str) -> (Option<String>, String) {
 fn count_items(page: &ModulePage) -> usize {
     page.items
         .iter()
-        .map(|it| 1 + it.member_groups.iter().map(|g| g.members.len()).sum::<usize>())
+        .map(|it| {
+            1 + it
+                .member_groups
+                .iter()
+                .map(|g| g.members.len())
+                .sum::<usize>()
+        })
         .sum::<usize>()
 }

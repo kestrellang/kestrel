@@ -24,8 +24,8 @@ use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir_lower::LowerBody;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use kestrel_type_infer::result::TypedBody;
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::result::TypedBody;
 use rowan::TextSize;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
@@ -33,7 +33,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 
 pub async fn handle(state: SharedState, params: SignatureHelpParams) -> Option<SignatureHelp> {
     let uri = params.text_document_position_params.text_document.uri;
@@ -44,16 +44,33 @@ pub async fn handle(state: SharedState, params: SignatureHelpParams) -> Option<S
         let s = state.lock().await;
         let li = s.docs.get(&uri).map(|d| d.line_index.clone())?;
         let (stdlib, user) = s.partition_sources();
-        (s.compiler_handle.clone(), stdlib, user, s.sources.clone(), li)
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            li,
+        )
     };
     let offset = line_index.position_to_offset(pos);
 
-    handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Option<SignatureHelp> {
-        let file_entity = semantic::file_entity_for_path(compiler, &path)?;
-        signature_help_at(compiler.world(), &sources, file_entity, offset, compiler.root())
-    })
-    .await
-    .flatten()
+    handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<SignatureHelp> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path)?;
+                signature_help_at(
+                    compiler.world(),
+                    &sources,
+                    file_entity,
+                    offset,
+                    compiler.root(),
+                )
+            },
+        )
+        .await
+        .flatten()
 }
 
 /// Sync core. Returns a SignatureHelp for the call enclosing `offset`, or
@@ -79,11 +96,17 @@ pub fn signature_help_at(
     //    include leading trivia and don't line up exactly with HIR spans, so
     //    we don't try to match end-to-end.)
     let ctx = world.query_context();
-    let hir: HirBody = ctx.query(LowerBody { entity: body_entity, root })?;
+    let hir: HirBody = ctx.query(LowerBody {
+        entity: body_entity,
+        root,
+    })?;
     let expr_id = enclosing_call_hir(&hir, offset)?;
 
     // 3. Resolve candidate callee entities.
-    let typed = ctx.query(InferBody { entity: body_entity, root });
+    let typed = ctx.query(InferBody {
+        entity: body_entity,
+        root,
+    });
     let candidates = resolve_callees(&hir, typed.as_ref(), expr_id)?;
     if candidates.is_empty() {
         return None;
@@ -92,8 +115,9 @@ pub fn signature_help_at(
     // 4. Render each candidate. Skip ones we can't render (intrinsics
     //    without a Callable component, etc).
     let mut signatures: Vec<SignatureInformation> = Vec::new();
-    let mut active_resolved: Option<Entity> =
-        typed.as_ref().and_then(|t| t.resolutions.get(&expr_id).copied());
+    let mut active_resolved: Option<Entity> = typed
+        .as_ref()
+        .and_then(|t| t.resolutions.get(&expr_id).copied());
     let mut active_signature: Option<u32> = None;
     for e in candidates.iter() {
         if let Some(sig) = render_signature(world, sources, *e, active) {
@@ -125,7 +149,9 @@ fn enclosing_call_at(cst: &SyntaxNode, offset: TextSize) -> Option<(SyntaxNode, 
         if node.kind() != SyntaxKind::ExprCall {
             continue;
         }
-        let Some(arg_list) = node.children().find(|c| c.kind() == SyntaxKind::ArgumentList)
+        let Some(arg_list) = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ArgumentList)
         else {
             continue;
         };
@@ -194,14 +220,12 @@ fn resolve_callees(
     expr_id: HirExprId,
 ) -> Option<Vec<Entity>> {
     match &hir.exprs[expr_id] {
-        HirExpr::Call { callee, .. } => {
-            match &hir.exprs[*callee] {
-                HirExpr::Def(e, _, _) => Some(vec![*e]),
-                HirExpr::OverloadSet { candidates, .. } => Some(candidates.clone()),
-                _ => typed
-                    .and_then(|t| t.resolutions.get(&expr_id).copied())
-                    .map(|e| vec![e]),
-            }
+        HirExpr::Call { callee, .. } => match &hir.exprs[*callee] {
+            HirExpr::Def(e, _, _) => Some(vec![*e]),
+            HirExpr::OverloadSet { candidates, .. } => Some(candidates.clone()),
+            _ => typed
+                .and_then(|t| t.resolutions.get(&expr_id).copied())
+                .map(|e| vec![e]),
         },
         HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. } => typed
             .and_then(|t| t.resolutions.get(&expr_id).copied())
@@ -235,7 +259,9 @@ fn render_signature(
     .unwrap_or_else(|| "_".to_string());
 
     let file_path = entity_file_path(world, entity);
-    let source = file_path.as_ref().and_then(|p| sources.get(p).map(|s| s.as_str()));
+    let source = file_path
+        .as_ref()
+        .and_then(|p| sources.get(p).map(|s| s.as_str()));
 
     let mut label = String::new();
     let mut params: Vec<ParameterInformation> = Vec::new();
@@ -374,7 +400,9 @@ mod tests {
         assert_eq!(sh.signatures.len(), 1);
         assert_eq!(sh.active_parameter, Some(0), "{:?}", sh);
         assert!(
-            sh.signatures[0].label.contains("add(a: lang.i64, b: lang.i64)"),
+            sh.signatures[0]
+                .label
+                .contains("add(a: lang.i64, b: lang.i64)"),
             "{}",
             sh.signatures[0].label
         );

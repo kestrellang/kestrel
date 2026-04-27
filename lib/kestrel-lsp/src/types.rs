@@ -50,8 +50,7 @@ pub fn type_at_cursor(
     // Distinguish type paths from expr paths: the Path must live inside a
     // TyPath wrapper. Without this guard we'd resolve `foo` in `foo.bar()`
     // as a type, hijacking expression-side hover/goto-def.
-    path.parent()
-        .filter(|n| n.kind() == SyntaxKind::TyPath)?;
+    path.parent().filter(|n| n.kind() == SyntaxKind::TyPath)?;
 
     let mut segments: Vec<String> = Vec::new();
     for child in path.children() {
@@ -104,14 +103,24 @@ pub fn type_references_in_file(
     target: Entity,
 ) -> Vec<Span> {
     let mut sites: Vec<Span> = Vec::new();
-    for ty_path in file_cst.descendants().filter(|n| n.kind() == SyntaxKind::TyPath) {
-        let Some(path) = ty_path.children().find(|n| n.kind() == SyntaxKind::Path) else { continue };
+    for ty_path in file_cst
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::TyPath)
+    {
+        let Some(path) = ty_path.children().find(|n| n.kind() == SyntaxKind::Path) else {
+            continue;
+        };
         let context = enclosing_decl_at(world, file_entity, path.text_range().start().into());
         let Some(context) = context else { continue };
 
         let mut segments: Vec<String> = Vec::new();
-        for elem in path.children().filter(|n| n.kind() == SyntaxKind::PathElement) {
-            let Some(name) = identifier_text(&elem) else { continue };
+        for elem in path
+            .children()
+            .filter(|n| n.kind() == SyntaxKind::PathElement)
+        {
+            let Some(name) = identifier_text(&elem) else {
+                continue;
+            };
             segments.push(name);
             // Resolve the running prefix; record this segment if it lands on target.
             let ctx = world.query_context();
@@ -152,10 +161,7 @@ pub fn type_references_workspace(
     let mut out: Vec<(Entity, Span)> = Vec::new();
     // Files are identified by carrying a `FilePath` directly; decls carry a
     // `FileId` pointing at the file entity instead.
-    let file_entities: Vec<Entity> = world
-        .iter_component::<FilePath>()
-        .map(|(e, _)| e)
-        .collect();
+    let file_entities: Vec<Entity> = world.iter_component::<FilePath>().map(|(e, _)| e).collect();
     for file_entity in file_entities {
         let cst = compiler.parse(file_entity).tree;
         for span in type_references_in_file(world, root, &cst, file_entity, target) {
@@ -223,10 +229,7 @@ mod tests {
             .expect("Point");
         let cst = c.parse(f).tree;
         let refs = type_references_in_file(c.world(), c.root(), &cst, f, point);
-        let texts: Vec<&str> = refs
-            .iter()
-            .map(|s| &src[s.start..s.end])
-            .collect();
+        let texts: Vec<&str> = refs.iter().map(|s| &src[s.start..s.end]).collect();
         // Two type-position references: `p: Point` and `-> Point`.
         let count = texts.iter().filter(|t| **t == "Point").count();
         assert_eq!(count, 2, "expected 2 Point refs; got {texts:?}");

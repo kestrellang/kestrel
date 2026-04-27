@@ -401,11 +401,7 @@ fn computing_contains(entity: Entity, root: Entity) -> bool {
     COMPUTING_COPY_SEMANTICS.with(|stack| stack.borrow().contains(&(entity, root)))
 }
 
-fn query_nominal_semantics(
-    ctx: &QueryContext<'_>,
-    entity: Entity,
-    root: Entity,
-) -> CopySemantics {
+fn query_nominal_semantics(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> CopySemantics {
     if computing_contains(entity, root) {
         // Self-reference (direct or transitive). Fall back to Copyable —
         // the definition can't make itself non-copyable without another

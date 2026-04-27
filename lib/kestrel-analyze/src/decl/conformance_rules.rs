@@ -169,7 +169,9 @@ fn check_copyable_conflict(
         return;
     };
 
-    let negated_copyable = set.negatives().find(|item| item.protocol() == Some(copyable));
+    let negated_copyable = set
+        .negatives()
+        .find(|item| item.protocol() == Some(copyable));
     let Some(neg_item) = negated_copyable else {
         return;
     };
@@ -224,7 +226,9 @@ fn check_negative_requires_builtin(
         let Some(protocol) = item.protocol() else {
             continue;
         };
-        let allows = cx.query.query(ProtocolAllowsNegativeConformance { protocol });
+        let allows = cx
+            .query
+            .query(ProtocolAllowsNegativeConformance { protocol });
         if allows {
             continue;
         }

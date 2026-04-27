@@ -22,7 +22,9 @@ pub fn body_entity_at(world: &World, file_entity: Entity, offset: usize) -> Opti
     let pos = TextSize::from(offset as u32);
     let mut best: Option<(Entity, u32)> = None;
     for (entity, valued) in world.iter_component::<Valued>() {
-        let Some(fid) = world.get::<FileId>(entity) else { continue };
+        let Some(fid) = world.get::<FileId>(entity) else {
+            continue;
+        };
         if fid.0 != file_entity {
             continue;
         }
@@ -98,14 +100,12 @@ pub fn file_cst(compiler: &kestrel_compiler::Compiler, file_entity: Entity) -> S
 /// back to walking the module hierarchy when no `DeclSpan` matches (e.g.
 /// the cursor is at file scope between two top-level decls). Used by
 /// completion to find the lexical scope at the cursor.
-pub fn enclosing_decl_at(
-    world: &World,
-    file_entity: Entity,
-    offset: usize,
-) -> Option<Entity> {
+pub fn enclosing_decl_at(world: &World, file_entity: Entity, offset: usize) -> Option<Entity> {
     let mut best: Option<(Entity, usize)> = None;
     for (entity, span) in world.iter_component::<DeclSpan>() {
-        let Some(fid) = world.get::<FileId>(entity) else { continue };
+        let Some(fid) = world.get::<FileId>(entity) else {
+            continue;
+        };
         if fid.0 != file_entity {
             continue;
         }
@@ -169,7 +169,10 @@ mod tests {
         let world = c.world();
         let ctx = world.query_context();
         let hir = ctx
-            .query(kestrel_hir_lower::LowerBody { entity: body_entity, root: c.root() })
+            .query(kestrel_hir_lower::LowerBody {
+                entity: body_entity,
+                root: c.root(),
+            })
             .expect("hir");
 
         let id = hir_expr_at(&hir, body_offset).expect("expr");

@@ -740,7 +740,10 @@ mod tests {
     #[test]
     fn doc_block_comment() {
         let src = "module M\n/**\n * line one\n * line two\n */\nstruct S {}";
-        assert_eq!(doc_for_struct(src, "S").as_deref(), Some("line one\nline two"));
+        assert_eq!(
+            doc_for_struct(src, "S").as_deref(),
+            Some("line one\nline two")
+        );
     }
 
     #[test]
@@ -776,11 +779,17 @@ mod tests {
         let m = find_child_by_name(&world, root, &NodeKind::Module, "M").unwrap();
         let e = find_child_by_name(&world, m, &NodeKind::Enum, "E").unwrap();
         let one = find_child_by_name(&world, e, &NodeKind::EnumCase, "One").unwrap();
-        assert_eq!(world.get::<Documentation>(one).map(|d| d.0.as_str()), Some("one"));
+        assert_eq!(
+            world.get::<Documentation>(one).map(|d| d.0.as_str()),
+            Some("one")
+        );
 
         let s = find_child_by_name(&world, m, &NodeKind::Struct, "S").unwrap();
         let init = find_child_by_kind(&world, s, &NodeKind::Initializer).unwrap();
-        assert_eq!(world.get::<Documentation>(init).map(|d| d.0.as_str()), Some("init doc"));
+        assert_eq!(
+            world.get::<Documentation>(init).map(|d| d.0.as_str()),
+            Some("init doc")
+        );
     }
 
     // ================================================================

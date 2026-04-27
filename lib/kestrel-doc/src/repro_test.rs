@@ -50,7 +50,11 @@ mod tests {
             .expect("direct group");
         let names: Vec<_> = direct.members.iter().map(|m| m.name.clone()).collect();
         assert!(names.contains(&"y".to_string()));
-        assert!(!names.contains(&"x".to_string()), "private leaked: {:?}", names);
+        assert!(
+            !names.contains(&"x".to_string()),
+            "private leaked: {:?}",
+            names
+        );
     }
 
     #[test]
@@ -69,7 +73,11 @@ mod tests {
             .iter()
             .find(|m| m.kind == "subscript")
             .expect("subscript");
-        assert!(sub.signature.contains("{ get set }"), "got: {}", sub.signature);
+        assert!(
+            sub.signature.contains("{ get set }"),
+            "got: {}",
+            sub.signature
+        );
     }
 
     #[test]
@@ -208,8 +216,7 @@ extend Foo: Eq {
         for group in &array.member_groups {
             for m in &group.members {
                 assert!(
-                    !m.signature.starts_with("private")
-                        && !m.signature.starts_with("fileprivate"),
+                    !m.signature.starts_with("private") && !m.signature.starts_with("fileprivate"),
                     "private leaked through ({}): {}",
                     group.kind,
                     m.signature

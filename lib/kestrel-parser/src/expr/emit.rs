@@ -534,10 +534,7 @@ fn emit_call_expr(
             // recovery to wrap correctly.
             let at_byte = lparen.map(|l| l.end).unwrap_or(0);
             let file_id = lparen.map(|l| l.file_id).unwrap_or(0);
-            sink.missing_token(
-                SyntaxKind::RParen,
-                Span::new(file_id, at_byte..at_byte),
-            );
+            sink.missing_token(SyntaxKind::RParen, Span::new(file_id, at_byte..at_byte));
         },
     }
     sink.finish_node();

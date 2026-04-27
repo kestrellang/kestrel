@@ -73,12 +73,8 @@ where
 }
 
 /// Internal Chumsky parser for module declarations.
-pub(crate) fn module_declaration_parser_internal<'tokens>() -> impl Parser<
-    'tokens,
-    ParserInput<'tokens>,
-    (Span, Vec<Span>),
-    ParserExtra<'tokens>,
-> + Clone {
+pub(crate) fn module_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<Span>), ParserExtra<'tokens>> + Clone {
     token(Token::Module)
         .then(module_path_parser_internal())
         .boxed()

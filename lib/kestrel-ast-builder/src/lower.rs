@@ -579,10 +579,11 @@ impl LowerCtx {
                     // Bare trailing `.` with no identifier and no `Missing`
                     // sibling either — count as a missing-member fold so the
                     // chain still looks like an access.
-                    let has_following = elements[i + 1..]
-                        .iter()
-                        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Identifier)
-                            || e.as_node().is_some_and(|n| n.kind() == SyntaxKind::Missing));
+                    let has_following = elements[i + 1..].iter().any(|e| {
+                        e.as_token()
+                            .is_some_and(|t| t.kind() == SyntaxKind::Identifier)
+                            || e.as_node().is_some_and(|n| n.kind() == SyntaxKind::Missing)
+                    });
                     if !has_following {
                         trailing_missing_member = true;
                     }
@@ -889,12 +890,10 @@ impl LowerCtx {
     /// Extract a label from an Argument node: if there's an Identifier followed
     /// by a Colon, the identifier is the label.
     fn extract_arg_label(&self, node: &SyntaxNode) -> Option<String> {
-        let mut iter = node
-            .children_with_tokens()
-            .filter(|e| {
-                !e.as_token()
-                    .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
-            });
+        let mut iter = node.children_with_tokens().filter(|e| {
+            !e.as_token()
+                .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
+        });
 
         let first = iter.next()?;
         let second = iter.next();
@@ -1604,12 +1603,10 @@ impl LowerCtx {
 
     /// Extract label from an EnumPatternArg: Identifier followed by Colon.
     fn extract_pattern_arg_label(&self, node: &SyntaxNode) -> Option<String> {
-        let mut iter = node
-            .children_with_tokens()
-            .filter(|e| {
-                !e.as_token()
-                    .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
-            });
+        let mut iter = node.children_with_tokens().filter(|e| {
+            !e.as_token()
+                .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
+        });
 
         let first = iter.next()?;
         let second = iter.next();

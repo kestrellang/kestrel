@@ -21,21 +21,17 @@ use kestrel_hecs::{Entity, QueryContext, World};
 use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::LowerBody;
 use kestrel_name_res::{Scope, ScopeFor};
-use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
-    InsertTextFormat,
+    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, InsertTextFormat,
 };
 
 use crate::semantic;
-use crate::server::{url_to_path, SharedState};
+use crate::server::{SharedState, url_to_path};
 use crate::syntax;
 
-pub async fn handle(
-    state: SharedState,
-    params: CompletionParams,
-) -> Option<CompletionResponse> {
+pub async fn handle(state: SharedState, params: CompletionParams) -> Option<CompletionResponse> {
     let uri = params.text_document_position.text_document.uri;
     let pos = params.text_document_position.position;
     let path = url_to_path(&uri);
@@ -49,43 +45,49 @@ pub async fn handle(
     let offset = line_index.position_to_offset(pos);
     let text = line_index.text().to_string();
 
-    let items = handle.with_compiler(stdlib, user, move |compiler, _by_path| -> Vec<CompletionItem> {
-        let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
-            return vec![];
-        };
-        let world = compiler.world();
-        let root = compiler.root();
-        let ctx = world.query_context();
-        let enclosing = semantic::enclosing_decl_at(world, file_entity, offset);
-        let prefix = syntax::identifier_prefix(&text, offset);
+    let items = handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Vec<CompletionItem> {
+                let Some(file_entity) = semantic::file_entity_for_path(compiler, &path) else {
+                    return vec![];
+                };
+                let world = compiler.world();
+                let root = compiler.root();
+                let ctx = world.query_context();
+                let enclosing = semantic::enclosing_decl_at(world, file_entity, offset);
+                let prefix = syntax::identifier_prefix(&text, offset);
 
-        // Member completion fires when the smallest HIR expression covering
-        // the cursor is a Field — that's exactly the `foo.|` / `foo.bar|`
-        // shape, surfaced through the parser-recovery work. Falls back to
-        // scope completion when there's no Field at the cursor (no body, no
-        // dot, etc.).
-        if let Some(items) = member_completion(&ctx, world, root, file_entity, offset, prefix) {
-            return items;
-        }
-
-        let mut items = scope_completion(
-            &ctx, world, root, prefix, enclosing, offset, file_entity,
-        );
-        // At module / file top level, also offer keyword snippets. We
-        // detect "top level" as: enclosing is the file's module entity.
-        let is_top_level = enclosing
-            .map(|e| world.get::<NodeKind>(e) == Some(&NodeKind::Module))
-            .unwrap_or(true);
-        if is_top_level {
-            for snip in top_level_snippets() {
-                if snip.label.starts_with(prefix) {
-                    items.push(snip);
+                // Member completion fires when the smallest HIR expression covering
+                // the cursor is a Field — that's exactly the `foo.|` / `foo.bar|`
+                // shape, surfaced through the parser-recovery work. Falls back to
+                // scope completion when there's no Field at the cursor (no body, no
+                // dot, etc.).
+                if let Some(items) =
+                    member_completion(&ctx, world, root, file_entity, offset, prefix)
+                {
+                    return items;
                 }
-            }
-        }
-        items
-    })
-    .await?;
+
+                let mut items =
+                    scope_completion(&ctx, world, root, prefix, enclosing, offset, file_entity);
+                // At module / file top level, also offer keyword snippets. We
+                // detect "top level" as: enclosing is the file's module entity.
+                let is_top_level = enclosing
+                    .map(|e| world.get::<NodeKind>(e) == Some(&NodeKind::Module))
+                    .unwrap_or(true);
+                if is_top_level {
+                    for snip in top_level_snippets() {
+                        if snip.label.starts_with(prefix) {
+                            items.push(snip);
+                        }
+                    }
+                }
+                items
+            },
+        )
+        .await?;
 
     Some(CompletionResponse::Array(items))
 }
@@ -107,8 +109,14 @@ fn member_completion(
     prefix: &str,
 ) -> Option<Vec<CompletionItem>> {
     let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
-    let hir = ctx.query(LowerBody { entity: body_entity, root })?;
-    let typed = ctx.query(InferBody { entity: body_entity, root })?;
+    let hir = ctx.query(LowerBody {
+        entity: body_entity,
+        root,
+    })?;
+    let typed = ctx.query(InferBody {
+        entity: body_entity,
+        root,
+    })?;
 
     // Two paths: the HIR-Field path handles `foo.|` cleanly when the
     // parser produced a Field with HirName::Missing. The CST-Dot path
@@ -163,7 +171,10 @@ fn receiver_type_at_dot(
         )
     {
         let _ = (root, ctx);
-        return Some(ResolvedTy::Named { entity: *entity, args: vec![] });
+        return Some(ResolvedTy::Named {
+            entity: *entity,
+            args: vec![],
+        });
     }
 
     Some(base_ty.clone())
@@ -191,7 +202,9 @@ fn receiver_type_via_cst_dot(
     // contains the cursor).
     let mut dot_end: Option<usize> = None;
     for tok in cst.descendants_with_tokens().filter_map(|e| e.into_token()) {
-        if tok.kind() != SyntaxKind::Dot { continue }
+        if tok.kind() != SyntaxKind::Dot {
+            continue;
+        }
         let r = tok.text_range();
         if r.end() == pos || (r.start() <= pos && pos <= r.end()) {
             dot_end = Some(r.end().into());
@@ -222,7 +235,9 @@ fn receiver_type_via_cst_dot(
 fn smallest_field_at(hir: &HirBody, offset: usize) -> Option<kestrel_hir::body::HirExprId> {
     let mut best: Option<(kestrel_hir::body::HirExprId, usize)> = None;
     for (id, expr) in hir.exprs.iter() {
-        let HirExpr::Field { span, .. } = expr else { continue };
+        let HirExpr::Field { span, .. } = expr else {
+            continue;
+        };
         if span.start <= offset && offset <= span.end {
             let len = span.end - span.start;
             if best.map(|(_, l)| len < l).unwrap_or(true) {
@@ -233,7 +248,11 @@ fn smallest_field_at(hir: &HirBody, offset: usize) -> Option<kestrel_hir::body::
     best.map(|(id, _)| id)
 }
 
-fn body_entity_containing(world: &World, file_entity: Entity, mut entity: Entity) -> Option<Entity> {
+fn body_entity_containing(
+    world: &World,
+    file_entity: Entity,
+    mut entity: Entity,
+) -> Option<Entity> {
     loop {
         if world.get::<Body>(entity).is_some()
             && world
@@ -266,7 +285,10 @@ fn push_members_for_type(
     }
 
     // Extensions targeting this type, then their children.
-    let exts = ctx.query(kestrel_name_res::ExtensionsFor { target: entity, root });
+    let exts = ctx.query(kestrel_name_res::ExtensionsFor {
+        target: entity,
+        root,
+    });
     for ext in exts {
         for &child in world.children_of(ext) {
             push_member_entity(world, child, out, seen);
@@ -276,7 +298,10 @@ fn push_members_for_type(
     // Protocol conformances aren't expanded here; M3 keeps it simple.
     // Methods provided by extensions are already covered above.
     if matches!(world.get::<NodeKind>(entity), Some(&NodeKind::Protocol)) {
-        let members = ctx.query(kestrel_name_res::ProtocolMembers { protocol: entity, root });
+        let members = ctx.query(kestrel_name_res::ProtocolMembers {
+            protocol: entity,
+            root,
+        });
         for member in members {
             push_member_entity(world, member.entity, out, seen);
         }
@@ -289,7 +314,9 @@ fn push_member_entity(
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
-    let Some(name) = world.get::<Name>(entity) else { return };
+    let Some(name) = world.get::<Name>(entity) else {
+        return;
+    };
     let kind = world.get::<NodeKind>(entity).cloned();
     if !seen.insert(format!("{}::{:?}", name.0, kind)) {
         return;
@@ -348,7 +375,10 @@ fn scope_completion(
 
     // 1. Locals in the enclosing body that are in scope at `offset`.
     if let Some(body_entity) = enclosing.and_then(|e| body_entity_containing(world, file_entity, e))
-        && let Some(hir) = ctx.query(LowerBody { entity: body_entity, root })
+        && let Some(hir) = ctx.query(LowerBody {
+            entity: body_entity,
+            root,
+        })
     {
         for (_id, local) in hir.locals.iter() {
             if local.span.start > offset {
@@ -357,11 +387,13 @@ fn scope_completion(
             if !local.name.starts_with(prefix) {
                 continue;
             }
-            items.entry(local.name.clone()).or_insert_with(|| CompletionItem {
-                label: local.name.clone(),
-                kind: Some(CompletionItemKind::VARIABLE),
-                ..Default::default()
-            });
+            items
+                .entry(local.name.clone())
+                .or_insert_with(|| CompletionItem {
+                    label: local.name.clone(),
+                    kind: Some(CompletionItemKind::VARIABLE),
+                    ..Default::default()
+                });
         }
     }
 
@@ -369,8 +401,10 @@ fn scope_completion(
     //    names. ScopeFor handles imports + auto-imports of std for us.
     let mut cursor = enclosing;
     while let Some(scope_entity) = cursor {
-        let scope: std::sync::Arc<Scope> =
-            ctx.query(ScopeFor { entity: scope_entity, root });
+        let scope: std::sync::Arc<Scope> = ctx.query(ScopeFor {
+            entity: scope_entity,
+            root,
+        });
         push_scope_names(world, &scope, prefix, &mut items);
         // Wildcard imports: walk their immediate children and offer names.
         for &source in &scope.wildcard_imports {
@@ -426,7 +460,9 @@ fn push_decl_name(
     prefix: &str,
     out: &mut HashMap<String, CompletionItem>,
 ) {
-    let Some(name) = world.get::<Name>(entity) else { return };
+    let Some(name) = world.get::<Name>(entity) else {
+        return;
+    };
     if !name.0.starts_with(prefix) || name.0 == "<root>" {
         return;
     }
@@ -541,10 +577,26 @@ mod tests {
     #[test]
     fn missing_token_recovery_emits_diagnostics() {
         let cases: &[(&str, &str, &str)] = &[
-            ("missing `;`", "module D\nfunc f() {\n    let z = 42\n}\n", "expected `;`"),
-            ("missing `}` (function body)", "module D\nfunc f() {\n    let z = 42;\n", "expected `}`"),
-            ("missing `)`", "module D\nfunc f() {\n    let z = (42;\n}\n", "expected `)`"),
-            ("missing `}` (closure)", "module D\nfunc f() {\n    let g = { 42\n}\n", "expected `}`"),
+            (
+                "missing `;`",
+                "module D\nfunc f() {\n    let z = 42\n}\n",
+                "expected `;`",
+            ),
+            (
+                "missing `}` (function body)",
+                "module D\nfunc f() {\n    let z = 42;\n",
+                "expected `}`",
+            ),
+            (
+                "missing `)`",
+                "module D\nfunc f() {\n    let z = (42;\n}\n",
+                "expected `)`",
+            ),
+            (
+                "missing `}` (closure)",
+                "module D\nfunc f() {\n    let g = { 42\n}\n",
+                "expected `}`",
+            ),
         ];
         for (label, src, want) in cases {
             // Exact LSP path: rebuild_compiler builds via set_source +
@@ -561,8 +613,13 @@ mod tests {
             // Diagnostic must carry the sink's file_id, not the chumsky
             // span's default `0` — the LSP's file_id → URL map drops
             // any diagnostic whose label points at a file_id it doesn't know.
-            assert!(diags.iter().all(|d| d.labels.iter().all(|l| l.file_id == f.index())),
-                "[{label}] expected diagnostic file_id == {} for {msgs:?}", f.index());
+            assert!(
+                diags
+                    .iter()
+                    .all(|d| d.labels.iter().all(|l| l.file_id == f.index())),
+                "[{label}] expected diagnostic file_id == {} for {msgs:?}",
+                f.index()
+            );
             assert!(
                 msgs.iter().any(|m| m.contains(want)),
                 "[{label}] expected compiler diagnostic containing {want:?}; got {msgs:?}"
@@ -633,7 +690,11 @@ mod tests {
         let items = member_completion(&ctx, world, root, f, cur, "")
             .expect("member completion should fire on `a.b.c.`");
         let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.contains("z"), "expected field z on C; got {:?}", labels);
+        assert!(
+            labels.contains("z"),
+            "expected field z on C; got {:?}",
+            labels
+        );
     }
 
     /// Call-receiver: `g().|` must complete on the return type of `g`.
@@ -650,7 +711,11 @@ mod tests {
         let items = member_completion(&ctx, world, root, f, cur, "")
             .expect("member completion should fire on `g().`");
         let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.contains("x"), "expected field x on R; got {:?}", labels);
+        assert!(
+            labels.contains("x"),
+            "expected field x on R; got {:?}",
+            labels
+        );
     }
 
     /// Parenthesised receiver: `(a.b).|` must complete on `b`'s type.
@@ -667,7 +732,11 @@ mod tests {
         let items = member_completion(&ctx, world, root, f, cur, "")
             .expect("member completion should fire on `(a.b).`");
         let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.contains("c"), "expected field c on B; got {:?}", labels);
+        assert!(
+            labels.contains("c"),
+            "expected field c on B; got {:?}",
+            labels
+        );
     }
 
     /// Method-chain receiver followed by another statement: parser greedily
@@ -686,7 +755,11 @@ mod tests {
         let items = member_completion(&ctx, world, root, f, cur, "")
             .expect("member completion should fire on `a.b.c.|` with following stmt");
         let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.contains("z"), "expected field z on C; got {:?}", labels);
+        assert!(
+            labels.contains("z"),
+            "expected field z on C; got {:?}",
+            labels
+        );
     }
 
     /// Call receiver followed by another statement.
@@ -703,7 +776,11 @@ mod tests {
         let items = member_completion(&ctx, world, root, f, cur, "")
             .expect("member completion should fire on `g().|` with following stmt");
         let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
-        assert!(labels.contains("x"), "expected field x on R; got {:?}", labels);
+        assert!(
+            labels.contains("x"),
+            "expected field x on R; got {:?}",
+            labels
+        );
     }
 
     /// Sanity: outside of a member-access position (cursor in a bare

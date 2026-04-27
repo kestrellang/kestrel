@@ -73,12 +73,18 @@ impl LineIndex {
         let line_start = self.line_starts[line];
         let line_text = &self.text[line_start..offset];
         let character = line_text.chars().map(|c| c.len_utf16()).sum::<usize>();
-        Position { line: line as u32, character: character as u32 }
+        Position {
+            line: line as u32,
+            character: character as u32,
+        }
     }
 
     /// Map a byte range to an LSP `Range`.
     pub fn range_for(&self, start: usize, end: usize) -> Range {
-        Range { start: self.offset_to_position(start), end: self.offset_to_position(end) }
+        Range {
+            start: self.offset_to_position(start),
+            end: self.offset_to_position(end),
+        }
     }
 }
 
@@ -93,11 +99,41 @@ mod tests {
     #[test]
     fn ascii_round_trip() {
         let i = idx("abc\ndef\nghi");
-        assert_eq!(i.offset_to_position(0), Position { line: 0, character: 0 });
-        assert_eq!(i.offset_to_position(4), Position { line: 1, character: 0 });
-        assert_eq!(i.offset_to_position(6), Position { line: 1, character: 2 });
-        assert_eq!(i.position_to_offset(Position { line: 1, character: 2 }), 6);
-        assert_eq!(i.position_to_offset(Position { line: 2, character: 3 }), 11);
+        assert_eq!(
+            i.offset_to_position(0),
+            Position {
+                line: 0,
+                character: 0
+            }
+        );
+        assert_eq!(
+            i.offset_to_position(4),
+            Position {
+                line: 1,
+                character: 0
+            }
+        );
+        assert_eq!(
+            i.offset_to_position(6),
+            Position {
+                line: 1,
+                character: 2
+            }
+        );
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 1,
+                character: 2
+            }),
+            6
+        );
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 2,
+                character: 3
+            }),
+            11
+        );
     }
 
     #[test]
@@ -105,8 +141,20 @@ mod tests {
         // 'é' is 2 bytes in UTF-8, 1 unit in UTF-16.
         let i = idx("aé\nb");
         // Byte offsets: a=0 é=1..3 \n=3 b=4
-        assert_eq!(i.offset_to_position(3), Position { line: 0, character: 2 });
-        assert_eq!(i.position_to_offset(Position { line: 0, character: 2 }), 3);
+        assert_eq!(
+            i.offset_to_position(3),
+            Position {
+                line: 0,
+                character: 2
+            }
+        );
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 0,
+                character: 2
+            }),
+            3
+        );
     }
 
     #[test]
@@ -114,10 +162,28 @@ mod tests {
         // '😀' is 4 bytes in UTF-8, 2 units in UTF-16 (surrogate pair).
         let i = idx("a😀b");
         // a=0 😀=1..5 b=5
-        assert_eq!(i.offset_to_position(5), Position { line: 0, character: 3 });
-        assert_eq!(i.position_to_offset(Position { line: 0, character: 3 }), 5);
+        assert_eq!(
+            i.offset_to_position(5),
+            Position {
+                line: 0,
+                character: 3
+            }
+        );
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 0,
+                character: 3
+            }),
+            5
+        );
         // Mid-surrogate clamps to start of char (offset 1).
-        assert_eq!(i.position_to_offset(Position { line: 0, character: 2 }), 1);
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 0,
+                character: 2
+            }),
+            1
+        );
     }
 
     #[test]
@@ -125,21 +191,57 @@ mod tests {
         // We treat '\n' as the line break; '\r' is part of the previous line.
         // Standard LSP behaviour — clients send '\r' as a regular character.
         let i = idx("a\r\nb");
-        assert_eq!(i.offset_to_position(3), Position { line: 1, character: 0 });
-        assert_eq!(i.offset_to_position(4), Position { line: 1, character: 1 });
+        assert_eq!(
+            i.offset_to_position(3),
+            Position {
+                line: 1,
+                character: 0
+            }
+        );
+        assert_eq!(
+            i.offset_to_position(4),
+            Position {
+                line: 1,
+                character: 1
+            }
+        );
     }
 
     #[test]
     fn past_eof_clamps() {
         let i = idx("hi");
-        assert_eq!(i.position_to_offset(Position { line: 99, character: 99 }), 2);
-        assert_eq!(i.offset_to_position(999), Position { line: 0, character: 2 });
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 99,
+                character: 99
+            }),
+            2
+        );
+        assert_eq!(
+            i.offset_to_position(999),
+            Position {
+                line: 0,
+                character: 2
+            }
+        );
     }
 
     #[test]
     fn empty_document() {
         let i = idx("");
-        assert_eq!(i.offset_to_position(0), Position { line: 0, character: 0 });
-        assert_eq!(i.position_to_offset(Position { line: 0, character: 0 }), 0);
+        assert_eq!(
+            i.offset_to_position(0),
+            Position {
+                line: 0,
+                character: 0
+            }
+        );
+        assert_eq!(
+            i.position_to_offset(Position {
+                line: 0,
+                character: 0
+            }),
+            0
+        );
     }
 }

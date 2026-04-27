@@ -13,9 +13,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
-    AttributeData, ConformanceListData, InitializerDeclarationData, emit_attribute_list, emit_name,
-    emit_visibility, identifier, initializer_declaration_parser_internal,
-    emit_initializer_declaration, token, visibility_parser_internal,
+    AttributeData, ConformanceListData, InitializerDeclarationData, emit_attribute_list,
+    emit_initializer_declaration, emit_name, emit_visibility, identifier,
+    initializer_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::field::{

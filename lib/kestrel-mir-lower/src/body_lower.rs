@@ -506,8 +506,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let self_type = self.type_from_type_ref(*base);
                     let result_ty = self.resolve_expr_type(expr_id);
                     let method_type_args = self.resolve_type_args(expr_id);
-                    let callee =
-                        Callee::witness(protocol, name.as_str_or_empty().to_string(), self_type, method_type_args);
+                    let callee = Callee::witness(
+                        protocol,
+                        name.as_str_or_empty().to_string(),
+                        self_type,
+                        method_type_args,
+                    );
                     self.emit_call(callee, vec![], result_ty)
                 } else if is_protocol_property {
                     let property_entity = resolved.unwrap();
@@ -518,8 +522,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let result_ty = self.resolve_expr_type(expr_id);
                     let receiver_arg = CallArg::borrow(base_val);
                     let method_type_args = self.resolve_type_args(expr_id);
-                    let callee =
-                        Callee::witness(protocol, name.as_str_or_empty().to_string(), receiver_ty, method_type_args);
+                    let callee = Callee::witness(
+                        protocol,
+                        name.as_str_or_empty().to_string(),
+                        receiver_ty,
+                        method_type_args,
+                    );
                     self.emit_call(callee, vec![receiver_arg], result_ty)
                 } else if is_callable && is_static {
                     // Static computed property on concrete type: direct getter
@@ -558,7 +566,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // Stored field: direct place access
                     let base_val = self.lower_expr(*base);
                     match base_val {
-                        Value::Place(p) => Value::Place(p.field(name.as_str_or_empty().to_string())),
+                        Value::Place(p) => {
+                            Value::Place(p.field(name.as_str_or_empty().to_string()))
+                        },
                         _ => {
                             // Need to materialize the value into a temp first
                             let ty = self.resolve_expr_type(*base);
@@ -567,7 +577,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                 dest: Place::local(temp),
                                 rvalue: value_to_rvalue(base_val),
                             }));
-                            Value::Place(Place::local(temp).field(name.as_str_or_empty().to_string()))
+                            Value::Place(
+                                Place::local(temp).field(name.as_str_or_empty().to_string()),
+                            )
                         },
                     }
                 }
@@ -740,14 +752,26 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 type_args: hir_type_args,
                 args,
                 ..
-            } => self.lower_method_call(expr_id, *receiver, method.as_str_or_empty(), hir_type_args.as_deref(), args),
+            } => self.lower_method_call(
+                expr_id,
+                *receiver,
+                method.as_str_or_empty(),
+                hir_type_args.as_deref(),
+                args,
+            ),
             HirExpr::ProtocolCall {
                 receiver,
                 protocol,
                 method,
                 args,
                 ..
-            } => self.lower_protocol_call(expr_id, *receiver, *protocol, method.as_str_or_empty(), args),
+            } => self.lower_protocol_call(
+                expr_id,
+                *receiver,
+                *protocol,
+                method.as_str_or_empty(),
+                args,
+            ),
 
             // === Match expression ===
             HirExpr::Match {
@@ -1609,9 +1633,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 MirTy::Pointer(Box::new(self.substitute_mir_type(inner, subst)))
             },
             MirTy::Ref(inner) => MirTy::Ref(Box::new(self.substitute_mir_type(inner, subst))),
-            MirTy::RefMut(inner) => {
-                MirTy::RefMut(Box::new(self.substitute_mir_type(inner, subst)))
-            },
+            MirTy::RefMut(inner) => MirTy::RefMut(Box::new(self.substitute_mir_type(inner, subst))),
             MirTy::Tuple(elems) => MirTy::Tuple(
                 elems
                     .iter()
@@ -1632,7 +1654,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .collect(),
                 ret: Box::new(self.substitute_mir_type(ret, subst)),
             },
-            MirTy::AssociatedProjection { base, protocol, name } => MirTy::AssociatedProjection {
+            MirTy::AssociatedProjection {
+                base,
+                protocol,
+                name,
+            } => MirTy::AssociatedProjection {
                 base: Box::new(self.substitute_mir_type(base, subst)),
                 protocol: *protocol,
                 name: name.clone(),
@@ -1980,8 +2006,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // the field instead of the value. Fall back to the lowered
                 // Value: an Immediate is a constant, always pass-by-value.
                 let copyable = arg_ty.is_trivially_copyable()
-                    || (matches!(arg_ty, MirTy::Error)
-                        && matches!(value, Value::Immediate(_)));
+                    || (matches!(arg_ty, MirTy::Error) && matches!(value, Value::Immediate(_)));
                 if copyable {
                     CallArg::copy(value)
                 } else {
@@ -2031,11 +2056,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             return;
         };
         let skip = if callable.receiver.is_some() { 1 } else { 0 };
-        for (arg, param) in call_args
-            .iter_mut()
-            .skip(skip)
-            .zip(callable.params.iter())
-        {
+        for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
             if param.is_consuming {
                 arg.mode = kestrel_mir::PassingMode::Move;
             } else if param.is_mut {
@@ -2391,27 +2412,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // property getter call. Computed properties carry a
                     // `Callable` component; stored fields don't.
                     let prefix_entity = receiver_entity.and_then(|recv| {
-                        self.ctx
-                            .world
-                            .children_of(recv)
-                            .iter()
-                            .copied()
-                            .find(|&c| {
-                                self.ctx.world.get::<kestrel_ast_builder::NodeKind>(c)
-                                    == Some(&kestrel_ast_builder::NodeKind::Field)
-                                    && self
-                                        .ctx
-                                        .world
-                                        .get::<kestrel_ast_builder::Name>(c)
-                                        .map_or(false, |n| n.0 == method_name)
-                            })
+                        self.ctx.world.children_of(recv).iter().copied().find(|&c| {
+                            self.ctx.world.get::<kestrel_ast_builder::NodeKind>(c)
+                                == Some(&kestrel_ast_builder::NodeKind::Field)
+                                && self
+                                    .ctx
+                                    .world
+                                    .get::<kestrel_ast_builder::Name>(c)
+                                    .map_or(false, |n| n.0 == method_name)
+                        })
                     });
                     let is_computed_property = prefix_entity.map_or(false, |e| {
-                        self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_some()
+                        self.ctx
+                            .world
+                            .get::<kestrel_ast_builder::Callable>(e)
+                            .is_some()
                     });
 
-                    let (subscript_receiver_ty, subscript_receiver_val) = if is_computed_property
-                    {
+                    let (subscript_receiver_ty, subscript_receiver_val) = if is_computed_property {
                         // Call the getter to materialize the property's value,
                         // then subscript that. Mirrors the HirExpr::Field
                         // computed-property path above.
@@ -2422,11 +2440,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         let getter_receiver_arg = CallArg::borrow(base_val);
                         let getter_type_args =
                             self.prepend_receiver_type_args(&receiver_ty, vec![]);
-                        let getter_callee = Callee::method(
-                            getter_entity,
-                            getter_type_args,
-                            receiver_ty.clone(),
-                        );
+                        let getter_callee =
+                            Callee::method(getter_entity, getter_type_args, receiver_ty.clone());
                         let value = self.emit_call(
                             getter_callee,
                             vec![getter_receiver_arg],

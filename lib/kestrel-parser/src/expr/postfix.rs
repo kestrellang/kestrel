@@ -165,10 +165,7 @@ pub(super) fn member_access_parser<'tokens>()
         .then(full_type_args_parser().or_not())
         .validate(|((dot, member), type_args), e, emitter| {
             if member.is_none() {
-                emitter.emit(Rich::custom(
-                    e.span(),
-                    "expected identifier after `.`",
-                ));
+                emitter.emit(Rich::custom(e.span(), "expected identifier after `.`"));
             }
             ((dot, member), type_args)
         })

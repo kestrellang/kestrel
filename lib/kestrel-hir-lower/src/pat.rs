@@ -363,10 +363,7 @@ impl LowerCtx<'_> {
                                 ))
                                 .with_labels(vec![
                                     kestrel_reporting::Label::primary(span.file_id, span.range())
-                                        .with_message(format!(
-                                            "unknown field `{}`",
-                                            field_name
-                                        )),
+                                        .with_message(format!("unknown field `{}`", field_name)),
                                 ]),
                         );
                     }
