@@ -13,7 +13,7 @@
     {
       "path": "std.core",
       "name": "core",
-      "item_count": 294
+      "item_count": 302
     },
     {
       "path": "std.ffi",
@@ -83,7 +83,7 @@
     {
       "path": "std.num",
       "name": "num",
-      "item_count": 1122
+      "item_count": 1132
     },
     {
       "path": "std.os",
@@ -113,7 +113,7 @@
     {
       "path": "std.text",
       "name": "text",
-      "item_count": 274
+      "item_count": 267
     },
     {
       "path": "std.text.unicode",

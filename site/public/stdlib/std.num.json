@@ -5549,6 +5549,114 @@
               "source_path": "lang/std/text/views.ks"
             }
           ]
+        },
+        {
+          "kind": "protocol",
+          "label": "GraphemesIndex",
+          "source_path": "std.text.GraphemesIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "GraphemesYield",
+              "anchor": "typealias-GraphemesYield",
+              "signature": "type GraphemesYield = Grapheme",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readGraphemes",
+              "anchor": "function-readGraphemes",
+              "signature": "public func readGraphemes(from: GraphemesView) -> Grapheme",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readGraphemesChecked",
+              "anchor": "function-readGraphemesChecked",
+              "signature": "public func readGraphemesChecked(from: GraphemesView) -> Grapheme?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "GraphemesClampable",
+          "source_path": "std.text.GraphemesClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "GraphemesClampedYield",
+              "anchor": "typealias-GraphemesClampedYield",
+              "signature": "type GraphemesClampedYield = Grapheme?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readGraphemesClamped",
+              "anchor": "function-readGraphemesClamped",
+              "signature": "public func readGraphemesClamped(from: GraphemesView) -> Grapheme?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "LinesIndex",
+          "source_path": "std.text.LinesIndex",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "LinesYield",
+              "anchor": "typealias-LinesYield",
+              "signature": "type LinesYield = String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readLines",
+              "anchor": "function-readLines",
+              "signature": "public func readLines(from: LinesView) -> String",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readLinesChecked",
+              "anchor": "function-readLinesChecked",
+              "signature": "public func readLinesChecked(from: LinesView) -> String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        },
+        {
+          "kind": "protocol",
+          "label": "LinesClampable",
+          "source_path": "std.text.LinesClampable",
+          "members": [
+            {
+              "kind": "typealias",
+              "name": "LinesClampedYield",
+              "anchor": "typealias-LinesClampedYield",
+              "signature": "type LinesClampedYield = String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "function",
+              "name": "readLinesClamped",
+              "anchor": "function-readLinesClamped",
+              "signature": "public func readLinesClamped(from: LinesView) -> String?",
+              "doc": "",
+              "source_path": "lang/std/text/views.ks"
+            }
+          ]
         }
       ]
     },

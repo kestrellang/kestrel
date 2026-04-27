@@ -273,7 +273,7 @@
       "name": "BytesIterator",
       "anchor": "struct-BytesIterator",
       "signature": "public struct BytesIterator { /* private fields */ }",
-      "doc": "Single-pass forward iterator over the raw UTF-8 bytes of a string.\n\nYielded by `BytesView.iter()`. Walks the underlying buffer one byte\nat a time and returns each as a `UInt8`. The iterator holds a raw\npointer into the source string's storage; do not mutate the source\nwhile iterating.\n\n# Examples\n\n```\nvar it = \"hi\".bytes().iter();\nit.next();  // Some(104)  // 'h'\nit.next();  // Some(105)  // 'i'\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, index)` triple: a raw pointer to the buffer plus\nthe cursor and total-length pair the iterator advances through.\n\n# Memory Model\n\nValue type. The pointer aliases string storage; do not retain the\niterator across mutations of the source `String`.",
+      "doc": "Single-pass forward iterator over the raw UTF-8 bytes of a string.\n\nYielded by `BytesView.iter()`. Walks the underlying buffer one byte\nat a time and returns each as a `UInt8`. The iterator holds a raw\npointer into the source string's storage; do not mutate the source\nwhile iterating.\n\n# Examples\n\n```\nvar it = \"hi\".bytes.iter();\nit.next();  // Some(104)  // 'h'\nit.next();  // Some(105)  // 'i'\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, index)` triple: a raw pointer to the buffer plus\nthe cursor and total-length pair the iterator advances through.\n\n# Memory Model\n\nValue type. The pointer aliases string storage; do not retain the\niterator across mutations of the source `String`.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -286,7 +286,7 @@
               "name": "From Pointer",
               "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, index: Int64)",
-              "doc": "Constructs a bytes iterator from a raw pointer, total byte count, and starting offset.\n\nPrefer `String.bytes().iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to at least `length` valid bytes; `index` must\nbe in `0..=length`.",
+              "doc": "Constructs a bytes iterator from a raw pointer, total byte count, and starting offset.\n\nPrefer `String.bytes.iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to at least `length` valid bytes; `index` must\nbe in `0..=length`.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -321,7 +321,7 @@
       "name": "BytesView",
       "anchor": "struct-BytesView",
       "signature": "public struct BytesView { /* private fields */ }",
-      "doc": "A read-only view over the raw UTF-8 bytes of a `String`.\n\nReturned by `String.bytes`. Provides O(1) byte indexing and\niteration; the bytes are returned as `UInt8` exactly as they sit\nin memory. The most common reason to reach for `BytesView` is to\nperform byte-level operations (substring searches, hashing) without\npaying the cost of UTF-8 decoding. For code-point or grapheme\niteration, see `CharsView` / `GraphemesView`.\n\n# Examples\n\n```\nlet s = \"hi\";\ns.bytes().count;               // 2\ns.bytes(checked: 0);         // Some(104)\ns.bytes(checked: 5);         // None (out of bounds)\n```\n\n# Representation\n\nA `(ptr, length)` pair pointing at the source string's UTF-8 buffer.\n\n# Memory Model\n\nBorrows the source string's storage; the view is invalidated by any\nmutation that reallocates that buffer. Copy out to a new `String`\n(e.g. via `substring`) if you need an independent value.",
+      "doc": "A read-only view over the raw UTF-8 bytes of a `String`.\n\nReturned by `String.bytes`. Provides O(1) byte indexing and\niteration; the bytes are returned as `UInt8` exactly as they sit\nin memory. The most common reason to reach for `BytesView` is to\nperform byte-level operations (substring searches, hashing) without\npaying the cost of UTF-8 decoding. For code-point or grapheme\niteration, see `CharsView` / `GraphemesView`.\n\n# Examples\n\n```\nlet s = \"hi\";\ns.bytes.count;               // 2\ns.bytes(checked: 0);         // Some(104)\ns.bytes(checked: 5);         // None (out of bounds)\n```\n\n# Representation\n\nA `(ptr, length)` pair pointing at the source string's UTF-8 buffer.\n\n# Memory Model\n\nBorrows the source string's storage; the view is invalidated by any\nmutation that reallocates that buffer. Copy out to a new `String`\n(e.g. via `substring`) if you need an independent value.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -788,7 +788,7 @@
       "name": "CharsIterator",
       "anchor": "struct-CharsIterator",
       "signature": "public struct CharsIterator { /* private fields */ }",
-      "doc": "Single-pass forward iterator over Unicode code points (`Char`).\n\nYielded by `CharsView.iter()` and consumed by `GraphemesIterator`.\nOn each `next()` call, decodes one UTF-8 character starting at the\ncurrent cursor and advances by its byte length. Invalid bytes are\nskipped one at a time and surfaced as `U+FFFD` (the Unicode\nreplacement character) so the iteration always makes progress.\n\n# Examples\n\n```\nvar it = \"hi\".chars().iter();\nit.next();  // Some('h')\nit.next();  // Some('i')\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, byteIndex)` triple. `byteIndex` walks the buffer\nin variable-width steps according to the UTF-8 encoding.\n\n# Memory Model\n\nValue type that aliases the source string's buffer. Do not retain\nacross mutations of the source `String`.",
+      "doc": "Single-pass forward iterator over Unicode code points (`Char`).\n\nYielded by `CharsView.iter()` and consumed by `GraphemesIterator`.\nOn each `next()` call, decodes one UTF-8 character starting at the\ncurrent cursor and advances by its byte length. Invalid bytes are\nskipped one at a time and surfaced as `U+FFFD` (the Unicode\nreplacement character) so the iteration always makes progress.\n\n# Examples\n\n```\nvar it = \"hi\".chars.iter();\nit.next();  // Some('h')\nit.next();  // Some('i')\nit.next();  // None\n```\n\n# Representation\n\nA `(ptr, length, byteIndex)` triple. `byteIndex` walks the buffer\nin variable-width steps according to the UTF-8 encoding.\n\n# Memory Model\n\nValue type that aliases the source string's buffer. Do not retain\nacross mutations of the source `String`.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -801,7 +801,7 @@
               "name": "From Pointer",
               "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64)",
-              "doc": "Constructs a chars iterator from a raw pointer, byte length, and starting byte offset.\n\nPrefer `String.chars().iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes; `byteIndex` must\nbe `0` or land on a UTF-8 boundary.",
+              "doc": "Constructs a chars iterator from a raw pointer, byte length, and starting byte offset.\n\nPrefer `String.chars.iter()` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes; `byteIndex` must\nbe `0` or land on a UTF-8 boundary.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -836,7 +836,7 @@
       "name": "CharsView",
       "anchor": "struct-CharsView",
       "signature": "public struct CharsView { /* private fields */ }",
-      "doc": "A view over the Unicode code points in a `String`.\n\nReturned by `String.chars`. Iteration is O(1) per code point but\n`count()` is O(n) because UTF-8 is variable-width. Likewise,\nrange subscripts on this view are O(n) — to index in O(1), use\n`BytesView` and convert byte offsets back yourself.\n\n# Examples\n\n```\nlet s = \"héllo\";\ns.chars().count;                  // 5 (code points)\ns.bytes().count;                  // 6 (bytes — 'é' is 2 bytes)\ns.chars(0..<4);                 // \"héll\"\n```\n\n# Representation\n\nA `(ptr, length)` pair, plus the on-demand UTF-8 decoder.\n\n# Memory Model\n\nBorrows the source string's buffer. Invalidated by any mutation\nthat reallocates the storage.",
+      "doc": "A view over the Unicode code points in a `String`.\n\nReturned by `String.chars`. Iteration is O(1) per code point but\n`count()` is O(n) because UTF-8 is variable-width. Likewise,\nrange subscripts on this view are O(n) — to index in O(1), use\n`BytesView` and convert byte offsets back yourself.\n\n# Examples\n\n```\nlet s = \"héllo\";\ns.chars.count;                  // 5 (code points)\ns.bytes.count;                  // 6 (bytes — 'é' is 2 bytes)\ns.chars(0..<4);                 // \"héll\"\n```\n\n# Representation\n\nA `(ptr, length)` pair, plus the on-demand UTF-8 decoder.\n\n# Memory Model\n\nBorrows the source string's buffer. Invalidated by any mutation\nthat reallocates the storage.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1490,7 +1490,7 @@
       "name": "GraphemesView",
       "anchor": "struct-GraphemesView",
       "signature": "public struct GraphemesView { /* private fields */ }",
-      "doc": "A view over the user-perceived characters (extended grapheme clusters) of a `String`.\n\nReturned by `String.graphemes`. Use this — not `chars` — when you\nneed the unit a user thinks of as a single character: emoji\nsequences, accented forms, country flags, etc. Both iteration and\n`count()` are O(n) because each cluster requires consulting the\nUAX #29 break tables.\n\n# Examples\n\n```\nlet flag = \"\\u{1F1FA}\\u{1F1F8}\";  // 🇺🇸\nflag.chars().count;        // 2 (regional indicators)\nflag.graphemes.count;    // 1 (one flag)\n```\n\n# Representation\n\nA `(ptr, length)` pair; iteration is delegated to a wrapped\n`CharsIterator` plus the UAX #29 segmenter state machine.",
+      "doc": "A view over the user-perceived characters (extended grapheme clusters) of a `String`.\n\nReturned by `String.graphemes`. Use this — not `chars` — when you\nneed the unit a user thinks of as a single character: emoji\nsequences, accented forms, country flags, etc. Both iteration and\n`count()` are O(n) because each cluster requires consulting the\nUAX #29 break tables.\n\n# Examples\n\n```\nlet flag = \"\\u{1F1FA}\\u{1F1F8}\";  // 🇺🇸\nflag.chars.count;        // 2 (regional indicators)\nflag.graphemes.count;    // 1 (one flag)\n```\n\n# Representation\n\nA `(ptr, length)` pair; iteration is delegated to a wrapped\n`CharsIterator` plus the UAX #29 segmenter state machine.",
       "source_path": "lang/std/text/views.ks",
       "member_groups": [
         {
@@ -1499,11 +1499,35 @@
           "source_path": null,
           "members": [
             {
+              "kind": "subscript",
+              "name": "Checked Index",
+              "anchor": "subscript-Checked-Index",
+              "signature": "public subscript[I](checked: I) -> I.GraphemesYield? { get }",
+              "doc": "Reads at `index`, returning `.None` on out-of-bounds.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Clamping",
+              "anchor": "subscript-Clamping",
+              "signature": "public subscript[I](clamped: I) -> I.GraphemesClampedYield { get }",
+              "doc": "Reads at `index` saturated to `[0, count)`. Yields `Grapheme?`\n(`.None` only when the view is empty).",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
               "kind": "initializer",
               "name": "From Pointer",
               "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
               "doc": "Constructs a graphemes view from a raw pointer and a byte length.\n\nPrefer `someString.graphemes` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid UTF-8 bytes that remain live\nfor the view's lifetime.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Indexed Grapheme / Substring",
+              "anchor": "subscript-Indexed-Grapheme---Substring",
+              "signature": "public subscript[I](I) -> I.GraphemesYield { get }",
+              "doc": "`Int64` reads a single cluster; `Range[Int64]` /\n`ClosedRange[Int64]` read a substring across cluster\nboundaries. **O(n)** — walks the segmenter from the start.\nPanics on out-of-bounds.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -1611,11 +1635,43 @@
           "source_path": null,
           "members": [
             {
+              "kind": "subscript",
+              "name": "Checked Index",
+              "anchor": "subscript-Checked-Index",
+              "signature": "public subscript[I](checked: I) -> I.LinesYield? { get }",
+              "doc": "Reads at `index`, returning `.None` on out-of-bounds.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Clamping",
+              "anchor": "subscript-Clamping",
+              "signature": "public subscript[I](clamped: I) -> I.LinesClampedYield { get }",
+              "doc": "Reads at `index` saturated to `[0, count)`. Yields `String?`\n(`.None` only when the view holds no lines).",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
               "kind": "initializer",
               "name": "From Pointer",
               "anchor": "initializer-From-Pointer",
               "signature": "public init(ptr: lang.ptr[lang.i8], length: Int64)",
               "doc": "Constructs a lines view from a raw pointer and a byte length.\n\nPrefer `someString.lines` over calling this directly.\n\n# Safety\n\n`ptr` must point to `length` valid bytes that remain live for\nthe view's lifetime.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "subscript",
+              "name": "Indexed Line",
+              "anchor": "subscript-Indexed-Line",
+              "signature": "public subscript[I](I) -> I.LinesYield { get }",
+              "doc": "Reads the line at index `index`. **O(n)** — walks the buffer\nfrom the start. Panics on out-of-bounds.",
+              "source_path": "lang/std/text/views.ks"
+            },
+            {
+              "kind": "field",
+              "name": "count",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
+              "doc": "Number of lines in the view. **O(n)** — walks the buffer\nscanning for terminators. Cache the result if you need it more\nthan once.",
               "source_path": "lang/std/text/views.ks"
             }
           ]
@@ -1890,22 +1946,6 @@
               "source_path": "lang/std/text/string.ks"
             },
             {
-              "kind": "function",
-              "name": "byteAt",
-              "anchor": "function-byteAt",
-              "signature": "public func byteAt(Int64) -> UInt8?",
-              "doc": "Returns the byte at byte index `index`, or `None` if out of bounds. O(1).\n\nFor unchecked access, use `byteAtUnchecked`. The byte is\nreturned as raw `UInt8` — multi-byte characters require the\ncaller to assemble them.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "byteAtUnchecked",
-              "anchor": "function-byteAtUnchecked",
-              "signature": "public func byteAtUnchecked(Int64) -> UInt8",
-              "doc": "Returns the byte at `index` without bounds checking. O(1).\n\n# Safety\n\nCaller must guarantee `0 <= index < byteCount`.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
               "kind": "field",
               "name": "byteCount",
               "anchor": "field-byteCount",
@@ -1914,43 +1954,11 @@
               "source_path": "lang/std/text/string.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "bytes",
-              "anchor": "function-bytes",
-              "signature": "public func bytes() -> BytesView",
-              "doc": "`s.bytes()` — view over the raw UTF-8 bytes. O(1) byte indexing,\nbyte-level iteration. Implemented as a method (rather than a\nproperty) so the same name can take an index for `s.bytes(i)` /\n`s.bytes(checked: i)` / `s.bytes(0..<n)` style indexing.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "bytes",
-              "anchor": "function-bytes",
-              "signature": "public func bytes[I](I) -> I.BytesYield where I: BytesIndex",
-              "doc": "`s.bytes(i)` returns a single byte; `s.bytes(0..<5)` returns a substring.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "bytes",
-              "anchor": "function-bytes",
-              "signature": "public func bytes[I](checked: I) -> I.BytesYield? where I: BytesIndex",
-              "doc": "`s.bytes(checked: i)` — `None` if out of bounds.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "bytes",
-              "anchor": "function-bytes",
-              "signature": "public func bytes[I](unchecked: I) -> I.BytesYield where I: BytesIndex",
-              "doc": "`s.bytes(unchecked: i)` — UB on out-of-bounds.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "bytes",
-              "anchor": "function-bytes",
-              "signature": "public func bytes[I](clamped: I) -> I.BytesClampedYield where I: BytesClampable",
-              "doc": "`s.bytes(clamped: i)` — saturates to valid bounds, never panics.",
+              "anchor": "field-bytes",
+              "signature": "public var bytes: BytesView { get }",
+              "doc": "`s.bytes` — view over the raw UTF-8 bytes. O(1) byte indexing,\nbyte-level iteration. Index via the view's subscripts:\n`s.bytes(i)`, `s.bytes(checked: i)`, `s.bytes(0..<n)`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -1962,75 +1970,11 @@
               "source_path": "lang/std/text/string.ks"
             },
             {
-              "kind": "function",
-              "name": "char",
-              "anchor": "function-char",
-              "signature": "public func char(at: Int64) -> Char",
-              "doc": "Returns the code point at code-point index `index`. Panics if out of bounds. O(n).\n\n# Errors\n\nPanics with `\"String index out of bounds\"` if `index` is\nnegative or `>= count`.\n\n# Examples\n\n```\n\"héllo\".char(at: 1);  // 'é'\n```",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "char",
-              "anchor": "function-char",
-              "signature": "public func char(checked: Int64) -> Char?",
-              "doc": "Returns the code point at code-point index `index`, or `None` if out of bounds. O(n).\n\nCompanion to `char(at:)`. Walks UTF-8 to find the right\ncharacter; the early `return` on the matching index keeps\naverage-case work proportional to `index`, not to `count`.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "char",
-              "anchor": "function-char",
-              "signature": "public func char(unchecked: Int64) -> Char",
-              "doc": "Returns the code point at code-point index `index` without bounds checking.\n\nCurrently delegates to `char(at:)` which itself panics on\nout-of-range, so this is not actually faster — exists for API\nparity with `Array`'s indexing family.\n\n# Safety\n\nCaller must guarantee `0 <= index < count`.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "char",
-              "anchor": "function-char",
-              "signature": "public func char(wrapped: Int64) -> Char",
-              "doc": "Returns the code point at `index` modulo `count`, supporting negative indices.\n\nNegative indices count from the end (`-1` is the last code\npoint). Equivalent to `char(at: ((index % count) + count) % count)`.\n\n# Errors\n\nPanics with `\"String is empty\"` if the string contains no code\npoints.\n\n# Examples\n\n```\n\"abc\".char(wrapped: -1);  // 'c'\n\"abc\".char(wrapped: 5);   // 'c'  (5 % 3 == 2)\n```",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "char",
-              "anchor": "function-char",
-              "signature": "public func char(clamped: Int64) -> Char",
-              "doc": "Returns the code point at `index` clamped to `[0, count - 1]`.\n\n# Errors\n\nPanics with `\"String is empty\"` if the string contains no code\npoints.\n\n# Examples\n\n```\n\"abc\".char(clamped: -1);  // 'a'\n\"abc\".char(clamped: 99);  // 'c'\n```",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
+              "kind": "field",
               "name": "chars",
-              "anchor": "function-chars",
-              "signature": "public func chars() -> CharsView",
-              "doc": "`s.chars()` — view over the Unicode code points. O(n) indexing,\nscalar-level iteration. Method form (see `bytes()` above) so the\nsame name supports `s.chars(i)` / `s.chars(checked: i)`.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "chars",
-              "anchor": "function-chars",
-              "signature": "public func chars[I](I) -> I.CharsYield where I: CharsIndex",
-              "doc": "",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "chars",
-              "anchor": "function-chars",
-              "signature": "public func chars[I](checked: I) -> I.CharsYield? where I: CharsIndex",
-              "doc": "`s.chars(checked: i)` — `None` if out of bounds.",
-              "source_path": "lang/std/text/string.ks"
-            },
-            {
-              "kind": "function",
-              "name": "chars",
-              "anchor": "function-chars",
-              "signature": "public func chars[I](clamped: I) -> I.CharsClampedYield where I: CharsClampable",
-              "doc": "`s.chars(clamped: i)` — saturates to valid bounds, never panics.",
+              "anchor": "field-chars",
+              "signature": "public var chars: CharsView { get }",
+              "doc": "`s.chars` — view over the Unicode code points. O(n) indexing,\nscalar-level iteration. Index via the view's subscripts:\n`s.chars(i)`, `s.chars(checked: i)`.",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2118,7 +2062,7 @@
               "name": "fromUtf8",
               "anchor": "function-fromUtf8",
               "signature": "public static func fromUtf8(Slice[UInt8]) -> String?",
-              "doc": "Constructs a string by copying validated UTF-8 bytes from `bytes`,\nreturning `.None` if the slice is not valid UTF-8.\n\nWalks the slice end-to-end with `decodeUtf8`; any malformed,\ntruncated, or overlong sequence produces `.None`. The empty slice\nis valid and yields the empty string. On success the bytes are\ncopied into a fresh heap allocation, so the returned `String`\nowns its storage independently of `bytes`.\n\n# Errors\n\nPanics with `\"String allocation failed\"` if the system allocator\nreturns null. Returns `.None` only for invalid UTF-8 — the\nallocation case is unrecoverable.\n\n# Examples\n\n```\nString.fromUtf8(bytes: \"héllo\".bytes().asSlice());  // Some(\"héllo\")\nString.fromUtf8(bytes: badSlice);                 // None\n```",
+              "doc": "Constructs a string by copying validated UTF-8 bytes from `bytes`,\nreturning `.None` if the slice is not valid UTF-8.\n\nWalks the slice end-to-end with `decodeUtf8`; any malformed,\ntruncated, or overlong sequence produces `.None`. The empty slice\nis valid and yields the empty string. On success the bytes are\ncopied into a fresh heap allocation, so the returned `String`\nowns its storage independently of `bytes`.\n\n# Errors\n\nPanics with `\"String allocation failed\"` if the system allocator\nreturns null. Returns `.None` only for invalid UTF-8 — the\nallocation case is unrecoverable.\n\n# Examples\n\n```\nString.fromUtf8(bytes: \"héllo\".bytes.asSlice());  // Some(\"héllo\")\nString.fromUtf8(bytes: badSlice);                 // None\n```",
               "source_path": "lang/std/text/string.ks"
             },
             {
@@ -2126,7 +2070,7 @@
               "name": "graphemes",
               "anchor": "field-graphemes",
               "signature": "public var graphemes: GraphemesView { get }",
-              "doc": "A view over the user-perceived characters (UAX #29 grapheme clusters).",
+              "doc": "`s.graphemes` — view over user-perceived characters\n(UAX #29 grapheme clusters). Iterate or count, no random access.",
               "source_path": "lang/std/text/string.ks"
             },
             {

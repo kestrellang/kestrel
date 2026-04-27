@@ -143,18 +143,18 @@ public struct BytesView: Iterable {
     /// the source string remains live and unmutated.
     public func asRaw() -> lang.ptr[lang.i8] { self.ptr }
 
-    /// @name Indexed Byte / Substring
-    /// Reads a single byte (`UInt8`) for `Int64` indexes, or a substring
-    /// (`String`) for `Range[Int64]` / `ClosedRange[Int64]`. Panics on
-    /// out-of-bounds or UTF-8 boundary violations for ranges. Use
-    /// `(checked:)` for an `Optional` instead of a panic.
+    /// @name Indexed Byte / Sub-view
+    /// Reads a single byte (`UInt8`) for `Int64` indexes, or a zero-copy
+    /// sub-view (`BytesView`) for `Range[Int64]` / `ClosedRange[Int64]`.
+    /// Panics on out-of-bounds. Range slicing does not validate UTF-8
+    /// boundaries — call `.toString()` on the sub-view if you need an
+    /// owned `String` (which validates).
     public subscript[I](index: I) -> I.BytesYield where I: BytesIndex {
         get { index.readBytes(from: self) }
     }
 
     /// @name Checked Index
-    /// Reads at `index`, returning `.None` on out-of-bounds (or invalid
-    /// UTF-8 boundary for range indexes).
+    /// Reads at `index`, returning `.None` on out-of-bounds.
     public subscript[I](checked index: I) -> I.BytesYield? where I: BytesIndex {
         get { index.readBytesChecked(from: self) }
     }
@@ -164,9 +164,9 @@ public struct BytesView: Iterable {
     ///
     /// # Safety
     ///
-    /// Caller must guarantee `0 <= index < count`. For ranges, both
-    /// endpoints must be valid UTF-8 boundaries; otherwise the resulting
-    /// string contains malformed UTF-8.
+    /// Caller must guarantee `0 <= index < count`. For ranges, the
+    /// endpoints must be in `0..=count`; otherwise the resulting
+    /// sub-view aliases out-of-bounds memory.
     public subscript[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
         get { index.readBytesUnchecked(from: self) }
     }
@@ -174,7 +174,7 @@ public struct BytesView: Iterable {
     /// @name Clamping
     /// Reads at `index` with bounds saturated to `[0, count)`. Single-
     /// byte indexes yield `UInt8?` (`None` on empty view); range indexes
-    /// yield `String` (always valid, possibly empty).
+    /// yield `BytesView` (always valid, possibly empty).
     public subscript[I](clamped index: I) -> I.BytesClampedYield where I: BytesClampable {
         get { index.readBytesClamped(from: self) }
     }
@@ -194,6 +194,28 @@ public struct BytesView: Iterable {
         let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
         let signedByte: lang.i8 = lang.ptr_read(bytePtr);
         UInt8(raw: signedByte)
+    }
+
+    /// Materializes the view as an owned `String`. Copies all bytes
+    /// into a fresh buffer; the result is independent of the source.
+    /// Bytes are copied verbatim — no UTF-8 validation is performed.
+    public func toString() -> String {
+        _copyByteRange(ptr: self.ptr, startByte: Int64(intLiteral: 0), endByte: self.length)
+    }
+
+    /// Convenience: dispatches to a `BytesSubstringIndex` to produce
+    /// an owned `String` covering the requested byte range. Equivalent
+    /// to `self(range).toString()` for both `Range[Int64]` and
+    /// `ClosedRange[Int64]`.
+    public func substring[I](range: I) -> String where I: BytesSubstringIndex {
+        range.readBytesSubstring(from: self)
+    }
+
+    /// Internal: build a sub-view over byte range `[startByte, endByte)`.
+    fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> BytesView {
+        let rawOffset: lang.i64 = startByte.raw;
+        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+        BytesView(ptr: newPtr, length: endByte - startByte)
     }
 }
 
@@ -276,17 +298,20 @@ public struct CharsIterator: Iterator {
 /// A view over the Unicode code points in a `String`.
 ///
 /// Returned by `String.chars`. Iteration is O(1) per code point but
-/// `count()` is O(n) because UTF-8 is variable-width. Likewise,
-/// range subscripts on this view are O(n) — to index in O(1), use
-/// `BytesView` and convert byte offsets back yourself.
+/// `count()` is O(n) because UTF-8 is variable-width. Range subscripts
+/// are O(n) (the segment-walk dominates) but yield a zero-copy
+/// `CharsView` sub-view — call `.toString()` to materialize an owned
+/// `String`. To index in O(1), use `BytesView` and convert byte offsets
+/// back yourself.
 ///
 /// # Examples
 ///
 /// ```
 /// let s = "héllo";
-/// s.chars.count;                  // 5 (code points)
-/// s.bytes.count;                  // 6 (bytes — 'é' is 2 bytes)
-/// s.chars(0..<4);                 // "héll"
+/// s.chars.count;                       // 5 (code points)
+/// s.bytes.count;                       // 6 (bytes — 'é' is 2 bytes)
+/// s.chars(0..<4).toString();           // "héll"
+/// s.chars.substring(0..<4);            // "héll"
 /// ```
 ///
 /// # Representation
@@ -346,11 +371,11 @@ public struct CharsView: Iterable {
         n
     }
 
-    /// @name Indexed Char / Substring
+    /// @name Indexed Char / Sub-view
     /// Reads a single code point (`Char`) for `Int64` indexes, or a
-    /// substring (`String`) for `Range[Int64]` / `ClosedRange[Int64]`.
-    /// All access is O(n) because UTF-8 is variable-width. Panics on
-    /// out-of-bounds.
+    /// zero-copy `CharsView` sub-view for `Range[Int64]` /
+    /// `ClosedRange[Int64]`. All access is O(n) because UTF-8 is
+    /// variable-width. Panics on out-of-bounds.
     public subscript[I](index: I) -> I.CharsYield where I: CharsIndex {
         get { index.readChars(from: self) }
     }
@@ -364,7 +389,7 @@ public struct CharsView: Iterable {
     /// @name Clamping
     /// Reads at `index` with bounds saturated to `[0, count)`. Single-
     /// char indexes yield `Char?` (`None` on empty view); range indexes
-    /// yield `String` (always valid, possibly empty).
+    /// yield `CharsView` (always valid, possibly empty).
     public subscript[I](clamped index: I) -> I.CharsClampedYield where I: CharsClampable {
         get { index.readCharsClamped(from: self) }
     }
@@ -403,9 +428,24 @@ public struct CharsView: Iterable {
         }
     }
 
-    /// Internal: build a `String` covering byte range `[startByte, endByte)`.
-    fileprivate func _substringFromByteRange(startByte startByte: Int64, endByte endByte: Int64) -> String {
-        _copyByteRange(ptr: self.ptr, startByte: startByte, endByte: endByte)
+    /// Internal: build a sub-view over byte range `[startByte, endByte)`.
+    fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> CharsView {
+        let rawOffset: lang.i64 = startByte.raw;
+        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+        CharsView(ptr: newPtr, length: endByte - startByte)
+    }
+
+    /// Materializes the view as an owned `String`. O(n) — copies bytes.
+    public func toString() -> String {
+        _copyByteRange(ptr: self.ptr, startByte: Int64(intLiteral: 0), endByte: self.length)
+    }
+
+    /// Convenience: dispatches to a `CharsSubstringIndex` to produce
+    /// an owned `String` covering the requested code-point range.
+    /// Equivalent to `self(range).toString()` for both `Range[Int64]`
+    /// and `ClosedRange[Int64]`.
+    public func substring[I](range: I) -> String where I: CharsSubstringIndex {
+        range.readCharsSubstring(from: self)
     }
 }
 
@@ -590,11 +630,11 @@ public struct GraphemesView: Iterable {
         n
     }
 
-    /// @name Indexed Grapheme / Substring
+    /// @name Indexed Grapheme / Sub-view
     /// `Int64` reads a single cluster; `Range[Int64]` /
-    /// `ClosedRange[Int64]` read a substring across cluster
-    /// boundaries. **O(n)** — walks the segmenter from the start.
-    /// Panics on out-of-bounds.
+    /// `ClosedRange[Int64]` yield a zero-copy `GraphemesView` sub-view
+    /// covering those clusters. **O(n)** — walks the segmenter from the
+    /// start. Panics on out-of-bounds.
     public subscript[I](index: I) -> I.GraphemesYield where I: GraphemesIndex {
         get { index.readGraphemes(from: self) }
     }
@@ -606,8 +646,9 @@ public struct GraphemesView: Iterable {
     }
 
     /// @name Clamping
-    /// Reads at `index` saturated to `[0, count)`. Yields `Grapheme?`
-    /// (`.None` only when the view is empty).
+    /// Reads at `index` saturated to `[0, count)`. Single-grapheme
+    /// indexes yield `Grapheme?` (`.None` only when the view is empty);
+    /// range indexes yield `GraphemesView` (always valid, possibly empty).
     public subscript[I](clamped index: I) -> I.GraphemesClampedYield where I: GraphemesClampable {
         get { index.readGraphemesClamped(from: self) }
     }
@@ -647,9 +688,24 @@ public struct GraphemesView: Iterable {
         }
     }
 
-    /// Internal: build a `String` covering byte range `[startByte, endByte)`.
-    fileprivate func _substringFromByteRange(startByte startByte: Int64, endByte endByte: Int64) -> String {
-        _copyByteRange(ptr: self.ptr, startByte: startByte, endByte: endByte)
+    /// Internal: build a sub-view over byte range `[startByte, endByte)`.
+    fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> GraphemesView {
+        let rawOffset: lang.i64 = startByte.raw;
+        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+        GraphemesView(ptr: newPtr, length: endByte - startByte)
+    }
+
+    /// Materializes the view as an owned `String`. O(n) — copies bytes.
+    public func toString() -> String {
+        _copyByteRange(ptr: self.ptr, startByte: Int64(intLiteral: 0), endByte: self.length)
+    }
+
+    /// Convenience: dispatches to a `GraphemesSubstringIndex` to
+    /// produce an owned `String` covering the requested cluster range.
+    /// Equivalent to `self(range).toString()` for both `Range[Int64]`
+    /// and `ClosedRange[Int64]`.
+    public func substring[I](range: I) -> String where I: GraphemesSubstringIndex {
+        range.readGraphemesSubstring(from: self)
     }
 }
 
@@ -787,10 +843,13 @@ public struct LinesIterator: Iterator {
 
 /// A view over the lines of a `String`, split on `\n`, `\r\n`, or `\r`.
 ///
-/// Returned by `String.lines`. The yielded strings do not include
-/// the terminator; a trailing line without a terminator is still
-/// emitted. To re-join with a specific separator, collect the
-/// iterator output and use `String.append`.
+/// Returned by `String.lines`. The yielded strings (from iteration or
+/// single-line subscripting) do not include the terminator; a trailing
+/// line without a terminator is still emitted. Range subscripts
+/// (`lines(0..<n)`) yield a zero-copy `LinesView` sub-view whose
+/// underlying byte range still includes the original terminators —
+/// iterating the sub-view round-trips the same line strings, and
+/// `.toString()` reconstructs the original substring exactly.
 ///
 /// # Examples
 ///
@@ -800,6 +859,9 @@ public struct LinesIterator: Iterator {
 ///     lines.append(line);
 /// }
 /// lines.count;  // 3
+///
+/// // Range subscript preserves terminators in the underlying bytes:
+/// "a\r\nb\nc".lines(0..<2).toString();  // "a\r\nb\n"
 /// ```
 ///
 /// # Representation
@@ -844,9 +906,12 @@ public struct LinesView: Iterable {
         n
     }
 
-    /// @name Indexed Line
-    /// Reads the line at index `index`. **O(n)** — walks the buffer
-    /// from the start. Panics on out-of-bounds.
+    /// @name Indexed Line / Sub-view
+    /// `Int64` reads a single line as a `String` (without terminator).
+    /// `Range[Int64]` / `ClosedRange[Int64]` yield a zero-copy
+    /// `LinesView` sub-view covering those lines (terminators preserved
+    /// in the underlying bytes). **O(n)** — walks the buffer from the
+    /// start. Panics on out-of-bounds.
     public subscript[I](index: I) -> I.LinesYield where I: LinesIndex {
         get { index.readLines(from: self) }
     }
@@ -858,10 +923,102 @@ public struct LinesView: Iterable {
     }
 
     /// @name Clamping
-    /// Reads at `index` saturated to `[0, count)`. Yields `String?`
-    /// (`.None` only when the view holds no lines).
+    /// Reads at `index` saturated to `[0, count)`. Single-line indexes
+    /// yield `String?` (`.None` only when the view holds no lines);
+    /// range indexes yield `LinesView` (always valid, possibly empty).
     public subscript[I](clamped index: I) -> I.LinesClampedYield where I: LinesClampable {
         get { index.readLinesClamped(from: self) }
+    }
+
+    /// Materializes the view as an owned `String` covering the entire
+    /// underlying buffer (terminators included). O(n) — copies bytes.
+    public func toString() -> String {
+        _copyByteRange(ptr: self.ptr, startByte: Int64(intLiteral: 0), endByte: self.length)
+    }
+
+    /// Convenience: dispatches to a `LinesSubstringIndex` to produce
+    /// an owned `String` covering the requested line range, with their
+    /// original terminators preserved. Equivalent to
+    /// `self(range).toString()` for both `Range[Int64]` and
+    /// `ClosedRange[Int64]`.
+    public func substring[I](range: I) -> String where I: LinesSubstringIndex {
+        range.readLinesSubstring(from: self)
+    }
+
+    /// Internal: walk the buffer to find the byte offset where line
+    /// `lineIndex` begins. Mirrors `_byteOffsetForCharIndex` —
+    /// `lineIndex == 0` returns `(0, true)`; `lineIndex == count`
+    /// returns `(length, true)` so range endpoints can be one-past-end;
+    /// negative or further-out indices return `(_, false)`. Recognises
+    /// `\n`, `\r\n`, and lone `\r` terminators (matching `LinesIterator`).
+    fileprivate func _byteOffsetForLineIndex(lineIndex lineIndex: Int64) -> (Int64, Bool) {
+        if lineIndex < Int64(intLiteral: 0) {
+            return (Int64(intLiteral: 0), false)
+        }
+        if lineIndex == Int64(intLiteral: 0) {
+            return (Int64(intLiteral: 0), true)
+        }
+        var li: Int64 = Int64(intLiteral: 0);
+        var bi: Int64 = Int64(intLiteral: 0);
+        var lineStart: Int64 = Int64(intLiteral: 0);
+        while bi < self.length {
+            let rawOffset: lang.i64 = bi.raw;
+            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byteVal: lang.i32 = lang.cast_i8_i32(byte);
+            let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
+            if Bool(boolLiteral: lang.i32_eq(unsignedByte, 10)) {
+                bi = bi + Int64(intLiteral: 1);
+                li = li + Int64(intLiteral: 1);
+                if li == lineIndex {
+                    return (bi, true)
+                }
+                lineStart = bi
+            } else if Bool(boolLiteral: lang.i32_eq(unsignedByte, 13)) {
+                bi = bi + Int64(intLiteral: 1);
+                if bi < self.length {
+                    let nextOffset: lang.i64 = bi.raw;
+                    let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, nextOffset);
+                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
+                    let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
+                    if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
+                        bi = bi + Int64(intLiteral: 1)
+                    }
+                }
+                li = li + Int64(intLiteral: 1);
+                if li == lineIndex {
+                    return (bi, true)
+                }
+                lineStart = bi
+            } else {
+                bi = bi + Int64(intLiteral: 1)
+            }
+        }
+        // Loop exited at end-of-buffer. If lineStart < length there is a
+        // trailing line with no terminator — count it as line `li` so the
+        // past-end endpoint (`lineIndex == count`) returns `(length, true)`.
+        if lineStart < self.length {
+            if li == lineIndex {
+                return (lineStart, true)
+            }
+            if lineIndex == li + Int64(intLiteral: 1) {
+                return (self.length, true)
+            }
+            return (self.length, false)
+        }
+        if li == lineIndex {
+            (self.length, true)
+        } else {
+            (self.length, false)
+        }
+    }
+
+    /// Internal: build a sub-view over byte range `[startByte, endByte)`.
+    fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> LinesView {
+        let rawOffset: lang.i64 = startByte.raw;
+        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+        LinesView(ptr: newPtr, length: endByte - startByte)
     }
 }
 
@@ -957,8 +1114,8 @@ public struct GraphemeIndex: Equatable {
 
 /// Stdlib-internal index types for `BytesView` subscripts.
 ///
-/// `Int64` reads a single byte (`UInt8`); range types read a substring.
-/// All access is O(1) for `Int64`, O(n) for ranges (one buffer copy).
+/// `Int64` reads a single byte (`UInt8`); range types yield a zero-copy
+/// `BytesView` sub-view. All access is O(1) — no buffer copy on slice.
 internal protocol BytesIndex {
     type BytesYield
     func readBytes(from view: BytesView) -> BytesYield
@@ -1009,35 +1166,10 @@ extend Int64: BytesClampable {
     }
 }
 
-// Internal helper: build a substring from a byte range, validating that
-// both endpoints fall on UTF-8 character boundaries (i.e. not in the
-// middle of a multi-byte sequence). Returns `.None` on invalid range or
-// boundary violation. Empty ranges are accepted.
-fileprivate func _bytesViewSubstringChecked(view view: BytesView, start start: Int64, end end: Int64) -> String? {
-    if start < Int64(intLiteral: 0) or end > view.count or start > end {
-        return .None
-    }
-    if start > Int64(intLiteral: 0) and start < view.count {
-        let b = view._readByteRaw(index: start);
-        let v: lang.i32 = lang.cast_i8_i32(b.raw);
-        if Bool(boolLiteral: lang.i32_eq(lang.i32_and(v, 0xC0), 0x80)) {
-            return .None
-        }
-    }
-    if end > Int64(intLiteral: 0) and end < view.count {
-        let b = view._readByteRaw(index: end);
-        let v: lang.i32 = lang.cast_i8_i32(b.raw);
-        if Bool(boolLiteral: lang.i32_eq(lang.i32_and(v, 0xC0), 0x80)) {
-            return .None
-        }
-    }
-    .Some(_bytesViewSubstringRaw(view: view, start: start, end: end))
-}
-
 // Internal helper: copy bytes `[startByte, endByte)` from a raw UTF-8
 // buffer into a fresh `String`. No validation; caller ensures sane
-// bounds. Shared by all view-level substring builders so the byte-copy
-// loop lives in one place.
+// bounds. Shared by every view's `toString()` so the byte-copy loop
+// lives in one place.
 fileprivate func _copyByteRange(ptr ptr: lang.ptr[lang.i8], startByte startByte: Int64, endByte endByte: Int64) -> String {
     let count = endByte - startByte;
     if count <= Int64(intLiteral: 0) {
@@ -1053,85 +1185,84 @@ fileprivate func _copyByteRange(ptr ptr: lang.ptr[lang.i8], startByte startByte:
     result
 }
 
-// Internal helper: copy bytes `[start, end)` from a `BytesView` into a
-// fresh String, no validation. Thin wrapper around `_copyByteRange`.
-fileprivate func _bytesViewSubstringRaw(view view: BytesView, start start: Int64, end end: Int64) -> String {
-    _copyByteRange(ptr: view.asRaw(), startByte: start, endByte: end)
-}
-
 extend Range[Int64]: BytesIndex {
-    type BytesYield = String
+    type BytesYield = BytesView
 
-    public func readBytes(from view: BytesView) -> String {
-        match _bytesViewSubstringChecked(view: view, start: self.start, end: self.end) {
-            .Some(s) => s,
-            .None => lang.panic("BytesView range out of bounds or not on UTF-8 boundary")
+    public func readBytes(from view: BytesView) -> BytesView {
+        if self.start < Int64(intLiteral: 0) or self.start > self.end or self.end > view.count {
+            lang.panic("BytesView range out of bounds")
         }
+        view._subView(startByte: self.start, endByte: self.end)
     }
 
-    public func readBytesChecked(from view: BytesView) -> String? {
-        _bytesViewSubstringChecked(view: view, start: self.start, end: self.end)
+    public func readBytesChecked(from view: BytesView) -> BytesView? {
+        if self.start < Int64(intLiteral: 0) or self.start > self.end or self.end > view.count {
+            return .None
+        }
+        .Some(view._subView(startByte: self.start, endByte: self.end))
     }
 
-    public func readBytesUnchecked(from view: BytesView) -> String {
-        _bytesViewSubstringRaw(view: view, start: self.start, end: self.end)
+    public func readBytesUnchecked(from view: BytesView) -> BytesView {
+        view._subView(startByte: self.start, endByte: self.end)
     }
 }
 
 extend Range[Int64]: BytesClampable {
-    type BytesClampedYield = String
+    type BytesClampedYield = BytesView
 
-    public func readBytesClamped(from view: BytesView) -> String {
+    public func readBytesClamped(from view: BytesView) -> BytesView {
         let len = view.count;
         var start = self.start;
         var end = self.end;
         if start < Int64(intLiteral: 0) { start = Int64(intLiteral: 0) }
         if end > len { end = len }
         if start > end { start = end }
-        // Skip bytes inside continuation sequences so we never split a
-        // multi-byte character. Walk forward from start, backward from end
-        // until both land on a leading byte.
-        while start < len {
-            let b = view._readByteRaw(index: start);
-            let v: lang.i32 = lang.cast_i8_i32(b.raw);
-            if Bool(boolLiteral: lang.i32_eq(lang.i32_and(v, 0xC0), 0x80)) {
-                start = start + Int64(intLiteral: 1)
-            } else {
-                break
-            }
-        }
-        while end > start and end < len {
-            let b = view._readByteRaw(index: end);
-            let v: lang.i32 = lang.cast_i8_i32(b.raw);
-            if Bool(boolLiteral: lang.i32_eq(lang.i32_and(v, 0xC0), 0x80)) {
-                end = end - Int64(intLiteral: 1)
-            } else {
-                break
-            }
-        }
-        _bytesViewSubstringRaw(view: view, start: start, end: end)
+        view._subView(startByte: start, endByte: end)
     }
 }
 
 extend ClosedRange[Int64]: BytesIndex {
-    type BytesYield = String
+    type BytesYield = BytesView
 
-    public func readBytes(from view: BytesView) -> String {
+    public func readBytes(from view: BytesView) -> BytesView {
         let endExclusive = self.end + Int64(intLiteral: 1);
-        match _bytesViewSubstringChecked(view: view, start: self.start, end: endExclusive) {
-            .Some(s) => s,
-            .None => lang.panic("BytesView range out of bounds or not on UTF-8 boundary")
+        if self.start < Int64(intLiteral: 0) or self.start > endExclusive or endExclusive > view.count {
+            lang.panic("BytesView range out of bounds")
         }
+        view._subView(startByte: self.start, endByte: endExclusive)
     }
 
-    public func readBytesChecked(from view: BytesView) -> String? {
+    public func readBytesChecked(from view: BytesView) -> BytesView? {
         let endExclusive = self.end + Int64(intLiteral: 1);
-        _bytesViewSubstringChecked(view: view, start: self.start, end: endExclusive)
+        if self.start < Int64(intLiteral: 0) or self.start > endExclusive or endExclusive > view.count {
+            return .None
+        }
+        .Some(view._subView(startByte: self.start, endByte: endExclusive))
     }
 
-    public func readBytesUnchecked(from view: BytesView) -> String {
+    public func readBytesUnchecked(from view: BytesView) -> BytesView {
         let endExclusive = self.end + Int64(intLiteral: 1);
-        _bytesViewSubstringRaw(view: view, start: self.start, end: endExclusive)
+        view._subView(startByte: self.start, endByte: endExclusive)
+    }
+}
+
+/// Range-only index for `BytesView.substring`. Conformed by every
+/// range type so a single generic `substring` can dispatch over all of
+/// them. Single-element indexes (`Int64`) deliberately don't conform —
+/// `substring` is range-flavored only.
+public protocol BytesSubstringIndex {
+    func readBytesSubstring(from view: BytesView) -> String
+}
+
+extend Range[Int64]: BytesSubstringIndex {
+    public func readBytesSubstring(from view: BytesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend ClosedRange[Int64]: BytesSubstringIndex {
+    public func readBytesSubstring(from view: BytesView) -> String {
+        view(self).toString()
     }
 }
 
@@ -1141,9 +1272,11 @@ extend ClosedRange[Int64]: BytesIndex {
 
 /// Stdlib-internal index types for `CharsView` subscripts.
 ///
-/// `Int64` reads a single code point (`Char`); range types read a
-/// substring. All access is O(n) — UTF-8 is variable-width, so every
-/// char-index lookup walks the buffer.
+/// `Int64` reads a single code point (`Char`); range types yield a
+/// zero-copy `CharsView` sub-view. All access is O(n) — UTF-8 is
+/// variable-width, so every char-index lookup walks the buffer; the
+/// slice itself is free (no copy), but resolving the byte offsets is
+/// linear.
 internal protocol CharsIndex {
     type CharsYield
     func readChars(from view: CharsView) -> CharsYield
@@ -1208,9 +1341,9 @@ extend Int64: CharsClampable {
 }
 
 extend Range[Int64]: CharsIndex {
-    type CharsYield = String
+    type CharsYield = CharsView
 
-    public func readChars(from view: CharsView) -> String {
+    public func readChars(from view: CharsView) -> CharsView {
         let s = self.start;
         let e = self.end;
         if s < Int64(intLiteral: 0) or s > e {
@@ -1221,10 +1354,10 @@ extend Range[Int64]: CharsIndex {
         if foundStart == false or foundEnd == false {
             lang.panic("CharsView range out of bounds")
         }
-        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+        view._subView(startByte: startByte, endByte: endByte)
     }
 
-    public func readCharsChecked(from view: CharsView) -> String? {
+    public func readCharsChecked(from view: CharsView) -> CharsView? {
         let s = self.start;
         let e = self.end;
         if s < Int64(intLiteral: 0) or s > e {
@@ -1235,14 +1368,14 @@ extend Range[Int64]: CharsIndex {
         if foundStart == false or foundEnd == false {
             return .None
         }
-        .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+        .Some(view._subView(startByte: startByte, endByte: endByte))
     }
 }
 
 extend Range[Int64]: CharsClampable {
-    type CharsClampedYield = String
+    type CharsClampedYield = CharsView
 
-    public func readCharsClamped(from view: CharsView) -> String {
+    public func readCharsClamped(from view: CharsView) -> CharsView {
         let n = view.count;
         var s = self.start;
         var e = self.end;
@@ -1251,14 +1384,14 @@ extend Range[Int64]: CharsClampable {
         if s > e { s = e }
         let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
         let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
-        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+        view._subView(startByte: startByte, endByte: endByte)
     }
 }
 
 extend ClosedRange[Int64]: CharsIndex {
-    type CharsYield = String
+    type CharsYield = CharsView
 
-    public func readChars(from view: CharsView) -> String {
+    public func readChars(from view: CharsView) -> CharsView {
         let s = self.start;
         let endInclusive = self.end;
         let endExclusive = endInclusive + Int64(intLiteral: 1);
@@ -1270,10 +1403,10 @@ extend ClosedRange[Int64]: CharsIndex {
         if foundStart == false or foundEnd == false {
             lang.panic("CharsView range out of bounds")
         }
-        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+        view._subView(startByte: startByte, endByte: endByte)
     }
 
-    public func readCharsChecked(from view: CharsView) -> String? {
+    public func readCharsChecked(from view: CharsView) -> CharsView? {
         let s = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if s < Int64(intLiteral: 0) or s > endExclusive {
@@ -1284,7 +1417,24 @@ extend ClosedRange[Int64]: CharsIndex {
         if foundStart == false or foundEnd == false {
             return .None
         }
-        .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+/// Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.
+public protocol CharsSubstringIndex {
+    func readCharsSubstring(from view: CharsView) -> String
+}
+
+extend Range[Int64]: CharsSubstringIndex {
+    public func readCharsSubstring(from view: CharsView) -> String {
+        view(self).toString()
+    }
+}
+
+extend ClosedRange[Int64]: CharsSubstringIndex {
+    public func readCharsSubstring(from view: CharsView) -> String {
+        view(self).toString()
     }
 }
 
@@ -1294,9 +1444,10 @@ extend ClosedRange[Int64]: CharsIndex {
 
 /// Stdlib-internal index types for `GraphemesView` subscripts.
 ///
-/// `Int64` reads a single cluster (`Grapheme`); range types read a
-/// substring (`String`). All access is O(n) — every cluster boundary
-/// is found by walking the UAX #29 segmenter from the start.
+/// `Int64` reads a single cluster (`Grapheme`); range types yield a
+/// zero-copy `GraphemesView` sub-view. All access is O(n) — every
+/// cluster boundary is found by walking the UAX #29 segmenter from the
+/// start; the slice itself is free.
 internal protocol GraphemesIndex {
     type GraphemesYield
     func readGraphemes(from view: GraphemesView) -> GraphemesYield
@@ -1361,9 +1512,9 @@ extend Int64: GraphemesClampable {
 }
 
 extend Range[Int64]: GraphemesIndex {
-    type GraphemesYield = String
+    type GraphemesYield = GraphemesView
 
-    public func readGraphemes(from view: GraphemesView) -> String {
+    public func readGraphemes(from view: GraphemesView) -> GraphemesView {
         let s = self.start;
         let e = self.end;
         if s < Int64(intLiteral: 0) or s > e {
@@ -1374,10 +1525,10 @@ extend Range[Int64]: GraphemesIndex {
         if foundStart == false or foundEnd == false {
             lang.panic("GraphemesView range out of bounds")
         }
-        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+        view._subView(startByte: startByte, endByte: endByte)
     }
 
-    public func readGraphemesChecked(from view: GraphemesView) -> String? {
+    public func readGraphemesChecked(from view: GraphemesView) -> GraphemesView? {
         let s = self.start;
         let e = self.end;
         if s < Int64(intLiteral: 0) or s > e {
@@ -1388,14 +1539,14 @@ extend Range[Int64]: GraphemesIndex {
         if foundStart == false or foundEnd == false {
             return .None
         }
-        .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+        .Some(view._subView(startByte: startByte, endByte: endByte))
     }
 }
 
 extend Range[Int64]: GraphemesClampable {
-    type GraphemesClampedYield = String
+    type GraphemesClampedYield = GraphemesView
 
-    public func readGraphemesClamped(from view: GraphemesView) -> String {
+    public func readGraphemesClamped(from view: GraphemesView) -> GraphemesView {
         let n = view.count;
         var s = self.start;
         var e = self.end;
@@ -1404,14 +1555,14 @@ extend Range[Int64]: GraphemesClampable {
         if s > e { s = e }
         let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
         let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
-        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+        view._subView(startByte: startByte, endByte: endByte)
     }
 }
 
 extend ClosedRange[Int64]: GraphemesIndex {
-    type GraphemesYield = String
+    type GraphemesYield = GraphemesView
 
-    public func readGraphemes(from view: GraphemesView) -> String {
+    public func readGraphemes(from view: GraphemesView) -> GraphemesView {
         let s = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if s < Int64(intLiteral: 0) or s > endExclusive {
@@ -1422,10 +1573,10 @@ extend ClosedRange[Int64]: GraphemesIndex {
         if foundStart == false or foundEnd == false {
             lang.panic("GraphemesView range out of bounds")
         }
-        view._substringFromByteRange(startByte: startByte, endByte: endByte)
+        view._subView(startByte: startByte, endByte: endByte)
     }
 
-    public func readGraphemesChecked(from view: GraphemesView) -> String? {
+    public func readGraphemesChecked(from view: GraphemesView) -> GraphemesView? {
         let s = self.start;
         let endExclusive = self.end + Int64(intLiteral: 1);
         if s < Int64(intLiteral: 0) or s > endExclusive {
@@ -1436,7 +1587,24 @@ extend ClosedRange[Int64]: GraphemesIndex {
         if foundStart == false or foundEnd == false {
             return .None
         }
-        .Some(view._substringFromByteRange(startByte: startByte, endByte: endByte))
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+/// Range-only index for `GraphemesView.substring`. See `BytesSubstringIndex`.
+public protocol GraphemesSubstringIndex {
+    func readGraphemesSubstring(from view: GraphemesView) -> String
+}
+
+extend Range[Int64]: GraphemesSubstringIndex {
+    public func readGraphemesSubstring(from view: GraphemesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend ClosedRange[Int64]: GraphemesSubstringIndex {
+    public func readGraphemesSubstring(from view: GraphemesView) -> String {
+        view(self).toString()
     }
 }
 
@@ -1446,10 +1614,11 @@ extend ClosedRange[Int64]: GraphemesIndex {
 
 /// Stdlib-internal index types for `LinesView` subscripts.
 ///
-/// Only `Int64` conforms today; range subscripts are deferred — joining
-/// lines back into a single string is lossy because the original
-/// terminators (`\n` vs `\r\n` vs `\r`) aren't reconstructable from the
-/// yielded strings alone.
+/// `Int64` reads a single line as a `String` (without terminator).
+/// `Range[Int64]` / `ClosedRange[Int64]` read a contiguous run of lines
+/// as a `LinesView` sub-view — the underlying byte range still includes
+/// the original terminators, so iterating the sub-view round-trips the
+/// same line strings.
 internal protocol LinesIndex {
     type LinesYield
     func readLines(from view: LinesView) -> LinesYield
@@ -1510,5 +1679,102 @@ extend Int64: LinesClampable {
         if idx < Int64(intLiteral: 0) { idx = Int64(intLiteral: 0) }
         if idx >= n { idx = n - Int64(intLiteral: 1) }
         _linesViewAt(view: view, lineIndex: idx)
+    }
+}
+
+extend Range[Int64]: LinesIndex {
+    type LinesYield = LinesView
+
+    public func readLines(from view: LinesView) -> LinesView {
+        let s = self.start;
+        let e = self.end;
+        if s < Int64(intLiteral: 0) or s > e {
+            lang.panic("LinesView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: e);
+        if foundStart == false or foundEnd == false {
+            lang.panic("LinesView range out of bounds")
+        }
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+
+    public func readLinesChecked(from view: LinesView) -> LinesView? {
+        let s = self.start;
+        let e = self.end;
+        if s < Int64(intLiteral: 0) or s > e {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: e);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend Range[Int64]: LinesClampable {
+    type LinesClampedYield = LinesView
+
+    public func readLinesClamped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end;
+        if s < Int64(intLiteral: 0) { s = Int64(intLiteral: 0) }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend ClosedRange[Int64]: LinesIndex {
+    type LinesYield = LinesView
+
+    public func readLines(from view: LinesView) -> LinesView {
+        let s = self.start;
+        let endExclusive = self.end + Int64(intLiteral: 1);
+        if s < Int64(intLiteral: 0) or s > endExclusive {
+            lang.panic("LinesView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: endExclusive);
+        if foundStart == false or foundEnd == false {
+            lang.panic("LinesView range out of bounds")
+        }
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+
+    public func readLinesChecked(from view: LinesView) -> LinesView? {
+        let s = self.start;
+        let endExclusive = self.end + Int64(intLiteral: 1);
+        if s < Int64(intLiteral: 0) or s > endExclusive {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: endExclusive);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+/// Range-only index for `LinesView.substring`. See `BytesSubstringIndex`.
+public protocol LinesSubstringIndex {
+    func readLinesSubstring(from view: LinesView) -> String
+}
+
+extend Range[Int64]: LinesSubstringIndex {
+    public func readLinesSubstring(from view: LinesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend ClosedRange[Int64]: LinesSubstringIndex {
+    public func readLinesSubstring(from view: LinesView) -> String {
+        view(self).toString()
     }
 }

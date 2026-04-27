@@ -8,7 +8,7 @@ import std.num.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, Slice)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView)
+import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, GraphemesView, LinesView, CharsSubstringIndex)
 import std.text.unicode as unicode
 import std.ffi.(memcpy)
 
@@ -933,6 +933,26 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
             return String()
         }
         String.fromBytesUnchecked(self.ptr().offset(by: start), end - start)
+    }
+
+    /// Returns the substring covering code points in `range`. Defaults
+    /// to **chars** semantics — use `self.graphemes.substring(range)`
+    /// for grapheme-cluster slicing or `self.bytes.substring(range)`
+    /// (or `substringBytes`) for raw byte ranges. Accepts any range
+    /// type that conforms to `std.text.CharsSubstringIndex`
+    /// (`Range[Int64]` and `ClosedRange[Int64]` today).
+    ///
+    /// Equivalent to `self.chars.substring(range)`. Panics on
+    /// out-of-bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "héllo".substring(0..<4);   // "héll"
+    /// "héllo".substring(0..=3);   // "héll"
+    /// ```
+    public func substring[I](range: I) -> String where I: CharsSubstringIndex {
+        self.chars.substring(range)
     }
 
     // ========================================================================

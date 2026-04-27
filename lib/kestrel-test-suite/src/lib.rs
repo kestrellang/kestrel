@@ -10,7 +10,7 @@
 
 #[used]
 #[unsafe(no_mangle)]
-pub static BUILD_NONCE: u32 = 19;
+pub static BUILD_NONCE: u32 = 20;
 
 pub mod annotation;
 pub mod compiler;
@@ -84,3 +84,5 @@ fn find_stdlib_path() -> PathBuf {
         .unwrap(); // project root
     project_root.join("lang/std")
 }
+
+// trigger rebuild after stdlib substring refactor
