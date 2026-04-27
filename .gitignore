@@ -27,3 +27,5 @@ examples/weather/weather
 .wrangler/
 
 .triage
+
+**/flock.lock

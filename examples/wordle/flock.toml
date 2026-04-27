@@ -1,0 +1,8 @@
+[package]
+name = "wordle"
+version = "0.1.0"
+description = "Wordle clone with shareable URL state"
+
+[dependencies]
+perch = { path = "../../lang/perch" }
+plume = { path = "../../lang/plume" }
