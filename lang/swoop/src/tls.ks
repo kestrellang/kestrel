@@ -68,8 +68,8 @@ func SSL_CTRL_SET_TLSEXT_HOSTNAME() -> Int32 { 55 }
 // TLS STREAM
 // ============================================================================
 
-/// A TLS-encrypted TCP stream that implements Read and Write.
-public struct TlsStream: Read, Write {
+/// A TLS-encrypted TCP stream that implements Readable and Writable.
+public struct TlsStream: Readable, Writable {
     private var ssl: lang.ptr[lang.i8]
     private var ctx: lang.ptr[lang.i8]
     var fd: Int32

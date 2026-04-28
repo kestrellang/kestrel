@@ -28,7 +28,7 @@ public func sendRequest[S](
     url: ClientUrl,
     headers: Headers,
     body: Body?
-) -> Result[Response, SwoopError] where S: Read, S: Write {
+) -> Result[Response, SwoopError] where S: Readable, S: Writable {
     // Build the request string
     var req = String();
 
@@ -108,7 +108,7 @@ public func sendRequest[S](
 // ============================================================================
 
 /// Reads an HTTP response from a stream.
-func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Read {
+func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readable {
     var recvStream = stream;
 
     // Read bytes until we find \r\n\r\n (header end)
@@ -358,7 +358,7 @@ func hexDigitValue(b: UInt8) -> Int64 {
 // ============================================================================
 
 /// Sends all bytes of a string over a stream.
-func sendAllString[S](stream: S, s: String) -> Result[(), IoError] where S: Write {
+func sendAllString[S](stream: S, s: String) -> Result[(), IoError] where S: Writable {
     var mutStream = stream;
     let len = s.byteCount;
     if len == 0 {
@@ -376,7 +376,7 @@ func sendAllString[S](stream: S, s: String) -> Result[(), IoError] where S: Writ
 }
 
 /// Sends all bytes of a buffer over a stream.
-func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), IoError] where S: Write {
+func sendAllBytes[S](stream: S, buf: Array[UInt8]) -> Result[(), IoError] where S: Writable {
     var mutStream = stream;
     let len = buf.count;
     var sent: Int64 = 0;

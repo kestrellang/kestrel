@@ -704,7 +704,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// let arr: Array[Int64] = [10, 20, 30];
     /// ```
     public init(arrayLiteral elements: LiteralSlice[T]) {
-        let elementCount = elements.count();
+        let elementCount = elements.count;
         if elementCount > 0 {
             let layout = Layout.array[T](elementCount);
             var allocator = SystemAllocator();

@@ -265,7 +265,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// let nums: Set = [1, 2, 3];
     /// ```
     public init(arrayLiteral elements: LiteralSlice[T]) {
-        self.dict = Dictionary(capacity: elements.count());
+        self.dict = Dictionary(capacity: elements.count);
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
             let _ = self.insert(elem);
