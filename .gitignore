@@ -29,3 +29,6 @@ examples/weather/weather
 .triage
 
 **/flock.lock
+
+# Separate repos living inside the monorepo checkout
+/external/

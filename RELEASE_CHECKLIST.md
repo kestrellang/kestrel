@@ -2,16 +2,16 @@
 - [x] Cargo fmt
 - [x] Cargo clippy
 - [ ] Rewrite README.md
-- [ ] Write style guide
+- [x] Write naming guide
 - [ ] Add custom written docs
 - [ ] Move to github org
 - [ ] Write blog post
 - [ ] Play with extension
 - [ ] Create claude code plugin
 - [ ] Create skill
-- [ ] Move site to separate repo
-- [ ] Move registry to separate repo
-- [ ] Move plugin to separate repo
-- [ ] Move triage to separate repo
+- [x] Move site to separate repo
+- [x] Move registry to separate repo
+- [x] Move plugin to separate repo
+- [x] Move triage to separate repo
 - [ ] Verify installation end-to-end
 - [ ] Build the playground
