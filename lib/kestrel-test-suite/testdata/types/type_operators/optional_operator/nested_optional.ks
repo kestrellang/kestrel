@@ -6,7 +6,7 @@ module Test
 import std.io.stdio.println
 
 func main() -> lang.i64 {
-    let nested: std.num.Int64?? = .Some(.Some(42));
+    let nested: std.numeric.Int64?? = .Some(.Some(42));
     let _ = println(nested.unwrap().unwrap());
     0
 }

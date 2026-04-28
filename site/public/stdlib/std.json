@@ -9,7 +9,7 @@
     "std.iter",
     "std.memory",
     "std.net",
-    "std.num",
+    "std.numeric",
     "std.os",
     "std.result",
     "std.text"

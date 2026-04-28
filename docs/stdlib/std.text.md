@@ -568,13 +568,13 @@ O(1). This is **byte** count, not character count — see
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `isEmpty`
+#### field `isEmpty`
 
 ```kestrel
-public func isEmpty() -> Bool
+public var isEmpty: Bool { get }
 ```
 
-Returns true if the view spans zero bytes.
+`true` if the view spans zero bytes.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -615,10 +615,10 @@ The element type yielded by iteration — always `UInt8`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = BytesIterator
+type TargetIterator = BytesIterator
 ```
 
 The iterator type returned by `iter()`.
@@ -1514,10 +1514,10 @@ The element type yielded by iteration — always `Char`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = CharsIterator
+type TargetIterator = CharsIterator
 ```
 
 The iterator type returned by `iter()`.
@@ -1542,7 +1542,7 @@ _Defined in `lang/std/text/views.ks`._
 public struct DefaultStringInterpolation { /* private fields */ }
 ```
 
-The default `StringInterpolationProtocol` accumulator used for `String` interpolation.
+The default `Interpolatable` accumulator used for `String` interpolation.
 
 Stores each literal and each formatted interpolation as a separate
 `String` part, then concatenates them in `build()`. The two-pass
@@ -1598,7 +1598,7 @@ public init(literalCapacity: Int64, interpolationCount: Int64)
 
 _Defined in `lang/std/text/format.ks`._
 
-### Implements `StringInterpolationProtocol`
+### Implements `Interpolatable`
 
 #### initializer `With Capacity`
 
@@ -1668,7 +1668,7 @@ Marker protocol for types constructible from a completed string interpolation.
 Refines `ExpressibleByStringLiteral` so a single conformance covers
 both pure-literal `"abc"` and interpolated `"a\{x}b"` forms. The
 compiler picks `Interpolation` as the accumulator type, drives it via
-`StringInterpolationProtocol`, then hands it to `init(interpolation:)`.
+`Interpolatable`, then hands it to `init(interpolation:)`.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -2538,10 +2538,10 @@ The element type yielded by iteration — always `Grapheme`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = GraphemesIterator
+type TargetIterator = GraphemesIterator
 ```
 
 The iterator type returned by `iter()`.
@@ -2557,6 +2557,68 @@ public func iter() -> GraphemesIterator
 Returns a `GraphemesIterator` positioned at byte 0.
 
 _Defined in `lang/std/text/views.ks`._
+
+## protocol `Interpolatable`
+
+```kestrel
+public protocol Interpolatable
+```
+
+Protocol for the accumulator type that string interpolation builds into.
+
+The compiler lowers `"hello, \{name}!"` to a sequence of
+`appendLiteral` and `appendInterpolation` calls on a fresh value of
+the implementor's type, then reads the final string out (typically
+via a `build()` method on the concrete accumulator). `String` ships
+`DefaultStringInterpolation` as its accumulator; custom string-like
+types can supply their own to intercept literal pieces or coerce
+formatted parts.
+
+_Defined in `lang/std/text/format.ks`._
+
+### Members
+
+#### initializer `With Capacity`
+
+```kestrel
+init(Int64, Int64)
+```
+
+Constructs an empty accumulator with capacity hints derived from the literal at compile time.
+
+`literalCapacity` is the total byte count of the static segments;
+`interpolationCount` is the number of `\{...}` holes. Implementors
+can use these to preallocate.
+
+_Defined in `lang/std/text/format.ks`._
+
+#### function `appendInterpolation`
+
+```kestrel
+mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
+```
+
+Appends one formatted interpolation hole.
+
+Receives the runtime `value`, the parsed `options` from the
+trailing spec (or defaults if no spec was given), and a generic
+constraint that the value is `Formattable`.
+
+_Defined in `lang/std/text/format.ks`._
+
+#### function `appendLiteral`
+
+```kestrel
+mutating func appendLiteral(String)
+```
+
+Appends a static literal segment.
+
+Called once per run of literal text between `\{...}` holes. May be
+called with the empty string; implementors should be cheap in
+that case.
+
+_Defined in `lang/std/text/format.ks`._
 
 ## struct `LinesIterator`
 
@@ -2794,10 +2856,10 @@ The element type yielded by iteration — always `String`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = LinesIterator
+type TargetIterator = LinesIterator
 ```
 
 The iterator type returned by `iter()`.
@@ -3028,7 +3090,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From Predicate`
 
 ```kestrel
-public init(ptr: Pointer[UInt8], length: Int64, predicate: (Char) -> Bool)
+public init(pointer: Pointer[UInt8], length: Int64, matching: (Char) -> Bool)
 ```
 
 Constructs a split-where iterator from a buffer pointer and a `Char` predicate.
@@ -3673,7 +3735,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `pad`
 
 ```kestrel
-public func pad(start: Int64, with: Char) -> String
+public func pad(leading: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the start with `char` so the total *code-point* count is `length`.
@@ -3693,7 +3755,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `pad`
 
 ```kestrel
-public func pad(end: Int64, with: Char) -> String
+public func pad(trailing: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the end with `char` so the total *code-point* count is `length`.
@@ -4153,10 +4215,10 @@ The element type yielded by iteration — always `Char`.
 
 _Defined in `lang/std/text/string.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = StringIterator
+type TargetIterator = StringIterator
 ```
 
 The iterator type returned by `iter()`.
@@ -4354,68 +4416,6 @@ init(from: From)
 Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
-
-## protocol `StringInterpolationProtocol`
-
-```kestrel
-public protocol StringInterpolationProtocol
-```
-
-Protocol for the accumulator type that string interpolation builds into.
-
-The compiler lowers `"hello, \{name}!"` to a sequence of
-`appendLiteral` and `appendInterpolation` calls on a fresh value of
-the implementor's type, then reads the final string out (typically
-via a `build()` method on the concrete accumulator). `String` ships
-`DefaultStringInterpolation` as its accumulator; custom string-like
-types can supply their own to intercept literal pieces or coerce
-formatted parts.
-
-_Defined in `lang/std/text/format.ks`._
-
-### Members
-
-#### initializer `With Capacity`
-
-```kestrel
-init(Int64, Int64)
-```
-
-Constructs an empty accumulator with capacity hints derived from the literal at compile time.
-
-`literalCapacity` is the total byte count of the static segments;
-`interpolationCount` is the number of `\{...}` holes. Implementors
-can use these to preallocate.
-
-_Defined in `lang/std/text/format.ks`._
-
-#### function `appendInterpolation`
-
-```kestrel
-mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
-```
-
-Appends one formatted interpolation hole.
-
-Receives the runtime `value`, the parsed `options` from the
-trailing spec (or defaults if no spec was given), and a generic
-constraint that the value is `Formattable`.
-
-_Defined in `lang/std/text/format.ks`._
-
-#### function `appendLiteral`
-
-```kestrel
-mutating func appendLiteral(String)
-```
-
-Appends a static literal segment.
-
-Called once per run of literal text between `\{...}` holes. May be
-called with the empty string; implementors should be cheap in
-that case.
-
-_Defined in `lang/std/text/format.ks`._
 
 ## struct `StringIterator`
 

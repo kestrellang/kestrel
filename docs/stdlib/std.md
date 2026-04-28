@@ -9,7 +9,7 @@
 - [`std.iter`](std.iter.md)
 - [`std.memory`](std.memory.md)
 - [`std.net`](std.net.md)
-- [`std.num`](std.num.md)
+- [`std.numeric`](std.numeric.md)
 - [`std.os`](std.os.md)
 - [`std.result`](std.result.md)
 - [`std.text`](std.text.md)

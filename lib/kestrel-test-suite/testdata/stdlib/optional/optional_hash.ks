@@ -7,9 +7,9 @@ module Test
             // Hash test: Some(42) and Some(42) should hash the same
             // None and None should hash the same
             // Some(42) and None should hash differently (very likely)
-            let a: std.result.Optional[std.num.Int64] = .Some(42);
-            let b: std.result.Optional[std.num.Int64] = .Some(42);
-            let c: std.result.Optional[std.num.Int64] = .None;
+            let a: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let b: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let c: std.result.Optional[std.numeric.Int64] = .None;
 
             var hasherA = std.collections.DefaultHasher();
             a.hash(into: hasherA);

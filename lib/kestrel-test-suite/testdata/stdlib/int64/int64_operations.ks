@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let a: std.num.Int64 = 10;
-            let b: std.num.Int64 = 3;
+            let a: std.numeric.Int64 = 10;
+            let b: std.numeric.Int64 = 3;
 
             // Test arithmetic
             if a.add(b) != 13 { return 1 }
@@ -15,7 +15,7 @@ module Test
             if a.modulo(b) != 1 { return 5 }
 
             // Test negate and abs
-            let neg: std.num.Int64 = -5;
+            let neg: std.numeric.Int64 = -5;
             if neg.negate() != 5 { return 6 }
             if neg.abs() != 5 { return 7 }
 

@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Create slice from array's asSlice()
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(10);
             arr.append(20);
             arr.append(30);
@@ -21,7 +21,7 @@ module Test
             if slice.isEmpty { return 2 }
 
             // Test isEmpty on empty slice
-            let emptyArr = std.collections.Array[std.num.Int64]();
+            let emptyArr = std.collections.Array[std.numeric.Int64]();
             let emptySlice = emptyArr.asSlice();
             if emptySlice.isEmpty == false { return 3 }
             if emptySlice.count != 0 { return 4 }
@@ -61,7 +61,7 @@ module Test
             if emptySlice.last().isSome() { return 19 }
 
             // Test subscript(checked: Range) - valid sub-slice
-            let sub = slice(checked: std.core.Range[std.num.Int64](1, 4));
+            let sub = slice(checked: std.core.Range[std.numeric.Int64](1, 4));
             if sub.isNone() { return 20 }
             let subSlice = sub.unwrap();
             if subSlice.count != 3 { return 21 }
@@ -70,26 +70,26 @@ module Test
             if subSlice(unchecked: 2) != 40 { return 24 }
 
             // Test subscript(checked: Range) - empty sub-slice
-            let emptySub = slice(checked: std.core.Range[std.num.Int64](2, 2));
+            let emptySub = slice(checked: std.core.Range[std.numeric.Int64](2, 2));
             if emptySub.isNone() { return 25 }
             if emptySub.unwrap().count != 0 { return 26 }
 
             // Test subscript(checked: Range) - full range
-            let fullSub = slice(checked: std.core.Range[std.num.Int64](0, 5));
+            let fullSub = slice(checked: std.core.Range[std.numeric.Int64](0, 5));
             if fullSub.isNone() { return 27 }
             if fullSub.unwrap().count != 5 { return 28 }
 
             // Test subscript(checked: Range) - invalid range returns None
-            let invalidSub = slice(checked: std.core.Range[std.num.Int64](3, 1));
+            let invalidSub = slice(checked: std.core.Range[std.numeric.Int64](3, 1));
             if invalidSub.isSome() { return 29 }
 
             // Test subscript(checked: Range) - out of bounds returns None
-            let oobSub = slice(checked: std.core.Range[std.num.Int64](0, 10));
+            let oobSub = slice(checked: std.core.Range[std.numeric.Int64](0, 10));
             if oobSub.isSome() { return 30 }
 
             // Test iter()
             var iter = slice.iter();
-            var sum: std.num.Int64 = 0;
+            var sum: std.numeric.Int64 = 0;
             var done: std.core.Bool = false;
             while done == false {
                 let next = iter.next();

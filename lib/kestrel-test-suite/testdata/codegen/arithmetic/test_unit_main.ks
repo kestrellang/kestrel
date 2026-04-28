@@ -4,5 +4,5 @@
 module Test
 
 func main() {
-    let x: std.num.Int64 = 42;
+    let x: std.numeric.Int64 = 42;
 }

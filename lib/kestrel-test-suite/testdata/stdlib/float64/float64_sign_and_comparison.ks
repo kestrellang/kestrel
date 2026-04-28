@@ -4,9 +4,9 @@
 module Test
 
         func main() -> lang.i64 {
-            let pos: std.num.Float64 = 3.14;
-            let neg: std.num.Float64 = -2.5;
-            let zero = std.num.Float64.zero;
+            let pos: std.numeric.Float64 = 3.14;
+            let neg: std.numeric.Float64 = -2.5;
+            let zero = std.numeric.Float64.zero;
 
             // sign
             let posSign = pos.sign;
@@ -31,19 +31,19 @@ module Test
             if pos.isZero { return 11 }
 
             // equals
-            let a: std.num.Float64 = 1.5;
-            let b: std.num.Float64 = 1.5;
-            let c: std.num.Float64 = 2.5;
+            let a: std.numeric.Float64 = 1.5;
+            let b: std.numeric.Float64 = 1.5;
+            let c: std.numeric.Float64 = 2.5;
             if a.equals(b) == false { return 12 }
             if a.equals(c) { return 13 }
 
             // NaN not equal to itself
-            let nan = std.num.Float64.nan;
+            let nan = std.numeric.Float64.nan;
             if nan.equals(nan) { return 14 }
 
             // compare
-            let one: std.num.Float64 = 1.0;
-            let two: std.num.Float64 = 2.0;
+            let one: std.numeric.Float64 = 1.0;
+            let two: std.numeric.Float64 = 2.0;
             let cmp1 = one.compare(two);
             match cmp1 {
                 .Less => 0,
@@ -61,7 +61,7 @@ module Test
             };
 
             // infinity comparison
-            let inf = std.num.Float64.infinity;
+            let inf = std.numeric.Float64.infinity;
             if inf.isPositive == false { return 18 }
             let negInf = inf.negate();
             if negInf.isNegative == false { return 19 }

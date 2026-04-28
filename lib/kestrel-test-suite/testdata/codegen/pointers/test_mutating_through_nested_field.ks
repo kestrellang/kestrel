@@ -4,14 +4,14 @@
 module Test
 
 struct Inner {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 }
 
 struct Outer {
     var inner: Inner
 }
 
-func setValue(mutating i: Inner, n: std.num.Int64) {
+func setValue(mutating i: Inner, n: std.numeric.Int64) {
     i.value = n;
 }
 

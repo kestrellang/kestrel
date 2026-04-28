@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Create RcBox
-            let box1 = std.memory.RcBox[std.num.Int64](42);
+            let box1 = std.memory.RcBox[std.numeric.Int64](42);
 
             // Test getValue
             if box1.getValue() != 42 { return 1 }

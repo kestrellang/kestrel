@@ -5,15 +5,15 @@ module Test
 
         func main() -> lang.i64 {
             // Test nullPointer
-            let nullPtr = std.memory.Pointer[std.num.Int64].nullPointer();
+            let nullPtr = std.memory.Pointer[std.numeric.Int64].nullPointer();
             if nullPtr.isNull == false { return 1 }
 
             // Test address of null pointer is 0
-            let zeroAddr: std.num.UInt64 = 0;
+            let zeroAddr: std.numeric.UInt64 = 0;
             if nullPtr.address != zeroAddr { return 2 }
 
             // Create a typed pointer from an array
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(100);
             arr.append(200);
             arr.append(300);
@@ -49,7 +49,7 @@ module Test
 
             // Test address round-trip
             let addr = ptr.address;
-            let zeroCheck: std.num.UInt64 = 0;
+            let zeroCheck: std.numeric.UInt64 = 0;
             if addr == zeroCheck { return 13 }
 
             0

@@ -3,7 +3,7 @@
 
 module Test
 
-        func makeOpts(width: std.num.Int64, alignment: std.text.Alignment, fill: std.text.Char) -> std.text.FormatOptions {
+        func makeOpts(width: std.numeric.Int64, alignment: std.text.Alignment, fill: std.text.Char) -> std.text.FormatOptions {
             var opts = std.text.FormatOptions();
             opts.width = .Some(width);
             opts.alignment = alignment;

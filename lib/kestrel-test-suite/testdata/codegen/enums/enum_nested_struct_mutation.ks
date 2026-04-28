@@ -4,7 +4,7 @@
 module Test
 
 struct Data {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 }
 
 enum Container {
@@ -12,7 +12,7 @@ enum Container {
     case Empty
 }
 
-func extract(c: Container) -> std.num.Int64 {
+func extract(c: Container) -> std.numeric.Int64 {
     match c {
         .Full(data: d) => d.value,
         .Empty => 0

@@ -2,7 +2,7 @@
 
 module std.net.socket
 
-import std.num.(Int64, Int32, UInt8, UInt16)
+import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
@@ -10,8 +10,8 @@ import std.text.(String)
 import std.core.(Bool)
 import std.net.libc
 import std.io.error.(IoError)
-import std.io.read.(Read)
-import std.io.write.(Write)
+import std.io.read.(Readable)
+import std.io.write.(Writable)
 
 /// Size in bytes of `struct addrinfo` on darwin (`48`).
 @platform(.darwin)
@@ -78,7 +78,7 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     addr
 }
 
-/// A connected TCP byte stream — implements `Read` and `Write` on top of a POSIX socket fd.
+/// A connected TCP byte stream — implements `Readable` and `Writable` on top of a POSIX socket fd.
 ///
 /// Returned by `TcpListener.accept()` (server side) and
 /// `TcpStream.connect(host:port:)` (client side). Reads and writes
@@ -94,7 +94,7 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 ///     .Ok(s) => s,
 ///     .Err(e) => return .Err(e)
 /// };
-/// // stream is Read + Write
+/// // stream is Readable + Writable
 /// ```
 ///
 /// # Representation
@@ -106,7 +106,7 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 ///
 /// Owns its fd. Cloning is not provided — duplicate explicitly via
 /// `dup(2)` if you need it.
-public struct TcpStream: Read, Write {
+public struct TcpStream: Readable, Writable {
     var fd: Int32
 
     /// @name From Fd
@@ -122,7 +122,7 @@ public struct TcpStream: Read, Write {
     /// Reads up to `buf.count` bytes into `buf`. Returns the byte count actually read.
     ///
     /// `0` indicates the peer closed the connection cleanly. Required
-    /// by the `Read` protocol.
+    /// by the `Readable` protocol.
     ///
     /// # Errors
     ///
@@ -139,7 +139,7 @@ public struct TcpStream: Read, Write {
     /// Writes up to `buf.count` bytes from `buf`. Returns the byte count actually written.
     ///
     /// May write fewer bytes than requested under back-pressure;
-    /// loop until the buffer is drained. Required by the `Write`
+    /// loop until the buffer is drained. Required by the `Writable`
     /// protocol.
     ///
     /// # Errors
@@ -156,7 +156,7 @@ public struct TcpStream: Read, Write {
 
     /// No-op — TCP sockets do not have an application-level write buffer.
     ///
-    /// Always returns `Ok(())`. Provided to satisfy the `Write`
+    /// Always returns `Ok(())`. Provided to satisfy the `Writable`
     /// protocol so generic writers can call `flush` unconditionally.
     public mutating func flush() -> Result[(), IoError] {
         .Ok(())

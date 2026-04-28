@@ -3,7 +3,7 @@
 
 module Test
 
-func make_doubler() -> (std.num.Int64) -> std.num.Int64 {
+func make_doubler() -> (std.numeric.Int64) -> std.numeric.Int64 {
     { (x) in x * 2 }
 }
 

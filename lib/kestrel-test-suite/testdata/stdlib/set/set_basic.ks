@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test init() and isEmpty
-            var s = std.collections.Set[std.num.Int64]();
+            var s = std.collections.Set[std.numeric.Int64]();
             if s.isEmpty == false { return 1 }
             if s.count != 0 { return 2 }
 

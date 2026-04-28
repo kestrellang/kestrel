@@ -3,7 +3,7 @@
 module std.io.error
 
 import std.core.(Bool)
-import std.num.(Int32, Int64)
+import std.numeric.(Int32, Int64)
 import std.text.(String)
 import std.result.(Result)
 import std.io.libc

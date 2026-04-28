@@ -8,7 +8,7 @@
       "name": "Cursor",
       "anchor": "struct-Cursor",
       "signature": "public struct Cursor { /* private fields */ }",
-      "doc": "`Read` over an in-memory `Array[UInt8]` with a movable position.\n\nMirrors the role of Rust's `io::Cursor` — useful for tests, parsers, and\nany place a byte buffer needs to be presented as a `Read` stream. The\nposition is clamped to `[0, count]` by `setPosition`. `Cursor` clones\nshare the underlying COW array.\n\n# Examples\n\n```\nvar c = Cursor(data: [10, 20, 30].asArray());\nvar buf = Array[UInt8](repeating: 0, count: 2);\ntry c.read(into: buf.asSlice());     // .Ok(2); buf == [10, 20]\nc.position()                         // 2\n```",
+      "doc": "`Readable` over an in-memory `Array[UInt8]` with a movable position.\n\nMirrors the role of Rust's `io::Cursor` — useful for tests, parsers, and\nany place a byte buffer needs to be presented as a `Readable` stream. The\nposition is clamped to `[0, count]` by `setPosition`. `Cursor` clones\nshare the underlying COW array.\n\n# Examples\n\n```\nvar c = Cursor(data: [10, 20, 30].asArray());\nvar buf = Array[UInt8](repeating: 0, count: 2);\ntry c.read(into: buf.asSlice());     // .Ok(2); buf == [10, 20]\nc.position()                         // 2\n```",
       "source_path": "lang/std/io/read.ks",
       "member_groups": [
         {
@@ -34,18 +34,10 @@
             },
             {
               "kind": "field",
-              "name": "pos",
-              "anchor": "field-pos",
-              "signature": "var pos: Int64",
-              "doc": "",
-              "source_path": "lang/std/io/read.ks"
-            },
-            {
-              "kind": "function",
               "name": "position",
-              "anchor": "function-position",
-              "signature": "public func position() -> Int64",
-              "doc": "Current byte offset into the underlying array.",
+              "anchor": "field-position",
+              "signature": "public var position: Int64",
+              "doc": "",
               "source_path": "lang/std/io/read.ks"
             },
             {
@@ -60,8 +52,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Read",
-          "source_path": "std.io.read.Read",
+          "label": "Readable",
+          "source_path": "std.io.read.Readable",
           "members": [
             {
               "kind": "function",
@@ -95,7 +87,7 @@
       "name": "Empty",
       "anchor": "struct-Empty",
       "signature": "public struct Empty { /* private fields */ }",
-      "doc": "`Read` that always returns `0` (EOF). Useful as a placeholder reader\nor in tests that need to assert how a consumer handles an empty source.\n\n# Representation\n\nZero-sized — no fields.",
+      "doc": "`Readable` that always returns `0` (EOF). Useful as a placeholder reader\nor in tests that need to assert how a consumer handles an empty source.\n\n# Representation\n\nZero-sized — no fields.",
       "source_path": "lang/std/io/read.ks",
       "member_groups": [
         {
@@ -115,8 +107,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Read",
-          "source_path": "std.io.read.Read",
+          "label": "Readable",
+          "source_path": "std.io.read.Readable",
           "members": [
             {
               "kind": "function",
@@ -132,10 +124,10 @@
     },
     {
       "kind": "protocol",
-      "name": "Read",
-      "anchor": "protocol-Read",
-      "signature": "public protocol Read",
-      "doc": "Protocol for byte-source streams.\n\nA single `read(into:)` call reads up to `buf.count` bytes into the\nprovided slice and returns how many actually landed. A return of `0`\nmeans end-of-stream; a partial read (`n < buf.count`) is *not* an\nerror — the caller is expected to loop, or to use `readExact` /\n`readAll` when a specific shape is required.\n\n# Examples\n\n```\npublic struct DigitsReader: Read {\n    var next: UInt8\n    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {\n        if buf.count == 0 { return .Ok(0) }\n        buf.pointer.write(self.next);\n        self.next = self.next + 1;\n        .Ok(1)\n    }\n}\n```",
+      "name": "Readable",
+      "anchor": "protocol-Readable",
+      "signature": "public protocol Readable",
+      "doc": "Protocol for byte-source streams.\n\nA single `read(into:)` call reads up to `buf.count` bytes into the\nprovided slice and returns how many actually landed. A return of `0`\nmeans end-of-stream; a partial read (`n < buf.count`) is *not* an\nerror — the caller is expected to loop, or to use `readExact` /\n`readAll` when a specific shape is required.\n\n# Examples\n\n```\npublic struct DigitsReader: Readable {\n    var next: UInt8\n    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {\n        if buf.count == 0 { return .Ok(0) }\n        buf.pointer.write(self.next);\n        self.next = self.next + 1;\n        .Ok(1)\n    }\n}\n```",
       "source_path": "lang/std/io/read.ks",
       "member_groups": [
         {
@@ -160,7 +152,7 @@
       "name": "Repeat",
       "anchor": "struct-Repeat",
       "signature": "public struct Repeat { /* private fields */ }",
-      "doc": "`Read` that yields the same byte forever — analogous to `/dev/zero`\n(with `byte: 0`) or `yes(1)`. Each `read` fills the entire destination.\n\n# Representation\n\nOne `UInt8` field for the repeated byte.",
+      "doc": "`Readable` that yields the same byte forever — analogous to `/dev/zero`\n(with `byte: 0`) or `yes(1)`. Each `read` fills the entire destination.\n\n# Representation\n\nOne `UInt8` field for the repeated byte.",
       "source_path": "lang/std/io/read.ks",
       "member_groups": [
         {
@@ -188,8 +180,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Read",
-          "source_path": "std.io.read.Read",
+          "label": "Readable",
+          "source_path": "std.io.read.Readable",
           "members": [
             {
               "kind": "function",
@@ -207,7 +199,7 @@
       "kind": "function",
       "name": "readAll",
       "anchor": "function-readAll",
-      "signature": "public func readAll[R](mutating R, into: mutating Array[UInt8]) -> Result[Int64, IoError] where R: Read",
+      "signature": "public func readAll[R](mutating R, into: mutating Array[UInt8]) -> Result[Int64, IoError] where R: Readable",
       "doc": "Drains `reader` into `buf`, appending every byte until EOF. Reads in\n4 KiB chunks. Returns the total number of bytes appended.\n\n# Examples\n\n```\nvar bytes = Array[UInt8]();\nvar file = try File.open(\"input.bin\");\nlet total = try readAll(file, into: bytes);\n```",
       "source_path": "lang/std/io/read.ks"
     },
@@ -215,7 +207,7 @@
       "kind": "function",
       "name": "readByte",
       "anchor": "function-readByte",
-      "signature": "public func readByte[R](mutating R) -> Result[Optional[UInt8], IoError] where R: Read",
+      "signature": "public func readByte[R](mutating R) -> Result[Optional[UInt8], IoError] where R: Readable",
       "doc": "Reads exactly one byte. Returns `.Ok(.None)` on EOF, `.Ok(.Some(b))`\non success, or propagates a reader error.\n\n# Examples\n\n```\nmatch try readByte(reader) {\n    .Some(b) => use(b),\n    .None => /* EOF */ break\n}\n```",
       "source_path": "lang/std/io/read.ks"
     },
@@ -223,7 +215,7 @@
       "kind": "function",
       "name": "readExact",
       "anchor": "function-readExact",
-      "signature": "public func readExact[R](mutating R, into: Slice[UInt8]) -> Result[(), IoError] where R: Read",
+      "signature": "public func readExact[R](mutating R, into: Slice[UInt8]) -> Result[(), IoError] where R: Readable",
       "doc": "Reads exactly `buf.count` bytes; treats a short read (EOF reached\nearly) as an error rather than a quiet truncation. Use when the\ncaller wants binary fidelity — e.g. reading a fixed-width header.\n\n# Errors\n\nReturns `.Err(invalidInput())` if EOF is reached before `buf.count`\nbytes have been collected.\n\n# Examples\n\n```\nvar header = Array[UInt8](repeating: 0, count: 16);\ntry readExact(file, into: header.asSlice());   // must read 16 bytes\n```",
       "source_path": "lang/std/io/read.ks"
     }

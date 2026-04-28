@@ -4,10 +4,10 @@
 module Test
 
         func main() -> lang.i64 {
-            let normal: std.num.Float64 = 1.0;
-            let zero = std.num.Float64.zero;
-            let inf = std.num.Float64.infinity;
-            let nan = std.num.Float64.nan;
+            let normal: std.numeric.Float64 = 1.0;
+            let zero = std.numeric.Float64.zero;
+            let inf = std.numeric.Float64.infinity;
+            let nan = std.numeric.Float64.nan;
             let negInf = inf.negate();
 
             // isNaN
@@ -35,7 +35,7 @@ module Test
             if nan.isNormal { return 16 }
 
             // isSubnormal - minPositive / 2 should be subnormal
-            let minPos = std.num.Float64.minPositive;
+            let minPos = std.numeric.Float64.minPositive;
             let subnormal = minPos.divide(2.0);
             if subnormal.isSubnormal == false { return 17 }
             if normal.isSubnormal { return 18 }

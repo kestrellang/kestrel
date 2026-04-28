@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test swap
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(10);
             arr.append(20);
             arr.append(30);
@@ -33,7 +33,7 @@ module Test
             if arr(unchecked: 0) != 10 { return 11 }
 
             // Test rotate left by 2
-            var rotArr = std.collections.Array[std.num.Int64]();
+            var rotArr = std.collections.Array[std.numeric.Int64]();
             rotArr.append(1);
             rotArr.append(2);
             rotArr.append(3);
@@ -48,17 +48,17 @@ module Test
             if rotArr(unchecked: 4) != 2 { return 16 }
 
             // Test replaceSubrange
-            var repArr = std.collections.Array[std.num.Int64]();
+            var repArr = std.collections.Array[std.numeric.Int64]();
             repArr.append(1);
             repArr.append(2);
             repArr.append(3);
             repArr.append(4);
             repArr.append(5);
-            var replacement = std.collections.Array[std.num.Int64]();
+            var replacement = std.collections.Array[std.numeric.Int64]();
             replacement.append(20);
             replacement.append(30);
             // Replace range 1..<4 ([2,3,4]) with [20,30]
-            repArr.replaceSubrange(std.core.Range[std.num.Int64](1, 4), with: replacement);
+            repArr.replaceSubrange(std.core.Range[std.numeric.Int64](1, 4), with: replacement);
             // Result should be [1, 20, 30, 5]
             if repArr.count != 4 { return 17 }
             if repArr(unchecked: 0) != 1 { return 18 }

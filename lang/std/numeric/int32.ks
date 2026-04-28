@@ -1,7 +1,7 @@
-// UInt32 - 32-bit unsigned integer
+// Int32 - 32-bit signed integer
 // Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
-module std.num
+module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
@@ -15,11 +15,11 @@ import std.core.(
 )
 import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64)
 
-/// A 32-bit unsigned integer.
+/// A 32-bit signed integer.
 ///
-/// UInt32 is the 32-bit member of the integer family. The same surface
+/// Int32 is the 32-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
 /// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
 /// `*Checked` variants for overflow detection or `*Saturating` to clamp to
@@ -46,8 +46,8 @@ import std.num.(UInt8, Int64, UInt64)
 ///
 /// A single `lang.i32` field. No padding, no headers — bit-identical
 /// to the corresponding C type.
-public struct UInt32:
-    UnsignedInteger,
+public struct Int32:
+    SignedInteger,
     Steppable,
     Comparable,
     Equatable,
@@ -59,7 +59,7 @@ public struct UInt32:
     Multipliable,
     Divisible,
     Modulo,
-    
+    Negatable,
     BitwiseAnd,
     BitwiseOr,
     BitwiseXor,
@@ -83,10 +83,10 @@ public struct UInt32:
     ClosedRangeConstructible,
     Convertible[Int8],
     Convertible[Int16],
-    Convertible[Int32],
     Convertible[Int64],
     Convertible[UInt8],
     Convertible[UInt16],
+    Convertible[UInt32],
     Convertible[UInt64]
 {
     /// The underlying primitive `lang.i32` value. Exposed for FFI
@@ -98,20 +98,20 @@ public struct UInt32:
     // ========================================================================
 
     /// The additive identity, `0`.
-    public static var zero: UInt32 { 0 }
+    public static var zero: Int32 { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: UInt32 { 0 }
+    public static var one: Int32 { 0 }
 
     /// The smallest representable value.
-    /// This is always 0 for unsigned types.
+    /// This is -2^31 (-2_147_483_648).
     /// Note that for signed types `minValue.negate()` overflows back to
     /// itself; use `negateChecked()` if you need to detect that.
-    public static var minValue: UInt32 { UInt32(intLiteral: 0) }
+    public static var minValue: Int32 { Int32(raw: lang.i32_shl(1, 31)) }
 
     /// The largest representable value.
-    /// This is 2^32 - 1 (4_294_967_295).
-    public static var maxValue: UInt32 { 4294967295 }
+    /// This is 2^31 - 1 (2_147_483_647).
+    public static var maxValue: Int32 { 2147483647 }
 
     /// The width in bits (32). Useful for shift bounds and bit-walks.
     public static var bitWidth: Int64 { 32 }
@@ -121,7 +121,7 @@ public struct UInt32:
     // ========================================================================
 
     /// @name Int Literal
-    /// Compiler-emitted bridge that turns an integer literal into a UInt32.
+    /// Compiler-emitted bridge that turns an integer literal into a Int32.
     ///
     /// You will rarely call this directly — write the literal and let the
     /// `ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
@@ -164,10 +164,6 @@ public struct UInt32:
     /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: Int16) { self.raw = lang.cast_i16_i32(other.raw) }
     /// @name From Integer
-    /// Converts from `Int32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int32) { self.raw = other.raw }
-    /// @name From Integer
     /// Converts from `Int64`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: Int64) { self.raw = lang.cast_i64_i32(other.raw) }
@@ -180,6 +176,10 @@ public struct UInt32:
     /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: UInt16) { self.raw = lang.cast_u16_i32(other.raw) }
     /// @name From Integer
+    /// Converts from `UInt32`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
+    public init(from other: UInt32) { self.raw = other.raw }
+    /// @name From Integer
     /// Converts from `UInt64`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
     public init(from other: UInt64) { self.raw = lang.cast_u64_i32(other.raw) }
@@ -188,22 +188,21 @@ public struct UInt32:
     // SIGN INSPECTION (Properties)
     // ========================================================================
 
-    /// Sign as a `UInt32`: `0` for zero, `1` otherwise (unsigned types
-    /// have no negative values).
-    public var sign: UInt32 { get {
-        if Bool(boolLiteral: lang.i32_eq(self.raw, 0)) { UInt32.zero }
-        else { UInt32.one }
+    /// Sign as a `Int32`: `-1`, `0`, or `1`.
+    public var sign: Int32 { get {
+        if Bool(boolLiteral: lang.i32_signed_lt(self.raw, 0)) { Int32(intLiteral: lang.i64_neg(1)) }
+        else if Bool(boolLiteral: lang.i32_eq(self.raw, 0)) { Int32.zero }
+        else { Int32.one }
     }}
 
     /// True when `self > 0`.
     public var isPositive: Bool { get {
-        Bool(boolLiteral: lang.i32_unsigned_gt(self.raw, 0))
+        Bool(boolLiteral: lang.i32_signed_gt(self.raw, 0))
     }}
 
-    /// Always `false` — unsigned types cannot be negative.
+    /// True when `self < 0`.
     public var isNegative: Bool { get {
-        // Unsigned types are never negative
-        false
+        Bool(boolLiteral: lang.i32_signed_lt(self.raw, 0))
     }}
 
     /// True when `self == 0`.
@@ -229,7 +228,7 @@ public struct UInt32:
     /// (0).isPowerOfTwo;   // false
     /// ```
     public var isPowerOfTwo: Bool { get {
-        if Bool(boolLiteral: lang.i32_eq(self.raw, 0)) { false }
+        if Bool(boolLiteral: lang.i32_signed_lt(self.raw, 1)) { false }
         else { Bool(boolLiteral: lang.i32_eq(lang.i32_and(self.raw, lang.i32_sub(self.raw, 1)), 0)) }
     }}
 
@@ -276,8 +275,8 @@ public struct UInt32:
 
     /// Value with its byte order reversed. Use to convert between big- and
     /// little-endian; lowered to a `bswap` intrinsic.
-    public var byteSwapped: UInt32 { get {
-        UInt32(raw: lang.i32_bswap(self.raw))
+    public var byteSwapped: Int32 { get {
+        Int32(raw: lang.i32_bswap(self.raw))
     }}
 
     // ========================================================================
@@ -292,12 +291,12 @@ public struct UInt32:
     /// (42).equals(other: 42);  // true
     /// 42 == 42;                // true
     /// ```
-    public func equals(other: UInt32) -> Bool {
+    public func equals(other: Int32) -> Bool {
         Bool(boolLiteral: lang.i32_eq(self.raw, other.raw))
     }
 
     /// Pattern-matching hook for `Matchable`. Identical to `equals`.
-    public func matches(other: UInt32) -> Bool {
+    public func matches(other: Int32) -> Bool {
         Bool(boolLiteral: lang.i32_eq(self.raw, other.raw))
     }
 
@@ -311,9 +310,9 @@ public struct UInt32:
     /// (2).compare(other: 2);   // .Equal
     /// (3).compare(other: 2);   // .Greater
     /// ```
-    public func compare(other: UInt32) -> Ordering {
-        if Bool(boolLiteral: lang.i32_unsigned_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.i32_unsigned_gt(self.raw, other.raw)) { .Greater }
+    public func compare(other: Int32) -> Ordering {
+        if Bool(boolLiteral: lang.i32_signed_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.i32_signed_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -323,19 +322,19 @@ public struct UInt32:
 
     /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
     /// integer ranges.
-    public func successor() -> UInt32 { self.add(UInt32.one) }
+    public func successor() -> Int32 { self.add(Int32.one) }
 
     /// Predecessor — `self - 1`. Wraps at `minValue`.
-    public func predecessor() -> UInt32 { self.subtract(UInt32.one) }
+    public func predecessor() -> Int32 { self.subtract(Int32.one) }
 
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-    public func exclusiveRange(to end: UInt32) -> Range[UInt32] {
-        Range[UInt32](self, end)
+    public func exclusiveRange(to end: Int32) -> Range[Int32] {
+        Range[Int32](self, end)
     }
 
     /// Builds a closed range `self..=end`. Sugar for the `..=` operator.
-    public func inclusiveRange(to end: UInt32) -> ClosedRange[UInt32] {
-        ClosedRange[UInt32](self, end)
+    public func inclusiveRange(to end: Int32) -> ClosedRange[Int32] {
+        ClosedRange[Int32](self, end)
     }
 
     // ========================================================================
@@ -346,27 +345,27 @@ public struct UInt32:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[UInt32]()))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[Int32]()))
     }
 
     // ========================================================================
     // ASSOCIATED TYPE BINDINGS
     // ========================================================================
 
-    type Addable.Output = UInt32
-    type Subtractable.Output = UInt32
-    type Multipliable.Output = UInt32
-    type Divisible.Output = UInt32
-    type Modulo.Output = UInt32
-    
-    type BitwiseAnd.Output = UInt32
-    type BitwiseOr.Output = UInt32
-    type BitwiseXor.Output = UInt32
-    type BitwiseNot.Output = UInt32
-    type LeftShift.Output = UInt32
-    type RightShift.Output = UInt32
-    type RangeConstructible.Output = Range[UInt32]
-    type ClosedRangeConstructible.Output = ClosedRange[UInt32]
+    type Addable.Output = Int32
+    type Subtractable.Output = Int32
+    type Multipliable.Output = Int32
+    type Divisible.Output = Int32
+    type Modulo.Output = Int32
+    type Negatable.Output = Int32
+    type BitwiseAnd.Output = Int32
+    type BitwiseOr.Output = Int32
+    type BitwiseXor.Output = Int32
+    type BitwiseNot.Output = Int32
+    type LeftShift.Output = Int32
+    type RightShift.Output = Int32
+    type RangeConstructible.Output = Range[Int32]
+    type ClosedRangeConstructible.Output = ClosedRange[Int32]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)
@@ -374,13 +373,13 @@ public struct UInt32:
 
     /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
     /// `addSaturating` to clamp.
-    public func add(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_add(self.raw, other.raw)) }
+    public func add(other: Int32) -> Int32 { Int32(raw: lang.i32_add(self.raw, other.raw)) }
 
     /// `self - other`, wrapping on overflow.
-    public func subtract(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_sub(self.raw, other.raw)) }
+    public func subtract(other: Int32) -> Int32 { Int32(raw: lang.i32_sub(self.raw, other.raw)) }
 
     /// `self * other`, wrapping on overflow.
-    public func multiply(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_mul(self.raw, other.raw)) }
+    public func multiply(other: Int32) -> Int32 { Int32(raw: lang.i32_mul(self.raw, other.raw)) }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -389,7 +388,7 @@ public struct UInt32:
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public func divide(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_div(self.raw, other.raw)) }
+    public func divide(other: Int32) -> Int32 { Int32(raw: lang.i32_signed_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -397,41 +396,54 @@ public struct UInt32:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public func modulo(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.raw, other.raw)) }
+    public func modulo(other: Int32) -> Int32 { Int32(raw: lang.i32_signed_rem(self.raw, other.raw)) }
 
-    
-    
+    /// Two's-complement negation. Wraps at the minimum value:
+    /// `Int32.minValue.negate() == Int32.minValue`. Use
+    /// `negateChecked` to surface the overflow.
+    public func negate() -> Int32 { Int32(raw: lang.i32_neg(self.raw)) }
+    /// Absolute value. Wraps at the minimum value
+    /// (`Int32.minValue.abs() == Int32.minValue`); use
+    /// `absChecked` if that's a problem.
+    public func abs() -> Int32 { if Bool(boolLiteral: lang.i32_signed_lt(self.raw, 0)) { self.negate() } else { self } }
 
     // ========================================================================
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
     // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` on overflow. For unsigned types
-    /// overflow is detected via `result < self`.
-    public func addChecked(other: UInt32) -> UInt32? {
+    /// Wrapping addition that returns `None` instead of overflowing.
+    public func addChecked(other: Int32) -> Int32? {
+        // Simplified check - detect if signs are same and result sign differs
         let result = self.add(other);
-        // For unsigned, overflow if result < either operand
-        if result < self {
+        if self.isPositive and other.isPositive and result.isNegative {
+            return .None
+        };
+        if self.isNegative and other.isNegative and result.isPositive {
             return .None
         };
         .Some(result)
     }
 
-    /// Subtraction that returns `None` on underflow (`other > self`).
-    public func subtractChecked(other: UInt32) -> UInt32? {
-        // For unsigned, underflow if other > self
-        if other > self {
+    /// Wrapping subtraction that returns `None` instead of overflowing.
+    public func subtractChecked(other: Int32) -> Int32? {
+        // Simplified check
+        let result = self.subtract(other);
+        if self.isPositive and other.isNegative and result.isNegative {
             return .None
         };
-        .Some(self.subtract(other))
+        if self.isNegative and other.isPositive and result.isPositive {
+            return .None
+        };
+        .Some(result)
     }
 
-    /// Wrapping multiplication that returns `None` on overflow. Implemented
-    /// by multiplying then dividing back.
-    public func multiplyChecked(other: UInt32) -> UInt32? {
-        if other == UInt32.zero {
-            return .Some(UInt32.zero)
+    /// Wrapping multiplication that returns `None` instead of overflowing.
+    /// Implemented by multiplying then dividing back; replace with an
+    /// overflow-detecting intrinsic when one is available.
+    public func multiplyChecked(other: Int32) -> Int32? {
+        if other == Int32.zero {
+            return .Some(Int32.zero)
         };
         let result = self.multiply(other);
         // Check by dividing back
@@ -441,12 +453,34 @@ public struct UInt32:
         .Some(result)
     }
 
-    /// Division that returns `None` for divide-by-zero.
-    public func divideChecked(other: UInt32) -> UInt32? {
-        if other == UInt32.zero {
+    /// Division that returns `None` for divide-by-zero or for the
+    /// `minValue / -1` overflow case.
+    public func divideChecked(other: Int32) -> Int32? {
+        if other == Int32.zero {
+            return .None
+        };
+        // Check for minValue / -1 overflow
+        if self == Int32.minValue and other == Int32(intLiteral: lang.i64_neg(1)) {
             return .None
         };
         .Some(self.divide(other))
+    }
+
+    /// Negation that returns `None` for `minValue` (whose negation overflows).
+    public func negateChecked() -> Int32? {
+        if self == Int32.minValue {
+            return .None
+        };
+        .Some(self.negate())
+    }
+
+    /// Absolute value that returns `None` for `minValue` (whose absolute
+    /// value overflows).
+    public func absChecked() -> Int32? {
+        if self == Int32.minValue {
+            return .None
+        };
+        .Some(self.abs())
     }
 
 
@@ -454,31 +488,53 @@ public struct UInt32:
     // ARITHMETIC (Saturating - Clamps to Bounds)
     // ========================================================================
 
-    /// Addition that clamps to `maxValue` on overflow.
-    public func addSaturating(other: UInt32) -> UInt32 {
+    /// Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+    public func addSaturating(other: Int32) -> Int32 {
         let checked = self.addChecked(other);
         match checked {
             .Some(result) => result,
-            .None => UInt32.maxValue
+            .None => if other.isPositive { Int32.maxValue } else { Int32.minValue }
         }
     }
 
-    /// Subtraction that clamps to `0` on underflow (unsigned types cannot
-    /// represent negative results).
-    public func subtractSaturating(other: UInt32) -> UInt32 {
+    /// Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
+    public func subtractSaturating(other: Int32) -> Int32 {
         let checked = self.subtractChecked(other);
         match checked {
             .Some(result) => result,
-            .None => UInt32.zero
+            .None => if other.isNegative { Int32.maxValue } else { Int32.minValue }
         }
     }
 
-    /// Multiplication that clamps to `maxValue` on overflow.
-    public func multiplySaturating(other: UInt32) -> UInt32 {
+    /// Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
+    /// The clamp direction follows the algebraic sign of the would-be result.
+    public func multiplySaturating(other: Int32) -> Int32 {
         let checked = self.multiplyChecked(other);
         match checked {
             .Some(result) => result,
-            .None => UInt32.maxValue
+            .None => {
+                // Determine sign of result
+                let sameSign = (self.isNegative == other.isNegative);
+                if sameSign { Int32.maxValue } else { Int32.minValue }
+            }
+        }
+    }
+
+    /// Negation that returns `maxValue` instead of wrapping `minValue`.
+    public func negateSaturating() -> Int32 {
+        if self == Int32.minValue {
+            Int32.maxValue
+        } else {
+            self.negate()
+        }
+    }
+
+    /// Absolute value that returns `maxValue` instead of wrapping `minValue`.
+    public func absSaturating() -> Int32 {
+        if self == Int32.minValue {
+            Int32.maxValue
+        } else {
+            self.abs()
         }
     }
 
@@ -498,14 +554,14 @@ public struct UInt32:
     /// (3).pow(4);   // 81
     /// (5).pow(-1);  // 0
     /// ```
-    public func pow(exponent: Int64) -> UInt32 {
+    public func pow(exponent: Int64) -> Int32 {
         if exponent < 0 {
-            return UInt32.zero
+            return Int32.zero
         };
         if exponent == 0 {
-            return UInt32.one
+            return Int32.one
         };
-        var result = UInt32.one;
+        var result = Int32.one;
         var base = self;
         var exp = exponent;
         while exp > 0 {
@@ -528,10 +584,10 @@ public struct UInt32:
     /// (17).gcd(5);   // 1   (coprime)
     /// (-12).gcd(8);  // 4
     /// ```
-    public func gcd(other: UInt32) -> UInt32 {
-        var a = self;
-        var b = other;
-        while b != UInt32.zero {
+    public func gcd(other: Int32) -> Int32 {
+        var a = self.abs();
+        var b = other.abs();
+        while b != Int32.zero {
             let t = b;
             b = a.modulo(b);
             a = t
@@ -549,12 +605,12 @@ public struct UInt32:
     /// (3).lcm(5);   // 15
     /// (0).lcm(7);   // 0
     /// ```
-    public func lcm(other: UInt32) -> UInt32 {
-        if self == UInt32.zero or other == UInt32.zero {
-            return UInt32.zero
+    public func lcm(other: Int32) -> Int32 {
+        if self == Int32.zero or other == Int32.zero {
+            return Int32.zero
         };
         let g = self.gcd(other);
-        self.divide(g).multiply(other)
+        self.abs().divide(g).multiply(other.abs())
     }
 
     // ========================================================================
@@ -571,7 +627,7 @@ public struct UInt32:
     /// (-5).clamp(min: 0, max: 10);   // 0
     /// (15).clamp(min: 0, max: 10);   // 10
     /// ```
-    public func clamp(min: UInt32, max: UInt32) -> UInt32 {
+    public func clamp(min: Int32, max: Int32) -> Int32 {
         if self < min { min }
         else if self > max { max }
         else { self }
@@ -582,29 +638,29 @@ public struct UInt32:
     // ========================================================================
 
     /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-    public func bitwiseAnd(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_and(self.raw, other.raw)) }
+    public func bitwiseAnd(other: Int32) -> Int32 { Int32(raw: lang.i32_and(self.raw, other.raw)) }
 
     /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-    public func bitwiseOr(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_or(self.raw, other.raw)) }
+    public func bitwiseOr(other: Int32) -> Int32 { Int32(raw: lang.i32_or(self.raw, other.raw)) }
 
     /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-    public func bitwiseXor(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_xor(self.raw, other.raw)) }
+    public func bitwiseXor(other: Int32) -> Int32 { Int32(raw: lang.i32_xor(self.raw, other.raw)) }
 
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-    public func bitwiseNot() -> UInt32 { UInt32(raw: lang.i32_not(self.raw)) }
+    public func bitwiseNot() -> Int32 { Int32(raw: lang.i32_not(self.raw)) }
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: lang.i64) -> UInt32 { UInt32(raw: lang.i32_shl(self.raw, lang.cast_i64_i32(count))) }
+    public func shiftLeft(by count: lang.i64) -> Int32 { Int32(raw: lang.i32_shl(self.raw, lang.cast_i64_i32(count))) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: lang.i64) -> UInt32 { UInt32(raw: lang.i32_unsigned_shr(self.raw, lang.cast_i64_i32(count))) }
+    public func shiftRight(by count: lang.i64) -> Int32 { Int32(raw: lang.i32_signed_shr(self.raw, lang.cast_i64_i32(count))) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.
-    public func rotateLeft(by count: Int64) -> UInt32 {
+    public func rotateLeft(by count: Int64) -> Int32 {
         let bits: Int64 = 32;
         let c = count % bits;
         if c == 0 { self }
@@ -613,7 +669,7 @@ public struct UInt32:
 
     /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
     /// `rotateLeft`.
-    public func rotateRight(by count: Int64) -> UInt32 {
+    public func rotateRight(by count: Int64) -> Int32 {
         let bits: Int64 = 32;
         let c = count % bits;
         if c == 0 { self }
@@ -625,21 +681,21 @@ public struct UInt32:
     // ========================================================================
 
     /// `self += other`
-    public mutating func addAssign(other: UInt32) { self = self.add(other) }
+    public mutating func addAssign(other: Int32) { self = self.add(other) }
     /// `self -= other`
-    public mutating func subtractAssign(other: UInt32) { self = self.subtract(other) }
+    public mutating func subtractAssign(other: Int32) { self = self.subtract(other) }
     /// `self *= other`
-    public mutating func multiplyAssign(other: UInt32) { self = self.multiply(other) }
+    public mutating func multiplyAssign(other: Int32) { self = self.multiply(other) }
     /// `self /= other`
-    public mutating func divideAssign(other: UInt32) { self = self.divide(other) }
+    public mutating func divideAssign(other: Int32) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: UInt32) { self = self.modulo(other) }
+    public mutating func modAssign(other: Int32) { self = self.modulo(other) }
     /// `self &= other`
-    public mutating func bitwiseAndAssign(other: UInt32) { self = self.bitwiseAnd(other) }
+    public mutating func bitwiseAndAssign(other: Int32) { self = self.bitwiseAnd(other) }
     /// `self |= other`
-    public mutating func bitwiseOrAssign(other: UInt32) { self = self.bitwiseOr(other) }
+    public mutating func bitwiseOrAssign(other: Int32) { self = self.bitwiseOr(other) }
     /// `self ^= other`
-    public mutating func bitwiseXorAssign(other: UInt32) { self = self.bitwiseXor(other) }
+    public mutating func bitwiseXorAssign(other: Int32) { self = self.bitwiseXor(other) }
     /// `self <<= count`
     public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
     /// `self >>= count`
@@ -656,7 +712,7 @@ public struct UInt32:
     /// # Examples
     ///
     /// ```
-    /// let bytes = UInt32.maxValue.toBytes();   // 4 bytes, host order
+    /// let bytes = Int32.maxValue.toBytes();   // 4 bytes, host order
     /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 4);
@@ -702,13 +758,13 @@ public struct UInt32:
         result
     }
 
-    /// Reassembles a `UInt32` from 4 bytes in native (host) byte
+    /// Reassembles a `Int32` from 4 bytes in native (host) byte
     /// order. Returns `None` if the input is not exactly 4 bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt32? {
+    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int32? {
         if bytes.count != 4 {
             return .None
         }
-        var value = UInt32.zero;
+        var value = Int32.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 4 {
@@ -718,9 +774,9 @@ public struct UInt32:
         .Some(value)
     }
 
-    /// Reassembles a `UInt32` from 4 bytes in big-endian order.
+    /// Reassembles a `Int32` from 4 bytes in big-endian order.
     /// Returns `None` if the input is not exactly 4 bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt32? {
+    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int32? {
         if bytes.count != 4 {
             return .None
         }
@@ -731,12 +787,12 @@ public struct UInt32:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        .Some(UInt32(from: result))
+        .Some(Int32(from: result))
     }
 
-    /// Reassembles a `UInt32` from 4 bytes in little-endian order.
+    /// Reassembles a `Int32` from 4 bytes in little-endian order.
     /// Returns `None` if the input is not exactly 4 bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt32? {
+    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int32? {
         if bytes.count != 4 {
             return .None
         }
@@ -748,40 +804,42 @@ public struct UInt32:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        .Some(UInt32(from: result))
+        .Some(Int32(from: result))
     }
 
     // ========================================================================
     // PARSING
     // ========================================================================
 
-    /// Parses a base-10 unsigned integer literal, optionally prefixed
-    /// with `+`. A leading `-` is rejected. Returns `None` for an empty
-    /// string, a non-digit character, or a value that does not fit in
-    /// `UInt32`.
+    /// Parses a base-10 integer literal, optionally prefixed with `+` or
+    /// `-`. Returns `None` for an empty string, a non-digit character,
+    /// or a value that does not fit in `Int32`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt32.parse(string: "42");   // Some(42)
-    /// UInt32.parse(string: "-1");   // None  (no sign for unsigned)
-    /// UInt32.parse(string: "");     // None
+    /// Int32.parse(string: "42");    // Some(42)
+    /// Int32.parse(string: "-7");    // Some(-7)
+    /// Int32.parse(string: "abc");   // None
+    /// Int32.parse(string: "");      // None
     /// ```
-    public static func parse(string: String) -> UInt32? {
+    public static func parse(string: String) -> Int32? {
         let len = string.byteCount;
         if len == 0 {
             return .None
         }
 
         var index: Int64 = 0;
+        var isNegative = false;
 
-        // Check for optional + sign
+        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 43 {  // '+'
+        if firstByteVal == 45 {  // '-'
+            isNegative = true;
             index = 1
-        } else if firstByteVal == 45 {  // '-' not allowed for unsigned
-            return .None
+        } else if firstByteVal == 43 {  // '+'
+            index = 1
         }
 
         // Must have at least one digit
@@ -789,14 +847,13 @@ public struct UInt32:
             return .None
         }
 
-        // Parse digits using UInt64 for accumulation
-        var result: UInt64 = 0;
-        let maxBeforeMultiply: UInt64 = 1844674407370955161;
-        let maxVal: UInt64 = UInt64(from: UInt32.maxValue);
+        // Parse digits using Int64 for accumulation
+        var result: Int64 = 0;
+        let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
 
         while index < len {
             let byte: UInt8 = string.bytes(unchecked: index);
-            let byteVal = UInt64(from: byte);
+            let byteVal = Int64(from: byte);
 
             // Check if digit (0-9 = 48-57)
             if byteVal < 48 or byteVal > 57 {
@@ -812,7 +869,7 @@ public struct UInt32:
             result = result * 10;
 
             // Check for overflow before add
-            if result > UInt64.maxValue - digit {
+            if result > 9223372036854775807 - digit {
                 return .None
             }
             result = result + digit;
@@ -820,26 +877,33 @@ public struct UInt32:
             index = index + 1
         }
 
-        // Check bounds for target type
-        if result > maxVal {
-            return .None
+        // Apply sign and check bounds for target type
+        if isNegative {
+            result = result.negate();
+            if result < Int64(from: Int32.minValue) {
+                return .None
+            }
+        } else {
+            if result > Int64(from: Int32.maxValue) {
+                return .None
+            }
         }
 
-        .Some(UInt32(from: result))
+        .Some(Int32(from: result))
     }
-    /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-    /// a–z are case-insensitive and represent digit values 10–35. A
-    /// leading `+` is allowed but a leading `-` is rejected. Returns
-    /// `None` for an out-of-range radix, an empty string, an
-    /// unrecognised digit, or a value that overflows `UInt32`.
+    /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
+    /// case-insensitive and represent digit values 10–35. Returns `None`
+    /// for an out-of-range radix, an empty string, an unrecognised digit,
+    /// or a value that overflows `Int32`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-    /// UInt32.parse(string: "101010", radix: 2);  // Some(42)
+    /// Int32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// Int32.parse(string: "101010", radix: 2);  // Some(42)
+    /// Int32.parse(string: "z", radix: 36);      // Some(35)
     /// ```
-    public static func parse(string: String, radix: Int64) -> UInt32? {
+    public static func parse(string: String, radix: Int64) -> Int32? {
         if radix < 2 or radix > 36 {
             return .None
         }
@@ -850,14 +914,16 @@ public struct UInt32:
         }
 
         var index: Int64 = 0;
+        var isNegative = false;
 
-        // Optional `+`; reject leading `-` outright.
+        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 43 {
+        if firstByteVal == 45 {  // '-'
+            isNegative = true;
             index = 1
-        } else if firstByteVal == 45 {
-            return .None
+        } else if firstByteVal == 43 {  // '+'
+            index = 1
         }
 
         // Must have at least one digit
@@ -866,7 +932,11 @@ public struct UInt32:
         }
 
         let radixU: UInt64 = UInt64(from: radix);
-        let maxVal: UInt64 = UInt64(from: UInt32.maxValue);
+        let maxMagnitude: UInt64 = if isNegative {
+            UInt64(from: Int32.maxValue) + 1
+        } else {
+            UInt64(from: Int32.maxValue)
+        };
 
         var result: UInt64 = 0;
 
@@ -889,14 +959,24 @@ public struct UInt32:
             }
 
             let digitU: UInt64 = UInt64(from: digit);
-            if result > (maxVal - digitU) / radixU {
+            if result > (maxMagnitude - digitU) / radixU {
                 return .None
             }
             result = result * radixU + digitU;
             index = index + 1
         }
 
-        .Some(UInt32(from: result))
+        // Magnitude fits — `result` ≤ maxMagnitude, which is `maxValue` for
+        // positives or `|minValue|` for negatives. For negatives we cast
+        // first (the `|minValue|` bit pattern reinterprets to `minValue`)
+        // then negate; two's-complement negation of `minValue` wraps back
+        // to `minValue`, so the boundary case lands correctly.
+        let typedResult = Int32(from: result);
+        if isNegative {
+            .Some(typedResult.negate())
+        } else {
+            .Some(typedResult)
+        }
     }
 
     // ========================================================================
@@ -928,7 +1008,10 @@ public struct UInt32:
     /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var n = self;
-        let isNegative = false;
+        let isNegative = n < 0;
+        if isNegative {
+            n = n.negate()
+        }
 
         // Get radix (default 10)
         var radix: Int64 = options.radix;
@@ -938,12 +1021,12 @@ public struct UInt32:
 
         // Build digits in reverse order
         var digits = String();
-        if n == UInt32.zero {
+        if n == Int32.zero {
             digits.appendByte(48)  // '0'
         } else {
-            let radixVal: UInt32 = UInt32(from: radix);
-            while n != UInt32.zero {
-                let digit: UInt32 = n % radixVal;
+            let radixVal: Int32 = Int32(from: radix);
+            while n != Int32.zero {
+                let digit: Int32 = n % radixVal;
                 let digitVal: Int64 = Int64(from: digit);
                 let charCode: Int64 = if digitVal < 10 {
                     digitVal + 48  // '0'-'9'
@@ -960,8 +1043,10 @@ public struct UInt32:
         // Build result string
         var result = String();
 
-        // Add sign prefix (unsigned types only show + if requested)
-        if options.sign == .Always {
+        // Add sign prefix
+        if isNegative {
+            result.appendByte(45)  // '-'
+        } else if options.sign == .Always {
             result.appendByte(43)  // '+'
         } else if options.sign == .Space {
             result.appendByte(32)  // ' '

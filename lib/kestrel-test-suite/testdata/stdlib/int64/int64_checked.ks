@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let a: std.num.Int64 = 10;
-            let b: std.num.Int64 = 5;
+            let a: std.numeric.Int64 = 10;
+            let b: std.numeric.Int64 = 5;
 
             // addChecked - normal case
             let addResult = a.addChecked(b);
@@ -13,7 +13,7 @@ module Test
             if addResult.unwrap() != 15 { return 2 }
 
             // addChecked - overflow
-            let maxVal = std.num.Int64.maxValue;
+            let maxVal = std.numeric.Int64.maxValue;
             let overflowAdd = maxVal.addChecked(1);
             if overflowAdd.isSome() { return 3 }
 
@@ -23,7 +23,7 @@ module Test
             if subResult.unwrap() != 5 { return 5 }
 
             // subtractChecked - underflow
-            let minVal = std.num.Int64.minValue;
+            let minVal = std.numeric.Int64.minValue;
             let overflowSub = minVal.subtractChecked(1);
             if overflowSub.isSome() { return 6 }
 
@@ -42,12 +42,12 @@ module Test
             if divResult.unwrap() != 2 { return 11 }
 
             // divideChecked - division by zero
-            let zero: std.num.Int64 = 0;
+            let zero: std.numeric.Int64 = 0;
             let divZero = a.divideChecked(zero);
             if divZero.isSome() { return 12 }
 
             // divideChecked - minValue / -1 overflow
-            let negOne: std.num.Int64 = -1;
+            let negOne: std.numeric.Int64 = -1;
             let divOverflow = minVal.divideChecked(negOne);
             if divOverflow.isSome() { return 13 }
 
@@ -61,7 +61,7 @@ module Test
             if negOverflow.isSome() { return 16 }
 
             // absChecked - normal case
-            let negFive: std.num.Int64 = -5;
+            let negFive: std.numeric.Int64 = -5;
             let absResult = negFive.absChecked();
             if absResult.isNone() { return 17 }
             if absResult.unwrap() != 5 { return 18 }

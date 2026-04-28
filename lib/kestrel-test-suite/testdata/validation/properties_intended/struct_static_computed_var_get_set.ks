@@ -6,15 +6,15 @@ module Main
 import std.io.stdio.println
 
 public struct Foo {
-    private static var _s: std.num.Int64 = 5;
+    private static var _s: std.numeric.Int64 = 5;
 
-    public static var structStaticComputedVar: std.num.Int64 {
+    public static var structStaticComputedVar: std.numeric.Int64 {
         get { _s }
         set { _s = newValue }
     }
 }
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let _ = println(Foo.structStaticComputedVar);
     Foo.structStaticComputedVar = 7;
     let _ = println(Foo.structStaticComputedVar);

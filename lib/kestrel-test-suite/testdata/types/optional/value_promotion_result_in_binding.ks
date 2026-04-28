@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Main
-import std.num.Int64
+import std.numeric.Int64
 import std.text.String
 func test() {
     let r: Int64 throws String = 42;

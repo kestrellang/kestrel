@@ -47,13 +47,6 @@ std/
 std.core, std.text, std.collections, std.iter
 ```
 
-**Modules are plural, types are singular.** The module is the container, the type is the thing.
-
-```
-std.collections.Array       // not std.collection.Array
-std.collections.Dictionary  // not std.collection.Dictionary
-```
-
 **Avoid deep nesting.** Two levels is the norm, three is allowed for genuine sub-domains, four or more is a smell.
 
 ```
@@ -69,12 +62,16 @@ std.text.unicode.tables.casefolding
 
 Spell it out. No shortcuts, no acronyms (except universally understood ones like UTF8, FFI, IO).
 
+Two-letter initialisms for well-known system domains are allowed in module names: `io`, `fs`, `ffi`.
+
 ```
 // Good
 count, capacity, remaining, pointer, address
+std.io, std.os.fs, std.ffi
 
 // Bad
 cnt, cap, rem, ptr, addr
+std.inputOutput, std.foreignFunctionInterface
 ```
 
 This applies to method names, properties, labels, type names, and associated types.
@@ -104,9 +101,18 @@ LeftShift     (not LeftShiftable)
 Negate        (not Negateable)
 FFISafe       (not FFISafeable)
 Equal         (not Equalable)
+Modulo        (not Modulable)
 ```
 
 The test: say it out loud. If the `-able` form sounds natural, use it. If it sounds clunky, drop to a short name.
+
+**Overload noun** — the protocol exists to let multiple types appear in the same position (operator overloading, subscript index overloading, etc.). The name describes the *role* the conformer plays, not an ability.
+
+```
+BytesSubstringIndex     // conformer can be a substring index into BytesView
+CharsSubstringIndex     // conformer can be a substring index into CharsView
+SignedInteger           // conformer is a signed integer
+```
 
 ## 5. Associated types are full words describing the role
 
@@ -155,17 +161,19 @@ replace, filter, fold, collect, append, insert, remove
 isEmpty, isNull, isSorted(), isValid(index:), isSubset(of:)
 ```
 
-**Labels are prepositions or participles** — `with:`, `from:`, `by:`, `of:`, `at:`, `matching:`, `combining:`, `using:`. Not bare nouns like `transform:`, `action:`, `predicate:`, `element:`.
+**Labels are prepositions or participles** — `with:`, `from:`, `by:`, `of:`, `at:`, `matching:`, `combining:`, `mapping:`, `using:`, `byKey:`. Not bare nouns like `transform:`, `action:`, `predicate:`, `element:`.
 
 ```
 // Good
 replace("foo", with: "bar")
 shuffle(using: rng)
 insert("x", at: 3)
+sort(byKey: { it.age })
 
 // Bad
 filter(predicate: { it > 0 })
 forEach(action: { print(it) })
+sort(keyExtractor: { it.age })
 ```
 
 **Don't duplicate meaning** between method name and label.
@@ -215,6 +223,8 @@ Both are fine for any complexity. The distinction is semantic:
 
 - **Properties** — describe state or attributes of the value: `count`, `isEmpty`, `capacity`, `isNull`, `address`
 - **Methods** — describe actions or computations that feel like "doing something": `collect()`, `fold()`, `iter()`
+
+State queries must be consistent across types: if `isEmpty` is a property on Array, it must be a property on every type that has it — never a method on one type and a property on another. The same applies to `count`, `capacity`, and any other state attribute.
 
 If a property is O(n) or expensive, document it.
 
@@ -278,4 +288,30 @@ toAddress()
 asPointer()
 asSlice()
 asRaw()
+```
+
+## 13. Cross-library consistency
+
+When two libraries expose the same semantic operation, they must use the same name, label, and declaration form. A user shouldn't have to remember that `isEmpty` is a property on Array but a method on BytesView, or that predicates use `matching:` on Set but are unlabeled on Iterator.
+
+Concrete rules:
+
+- **Predicate closures** always use `matching:` — on every type, in every module.
+- **Key-extractor closures** always use `byKey:`.
+- **Combining closures** always use `combining:`.
+- **Mapping closures** always use `mapping:` (or are unlabeled for trailing closures like `map`, `flatMap`).
+- **State queries** (`isEmpty`, `count`, `capacity`) are always properties, never methods.
+- **Same concept, same name** — if collections call it `first(matching:)`, iterators call it `first(matching:)` too, not `find`.
+
+```
+// Good — consistent across Array, Set, Iterator, String
+filter(matching: { it > 0 })
+all(matching: { it.isReady })
+first(matching: { it.isExpired })
+sort(byKey: { it.name })
+fold(from: 0, combining: { a + b })
+
+// Bad — different names/labels for the same thing
+Array.all(satisfying: ...)   // vs Set.all(matching: ...)
+Iterator.find(...)           // vs Array.first(matching: ...)
 ```

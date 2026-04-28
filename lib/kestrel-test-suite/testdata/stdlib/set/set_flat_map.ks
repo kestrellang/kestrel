@@ -4,13 +4,13 @@
 module Test
 
         func main() -> lang.i64 {
-            var s = std.collections.Set[std.num.Int64]();
+            var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(1);
             let _ = s.insert(2);
 
             // flatMap: transform returns Set, results are unioned
             let result = s.flatMap({ (x) in
-                var inner = std.collections.Set[std.num.Int64]();
+                var inner = std.collections.Set[std.numeric.Int64]();
                 let _ = inner.insert(x);
                 let _ = inner.insert(x * 10);
                 inner
@@ -23,12 +23,12 @@ module Test
             if result.contains(20) == false { return 5 }
 
             // flatMap with overlapping sets
-            var s2 = std.collections.Set[std.num.Int64]();
+            var s2 = std.collections.Set[std.numeric.Int64]();
             let _ = s2.insert(1);
             let _ = s2.insert(2);
             let _ = s2.insert(3);
             let overlap = s2.flatMap({ (x) in
-                var inner = std.collections.Set[std.num.Int64]();
+                var inner = std.collections.Set[std.numeric.Int64]();
                 let _ = inner.insert(x);
                 let _ = inner.insert(x + 1);
                 inner
@@ -39,9 +39,9 @@ module Test
             if overlap.contains(4) == false { return 8 }
 
             // flatMap on empty set
-            let empty = std.collections.Set[std.num.Int64]();
+            let empty = std.collections.Set[std.numeric.Int64]();
             let emptyResult = empty.flatMap({ (x) in
-                var inner = std.collections.Set[std.num.Int64]();
+                var inner = std.collections.Set[std.numeric.Int64]();
                 let _ = inner.insert(x);
                 inner
             });
@@ -49,7 +49,7 @@ module Test
 
             // flatMap where transform returns empty sets
             let emptyInner = s.flatMap({ (x) in
-                std.collections.Set[std.num.Int64]()
+                std.collections.Set[std.numeric.Int64]()
             });
             if emptyInner.count != 0 { return 10 }
 

@@ -3,11 +3,11 @@
 
 module Test
 
-func get_answer() -> std.num.Int64 {
+func get_answer() -> std.numeric.Int64 {
     42
 }
 
-func call_it(f: () -> std.num.Int64) -> std.num.Int64 {
+func call_it(f: () -> std.numeric.Int64) -> std.numeric.Int64 {
     f()
 }
 

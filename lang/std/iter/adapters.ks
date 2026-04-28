@@ -9,7 +9,7 @@ module std.iter
 
 import std.result.(Optional)
 import std.core.(Bool, Copyable, Cloneable)
-import std.num.(Int64)
+import std.numeric.(Int64)
 
 // ============================================================================
 // TRANSFORMATION ADAPTERS
@@ -31,7 +31,7 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `MapIterator` from `inner` and `transform`. Prefer
     /// `inner.map(transform)`.
-    public init(inner inner: I, transform transform: (I.Item) -> U) {
+    public init(inner inner: I, mapping transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -65,7 +65,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
-    public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
+    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
     }
@@ -99,7 +99,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
     /// `inner.compactMap()`.
-    public init(inner inner: I, transform transform: (I.Item) -> U?) {
+    public init(inner inner: I, mapping transform: (I.Item) -> U?) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -136,7 +136,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.
-    public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
+    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.done = false;
@@ -181,7 +181,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
-    public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
+    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.doneSkipping = false;
@@ -472,14 +472,14 @@ public struct CycleIterator[I]: Iterator where I: Iterator {
 /// # Representation
 ///
 /// Source iterator + a one-bit latch.
-public struct FuseIterator[I]: Iterator where I: Iterator {
+public struct FusedIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var done: Bool
 
     /// @name From Source
-    /// Builds a `FuseIterator` in the "still active" state.
+    /// Builds a `FusedIterator` in the "still active" state.
     public init(inner inner: I) {
         self.inner = inner;
         self.done = false;
@@ -623,7 +623,7 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 
     /// @name From Source
     /// Builds a `FlatMapIterator` with no inner iterator buffered.
-    public init(inner inner: I, transform transform: (I.Item) -> U) {
+    public init(inner inner: I, mapping transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
         self.current = .None;
@@ -720,7 +720,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
-    public init(inner inner: I, inspector inspector: (I.Item) -> ()) {
+    public init(inner inner: I, inspecting inspector: (I.Item) -> ()) {
         self.inner = inner;
         self.inspector = inspector;
     }
@@ -787,20 +787,20 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
 // ============================================================================
 
 /// Wraps a `DoubleEndedIterator` to walk it back to front. The
-/// `Iterator` conformance is added by the `extend RevIterator[I]:
+/// `Iterator` conformance is added by the `extend ReversedIterator[I]:
 /// DoubleEndedIterator` block in `iterator.ks`. Returned by
 /// `DoubleEndedIterator.rev()`.
 ///
 /// # Representation
 ///
 /// Just the inner iterator — no buffering.
-public struct RevIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator {
+public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator {
     type Item = I.Item
 
     internal var inner: I
 
     /// @name From Source
-    /// Builds a `RevIterator`. Prefer `inner.rev()`.
+    /// Builds a `ReversedIterator`. Prefer `inner.rev()`.
     public init(inner inner: I) {
         self.inner = inner;
     }
@@ -828,7 +828,7 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `ScanIterator` seeded with `initial`.
-    public init(inner inner: I, initial initial: Acc, combine combine: (Acc, I.Item) -> Acc) {
+    public init(inner inner: I, from initial: Acc, combining combine: (Acc, I.Item) -> Acc) {
         self.inner = inner;
         self.state = initial;
         self.combine = combine;
@@ -868,7 +868,7 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `IntersperseIterator`.
-    public init(inner inner: I, separator separator: I.Item) {
+    public init(inner inner: I, with separator: I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;
@@ -916,7 +916,7 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `IntersperseWithIterator`.
-    public init(inner inner: I, separator separator: () -> I.Item) {
+    public init(inner inner: I, with separator: () -> I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;

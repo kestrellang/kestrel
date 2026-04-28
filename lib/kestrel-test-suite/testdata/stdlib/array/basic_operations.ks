@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
 
             // Test isEmpty on empty array
             if arr.isEmpty == false { return 1 }

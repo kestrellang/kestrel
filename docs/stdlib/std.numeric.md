@@ -1,4 +1,4 @@
-# std.num
+# std.numeric
 
 ## typealias `Float`
 
@@ -10,7 +10,7 @@ Default floating-point type — alias for `Float64`. Reach for `Float`
 when you want the recommended precision/performance trade-off; reach for
 `Float32` only when you specifically need 32-bit storage.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ## struct `Float32`
 
@@ -53,7 +53,7 @@ arithmetic with NaN propagates NaN.
 
 A single `lang.f32` field holding the raw IEEE 754 bit pattern.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Members
 
@@ -65,7 +65,7 @@ public init()
 
 Creates the zero value, satisfying `Defaultable`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### initializer `Float Literal`
 
@@ -83,7 +83,7 @@ let x: Float64 = 3.14;                  // implicit
 let y = Float64(floatLiteral: 3.14);    // explicit
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### initializer `From Float`
 
@@ -101,7 +101,7 @@ let f32: Float32 = 3.14;
 let f64 = Float64(from: f32);
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### initializer `From Int`
 
@@ -119,7 +119,7 @@ let n: Int64 = 42;
 let f = Float64(from: n);  // 42.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### initializer `From Raw`
 
@@ -130,7 +130,7 @@ init(raw: lang.f32)
 Wraps an existing `lang.f32` bit pattern. Internal; used
 by intrinsics.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### initializer `Int Literal`
 
@@ -148,7 +148,7 @@ let x: Float64 = 42;     // 42.0
 let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `abs`
 
@@ -159,7 +159,7 @@ public func abs() -> Float32
 Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
 `+0.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `acos`
 
@@ -170,7 +170,7 @@ public func acos() -> Float32
 Arc cosine, result in radians on `[0, π]`. Returns NaN outside
 `[-1.0, 1.0]`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `acosh`
 
@@ -180,7 +180,7 @@ public func acosh() -> Float32
 
 Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `asin`
 
@@ -191,7 +191,7 @@ public func asin() -> Float32
 Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
 `[-1.0, 1.0]`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `asinh`
 
@@ -201,7 +201,7 @@ public func asinh() -> Float32
 
 Inverse hyperbolic sine. Defined on all real inputs.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `atan`
 
@@ -212,7 +212,7 @@ public func atan() -> Float32
 Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
 recovery use `atan2`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `atan2`
 
@@ -233,7 +233,7 @@ from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
 (-1.0).atan2(x: 1.0);   // -π/4   (Q4)
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `atanh`
 
@@ -243,7 +243,7 @@ public func atanh() -> Float32
 
 Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `cbrt`
 
@@ -253,7 +253,7 @@ public func cbrt() -> Float32
 
 Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `ceil`
 
@@ -270,7 +270,7 @@ Smallest integer ≥ `self`. Rounds toward `+infinity`.
 (-3.7).ceil();  // -3.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `clamp`
 
@@ -289,7 +289,7 @@ must ensure `min <= max`.
 (1.5).clamp(min: 0.0, max: 1.0);   // 1.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `copysign`
 
@@ -300,7 +300,7 @@ public func copysign(from: Float32) -> Float32
 Returns a value with `self`'s magnitude and `other`'s sign — i.e. an
 IEEE 754 `copysign`. Useful for unbiased rounding tricks.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `cos`
 
@@ -310,7 +310,7 @@ public func cos() -> Float32
 
 Cosine of `self` in radians.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `cosh`
 
@@ -320,7 +320,7 @@ public func cosh() -> Float32
 
 Hyperbolic cosine.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `e`
 
@@ -330,7 +330,7 @@ public static var e: Float32 { get }
 
 Euler's number `e` ≈ 2.71828182845904… — base of the natural logarithm.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `epsilon`
 
@@ -352,7 +352,7 @@ func almostEqual(a: Float64, b: Float64) -> Bool {
 }
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `exp`
 
@@ -362,7 +362,7 @@ public func exp() -> Float32
 
 `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `exp2`
 
@@ -372,7 +372,7 @@ public func exp2() -> Float32
 
 `2^self`. Useful for binary scaling.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `expm1`
 
@@ -383,7 +383,7 @@ public func expm1() -> Float32
 `e^self - 1`, computed without the cancellation that hurts
 `self.exp() - 1.0` for small `self`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `floor`
 
@@ -400,7 +400,7 @@ Largest integer ≤ `self`. Rounds toward `-infinity`.
 (-3.2).floor();  // -4.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `fma`
 
@@ -417,7 +417,7 @@ More accurate (and often faster) than separate `multiply`/`add`.
 (2.0).fma(a: 3.0, b: 4.0);   // 10.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `fract`
 
@@ -434,7 +434,7 @@ Fractional part — `self - self.trunc()`. Sign matches `self`.
 (-3.7).fract();  // -0.7
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `hypot`
 
@@ -451,7 +451,7 @@ avoids intermediate overflow when one operand is very large.
 (3.0).hypot(other: 4.0);  // 5.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `infinity`
 
@@ -472,7 +472,7 @@ Float64.infinity + 1;   // inf
 Float64.infinity.negate();  // -inf
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isFinite`
 
@@ -483,7 +483,7 @@ public var isFinite: Bool { get }
 True if `self` is finite — equivalently, not NaN and not infinite.
 Includes zero and subnormals.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isInfinite`
 
@@ -502,7 +502,7 @@ Float64.infinity.negate().isInfinite;    // true
 Float64.nan.isInfinite;                  // false
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isNaN`
 
@@ -522,7 +522,7 @@ Float64.nan.isNaN;        // true
 Float64.infinity.isNaN;   // false
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isNegative`
 
@@ -533,7 +533,7 @@ public var isNegative: Bool { get }
 True if `self < 0.0`. False for `-0.0`, `nan`, zero, and positives.
 To detect signed zero specifically, use `sign`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isNormal`
 
@@ -554,7 +554,7 @@ Float64.minPositive.isNormal;                // true
 (Float64.minPositive / 2.0).isNormal;        // false (subnormal)
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isPositive`
 
@@ -564,7 +564,7 @@ public var isPositive: Bool { get }
 
 True if `self > 0.0`. False for `+0.0`, `-0.0`, `nan`, and negatives.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isSubnormal`
 
@@ -576,7 +576,7 @@ True if `self` is subnormal (denormalized) — finite, non-zero, and
 smaller than `minPositive` in magnitude. Subnormals trade precision
 for range near zero.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `isZero`
 
@@ -586,7 +586,7 @@ public var isZero: Bool { get }
 
 True if `self` is `+0.0` or `-0.0`. Both signed zeros compare equal.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `lerp`
 
@@ -606,7 +606,7 @@ Linear interpolation — `self + (other - self) * t`. `t == 0` returns
 (0.0).lerp(to: 10.0, t: 0.25);  //  2.5
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `ln`
 
@@ -625,7 +625,7 @@ Float64.e.ln();       //  1.0
 (-1.0).ln();          //  nan
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `ln10`
 
@@ -635,7 +635,7 @@ public static var ln10: Float32 { get }
 
 Natural logarithm of 10, ≈ 2.30258509299404…
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `ln1p`
 
@@ -646,7 +646,7 @@ public func ln1p() -> Float32
 `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
 would lose digits.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `ln2`
 
@@ -656,7 +656,7 @@ public static var ln2: Float32 { get }
 
 Natural logarithm of 2, ≈ 0.69314718055994…
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `log`
 
@@ -668,7 +668,7 @@ Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
 Pick `log2` or `log10` directly when you can — they avoid the second
 libm call.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `log10`
 
@@ -678,7 +678,7 @@ public func log10() -> Float32
 
 Base-10 logarithm.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `log2`
 
@@ -688,7 +688,7 @@ public func log2() -> Float32
 
 Base-2 logarithm.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `maxValue`
 
@@ -698,7 +698,7 @@ public static var maxValue: Float32 { get }
 
 The most positive finite value, ≈ 3.4028235e38.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `minPositive`
 
@@ -709,7 +709,7 @@ public static var minPositive: Float32 { get }
 The smallest positive *normal* value, ≈ 1.17549435e-38.
 Values smaller than this are subnormal and lose precision.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `minValue`
 
@@ -719,7 +719,7 @@ public static var minValue: Float32 { get }
 
 The most negative finite value, ≈ -3.4028235e38.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `nan`
 
@@ -739,7 +739,7 @@ Float64.nan == Float64.nan;    // false (!)
 0.0 / 0.0;                     // nan
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `nextDown`
 
@@ -749,7 +749,7 @@ public func nextDown() -> Float32
 
 Next representable value less than `self`. Mirror of `nextUp`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `nextUp`
 
@@ -760,7 +760,7 @@ public func nextUp() -> Float32
 Next representable value greater than `self`. `+inf` and `nan` are
 fixed points; the largest finite value steps up to `+inf`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `parse`
 
@@ -784,7 +784,7 @@ Float32.parse(string: "abc");       // None
 Float32.parse(string: "");          // None
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `pi`
 
@@ -794,7 +794,7 @@ public static var pi: Float32 { get }
 
 The constant π ≈ 3.14159265358979… — circle circumference over diameter.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `pow`
 
@@ -813,7 +813,7 @@ return NaN.
 (-2.0).pow(exponent: 0.5);   // nan
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `powi`
 
@@ -832,7 +832,7 @@ exponents invert.
 (2.0).powi(exponent: -1);   // 0.5
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `raw`
 
@@ -844,7 +844,7 @@ The underlying primitive `lang.f32` value (IEEE 754 bit
 pattern). Exposed for FFI and intrinsic use; reach for the typed
 surface for everything else.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `remainder`
 
@@ -856,7 +856,7 @@ IEEE 754 remainder — uses round-to-nearest division, not truncation.
 Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
 `2.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `round`
 
@@ -875,7 +875,7 @@ rounding is not used).
 (-3.5).round();  // -4.0
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `sign`
 
@@ -895,7 +895,7 @@ Negative zero returns `-0.0` (which still compares equal to `0.0`).
 Float64.nan.sign;    //  nan
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `sin`
 
@@ -905,7 +905,7 @@ public func sin() -> Float32
 
 Sine of `self` in radians.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `sinCos`
 
@@ -922,7 +922,7 @@ kept for ergonomics and as a future optimisation point.
 let (s, c) = angle.sinCos();
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `sinh`
 
@@ -932,7 +932,7 @@ public func sinh() -> Float32
 
 Hyperbolic sine.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `sqrt`
 
@@ -950,7 +950,7 @@ Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
 (-1.0).sqrt();   // nan
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `sqrt2`
 
@@ -960,7 +960,7 @@ public static var sqrt2: Float32 { get }
 
 Square root of 2, ≈ 1.41421356237309…
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `tan`
 
@@ -970,7 +970,7 @@ public func tan() -> Float32
 
 Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `tanh`
 
@@ -980,7 +980,7 @@ public func tanh() -> Float32
 
 Hyperbolic tangent. Saturates at ±1 for large magnitudes.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `tau`
 
@@ -991,7 +991,7 @@ public static var tau: Float32 { get }
 Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
 "one full turn" rotational math.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `toFloat64`
 
@@ -1002,7 +1002,7 @@ public func toFloat64() -> Float64
 Converts to the sibling float type. Widening (32→64) is exact;
 narrowing (64→32) rounds and may overflow to ±infinity.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `toInt64`
 
@@ -1022,7 +1022,7 @@ Float64.nan.toInt64();        // None
 Float64.infinity.toInt64();   // None
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `trunc`
 
@@ -1033,7 +1033,7 @@ public func trunc() -> Float32
 Integer part, truncating toward zero. `floor` for positives, `ceil`
 for negatives.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Comparable`
 
@@ -1057,7 +1057,7 @@ answer.
 (1.0).compare(other: Float64.infinity); // .Less
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Equatable`
 
@@ -1077,7 +1077,7 @@ IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
 Float64.nan.equals(other: Float64.nan);      // false (!)
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Formattable`
 
@@ -1113,7 +1113,7 @@ String interpolation forwards through the same options:
 (3.14).format(options: .{sign: .Always});                    // "+3.14"
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Addable`
 
@@ -1123,7 +1123,7 @@ _Defined in `lang/std/num/float32.ks`._
 type Output = Float32
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### typealias `Output`
 
@@ -1131,7 +1131,7 @@ _Defined in `lang/std/num/float32.ks`._
 type Output = Float32
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### typealias `Output`
 
@@ -1139,7 +1139,7 @@ _Defined in `lang/std/num/float32.ks`._
 type Output = Float32
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### typealias `Output`
 
@@ -1147,7 +1147,7 @@ _Defined in `lang/std/num/float32.ks`._
 type Output = Float32
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### typealias `Output`
 
@@ -1155,7 +1155,7 @@ _Defined in `lang/std/num/float32.ks`._
 type Output = Float32
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `add`
 
@@ -1166,7 +1166,7 @@ public func add(Float32) -> Float32
 IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
 is inf.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `zero`
 
@@ -1176,7 +1176,7 @@ public static var zero: Float32 { get }
 
 The additive identity, `0.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Subtractable`
 
@@ -1196,7 +1196,7 @@ public func subtract(Float32) -> Float32
 
 IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Multipliable`
 
@@ -1217,7 +1217,7 @@ public func multiply(Float32) -> Float32
 IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
 the result follows the usual algebra.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 #### field `one`
 
@@ -1227,7 +1227,7 @@ public static var one: Float32 { get }
 
 The multiplicative identity, `1.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Divisible`
 
@@ -1261,7 +1261,7 @@ Special cases:
 0.0 / 0.0;                  // nan
 ```
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Negatable`
 
@@ -1282,7 +1282,7 @@ public func negate() -> Float32
 IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
 is `+0.0`.
 
-_Defined in `lang/std/num/float32.ks`._
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `ExpressibleByFloatLiteral`
 
@@ -1373,7 +1373,7 @@ arithmetic with NaN propagates NaN.
 
 A single `lang.f64` field holding the raw IEEE 754 bit pattern.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Members
 
@@ -1385,7 +1385,7 @@ public init()
 
 Creates the zero value, satisfying `Defaultable`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### initializer `Float Literal`
 
@@ -1403,7 +1403,7 @@ let x: Float64 = 3.14;                  // implicit
 let y = Float64(floatLiteral: 3.14);    // explicit
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### initializer `From Float`
 
@@ -1421,7 +1421,7 @@ let f32: Float32 = 3.14;
 let f64 = Float64(from: f32);
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### initializer `From Int`
 
@@ -1439,7 +1439,7 @@ let n: Int64 = 42;
 let f = Float64(from: n);  // 42.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### initializer `From Raw`
 
@@ -1450,7 +1450,7 @@ init(raw: lang.f64)
 Wraps an existing `lang.f64` bit pattern. Internal; used
 by intrinsics.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### initializer `Int Literal`
 
@@ -1468,7 +1468,7 @@ let x: Float64 = 42;     // 42.0
 let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `abs`
 
@@ -1479,7 +1479,7 @@ public func abs() -> Float64
 Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
 `+0.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `acos`
 
@@ -1490,7 +1490,7 @@ public func acos() -> Float64
 Arc cosine, result in radians on `[0, π]`. Returns NaN outside
 `[-1.0, 1.0]`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `acosh`
 
@@ -1500,7 +1500,7 @@ public func acosh() -> Float64
 
 Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `asin`
 
@@ -1511,7 +1511,7 @@ public func asin() -> Float64
 Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
 `[-1.0, 1.0]`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `asinh`
 
@@ -1521,7 +1521,7 @@ public func asinh() -> Float64
 
 Inverse hyperbolic sine. Defined on all real inputs.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `atan`
 
@@ -1532,7 +1532,7 @@ public func atan() -> Float64
 Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
 recovery use `atan2`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `atan2`
 
@@ -1553,7 +1553,7 @@ from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
 (-1.0).atan2(x: 1.0);   // -π/4   (Q4)
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `atanh`
 
@@ -1563,7 +1563,7 @@ public func atanh() -> Float64
 
 Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `cbrt`
 
@@ -1573,7 +1573,7 @@ public func cbrt() -> Float64
 
 Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `ceil`
 
@@ -1590,7 +1590,7 @@ Smallest integer ≥ `self`. Rounds toward `+infinity`.
 (-3.7).ceil();  // -3.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `clamp`
 
@@ -1609,7 +1609,7 @@ must ensure `min <= max`.
 (1.5).clamp(min: 0.0, max: 1.0);   // 1.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `copysign`
 
@@ -1620,7 +1620,7 @@ public func copysign(from: Float64) -> Float64
 Returns a value with `self`'s magnitude and `other`'s sign — i.e. an
 IEEE 754 `copysign`. Useful for unbiased rounding tricks.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `cos`
 
@@ -1630,7 +1630,7 @@ public func cos() -> Float64
 
 Cosine of `self` in radians.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `cosh`
 
@@ -1640,7 +1640,7 @@ public func cosh() -> Float64
 
 Hyperbolic cosine.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `e`
 
@@ -1650,7 +1650,7 @@ public static var e: Float64 { get }
 
 Euler's number `e` ≈ 2.71828182845904… — base of the natural logarithm.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `epsilon`
 
@@ -1672,7 +1672,7 @@ func almostEqual(a: Float64, b: Float64) -> Bool {
 }
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `exp`
 
@@ -1682,7 +1682,7 @@ public func exp() -> Float64
 
 `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `exp2`
 
@@ -1692,7 +1692,7 @@ public func exp2() -> Float64
 
 `2^self`. Useful for binary scaling.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `expm1`
 
@@ -1703,7 +1703,7 @@ public func expm1() -> Float64
 `e^self - 1`, computed without the cancellation that hurts
 `self.exp() - 1.0` for small `self`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `floor`
 
@@ -1720,7 +1720,7 @@ Largest integer ≤ `self`. Rounds toward `-infinity`.
 (-3.2).floor();  // -4.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `fma`
 
@@ -1737,7 +1737,7 @@ More accurate (and often faster) than separate `multiply`/`add`.
 (2.0).fma(a: 3.0, b: 4.0);   // 10.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `fract`
 
@@ -1754,7 +1754,7 @@ Fractional part — `self - self.trunc()`. Sign matches `self`.
 (-3.7).fract();  // -0.7
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `hypot`
 
@@ -1771,7 +1771,7 @@ avoids intermediate overflow when one operand is very large.
 (3.0).hypot(other: 4.0);  // 5.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `infinity`
 
@@ -1792,7 +1792,7 @@ Float64.infinity + 1;   // inf
 Float64.infinity.negate();  // -inf
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isFinite`
 
@@ -1803,7 +1803,7 @@ public var isFinite: Bool { get }
 True if `self` is finite — equivalently, not NaN and not infinite.
 Includes zero and subnormals.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isInfinite`
 
@@ -1822,7 +1822,7 @@ Float64.infinity.negate().isInfinite;    // true
 Float64.nan.isInfinite;                  // false
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isNaN`
 
@@ -1842,7 +1842,7 @@ Float64.nan.isNaN;        // true
 Float64.infinity.isNaN;   // false
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isNegative`
 
@@ -1853,7 +1853,7 @@ public var isNegative: Bool { get }
 True if `self < 0.0`. False for `-0.0`, `nan`, zero, and positives.
 To detect signed zero specifically, use `sign`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isNormal`
 
@@ -1874,7 +1874,7 @@ Float64.minPositive.isNormal;                // true
 (Float64.minPositive / 2.0).isNormal;        // false (subnormal)
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isPositive`
 
@@ -1884,7 +1884,7 @@ public var isPositive: Bool { get }
 
 True if `self > 0.0`. False for `+0.0`, `-0.0`, `nan`, and negatives.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isSubnormal`
 
@@ -1896,7 +1896,7 @@ True if `self` is subnormal (denormalized) — finite, non-zero, and
 smaller than `minPositive` in magnitude. Subnormals trade precision
 for range near zero.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `isZero`
 
@@ -1906,7 +1906,7 @@ public var isZero: Bool { get }
 
 True if `self` is `+0.0` or `-0.0`. Both signed zeros compare equal.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `lerp`
 
@@ -1926,7 +1926,7 @@ Linear interpolation — `self + (other - self) * t`. `t == 0` returns
 (0.0).lerp(to: 10.0, t: 0.25);  //  2.5
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `ln`
 
@@ -1945,7 +1945,7 @@ Float64.e.ln();       //  1.0
 (-1.0).ln();          //  nan
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `ln10`
 
@@ -1955,7 +1955,7 @@ public static var ln10: Float64 { get }
 
 Natural logarithm of 10, ≈ 2.30258509299404…
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `ln1p`
 
@@ -1966,7 +1966,7 @@ public func ln1p() -> Float64
 `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
 would lose digits.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `ln2`
 
@@ -1976,7 +1976,7 @@ public static var ln2: Float64 { get }
 
 Natural logarithm of 2, ≈ 0.69314718055994…
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `log`
 
@@ -1988,7 +1988,7 @@ Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
 Pick `log2` or `log10` directly when you can — they avoid the second
 libm call.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `log10`
 
@@ -1998,7 +1998,7 @@ public func log10() -> Float64
 
 Base-10 logarithm.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `log2`
 
@@ -2008,7 +2008,7 @@ public func log2() -> Float64
 
 Base-2 logarithm.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `maxValue`
 
@@ -2018,7 +2018,7 @@ public static var maxValue: Float64 { get }
 
 The most positive finite value, ≈ 1.7976931348623157e308.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `minPositive`
 
@@ -2029,7 +2029,7 @@ public static var minPositive: Float64 { get }
 The smallest positive *normal* value, ≈ 2.2250738585072014e-308.
 Values smaller than this are subnormal and lose precision.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `minValue`
 
@@ -2039,7 +2039,7 @@ public static var minValue: Float64 { get }
 
 The most negative finite value, ≈ -1.7976931348623157e308.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `nan`
 
@@ -2059,7 +2059,7 @@ Float64.nan == Float64.nan;    // false (!)
 0.0 / 0.0;                     // nan
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `nextDown`
 
@@ -2069,7 +2069,7 @@ public func nextDown() -> Float64
 
 Next representable value less than `self`. Mirror of `nextUp`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `nextUp`
 
@@ -2080,7 +2080,7 @@ public func nextUp() -> Float64
 Next representable value greater than `self`. `+inf` and `nan` are
 fixed points; the largest finite value steps up to `+inf`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `parse`
 
@@ -2104,7 +2104,7 @@ Float64.parse(string: "abc");       // None
 Float64.parse(string: "");          // None
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `pi`
 
@@ -2114,7 +2114,7 @@ public static var pi: Float64 { get }
 
 The constant π ≈ 3.14159265358979… — circle circumference over diameter.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `pow`
 
@@ -2133,7 +2133,7 @@ return NaN.
 (-2.0).pow(exponent: 0.5);   // nan
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `powi`
 
@@ -2152,7 +2152,7 @@ exponents invert.
 (2.0).powi(exponent: -1);   // 0.5
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `raw`
 
@@ -2164,7 +2164,7 @@ The underlying primitive `lang.f64` value (IEEE 754 bit
 pattern). Exposed for FFI and intrinsic use; reach for the typed
 surface for everything else.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `remainder`
 
@@ -2176,7 +2176,7 @@ IEEE 754 remainder — uses round-to-nearest division, not truncation.
 Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
 `2.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `round`
 
@@ -2195,7 +2195,7 @@ rounding is not used).
 (-3.5).round();  // -4.0
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `sign`
 
@@ -2215,7 +2215,7 @@ Negative zero returns `-0.0` (which still compares equal to `0.0`).
 Float64.nan.sign;    //  nan
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `sin`
 
@@ -2225,7 +2225,7 @@ public func sin() -> Float64
 
 Sine of `self` in radians.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `sinCos`
 
@@ -2242,7 +2242,7 @@ kept for ergonomics and as a future optimisation point.
 let (s, c) = angle.sinCos();
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `sinh`
 
@@ -2252,7 +2252,7 @@ public func sinh() -> Float64
 
 Hyperbolic sine.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `sqrt`
 
@@ -2270,7 +2270,7 @@ Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
 (-1.0).sqrt();   // nan
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `sqrt2`
 
@@ -2280,7 +2280,7 @@ public static var sqrt2: Float64 { get }
 
 Square root of 2, ≈ 1.41421356237309…
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `tan`
 
@@ -2290,7 +2290,7 @@ public func tan() -> Float64
 
 Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `tanh`
 
@@ -2300,7 +2300,7 @@ public func tanh() -> Float64
 
 Hyperbolic tangent. Saturates at ±1 for large magnitudes.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `tau`
 
@@ -2311,7 +2311,7 @@ public static var tau: Float64 { get }
 Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
 "one full turn" rotational math.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `toFloat32`
 
@@ -2322,7 +2322,7 @@ public func toFloat32() -> Float32
 Converts to the sibling float type. Widening (32→64) is exact;
 narrowing (64→32) rounds and may overflow to ±infinity.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `toInt64`
 
@@ -2342,7 +2342,7 @@ Float64.nan.toInt64();        // None
 Float64.infinity.toInt64();   // None
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `trunc`
 
@@ -2353,7 +2353,7 @@ public func trunc() -> Float64
 Integer part, truncating toward zero. `floor` for positives, `ceil`
 for negatives.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Comparable`
 
@@ -2377,7 +2377,7 @@ answer.
 (1.0).compare(other: Float64.infinity); // .Less
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Equatable`
 
@@ -2397,7 +2397,7 @@ IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
 Float64.nan.equals(other: Float64.nan);      // false (!)
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Formattable`
 
@@ -2433,7 +2433,7 @@ String interpolation forwards through the same options:
 (3.14).format(options: .{sign: .Always});                    // "+3.14"
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Addable`
 
@@ -2443,7 +2443,7 @@ _Defined in `lang/std/num/float64.ks`._
 type Output = Float64
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### typealias `Output`
 
@@ -2451,7 +2451,7 @@ _Defined in `lang/std/num/float64.ks`._
 type Output = Float64
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### typealias `Output`
 
@@ -2459,7 +2459,7 @@ _Defined in `lang/std/num/float64.ks`._
 type Output = Float64
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### typealias `Output`
 
@@ -2467,7 +2467,7 @@ _Defined in `lang/std/num/float64.ks`._
 type Output = Float64
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### typealias `Output`
 
@@ -2475,7 +2475,7 @@ _Defined in `lang/std/num/float64.ks`._
 type Output = Float64
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `add`
 
@@ -2486,7 +2486,7 @@ public func add(Float64) -> Float64
 IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
 is inf.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `zero`
 
@@ -2496,7 +2496,7 @@ public static var zero: Float64 { get }
 
 The additive identity, `0.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Subtractable`
 
@@ -2516,7 +2516,7 @@ public func subtract(Float64) -> Float64
 
 IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Multipliable`
 
@@ -2537,7 +2537,7 @@ public func multiply(Float64) -> Float64
 IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
 the result follows the usual algebra.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 #### field `one`
 
@@ -2547,7 +2547,7 @@ public static var one: Float64 { get }
 
 The multiplicative identity, `1.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Divisible`
 
@@ -2581,7 +2581,7 @@ Special cases:
 0.0 / 0.0;                  // nan
 ```
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Negatable`
 
@@ -2602,7 +2602,7 @@ public func negate() -> Float64
 IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
 is `+0.0`.
 
-_Defined in `lang/std/num/float64.ks`._
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `ExpressibleByFloatLiteral`
 
@@ -2660,7 +2660,7 @@ public type Int = Int64
 
 Platform-sized signed integer — currently always `Int64`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ## struct `Int16`
 
@@ -2698,7 +2698,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i16` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Members
 
@@ -2716,7 +2716,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2727,7 +2727,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2738,7 +2738,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2749,7 +2749,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2760,7 +2760,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2771,7 +2771,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2782,7 +2782,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Integer`
 
@@ -2793,7 +2793,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `From Raw`
 
@@ -2804,7 +2804,7 @@ init(raw: lang.i16)
 Wraps an existing `lang.i16` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `Int Literal`
 
@@ -2824,7 +2824,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `absChecked`
 
@@ -2835,7 +2835,7 @@ public func absChecked() -> Int16?
 Absolute value that returns `None` for `minValue` (whose absolute
 value overflows).
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `absSaturating`
 
@@ -2845,7 +2845,7 @@ public func absSaturating() -> Int16
 
 Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `addChecked`
 
@@ -2855,7 +2855,7 @@ public func addChecked(Int16) -> Int16?
 
 Wrapping addition that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `addSaturating`
 
@@ -2865,7 +2865,7 @@ public func addSaturating(Int16) -> Int16
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `bitWidth`
 
@@ -2875,7 +2875,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (16). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `byteSwapped`
 
@@ -2886,7 +2886,7 @@ public var byteSwapped: Int16 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `clamp`
 
@@ -2905,7 +2905,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `countOnes`
 
@@ -2925,7 +2925,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `countZeros`
 
@@ -2935,7 +2935,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `divideChecked`
 
@@ -2946,7 +2946,7 @@ public func divideChecked(Int16) -> Int16?
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `fromBytes`
 
@@ -2957,7 +2957,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> Int16?
 Reassembles a `Int16` from 2 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 2 bytes long.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -2968,7 +2968,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int16?
 Reassembles a `Int16` from 2 bytes in big-endian order.
 Returns `None` if the input is not exactly 2 bytes long.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -2979,7 +2979,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int16?
 Reassembles a `Int16` from 2 bytes in little-endian order.
 Returns `None` if the input is not exactly 2 bytes long.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `gcd`
 
@@ -2998,7 +2998,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `isNegative`
 
@@ -3008,7 +3008,7 @@ public var isNegative: Bool { get }
 
 True when `self < 0`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `isPositive`
 
@@ -3018,7 +3018,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -3040,7 +3040,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `isZero`
 
@@ -3050,7 +3050,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `lcm`
 
@@ -3069,7 +3069,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `leadingZeros`
 
@@ -3088,7 +3088,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `maxValue`
 
@@ -3099,7 +3099,7 @@ public static var maxValue: Int16 { get }
 The largest representable value.
 This is 2^15 - 1 (32_767).
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `minValue`
 
@@ -3112,7 +3112,7 @@ This is -2^15 (-32_768).
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `multiplyChecked`
 
@@ -3124,7 +3124,7 @@ Wrapping multiplication that returns `None` instead of overflowing.
 Implemented by multiplying then dividing back; replace with an
 overflow-detecting intrinsic when one is available.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `multiplySaturating`
 
@@ -3135,7 +3135,7 @@ public func multiplySaturating(Int16) -> Int16
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `negateChecked`
 
@@ -3145,7 +3145,7 @@ public func negateChecked() -> Int16?
 
 Negation that returns `None` for `minValue` (whose negation overflows).
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `negateSaturating`
 
@@ -3155,7 +3155,7 @@ public func negateSaturating() -> Int16
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `parse`
 
@@ -3176,7 +3176,7 @@ Int16.parse(string: "abc");   // None
 Int16.parse(string: "");      // None
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `parse`
 
@@ -3197,7 +3197,7 @@ Int16.parse(string: "101010", radix: 2);  // Some(42)
 Int16.parse(string: "z", radix: 36);      // Some(35)
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `pow`
 
@@ -3217,7 +3217,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `raw`
 
@@ -3228,7 +3228,7 @@ public var raw: lang.i16
 The underlying primitive `lang.i16` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `rotateLeft`
 
@@ -3239,7 +3239,7 @@ public func rotateLeft(by: Int64) -> Int16
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `rotateRight`
 
@@ -3250,7 +3250,7 @@ public func rotateRight(by: Int64) -> Int16
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `sign`
 
@@ -3260,7 +3260,7 @@ public var sign: Int16 { get }
 
 Sign as a `Int16`: `-1`, `0`, or `1`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `subtractChecked`
 
@@ -3270,7 +3270,7 @@ public func subtractChecked(Int16) -> Int16?
 
 Wrapping subtraction that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `subtractSaturating`
 
@@ -3280,7 +3280,7 @@ public func subtractSaturating(Int16) -> Int16
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `toBytes`
 
@@ -3298,7 +3298,7 @@ a fixed wire format.
 let bytes = Int16.maxValue.toBytes();   // 2 bytes, host order
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -3309,7 +3309,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 2 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -3320,7 +3320,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 2 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `trailingZeros`
 
@@ -3332,7 +3332,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `SignedInteger`
 
@@ -3346,7 +3346,7 @@ Absolute value. Wraps at the minimum value
 (`Int16.minValue.abs() == Int16.minValue`); use
 `absChecked` if that's a problem.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Steppable`
 
@@ -3358,7 +3358,7 @@ public func predecessor() -> Int16
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `successor`
 
@@ -3369,7 +3369,7 @@ public func successor() -> Int16
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Comparable`
 
@@ -3390,7 +3390,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Equatable`
 
@@ -3409,7 +3409,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Matchable`
 
@@ -3421,7 +3421,7 @@ public func matches(Int16) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Formattable`
 
@@ -3454,7 +3454,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Hash`
 
@@ -3467,7 +3467,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Addable`
 
@@ -3477,7 +3477,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3485,7 +3485,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3493,7 +3493,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3501,7 +3501,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3509,7 +3509,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3517,7 +3517,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3525,7 +3525,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3533,7 +3533,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3541,7 +3541,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3549,7 +3549,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3557,7 +3557,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3565,7 +3565,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Int16
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3573,7 +3573,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = Range[Int16]
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### typealias `Output`
 
@@ -3581,7 +3581,7 @@ _Defined in `lang/std/num/int16.ks`._
 type Output = ClosedRange[Int16]
 ```
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `add`
 
@@ -3592,7 +3592,7 @@ public func add(Int16) -> Int16
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `zero`
 
@@ -3602,7 +3602,7 @@ public static var zero: Int16 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Subtractable`
 
@@ -3622,7 +3622,7 @@ public func subtract(Int16) -> Int16
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Multipliable`
 
@@ -3642,7 +3642,7 @@ public func multiply(Int16) -> Int16
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### field `one`
 
@@ -3652,7 +3652,7 @@ public static var one: Int16 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Divisible`
 
@@ -3678,7 +3678,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Modulo`
 
@@ -3703,7 +3703,7 @@ public func modulo(Int16) -> Int16
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Negatable`
 
@@ -3725,7 +3725,7 @@ Two's-complement negation. Wraps at the minimum value:
 `Int16.minValue.negate() == Int16.minValue`. Use
 `negateChecked` to surface the overflow.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -3745,7 +3745,7 @@ public func bitwiseAnd(Int16) -> Int16
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -3765,7 +3765,7 @@ public func bitwiseOr(Int16) -> Int16
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -3785,7 +3785,7 @@ public func bitwiseXor(Int16) -> Int16
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -3805,7 +3805,7 @@ public func bitwiseNot() -> Int16
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `LeftShift`
 
@@ -3826,7 +3826,7 @@ public func shiftLeft(by: lang.i64) -> Int16
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RightShift`
 
@@ -3848,7 +3848,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `AddAssign`
 
@@ -3860,7 +3860,7 @@ public mutating func addAssign(Int16)
 
 `self += other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -3872,7 +3872,7 @@ public mutating func subtractAssign(Int16)
 
 `self -= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -3884,7 +3884,7 @@ public mutating func multiplyAssign(Int16)
 
 `self *= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `DivideAssign`
 
@@ -3896,7 +3896,7 @@ public mutating func divideAssign(Int16)
 
 `self /= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -3908,7 +3908,7 @@ public mutating func modAssign(Int16)
 
 `self %= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -3920,7 +3920,7 @@ public mutating func bitwiseAndAssign(Int16)
 
 `self &= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -3932,7 +3932,7 @@ public mutating func bitwiseOrAssign(Int16)
 
 `self |= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -3944,7 +3944,7 @@ public mutating func bitwiseXorAssign(Int16)
 
 `self ^= other`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -3956,7 +3956,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -3968,7 +3968,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -4012,7 +4012,7 @@ public func exclusiveRange(to: Int16) -> Range[Int16]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -4032,7 +4032,7 @@ public func inclusiveRange(to: Int16) -> ClosedRange[Int16]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/int16.ks`._
+_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Convertible`
 
@@ -4082,7 +4082,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i32` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Members
 
@@ -4100,7 +4100,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4111,7 +4111,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4122,7 +4122,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4133,7 +4133,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4144,7 +4144,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4155,7 +4155,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4166,7 +4166,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Integer`
 
@@ -4177,7 +4177,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `From Raw`
 
@@ -4188,7 +4188,7 @@ init(raw: lang.i32)
 Wraps an existing `lang.i32` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `Int Literal`
 
@@ -4208,7 +4208,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `absChecked`
 
@@ -4219,7 +4219,7 @@ public func absChecked() -> Int32?
 Absolute value that returns `None` for `minValue` (whose absolute
 value overflows).
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `absSaturating`
 
@@ -4229,7 +4229,7 @@ public func absSaturating() -> Int32
 
 Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `addChecked`
 
@@ -4239,7 +4239,7 @@ public func addChecked(Int32) -> Int32?
 
 Wrapping addition that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `addSaturating`
 
@@ -4249,7 +4249,7 @@ public func addSaturating(Int32) -> Int32
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `bitWidth`
 
@@ -4259,7 +4259,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (32). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `byteSwapped`
 
@@ -4270,7 +4270,7 @@ public var byteSwapped: Int32 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `clamp`
 
@@ -4289,7 +4289,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `countOnes`
 
@@ -4309,7 +4309,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `countZeros`
 
@@ -4319,7 +4319,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `divideChecked`
 
@@ -4330,7 +4330,7 @@ public func divideChecked(Int32) -> Int32?
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `fromBytes`
 
@@ -4341,7 +4341,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> Int32?
 Reassembles a `Int32` from 4 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 4 bytes long.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -4352,7 +4352,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int32?
 Reassembles a `Int32` from 4 bytes in big-endian order.
 Returns `None` if the input is not exactly 4 bytes long.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -4363,7 +4363,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int32?
 Reassembles a `Int32` from 4 bytes in little-endian order.
 Returns `None` if the input is not exactly 4 bytes long.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `gcd`
 
@@ -4382,7 +4382,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `isNegative`
 
@@ -4392,7 +4392,7 @@ public var isNegative: Bool { get }
 
 True when `self < 0`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `isPositive`
 
@@ -4402,7 +4402,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -4424,7 +4424,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `isZero`
 
@@ -4434,7 +4434,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `lcm`
 
@@ -4453,7 +4453,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `leadingZeros`
 
@@ -4472,7 +4472,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `maxValue`
 
@@ -4483,7 +4483,7 @@ public static var maxValue: Int32 { get }
 The largest representable value.
 This is 2^31 - 1 (2_147_483_647).
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `minValue`
 
@@ -4496,7 +4496,7 @@ This is -2^31 (-2_147_483_648).
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `multiplyChecked`
 
@@ -4508,7 +4508,7 @@ Wrapping multiplication that returns `None` instead of overflowing.
 Implemented by multiplying then dividing back; replace with an
 overflow-detecting intrinsic when one is available.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `multiplySaturating`
 
@@ -4519,7 +4519,7 @@ public func multiplySaturating(Int32) -> Int32
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `negateChecked`
 
@@ -4529,7 +4529,7 @@ public func negateChecked() -> Int32?
 
 Negation that returns `None` for `minValue` (whose negation overflows).
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `negateSaturating`
 
@@ -4539,7 +4539,7 @@ public func negateSaturating() -> Int32
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `parse`
 
@@ -4560,7 +4560,7 @@ Int32.parse(string: "abc");   // None
 Int32.parse(string: "");      // None
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `parse`
 
@@ -4581,7 +4581,7 @@ Int32.parse(string: "101010", radix: 2);  // Some(42)
 Int32.parse(string: "z", radix: 36);      // Some(35)
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `pow`
 
@@ -4601,7 +4601,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `raw`
 
@@ -4612,7 +4612,7 @@ public var raw: lang.i32
 The underlying primitive `lang.i32` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `rotateLeft`
 
@@ -4623,7 +4623,7 @@ public func rotateLeft(by: Int64) -> Int32
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `rotateRight`
 
@@ -4634,7 +4634,7 @@ public func rotateRight(by: Int64) -> Int32
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `sign`
 
@@ -4644,7 +4644,7 @@ public var sign: Int32 { get }
 
 Sign as a `Int32`: `-1`, `0`, or `1`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `subtractChecked`
 
@@ -4654,7 +4654,7 @@ public func subtractChecked(Int32) -> Int32?
 
 Wrapping subtraction that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `subtractSaturating`
 
@@ -4664,7 +4664,7 @@ public func subtractSaturating(Int32) -> Int32
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `toBytes`
 
@@ -4682,7 +4682,7 @@ a fixed wire format.
 let bytes = Int32.maxValue.toBytes();   // 4 bytes, host order
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -4693,7 +4693,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 4 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -4704,7 +4704,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 4 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `trailingZeros`
 
@@ -4716,7 +4716,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `SignedInteger`
 
@@ -4730,7 +4730,7 @@ Absolute value. Wraps at the minimum value
 (`Int32.minValue.abs() == Int32.minValue`); use
 `absChecked` if that's a problem.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Steppable`
 
@@ -4742,7 +4742,7 @@ public func predecessor() -> Int32
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `successor`
 
@@ -4753,7 +4753,7 @@ public func successor() -> Int32
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Comparable`
 
@@ -4774,7 +4774,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Equatable`
 
@@ -4793,7 +4793,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Matchable`
 
@@ -4805,7 +4805,7 @@ public func matches(Int32) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Formattable`
 
@@ -4838,7 +4838,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Hash`
 
@@ -4851,7 +4851,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Addable`
 
@@ -4861,7 +4861,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4869,7 +4869,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4877,7 +4877,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4885,7 +4885,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4893,7 +4893,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4901,7 +4901,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4909,7 +4909,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4917,7 +4917,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4925,7 +4925,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4933,7 +4933,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4941,7 +4941,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4949,7 +4949,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Int32
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4957,7 +4957,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = Range[Int32]
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### typealias `Output`
 
@@ -4965,7 +4965,7 @@ _Defined in `lang/std/num/int32.ks`._
 type Output = ClosedRange[Int32]
 ```
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `add`
 
@@ -4976,7 +4976,7 @@ public func add(Int32) -> Int32
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `zero`
 
@@ -4986,7 +4986,7 @@ public static var zero: Int32 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Subtractable`
 
@@ -5006,7 +5006,7 @@ public func subtract(Int32) -> Int32
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Multipliable`
 
@@ -5026,7 +5026,7 @@ public func multiply(Int32) -> Int32
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### field `one`
 
@@ -5036,7 +5036,7 @@ public static var one: Int32 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Divisible`
 
@@ -5062,7 +5062,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Modulo`
 
@@ -5087,7 +5087,7 @@ public func modulo(Int32) -> Int32
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Negatable`
 
@@ -5109,7 +5109,7 @@ Two's-complement negation. Wraps at the minimum value:
 `Int32.minValue.negate() == Int32.minValue`. Use
 `negateChecked` to surface the overflow.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -5129,7 +5129,7 @@ public func bitwiseAnd(Int32) -> Int32
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -5149,7 +5149,7 @@ public func bitwiseOr(Int32) -> Int32
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -5169,7 +5169,7 @@ public func bitwiseXor(Int32) -> Int32
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -5189,7 +5189,7 @@ public func bitwiseNot() -> Int32
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `LeftShift`
 
@@ -5210,7 +5210,7 @@ public func shiftLeft(by: lang.i64) -> Int32
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RightShift`
 
@@ -5232,7 +5232,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `AddAssign`
 
@@ -5244,7 +5244,7 @@ public mutating func addAssign(Int32)
 
 `self += other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -5256,7 +5256,7 @@ public mutating func subtractAssign(Int32)
 
 `self -= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -5268,7 +5268,7 @@ public mutating func multiplyAssign(Int32)
 
 `self *= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `DivideAssign`
 
@@ -5280,7 +5280,7 @@ public mutating func divideAssign(Int32)
 
 `self /= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -5292,7 +5292,7 @@ public mutating func modAssign(Int32)
 
 `self %= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -5304,7 +5304,7 @@ public mutating func bitwiseAndAssign(Int32)
 
 `self &= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -5316,7 +5316,7 @@ public mutating func bitwiseOrAssign(Int32)
 
 `self |= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -5328,7 +5328,7 @@ public mutating func bitwiseXorAssign(Int32)
 
 `self ^= other`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -5340,7 +5340,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -5352,7 +5352,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -5396,7 +5396,7 @@ public func exclusiveRange(to: Int32) -> Range[Int32]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -5416,7 +5416,7 @@ public func inclusiveRange(to: Int32) -> ClosedRange[Int32]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/int32.ks`._
+_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Convertible`
 
@@ -5466,7 +5466,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i64` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Members
 
@@ -5484,7 +5484,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5495,7 +5495,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5506,7 +5506,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5517,7 +5517,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5528,7 +5528,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5539,7 +5539,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5550,7 +5550,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Integer`
 
@@ -5561,7 +5561,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `From Raw`
 
@@ -5572,7 +5572,7 @@ init(raw: lang.i64)
 Wraps an existing `lang.i64` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `Int Literal`
 
@@ -5592,7 +5592,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `absChecked`
 
@@ -5603,7 +5603,7 @@ public func absChecked() -> Int64?
 Absolute value that returns `None` for `minValue` (whose absolute
 value overflows).
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `absSaturating`
 
@@ -5613,7 +5613,7 @@ public func absSaturating() -> Int64
 
 Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `addChecked`
 
@@ -5623,7 +5623,7 @@ public func addChecked(Int64) -> Int64?
 
 Wrapping addition that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `addSaturating`
 
@@ -5633,7 +5633,7 @@ public func addSaturating(Int64) -> Int64
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `bitWidth`
 
@@ -5643,7 +5643,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (64). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `byteSwapped`
 
@@ -5654,7 +5654,7 @@ public var byteSwapped: Int64 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `clamp`
 
@@ -5673,7 +5673,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `countOnes`
 
@@ -5693,7 +5693,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `countZeros`
 
@@ -5703,7 +5703,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `divideChecked`
 
@@ -5714,7 +5714,7 @@ public func divideChecked(Int64) -> Int64?
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `fromBytes`
 
@@ -5725,7 +5725,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> Int64?
 Reassembles a `Int64` from 8 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 8 bytes long.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -5736,7 +5736,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int64?
 Reassembles a `Int64` from 8 bytes in big-endian order.
 Returns `None` if the input is not exactly 8 bytes long.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -5747,7 +5747,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int64?
 Reassembles a `Int64` from 8 bytes in little-endian order.
 Returns `None` if the input is not exactly 8 bytes long.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `gcd`
 
@@ -5766,7 +5766,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `isNegative`
 
@@ -5776,7 +5776,7 @@ public var isNegative: Bool { get }
 
 True when `self < 0`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `isPositive`
 
@@ -5786,7 +5786,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -5808,7 +5808,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `isZero`
 
@@ -5818,7 +5818,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `lcm`
 
@@ -5837,7 +5837,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `leadingZeros`
 
@@ -5856,7 +5856,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `maxValue`
 
@@ -5867,7 +5867,7 @@ public static var maxValue: Int64 { get }
 The largest representable value.
 This is 2^63 - 1 (9_223_372_036_854_775_807).
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `minValue`
 
@@ -5880,7 +5880,7 @@ This is -2^63 (-9_223_372_036_854_775_808).
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `multiplyChecked`
 
@@ -5892,7 +5892,7 @@ Wrapping multiplication that returns `None` instead of overflowing.
 Implemented by multiplying then dividing back; replace with an
 overflow-detecting intrinsic when one is available.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `multiplySaturating`
 
@@ -5903,7 +5903,7 @@ public func multiplySaturating(Int64) -> Int64
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `negateChecked`
 
@@ -5913,7 +5913,7 @@ public func negateChecked() -> Int64?
 
 Negation that returns `None` for `minValue` (whose negation overflows).
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `negateSaturating`
 
@@ -5923,7 +5923,7 @@ public func negateSaturating() -> Int64
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `parse`
 
@@ -5944,7 +5944,7 @@ Int64.parse(string: "abc");   // None
 Int64.parse(string: "");      // None
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `parse`
 
@@ -5965,7 +5965,7 @@ Int64.parse(string: "101010", radix: 2);  // Some(42)
 Int64.parse(string: "z", radix: 36);      // Some(35)
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `pow`
 
@@ -5985,7 +5985,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `raw`
 
@@ -5996,7 +5996,7 @@ public var raw: lang.i64
 The underlying primitive `lang.i64` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `rotateLeft`
 
@@ -6007,7 +6007,7 @@ public func rotateLeft(by: Int64) -> Int64
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `rotateRight`
 
@@ -6018,7 +6018,7 @@ public func rotateRight(by: Int64) -> Int64
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `sign`
 
@@ -6028,7 +6028,7 @@ public var sign: Int64 { get }
 
 Sign as a `Int64`: `-1`, `0`, or `1`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `subtractChecked`
 
@@ -6038,7 +6038,7 @@ public func subtractChecked(Int64) -> Int64?
 
 Wrapping subtraction that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `subtractSaturating`
 
@@ -6048,7 +6048,7 @@ public func subtractSaturating(Int64) -> Int64
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `toBytes`
 
@@ -6066,7 +6066,7 @@ a fixed wire format.
 let bytes = Int64.maxValue.toBytes();   // 8 bytes, host order
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -6077,7 +6077,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 8 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -6088,7 +6088,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 8 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `trailingZeros`
 
@@ -6100,7 +6100,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `SignedInteger`
 
@@ -6114,7 +6114,7 @@ Absolute value. Wraps at the minimum value
 (`Int64.minValue.abs() == Int64.minValue`); use
 `absChecked` if that's a problem.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Steppable`
 
@@ -6126,7 +6126,7 @@ public func predecessor() -> Int64
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `successor`
 
@@ -6137,7 +6137,7 @@ public func successor() -> Int64
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Comparable`
 
@@ -6158,7 +6158,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Equatable`
 
@@ -6177,7 +6177,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Matchable`
 
@@ -6189,7 +6189,7 @@ public func matches(Int64) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Formattable`
 
@@ -6222,7 +6222,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Hash`
 
@@ -6235,7 +6235,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Addable`
 
@@ -6245,7 +6245,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6253,7 +6253,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6261,7 +6261,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6269,7 +6269,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6277,7 +6277,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6285,7 +6285,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6293,7 +6293,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6301,7 +6301,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6309,7 +6309,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6317,7 +6317,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6325,7 +6325,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6333,7 +6333,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Int64
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6341,7 +6341,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = Range[Int64]
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### typealias `Output`
 
@@ -6349,7 +6349,7 @@ _Defined in `lang/std/num/int64.ks`._
 type Output = ClosedRange[Int64]
 ```
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `add`
 
@@ -6360,7 +6360,7 @@ public func add(Int64) -> Int64
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `zero`
 
@@ -6370,7 +6370,7 @@ public static var zero: Int64 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Subtractable`
 
@@ -6390,7 +6390,7 @@ public func subtract(Int64) -> Int64
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Multipliable`
 
@@ -6410,7 +6410,7 @@ public func multiply(Int64) -> Int64
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### field `one`
 
@@ -6420,7 +6420,7 @@ public static var one: Int64 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Divisible`
 
@@ -6446,7 +6446,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Modulo`
 
@@ -6471,7 +6471,7 @@ public func modulo(Int64) -> Int64
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Negatable`
 
@@ -6493,7 +6493,7 @@ Two's-complement negation. Wraps at the minimum value:
 `Int64.minValue.negate() == Int64.minValue`. Use
 `negateChecked` to surface the overflow.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -6513,7 +6513,7 @@ public func bitwiseAnd(Int64) -> Int64
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -6533,7 +6533,7 @@ public func bitwiseOr(Int64) -> Int64
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -6553,7 +6553,7 @@ public func bitwiseXor(Int64) -> Int64
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -6573,7 +6573,7 @@ public func bitwiseNot() -> Int64
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `LeftShift`
 
@@ -6594,7 +6594,7 @@ public func shiftLeft(by: lang.i64) -> Int64
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RightShift`
 
@@ -6616,7 +6616,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `AddAssign`
 
@@ -6628,7 +6628,7 @@ public mutating func addAssign(Int64)
 
 `self += other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -6640,7 +6640,7 @@ public mutating func subtractAssign(Int64)
 
 `self -= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -6652,7 +6652,7 @@ public mutating func multiplyAssign(Int64)
 
 `self *= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `DivideAssign`
 
@@ -6664,7 +6664,7 @@ public mutating func divideAssign(Int64)
 
 `self /= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -6676,7 +6676,7 @@ public mutating func modAssign(Int64)
 
 `self %= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -6688,7 +6688,7 @@ public mutating func bitwiseAndAssign(Int64)
 
 `self &= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -6700,7 +6700,7 @@ public mutating func bitwiseOrAssign(Int64)
 
 `self |= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -6712,7 +6712,7 @@ public mutating func bitwiseXorAssign(Int64)
 
 `self ^= other`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -6724,7 +6724,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -6736,7 +6736,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -6780,7 +6780,7 @@ public func exclusiveRange(to: Int64) -> Range[Int64]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -6800,7 +6800,7 @@ public func inclusiveRange(to: Int64) -> ClosedRange[Int64]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/int64.ks`._
+_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Convertible`
 
@@ -6851,7 +6851,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArray`
 
 ```kestrel
-public func writeArray(to: mutating Array[T], value: T)
+public func writeArray(to: mutating Array[T], with: T)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -6859,7 +6859,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArrayUnchecked`
 
 ```kestrel
-public func writeArrayUnchecked(to: mutating Array[T], value: T)
+public func writeArrayUnchecked(to: mutating Array[T], with: T)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -6885,7 +6885,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArrayClamped`
 
 ```kestrel
-public func writeArrayClamped(to: mutating Array[T], value: T?)
+public func writeArrayClamped(to: mutating Array[T], with: T?)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -6911,7 +6911,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArrayWrapped`
 
 ```kestrel
-public func writeArrayWrapped(to: mutating Array[T], value: T?)
+public func writeArrayWrapped(to: mutating Array[T], with: T?)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -6953,7 +6953,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSlice`
 
 ```kestrel
-public func writeSlice(to: Slice[T], value: T)
+public func writeSlice(to: Slice[T], with: T)
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -6961,7 +6961,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSliceUnchecked`
 
 ```kestrel
-public func writeSliceUnchecked(to: Slice[T], value: T)
+public func writeSliceUnchecked(to: Slice[T], with: T)
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -6987,7 +6987,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSliceClamped`
 
 ```kestrel
-public func writeSliceClamped(to: Slice[T], value: T?)
+public func writeSliceClamped(to: Slice[T], with: T?)
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -7013,7 +7013,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSliceWrapped`
 
 ```kestrel
-public func writeSliceWrapped(to: Slice[T], value: T?)
+public func writeSliceWrapped(to: Slice[T], with: T?)
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -7238,7 +7238,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i8` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Members
 
@@ -7256,7 +7256,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7267,7 +7267,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7278,7 +7278,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7289,7 +7289,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7300,7 +7300,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7311,7 +7311,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7322,7 +7322,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Integer`
 
@@ -7333,7 +7333,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `From Raw`
 
@@ -7344,7 +7344,7 @@ init(raw: lang.i8)
 Wraps an existing `lang.i8` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `Int Literal`
 
@@ -7364,7 +7364,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `absChecked`
 
@@ -7375,7 +7375,7 @@ public func absChecked() -> Int8?
 Absolute value that returns `None` for `minValue` (whose absolute
 value overflows).
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `absSaturating`
 
@@ -7385,7 +7385,7 @@ public func absSaturating() -> Int8
 
 Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `addChecked`
 
@@ -7395,7 +7395,7 @@ public func addChecked(Int8) -> Int8?
 
 Wrapping addition that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `addSaturating`
 
@@ -7405,7 +7405,7 @@ public func addSaturating(Int8) -> Int8
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `bitWidth`
 
@@ -7415,7 +7415,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (8). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `byteSwapped`
 
@@ -7426,7 +7426,7 @@ public var byteSwapped: Int8 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `clamp`
 
@@ -7445,7 +7445,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `countOnes`
 
@@ -7465,7 +7465,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `countZeros`
 
@@ -7475,7 +7475,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `divideChecked`
 
@@ -7486,7 +7486,7 @@ public func divideChecked(Int8) -> Int8?
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `fromBytes`
 
@@ -7497,7 +7497,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> Int8?
 Reassembles a `Int8` from 1 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 1 bytes long.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -7508,7 +7508,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int8?
 Reassembles a `Int8` from 1 bytes in big-endian order.
 Returns `None` if the input is not exactly 1 bytes long.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -7519,7 +7519,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int8?
 Reassembles a `Int8` from 1 bytes in little-endian order.
 Returns `None` if the input is not exactly 1 bytes long.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `gcd`
 
@@ -7538,7 +7538,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `isNegative`
 
@@ -7548,7 +7548,7 @@ public var isNegative: Bool { get }
 
 True when `self < 0`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `isPositive`
 
@@ -7558,7 +7558,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -7580,7 +7580,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `isZero`
 
@@ -7590,7 +7590,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `lcm`
 
@@ -7609,7 +7609,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `leadingZeros`
 
@@ -7628,7 +7628,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `maxValue`
 
@@ -7639,7 +7639,7 @@ public static var maxValue: Int8 { get }
 The largest representable value.
 This is 2^7 - 1 (127).
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `minValue`
 
@@ -7652,7 +7652,7 @@ This is -2^7 (-128).
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `multiplyChecked`
 
@@ -7664,7 +7664,7 @@ Wrapping multiplication that returns `None` instead of overflowing.
 Implemented by multiplying then dividing back; replace with an
 overflow-detecting intrinsic when one is available.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `multiplySaturating`
 
@@ -7675,7 +7675,7 @@ public func multiplySaturating(Int8) -> Int8
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `negateChecked`
 
@@ -7685,7 +7685,7 @@ public func negateChecked() -> Int8?
 
 Negation that returns `None` for `minValue` (whose negation overflows).
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `negateSaturating`
 
@@ -7695,7 +7695,7 @@ public func negateSaturating() -> Int8
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `parse`
 
@@ -7716,7 +7716,7 @@ Int8.parse(string: "abc");   // None
 Int8.parse(string: "");      // None
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `parse`
 
@@ -7737,7 +7737,7 @@ Int8.parse(string: "101010", radix: 2);  // Some(42)
 Int8.parse(string: "z", radix: 36);      // Some(35)
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `pow`
 
@@ -7757,7 +7757,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `raw`
 
@@ -7768,7 +7768,7 @@ public var raw: lang.i8
 The underlying primitive `lang.i8` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `rotateLeft`
 
@@ -7779,7 +7779,7 @@ public func rotateLeft(by: Int64) -> Int8
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `rotateRight`
 
@@ -7790,7 +7790,7 @@ public func rotateRight(by: Int64) -> Int8
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `sign`
 
@@ -7800,7 +7800,7 @@ public var sign: Int8 { get }
 
 Sign as a `Int8`: `-1`, `0`, or `1`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `subtractChecked`
 
@@ -7810,7 +7810,7 @@ public func subtractChecked(Int8) -> Int8?
 
 Wrapping subtraction that returns `None` instead of overflowing.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `subtractSaturating`
 
@@ -7820,7 +7820,7 @@ public func subtractSaturating(Int8) -> Int8
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `toBytes`
 
@@ -7838,7 +7838,7 @@ a fixed wire format.
 let bytes = Int8.maxValue.toBytes();   // 1 bytes, host order
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -7849,7 +7849,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 1 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -7860,7 +7860,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 1 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `trailingZeros`
 
@@ -7872,7 +7872,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `SignedInteger`
 
@@ -7886,7 +7886,7 @@ Absolute value. Wraps at the minimum value
 (`Int8.minValue.abs() == Int8.minValue`); use
 `absChecked` if that's a problem.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Steppable`
 
@@ -7898,7 +7898,7 @@ public func predecessor() -> Int8
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `successor`
 
@@ -7909,7 +7909,7 @@ public func successor() -> Int8
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Comparable`
 
@@ -7930,7 +7930,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Equatable`
 
@@ -7949,7 +7949,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Matchable`
 
@@ -7961,7 +7961,7 @@ public func matches(Int8) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Formattable`
 
@@ -7994,7 +7994,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Hash`
 
@@ -8007,7 +8007,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Addable`
 
@@ -8017,7 +8017,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8025,7 +8025,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8033,7 +8033,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8041,7 +8041,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8049,7 +8049,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8057,7 +8057,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8065,7 +8065,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8073,7 +8073,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8081,7 +8081,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8089,7 +8089,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8097,7 +8097,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8105,7 +8105,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Int8
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8113,7 +8113,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = Range[Int8]
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### typealias `Output`
 
@@ -8121,7 +8121,7 @@ _Defined in `lang/std/num/int8.ks`._
 type Output = ClosedRange[Int8]
 ```
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `add`
 
@@ -8132,7 +8132,7 @@ public func add(Int8) -> Int8
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `zero`
 
@@ -8142,7 +8142,7 @@ public static var zero: Int8 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Subtractable`
 
@@ -8162,7 +8162,7 @@ public func subtract(Int8) -> Int8
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Multipliable`
 
@@ -8182,7 +8182,7 @@ public func multiply(Int8) -> Int8
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### field `one`
 
@@ -8192,7 +8192,7 @@ public static var one: Int8 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Divisible`
 
@@ -8218,7 +8218,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Modulo`
 
@@ -8243,7 +8243,7 @@ public func modulo(Int8) -> Int8
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Negatable`
 
@@ -8265,7 +8265,7 @@ Two's-complement negation. Wraps at the minimum value:
 `Int8.minValue.negate() == Int8.minValue`. Use
 `negateChecked` to surface the overflow.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -8285,7 +8285,7 @@ public func bitwiseAnd(Int8) -> Int8
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -8305,7 +8305,7 @@ public func bitwiseOr(Int8) -> Int8
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -8325,7 +8325,7 @@ public func bitwiseXor(Int8) -> Int8
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -8345,7 +8345,7 @@ public func bitwiseNot() -> Int8
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `LeftShift`
 
@@ -8366,7 +8366,7 @@ public func shiftLeft(by: lang.i64) -> Int8
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RightShift`
 
@@ -8388,7 +8388,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `AddAssign`
 
@@ -8400,7 +8400,7 @@ public mutating func addAssign(Int8)
 
 `self += other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -8412,7 +8412,7 @@ public mutating func subtractAssign(Int8)
 
 `self -= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -8424,7 +8424,7 @@ public mutating func multiplyAssign(Int8)
 
 `self *= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `DivideAssign`
 
@@ -8436,7 +8436,7 @@ public mutating func divideAssign(Int8)
 
 `self /= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -8448,7 +8448,7 @@ public mutating func modAssign(Int8)
 
 `self %= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -8460,7 +8460,7 @@ public mutating func bitwiseAndAssign(Int8)
 
 `self &= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -8472,7 +8472,7 @@ public mutating func bitwiseOrAssign(Int8)
 
 `self |= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -8484,7 +8484,7 @@ public mutating func bitwiseXorAssign(Int8)
 
 `self ^= other`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -8496,7 +8496,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -8508,7 +8508,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -8552,7 +8552,7 @@ public func exclusiveRange(to: Int8) -> Range[Int8]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -8572,7 +8572,7 @@ public func inclusiveRange(to: Int8) -> ClosedRange[Int8]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/int8.ks`._
+_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Convertible`
 
@@ -8615,7 +8615,7 @@ let v2 = rng.nextUInt64();   // distinct from v1
 
 One `UInt64` field — the mutable generator state.
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 ### Members
 
@@ -8629,7 +8629,7 @@ Creates a generator with a hard-coded default seed
 (`88172645463325252`). Always produces the same stream — provide an
 explicit seed via `init(seed:)` when you need variation between runs.
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 #### initializer `Seeded`
 
@@ -8647,7 +8647,7 @@ independent streams; the same seed always reproduces the same stream
 var rng = Lcg64(seed: 42);
 ```
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `RandomNumberGenerator`
 
@@ -8660,7 +8660,7 @@ public mutating func nextUInt64() -> UInt64
 Advances the state once and returns the new value. `O(1)` and
 allocation-free.
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `Defaultable`
 
@@ -8701,7 +8701,7 @@ struct MyRng: RandomNumberGenerator {
 }
 ```
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 ### Members
 
@@ -8725,7 +8725,7 @@ var rng = Lcg64(seed: 42);
 let roll = rng.nextInt(below: 6);   // 0..5
 ```
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 #### function `nextUInt64`
 
@@ -8738,7 +8738,7 @@ state. Each call should be independent and uniformly distributed
 over the full `UInt64` range — implementers that can't promise
 uniformity (e.g. very small periods) should document the bias.
 
-_Defined in `lang/std/num/random.ks`._
+_Defined in `lang/std/numeric/random.ks`._
 
 ## protocol `SignedInteger`
 
@@ -8750,7 +8750,7 @@ Marker protocol for signed integer types. The `abs()` requirement is
 what justifies treating these uniformly in generic code — unsigned
 integers can't satisfy it without changing semantics.
 
-_Defined in `lang/std/num/numeric.ks`._
+_Defined in `lang/std/numeric/numeric.ks`._
 
 ### Members
 
@@ -8764,7 +8764,7 @@ Absolute value. For two's-complement types this can overflow at
 `minValue`; consumers that need a total function should use
 `absChecked()` from the concrete type instead.
 
-_Defined in `lang/std/num/numeric.ks`._
+_Defined in `lang/std/numeric/numeric.ks`._
 
 ## protocol `Steppable`
 
@@ -8780,7 +8780,7 @@ the step size is implicit (`1` for integers).
 value; behaviour at the type's edges (`Int64.maxValue.successor()`,
 for example) follows the same wrapping rules as `add`/`subtract`.
 
-_Defined in `lang/std/num/numeric.ks`._
+_Defined in `lang/std/numeric/numeric.ks`._
 
 ### Members
 
@@ -8792,7 +8792,7 @@ func predecessor() -> Self
 
 The previous value in the sequence. For integers this is `self - 1`.
 
-_Defined in `lang/std/num/numeric.ks`._
+_Defined in `lang/std/numeric/numeric.ks`._
 
 #### function `successor`
 
@@ -8802,7 +8802,7 @@ func successor() -> Self
 
 The next value in the sequence. For integers this is `self + 1`.
 
-_Defined in `lang/std/num/numeric.ks`._
+_Defined in `lang/std/numeric/numeric.ks`._
 
 ## typealias `UInt`
 
@@ -8812,7 +8812,7 @@ public type UInt = UInt64
 
 Platform-sized unsigned integer — currently always `UInt64`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ## struct `UInt16`
 
@@ -8850,7 +8850,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i16` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Members
 
@@ -8868,7 +8868,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8879,7 +8879,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8890,7 +8890,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8901,7 +8901,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8912,7 +8912,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8923,7 +8923,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8934,7 +8934,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Integer`
 
@@ -8945,7 +8945,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `From Raw`
 
@@ -8956,7 +8956,7 @@ init(raw: lang.i16)
 Wraps an existing `lang.i16` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `Int Literal`
 
@@ -8976,7 +8976,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `addChecked`
 
@@ -8987,7 +8987,7 @@ public func addChecked(UInt16) -> UInt16?
 Wrapping addition that returns `None` on overflow. For unsigned types
 overflow is detected via `result < self`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `addSaturating`
 
@@ -8997,7 +8997,7 @@ public func addSaturating(UInt16) -> UInt16
 
 Addition that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `bitWidth`
 
@@ -9007,7 +9007,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (16). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `byteSwapped`
 
@@ -9018,7 +9018,7 @@ public var byteSwapped: UInt16 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `clamp`
 
@@ -9037,7 +9037,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `countOnes`
 
@@ -9057,7 +9057,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `countZeros`
 
@@ -9067,7 +9067,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `divideChecked`
 
@@ -9077,7 +9077,7 @@ public func divideChecked(UInt16) -> UInt16?
 
 Division that returns `None` for divide-by-zero.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `fromBytes`
 
@@ -9088,7 +9088,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> UInt16?
 Reassembles a `UInt16` from 2 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 2 bytes long.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -9099,7 +9099,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt16?
 Reassembles a `UInt16` from 2 bytes in big-endian order.
 Returns `None` if the input is not exactly 2 bytes long.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -9110,7 +9110,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt16
 Reassembles a `UInt16` from 2 bytes in little-endian order.
 Returns `None` if the input is not exactly 2 bytes long.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `gcd`
 
@@ -9129,7 +9129,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `isNegative`
 
@@ -9139,7 +9139,7 @@ public var isNegative: Bool { get }
 
 Always `false` — unsigned types cannot be negative.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `isPositive`
 
@@ -9149,7 +9149,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -9171,7 +9171,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `isZero`
 
@@ -9181,7 +9181,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `lcm`
 
@@ -9200,7 +9200,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `leadingZeros`
 
@@ -9219,7 +9219,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `maxValue`
 
@@ -9230,7 +9230,7 @@ public static var maxValue: UInt16 { get }
 The largest representable value.
 This is 2^16 - 1 (65_535).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `minValue`
 
@@ -9243,7 +9243,7 @@ This is always 0 for unsigned types.
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `multiplyChecked`
 
@@ -9254,7 +9254,7 @@ public func multiplyChecked(UInt16) -> UInt16?
 Wrapping multiplication that returns `None` on overflow. Implemented
 by multiplying then dividing back.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `multiplySaturating`
 
@@ -9264,7 +9264,7 @@ public func multiplySaturating(UInt16) -> UInt16
 
 Multiplication that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `parse`
 
@@ -9285,7 +9285,7 @@ UInt16.parse(string: "-1");   // None  (no sign for unsigned)
 UInt16.parse(string: "");     // None
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `parse`
 
@@ -9306,7 +9306,7 @@ UInt16.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
 UInt16.parse(string: "101010", radix: 2);  // Some(42)
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `pow`
 
@@ -9326,7 +9326,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `raw`
 
@@ -9337,7 +9337,7 @@ public var raw: lang.i16
 The underlying primitive `lang.i16` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `rotateLeft`
 
@@ -9348,7 +9348,7 @@ public func rotateLeft(by: Int64) -> UInt16
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `rotateRight`
 
@@ -9359,7 +9359,7 @@ public func rotateRight(by: Int64) -> UInt16
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `sign`
 
@@ -9370,7 +9370,7 @@ public var sign: UInt16 { get }
 Sign as a `UInt16`: `0` for zero, `1` otherwise (unsigned types
 have no negative values).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `subtractChecked`
 
@@ -9380,7 +9380,7 @@ public func subtractChecked(UInt16) -> UInt16?
 
 Subtraction that returns `None` on underflow (`other > self`).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `subtractSaturating`
 
@@ -9391,7 +9391,7 @@ public func subtractSaturating(UInt16) -> UInt16
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `toBytes`
 
@@ -9409,7 +9409,7 @@ a fixed wire format.
 let bytes = UInt16.maxValue.toBytes();   // 2 bytes, host order
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -9420,7 +9420,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 2 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -9431,7 +9431,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 2 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `trailingZeros`
 
@@ -9443,7 +9443,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Steppable`
 
@@ -9455,7 +9455,7 @@ public func predecessor() -> UInt16
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `successor`
 
@@ -9466,7 +9466,7 @@ public func successor() -> UInt16
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Comparable`
 
@@ -9487,7 +9487,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Equatable`
 
@@ -9506,7 +9506,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Matchable`
 
@@ -9518,7 +9518,7 @@ public func matches(UInt16) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Formattable`
 
@@ -9551,7 +9551,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Hash`
 
@@ -9564,7 +9564,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Addable`
 
@@ -9574,7 +9574,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9582,7 +9582,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9590,7 +9590,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9598,7 +9598,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9606,7 +9606,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9614,7 +9614,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9622,7 +9622,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9630,7 +9630,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9638,7 +9638,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9646,7 +9646,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9654,7 +9654,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = UInt16
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9662,7 +9662,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = Range[UInt16]
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### typealias `Output`
 
@@ -9670,7 +9670,7 @@ _Defined in `lang/std/num/uint16.ks`._
 type Output = ClosedRange[UInt16]
 ```
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `add`
 
@@ -9681,7 +9681,7 @@ public func add(UInt16) -> UInt16
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `zero`
 
@@ -9691,7 +9691,7 @@ public static var zero: UInt16 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Subtractable`
 
@@ -9711,7 +9711,7 @@ public func subtract(UInt16) -> UInt16
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Multipliable`
 
@@ -9731,7 +9731,7 @@ public func multiply(UInt16) -> UInt16
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### field `one`
 
@@ -9741,7 +9741,7 @@ public static var one: UInt16 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Divisible`
 
@@ -9767,7 +9767,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Modulo`
 
@@ -9792,7 +9792,7 @@ public func modulo(UInt16) -> UInt16
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -9812,7 +9812,7 @@ public func bitwiseAnd(UInt16) -> UInt16
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -9832,7 +9832,7 @@ public func bitwiseOr(UInt16) -> UInt16
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -9852,7 +9852,7 @@ public func bitwiseXor(UInt16) -> UInt16
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -9872,7 +9872,7 @@ public func bitwiseNot() -> UInt16
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `LeftShift`
 
@@ -9893,7 +9893,7 @@ public func shiftLeft(by: lang.i64) -> UInt16
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RightShift`
 
@@ -9915,7 +9915,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `AddAssign`
 
@@ -9927,7 +9927,7 @@ public mutating func addAssign(UInt16)
 
 `self += other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -9939,7 +9939,7 @@ public mutating func subtractAssign(UInt16)
 
 `self -= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -9951,7 +9951,7 @@ public mutating func multiplyAssign(UInt16)
 
 `self *= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `DivideAssign`
 
@@ -9963,7 +9963,7 @@ public mutating func divideAssign(UInt16)
 
 `self /= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -9975,7 +9975,7 @@ public mutating func modAssign(UInt16)
 
 `self %= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -9987,7 +9987,7 @@ public mutating func bitwiseAndAssign(UInt16)
 
 `self &= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -9999,7 +9999,7 @@ public mutating func bitwiseOrAssign(UInt16)
 
 `self |= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -10011,7 +10011,7 @@ public mutating func bitwiseXorAssign(UInt16)
 
 `self ^= other`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -10023,7 +10023,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -10035,7 +10035,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -10079,7 +10079,7 @@ public func exclusiveRange(to: UInt16) -> Range[UInt16]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -10099,7 +10099,7 @@ public func inclusiveRange(to: UInt16) -> ClosedRange[UInt16]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/uint16.ks`._
+_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Convertible`
 
@@ -10149,7 +10149,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i32` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Members
 
@@ -10167,7 +10167,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10178,7 +10178,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10189,7 +10189,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10200,7 +10200,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10211,7 +10211,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10222,7 +10222,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10233,7 +10233,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Integer`
 
@@ -10244,7 +10244,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `From Raw`
 
@@ -10255,7 +10255,7 @@ init(raw: lang.i32)
 Wraps an existing `lang.i32` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `Int Literal`
 
@@ -10275,7 +10275,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `addChecked`
 
@@ -10286,7 +10286,7 @@ public func addChecked(UInt32) -> UInt32?
 Wrapping addition that returns `None` on overflow. For unsigned types
 overflow is detected via `result < self`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `addSaturating`
 
@@ -10296,7 +10296,7 @@ public func addSaturating(UInt32) -> UInt32
 
 Addition that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `bitWidth`
 
@@ -10306,7 +10306,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (32). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `byteSwapped`
 
@@ -10317,7 +10317,7 @@ public var byteSwapped: UInt32 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `clamp`
 
@@ -10336,7 +10336,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `countOnes`
 
@@ -10356,7 +10356,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `countZeros`
 
@@ -10366,7 +10366,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `divideChecked`
 
@@ -10376,7 +10376,7 @@ public func divideChecked(UInt32) -> UInt32?
 
 Division that returns `None` for divide-by-zero.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `fromBytes`
 
@@ -10387,7 +10387,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> UInt32?
 Reassembles a `UInt32` from 4 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 4 bytes long.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -10398,7 +10398,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt32?
 Reassembles a `UInt32` from 4 bytes in big-endian order.
 Returns `None` if the input is not exactly 4 bytes long.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -10409,7 +10409,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt32
 Reassembles a `UInt32` from 4 bytes in little-endian order.
 Returns `None` if the input is not exactly 4 bytes long.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `gcd`
 
@@ -10428,7 +10428,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `isNegative`
 
@@ -10438,7 +10438,7 @@ public var isNegative: Bool { get }
 
 Always `false` — unsigned types cannot be negative.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `isPositive`
 
@@ -10448,7 +10448,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -10470,7 +10470,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `isZero`
 
@@ -10480,7 +10480,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `lcm`
 
@@ -10499,7 +10499,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `leadingZeros`
 
@@ -10518,7 +10518,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `maxValue`
 
@@ -10529,7 +10529,7 @@ public static var maxValue: UInt32 { get }
 The largest representable value.
 This is 2^32 - 1 (4_294_967_295).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `minValue`
 
@@ -10542,7 +10542,7 @@ This is always 0 for unsigned types.
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `multiplyChecked`
 
@@ -10553,7 +10553,7 @@ public func multiplyChecked(UInt32) -> UInt32?
 Wrapping multiplication that returns `None` on overflow. Implemented
 by multiplying then dividing back.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `multiplySaturating`
 
@@ -10563,7 +10563,7 @@ public func multiplySaturating(UInt32) -> UInt32
 
 Multiplication that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `parse`
 
@@ -10584,7 +10584,7 @@ UInt32.parse(string: "-1");   // None  (no sign for unsigned)
 UInt32.parse(string: "");     // None
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `parse`
 
@@ -10605,7 +10605,7 @@ UInt32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
 UInt32.parse(string: "101010", radix: 2);  // Some(42)
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `pow`
 
@@ -10625,7 +10625,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `raw`
 
@@ -10636,7 +10636,7 @@ public var raw: lang.i32
 The underlying primitive `lang.i32` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `rotateLeft`
 
@@ -10647,7 +10647,7 @@ public func rotateLeft(by: Int64) -> UInt32
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `rotateRight`
 
@@ -10658,7 +10658,7 @@ public func rotateRight(by: Int64) -> UInt32
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `sign`
 
@@ -10669,7 +10669,7 @@ public var sign: UInt32 { get }
 Sign as a `UInt32`: `0` for zero, `1` otherwise (unsigned types
 have no negative values).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `subtractChecked`
 
@@ -10679,7 +10679,7 @@ public func subtractChecked(UInt32) -> UInt32?
 
 Subtraction that returns `None` on underflow (`other > self`).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `subtractSaturating`
 
@@ -10690,7 +10690,7 @@ public func subtractSaturating(UInt32) -> UInt32
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `toBytes`
 
@@ -10708,7 +10708,7 @@ a fixed wire format.
 let bytes = UInt32.maxValue.toBytes();   // 4 bytes, host order
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -10719,7 +10719,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 4 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -10730,7 +10730,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 4 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `trailingZeros`
 
@@ -10742,7 +10742,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Steppable`
 
@@ -10754,7 +10754,7 @@ public func predecessor() -> UInt32
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `successor`
 
@@ -10765,7 +10765,7 @@ public func successor() -> UInt32
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Comparable`
 
@@ -10786,7 +10786,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Equatable`
 
@@ -10805,7 +10805,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Matchable`
 
@@ -10817,7 +10817,7 @@ public func matches(UInt32) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Formattable`
 
@@ -10850,7 +10850,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Hash`
 
@@ -10863,7 +10863,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Addable`
 
@@ -10873,7 +10873,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10881,7 +10881,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10889,7 +10889,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10897,7 +10897,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10905,7 +10905,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10913,7 +10913,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10921,7 +10921,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10929,7 +10929,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10937,7 +10937,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10945,7 +10945,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10953,7 +10953,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = UInt32
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10961,7 +10961,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = Range[UInt32]
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### typealias `Output`
 
@@ -10969,7 +10969,7 @@ _Defined in `lang/std/num/uint32.ks`._
 type Output = ClosedRange[UInt32]
 ```
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `add`
 
@@ -10980,7 +10980,7 @@ public func add(UInt32) -> UInt32
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `zero`
 
@@ -10990,7 +10990,7 @@ public static var zero: UInt32 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Subtractable`
 
@@ -11010,7 +11010,7 @@ public func subtract(UInt32) -> UInt32
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Multipliable`
 
@@ -11030,7 +11030,7 @@ public func multiply(UInt32) -> UInt32
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### field `one`
 
@@ -11040,7 +11040,7 @@ public static var one: UInt32 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Divisible`
 
@@ -11066,7 +11066,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Modulo`
 
@@ -11091,7 +11091,7 @@ public func modulo(UInt32) -> UInt32
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -11111,7 +11111,7 @@ public func bitwiseAnd(UInt32) -> UInt32
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -11131,7 +11131,7 @@ public func bitwiseOr(UInt32) -> UInt32
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -11151,7 +11151,7 @@ public func bitwiseXor(UInt32) -> UInt32
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -11171,7 +11171,7 @@ public func bitwiseNot() -> UInt32
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `LeftShift`
 
@@ -11192,7 +11192,7 @@ public func shiftLeft(by: lang.i64) -> UInt32
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RightShift`
 
@@ -11214,7 +11214,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `AddAssign`
 
@@ -11226,7 +11226,7 @@ public mutating func addAssign(UInt32)
 
 `self += other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -11238,7 +11238,7 @@ public mutating func subtractAssign(UInt32)
 
 `self -= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -11250,7 +11250,7 @@ public mutating func multiplyAssign(UInt32)
 
 `self *= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `DivideAssign`
 
@@ -11262,7 +11262,7 @@ public mutating func divideAssign(UInt32)
 
 `self /= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -11274,7 +11274,7 @@ public mutating func modAssign(UInt32)
 
 `self %= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -11286,7 +11286,7 @@ public mutating func bitwiseAndAssign(UInt32)
 
 `self &= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -11298,7 +11298,7 @@ public mutating func bitwiseOrAssign(UInt32)
 
 `self |= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -11310,7 +11310,7 @@ public mutating func bitwiseXorAssign(UInt32)
 
 `self ^= other`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -11322,7 +11322,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -11334,7 +11334,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -11378,7 +11378,7 @@ public func exclusiveRange(to: UInt32) -> Range[UInt32]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -11398,7 +11398,7 @@ public func inclusiveRange(to: UInt32) -> ClosedRange[UInt32]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/uint32.ks`._
+_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Convertible`
 
@@ -11448,7 +11448,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i64` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Members
 
@@ -11466,7 +11466,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11477,7 +11477,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11488,7 +11488,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11499,7 +11499,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11510,7 +11510,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11521,7 +11521,7 @@ public init(from: UInt8)
 Converts from `UInt8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11532,7 +11532,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Integer`
 
@@ -11543,7 +11543,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `From Raw`
 
@@ -11554,7 +11554,7 @@ init(raw: lang.i64)
 Wraps an existing `lang.i64` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `Int Literal`
 
@@ -11574,7 +11574,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `addChecked`
 
@@ -11585,7 +11585,7 @@ public func addChecked(UInt64) -> UInt64?
 Wrapping addition that returns `None` on overflow. For unsigned types
 overflow is detected via `result < self`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `addSaturating`
 
@@ -11595,7 +11595,7 @@ public func addSaturating(UInt64) -> UInt64
 
 Addition that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `bitWidth`
 
@@ -11605,7 +11605,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (64). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `byteSwapped`
 
@@ -11616,7 +11616,7 @@ public var byteSwapped: UInt64 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `clamp`
 
@@ -11635,7 +11635,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `countOnes`
 
@@ -11655,7 +11655,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `countZeros`
 
@@ -11665,7 +11665,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `divideChecked`
 
@@ -11675,7 +11675,7 @@ public func divideChecked(UInt64) -> UInt64?
 
 Division that returns `None` for divide-by-zero.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `fromBytes`
 
@@ -11686,7 +11686,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> UInt64?
 Reassembles a `UInt64` from 8 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 8 bytes long.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -11697,7 +11697,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt64?
 Reassembles a `UInt64` from 8 bytes in big-endian order.
 Returns `None` if the input is not exactly 8 bytes long.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -11708,7 +11708,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt64
 Reassembles a `UInt64` from 8 bytes in little-endian order.
 Returns `None` if the input is not exactly 8 bytes long.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `gcd`
 
@@ -11727,7 +11727,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `isNegative`
 
@@ -11737,7 +11737,7 @@ public var isNegative: Bool { get }
 
 Always `false` — unsigned types cannot be negative.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `isPositive`
 
@@ -11747,7 +11747,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -11769,7 +11769,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `isZero`
 
@@ -11779,7 +11779,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `lcm`
 
@@ -11798,7 +11798,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `leadingZeros`
 
@@ -11817,7 +11817,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `maxValue`
 
@@ -11828,7 +11828,7 @@ public static var maxValue: UInt64 { get }
 The largest representable value.
 This is 2^64 - 1 (18_446_744_073_709_551_615).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `minValue`
 
@@ -11841,7 +11841,7 @@ This is always 0 for unsigned types.
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `multiplyChecked`
 
@@ -11852,7 +11852,7 @@ public func multiplyChecked(UInt64) -> UInt64?
 Wrapping multiplication that returns `None` on overflow. Implemented
 by multiplying then dividing back.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `multiplySaturating`
 
@@ -11862,7 +11862,7 @@ public func multiplySaturating(UInt64) -> UInt64
 
 Multiplication that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `parse`
 
@@ -11883,7 +11883,7 @@ UInt64.parse(string: "-1");   // None  (no sign for unsigned)
 UInt64.parse(string: "");     // None
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `parse`
 
@@ -11904,7 +11904,7 @@ UInt64.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
 UInt64.parse(string: "101010", radix: 2);  // Some(42)
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `pow`
 
@@ -11924,7 +11924,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `raw`
 
@@ -11935,7 +11935,7 @@ public var raw: lang.i64
 The underlying primitive `lang.i64` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `rotateLeft`
 
@@ -11946,7 +11946,7 @@ public func rotateLeft(by: Int64) -> UInt64
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `rotateRight`
 
@@ -11957,7 +11957,7 @@ public func rotateRight(by: Int64) -> UInt64
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `sign`
 
@@ -11968,7 +11968,7 @@ public var sign: UInt64 { get }
 Sign as a `UInt64`: `0` for zero, `1` otherwise (unsigned types
 have no negative values).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `subtractChecked`
 
@@ -11978,7 +11978,7 @@ public func subtractChecked(UInt64) -> UInt64?
 
 Subtraction that returns `None` on underflow (`other > self`).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `subtractSaturating`
 
@@ -11989,7 +11989,7 @@ public func subtractSaturating(UInt64) -> UInt64
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `toBytes`
 
@@ -12007,7 +12007,7 @@ a fixed wire format.
 let bytes = UInt64.maxValue.toBytes();   // 8 bytes, host order
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -12018,7 +12018,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 8 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -12029,7 +12029,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 8 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `trailingZeros`
 
@@ -12041,7 +12041,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Steppable`
 
@@ -12053,7 +12053,7 @@ public func predecessor() -> UInt64
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `successor`
 
@@ -12064,7 +12064,7 @@ public func successor() -> UInt64
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Comparable`
 
@@ -12085,7 +12085,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Equatable`
 
@@ -12104,7 +12104,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Matchable`
 
@@ -12116,7 +12116,7 @@ public func matches(UInt64) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Formattable`
 
@@ -12149,7 +12149,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Hash`
 
@@ -12162,7 +12162,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Addable`
 
@@ -12172,7 +12172,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12180,7 +12180,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12188,7 +12188,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12196,7 +12196,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12204,7 +12204,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12212,7 +12212,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12220,7 +12220,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12228,7 +12228,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12236,7 +12236,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12244,7 +12244,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12252,7 +12252,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = UInt64
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12260,7 +12260,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = Range[UInt64]
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### typealias `Output`
 
@@ -12268,7 +12268,7 @@ _Defined in `lang/std/num/uint64.ks`._
 type Output = ClosedRange[UInt64]
 ```
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `add`
 
@@ -12279,7 +12279,7 @@ public func add(UInt64) -> UInt64
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `zero`
 
@@ -12289,7 +12289,7 @@ public static var zero: UInt64 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Subtractable`
 
@@ -12309,7 +12309,7 @@ public func subtract(UInt64) -> UInt64
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Multipliable`
 
@@ -12329,7 +12329,7 @@ public func multiply(UInt64) -> UInt64
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### field `one`
 
@@ -12339,7 +12339,7 @@ public static var one: UInt64 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Divisible`
 
@@ -12365,7 +12365,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Modulo`
 
@@ -12390,7 +12390,7 @@ public func modulo(UInt64) -> UInt64
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -12410,7 +12410,7 @@ public func bitwiseAnd(UInt64) -> UInt64
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -12430,7 +12430,7 @@ public func bitwiseOr(UInt64) -> UInt64
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -12450,7 +12450,7 @@ public func bitwiseXor(UInt64) -> UInt64
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -12470,7 +12470,7 @@ public func bitwiseNot() -> UInt64
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `LeftShift`
 
@@ -12491,7 +12491,7 @@ public func shiftLeft(by: lang.i64) -> UInt64
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RightShift`
 
@@ -12513,7 +12513,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `AddAssign`
 
@@ -12525,7 +12525,7 @@ public mutating func addAssign(UInt64)
 
 `self += other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -12537,7 +12537,7 @@ public mutating func subtractAssign(UInt64)
 
 `self -= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -12549,7 +12549,7 @@ public mutating func multiplyAssign(UInt64)
 
 `self *= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `DivideAssign`
 
@@ -12561,7 +12561,7 @@ public mutating func divideAssign(UInt64)
 
 `self /= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -12573,7 +12573,7 @@ public mutating func modAssign(UInt64)
 
 `self %= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -12585,7 +12585,7 @@ public mutating func bitwiseAndAssign(UInt64)
 
 `self &= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -12597,7 +12597,7 @@ public mutating func bitwiseOrAssign(UInt64)
 
 `self |= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -12609,7 +12609,7 @@ public mutating func bitwiseXorAssign(UInt64)
 
 `self ^= other`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -12621,7 +12621,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -12633,7 +12633,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -12677,7 +12677,7 @@ public func exclusiveRange(to: UInt64) -> Range[UInt64]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -12697,7 +12697,7 @@ public func inclusiveRange(to: UInt64) -> ClosedRange[UInt64]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/uint64.ks`._
+_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Convertible`
 
@@ -12747,7 +12747,7 @@ let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
 A single `lang.i8` field. No padding, no headers — bit-identical
 to the corresponding C type.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Members
 
@@ -12765,7 +12765,7 @@ Creates the zero value, satisfying `Defaultable`.
 let n = Int64();   // 0
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12776,7 +12776,7 @@ public init(from: Int8)
 Converts from `Int8`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12787,7 +12787,7 @@ public init(from: Int16)
 Converts from `Int16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12798,7 +12798,7 @@ public init(from: Int32)
 Converts from `Int32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12809,7 +12809,7 @@ public init(from: Int64)
 Converts from `Int64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12820,7 +12820,7 @@ public init(from: UInt16)
 Converts from `UInt16`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12831,7 +12831,7 @@ public init(from: UInt32)
 Converts from `UInt32`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Integer`
 
@@ -12842,7 +12842,7 @@ public init(from: UInt64)
 Converts from `UInt64`. Narrowing conversions truncate the high
 bits; signed→unsigned reinterprets the bit pattern.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `From Raw`
 
@@ -12853,7 +12853,7 @@ init(raw: lang.i8)
 Wraps an existing `lang.i8` without conversion. Internal
 constructor used by intrinsics; not part of the public API.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `Int Literal`
 
@@ -12873,7 +12873,7 @@ You will rarely call this directly — write the literal and let the
 let n: Int64 = 42;            // implicit
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `addChecked`
 
@@ -12884,7 +12884,7 @@ public func addChecked(UInt8) -> UInt8?
 Wrapping addition that returns `None` on overflow. For unsigned types
 overflow is detected via `result < self`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `addSaturating`
 
@@ -12894,7 +12894,7 @@ public func addSaturating(UInt8) -> UInt8
 
 Addition that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `bitWidth`
 
@@ -12904,7 +12904,7 @@ public static var bitWidth: Int64 { get }
 
 The width in bits (8). Useful for shift bounds and bit-walks.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `byteSwapped`
 
@@ -12915,7 +12915,7 @@ public var byteSwapped: UInt8 { get }
 Value with its byte order reversed. Use to convert between big- and
 little-endian; lowered to a `bswap` intrinsic.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `clamp`
 
@@ -12934,7 +12934,7 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 (15).clamp(min: 0, max: 10);   // 10
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `countOnes`
 
@@ -12954,7 +12954,7 @@ Lowered to a `popcount` intrinsic where the target supports it.
 (0).countOnes;       // 0
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `countZeros`
 
@@ -12964,7 +12964,7 @@ public var countZeros: Int64 { get }
 
 Complement of `countOnes`: equal to `bitWidth - countOnes`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `divideChecked`
 
@@ -12974,7 +12974,7 @@ public func divideChecked(UInt8) -> UInt8?
 
 Division that returns `None` for divide-by-zero.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `fromBytes`
 
@@ -12985,7 +12985,7 @@ public static func fromBytes(std.collections.Array[UInt8]) -> UInt8?
 Reassembles a `UInt8` from 1 bytes in native (host) byte
 order. Returns `None` if the input is not exactly 1 bytes long.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `fromBytesBigEndian`
 
@@ -12996,7 +12996,7 @@ public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt8?
 Reassembles a `UInt8` from 1 bytes in big-endian order.
 Returns `None` if the input is not exactly 1 bytes long.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `fromBytesLittleEndian`
 
@@ -13007,7 +13007,7 @@ public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt8?
 Reassembles a `UInt8` from 1 bytes in little-endian order.
 Returns `None` if the input is not exactly 1 bytes long.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `gcd`
 
@@ -13026,7 +13026,7 @@ the inputs are taken absolute first; the result is always non-negative.
 (-12).gcd(8);  // 4
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `isNegative`
 
@@ -13036,7 +13036,7 @@ public var isNegative: Bool { get }
 
 Always `false` — unsigned types cannot be negative.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `isPositive`
 
@@ -13046,7 +13046,7 @@ public var isPositive: Bool { get }
 
 True when `self > 0`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `isPowerOfTwo`
 
@@ -13068,7 +13068,7 @@ Zero and negatives are excluded. Cheap branchless test built on
 (0).isPowerOfTwo;   // false
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `isZero`
 
@@ -13078,7 +13078,7 @@ public var isZero: Bool { get }
 
 True when `self == 0`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `lcm`
 
@@ -13097,7 +13097,7 @@ to avoid intermediate overflow. Returns zero if either input is zero.
 (0).lcm(7);   // 0
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `leadingZeros`
 
@@ -13116,7 +13116,7 @@ For zero, returns `bitWidth`.
 (0).leadingZeros;   // bitWidth
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `maxValue`
 
@@ -13127,7 +13127,7 @@ public static var maxValue: UInt8 { get }
 The largest representable value.
 This is 2^8 - 1 (255).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `minValue`
 
@@ -13140,7 +13140,7 @@ This is always 0 for unsigned types.
 Note that for signed types `minValue.negate()` overflows back to
 itself; use `negateChecked()` if you need to detect that.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `multiplyChecked`
 
@@ -13151,7 +13151,7 @@ public func multiplyChecked(UInt8) -> UInt8?
 Wrapping multiplication that returns `None` on overflow. Implemented
 by multiplying then dividing back.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `multiplySaturating`
 
@@ -13161,7 +13161,7 @@ public func multiplySaturating(UInt8) -> UInt8
 
 Multiplication that clamps to `maxValue` on overflow.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `parse`
 
@@ -13182,7 +13182,7 @@ UInt8.parse(string: "-1");   // None  (no sign for unsigned)
 UInt8.parse(string: "");     // None
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `parse`
 
@@ -13203,7 +13203,7 @@ UInt8.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
 UInt8.parse(string: "101010", radix: 2);  // Some(42)
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `pow`
 
@@ -13223,7 +13223,7 @@ the would-be fraction).
 (5).pow(-1);  // 0
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `raw`
 
@@ -13234,7 +13234,7 @@ public var raw: lang.i8
 The underlying primitive `lang.i8` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `rotateLeft`
 
@@ -13245,7 +13245,7 @@ public func rotateLeft(by: Int64) -> UInt8
 Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
 MSB re-enter at the LSB.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `rotateRight`
 
@@ -13256,7 +13256,7 @@ public func rotateRight(by: Int64) -> UInt8
 Rotates bits right by `count`, modulo `bitWidth`. Mirror of
 `rotateLeft`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `sign`
 
@@ -13267,7 +13267,7 @@ public var sign: UInt8 { get }
 Sign as a `UInt8`: `0` for zero, `1` otherwise (unsigned types
 have no negative values).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `subtractChecked`
 
@@ -13277,7 +13277,7 @@ public func subtractChecked(UInt8) -> UInt8?
 
 Subtraction that returns `None` on underflow (`other > self`).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `subtractSaturating`
 
@@ -13288,7 +13288,7 @@ public func subtractSaturating(UInt8) -> UInt8
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `toBytes`
 
@@ -13306,7 +13306,7 @@ a fixed wire format.
 let bytes = UInt8.maxValue.toBytes();   // 1 bytes, host order
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `toBytesBigEndian`
 
@@ -13317,7 +13317,7 @@ public func toBytesBigEndian() -> std.collections.Array[UInt8]
 Splits this integer into 1 bytes in big-endian order (most
 significant byte first — i.e. network byte order).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `toBytesLittleEndian`
 
@@ -13328,7 +13328,7 @@ public func toBytesLittleEndian() -> std.collections.Array[UInt8]
 Splits this integer into 1 bytes in little-endian order (least
 significant byte first).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `trailingZeros`
 
@@ -13340,7 +13340,7 @@ Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
 values; returns `bitWidth` for zero. Useful for finding the largest
 power of two dividing the value.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Steppable`
 
@@ -13352,7 +13352,7 @@ public func predecessor() -> UInt8
 
 Predecessor — `self - 1`. Wraps at `minValue`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `successor`
 
@@ -13363,7 +13363,7 @@ public func successor() -> UInt8
 Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
 integer ranges.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Comparable`
 
@@ -13384,7 +13384,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 (3).compare(other: 2);   // .Greater
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Equatable`
 
@@ -13403,7 +13403,7 @@ Bit-for-bit equality. Backs the `==` operator.
 42 == 42;                // true
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Matchable`
 
@@ -13415,7 +13415,7 @@ public func matches(UInt8) -> Bool
 
 Pattern-matching hook for `Matchable`. Identical to `equals`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Formattable`
 
@@ -13448,7 +13448,7 @@ Recognised options:
 (-42).format(options: .{sign: .Always});                 // "-42"
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Hash`
 
@@ -13461,7 +13461,7 @@ public func hash[H](into: mutating H) where H: Hasher
 Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
 only within a single process — do not persist hashes across builds.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Addable`
 
@@ -13471,7 +13471,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13479,7 +13479,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13487,7 +13487,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13495,7 +13495,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13503,7 +13503,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13511,7 +13511,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13519,7 +13519,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13527,7 +13527,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13535,7 +13535,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13543,7 +13543,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13551,7 +13551,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = UInt8
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13559,7 +13559,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = Range[UInt8]
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### typealias `Output`
 
@@ -13567,7 +13567,7 @@ _Defined in `lang/std/num/uint8.ks`._
 type Output = ClosedRange[UInt8]
 ```
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `add`
 
@@ -13578,7 +13578,7 @@ public func add(UInt8) -> UInt8
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
 `addSaturating` to clamp.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `zero`
 
@@ -13588,7 +13588,7 @@ public static var zero: UInt8 { get }
 
 The additive identity, `0`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Subtractable`
 
@@ -13608,7 +13608,7 @@ public func subtract(UInt8) -> UInt8
 
 `self - other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Multipliable`
 
@@ -13628,7 +13628,7 @@ public func multiply(UInt8) -> UInt8
 
 `self * other`, wrapping on overflow.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### field `one`
 
@@ -13638,7 +13638,7 @@ public static var one: UInt8 { get }
 
 The multiplicative identity, `1`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Divisible`
 
@@ -13664,7 +13664,7 @@ Truncating integer division (`self / other`). For signed types,
 Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
 process aborts before producing a result).
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Modulo`
 
@@ -13689,7 +13689,7 @@ public func modulo(UInt8) -> UInt8
 
 Traps on division by zero, like `divide`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseAnd`
 
@@ -13709,7 +13709,7 @@ public func bitwiseAnd(UInt8) -> UInt8
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseOr`
 
@@ -13729,7 +13729,7 @@ public func bitwiseOr(UInt8) -> UInt8
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseXor`
 
@@ -13749,7 +13749,7 @@ public func bitwiseXor(UInt8) -> UInt8
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseNot`
 
@@ -13769,7 +13769,7 @@ public func bitwiseNot() -> UInt8
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `LeftShift`
 
@@ -13790,7 +13790,7 @@ public func shiftLeft(by: lang.i64) -> UInt8
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
 — pre-mask the count if you can't guarantee the bound.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RightShift`
 
@@ -13812,7 +13812,7 @@ Right shift by `count`. Arithmetic (sign-extending) for signed types,
 logical (zero-filling) for unsigned. Same `count` precondition as
 `shiftLeft`.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `AddAssign`
 
@@ -13824,7 +13824,7 @@ public mutating func addAssign(UInt8)
 
 `self += other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `SubtractAssign`
 
@@ -13836,7 +13836,7 @@ public mutating func subtractAssign(UInt8)
 
 `self -= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `MultiplyAssign`
 
@@ -13848,7 +13848,7 @@ public mutating func multiplyAssign(UInt8)
 
 `self *= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `DivideAssign`
 
@@ -13860,7 +13860,7 @@ public mutating func divideAssign(UInt8)
 
 `self /= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `ModuloAssign`
 
@@ -13872,7 +13872,7 @@ public mutating func modAssign(UInt8)
 
 `self %= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseAndAssign`
 
@@ -13884,7 +13884,7 @@ public mutating func bitwiseAndAssign(UInt8)
 
 `self &= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseOrAssign`
 
@@ -13896,7 +13896,7 @@ public mutating func bitwiseOrAssign(UInt8)
 
 `self |= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseXorAssign`
 
@@ -13908,7 +13908,7 @@ public mutating func bitwiseXorAssign(UInt8)
 
 `self ^= other`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `LeftShiftAssign`
 
@@ -13920,7 +13920,7 @@ public mutating func shiftLeftAssign(by: lang.i64)
 
 `self <<= count`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RightShiftAssign`
 
@@ -13932,7 +13932,7 @@ public mutating func shiftRightAssign(by: lang.i64)
 
 `self >>= count`
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -13976,7 +13976,7 @@ public func exclusiveRange(to: UInt8) -> Range[UInt8]
 
 Builds a half-open range `self..<end`. Sugar for the `..<` operator.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
@@ -13996,7 +13996,7 @@ public func inclusiveRange(to: UInt8) -> ClosedRange[UInt8]
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
-_Defined in `lang/std/num/uint8.ks`._
+_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Convertible`
 
@@ -14020,5 +14020,5 @@ Marker protocol for unsigned integer types. Carries no requirements —
 it exists so generic code can constrain on signedness without naming
 every concrete `UInt*` type.
 
-_Defined in `lang/std/num/numeric.ks`._
+_Defined in `lang/std/numeric/numeric.ks`._
 

@@ -24,7 +24,7 @@
 module std.ffi
 
 import std.ffi.(FFISafe, malloc, free, memcpy)
-import std.num.(Int64, UInt8)
+import std.numeric.(Int64, UInt8)
 import std.memory.(Pointer, RawPointer)
 import std.core.(Convertible, Bool)
 import std.text.(String)

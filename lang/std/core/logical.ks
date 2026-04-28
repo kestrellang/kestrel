@@ -18,12 +18,12 @@ module std.core
 /// true and { true }     // true (closure form, mostly internal)
 /// ```
 @builtin(.LogicalAndOperatorProtocol)
-public protocol And[Rhs = Self] {
+public protocol And[Other = Self] {
     type Output
 
     /// Returns `self and other()`. The closure runs only if needed.
     @builtin(.LogicalAndOperatorMethod)
-    func logicalAnd(other: () -> Rhs) -> Output
+    func logicalAnd(other: () -> Other) -> Output
 }
 
 /// Raw protocol backing the `or` keyword operator.
@@ -31,12 +31,12 @@ public protocol And[Rhs = Self] {
 /// As with `And`, `other` is a thunk so the right-hand side can be skipped
 /// when `self` already determines the result.
 @builtin(.LogicalOrOperatorProtocol)
-public protocol Or[Rhs = Self] {
+public protocol Or[Other = Self] {
     type Output
 
     /// Returns `self or other()`. The closure runs only if needed.
     @builtin(.LogicalOrOperatorMethod)
-    func logicalOr(other: () -> Rhs) -> Output
+    func logicalOr(other: () -> Other) -> Output
 }
 
 /// Raw protocol backing the `not` keyword operator.

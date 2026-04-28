@@ -8,7 +8,7 @@
       "name": "Buffer",
       "anchor": "struct-Buffer",
       "signature": "public struct Buffer { /* private fields */ }",
-      "doc": "`Write` that appends bytes to a growable `Array[UInt8]` — the in-memory\ncounterpart to writing to a file. Useful for capturing output, building\nbyte sequences before flushing to a real sink, or testing formatters.\n\n`Buffer` clones share the underlying COW array.\n\n# Examples\n\n```\nvar b = Buffer();\ntry writeStr(b, \"Hello, \");\ntry writeStr(b, \"World!\");\nb.toString()       // \"Hello, World!\"\n```\n\n# Representation\n\nOne `Array[UInt8]` field; capacity grows on demand.",
+      "doc": "`Writable` that appends bytes to a growable `Array[UInt8]` — the in-memory\ncounterpart to writing to a file. Useful for capturing output, building\nbyte sequences before flushing to a real sink, or testing formatters.\n\n`Buffer` clones share the underlying COW array.\n\n# Examples\n\n```\nvar b = Buffer();\ntry writeString(b, \"Hello, \");\ntry writeString(b, \"World!\");\nb.toString()       // \"Hello, World!\"\n```\n\n# Representation\n\nOne `Array[UInt8]` field; capacity grows on demand.",
       "source_path": "lang/std/io/write.ks",
       "member_groups": [
         {
@@ -49,10 +49,10 @@
               "source_path": "lang/std/io/write.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "count",
-              "anchor": "function-count",
-              "signature": "public func count() -> Int64",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
               "doc": "Bytes currently held.",
               "source_path": "lang/std/io/write.ks"
             },
@@ -65,10 +65,10 @@
               "source_path": "lang/std/io/write.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "isEmpty",
-              "anchor": "function-isEmpty",
-              "signature": "public func isEmpty() -> Bool",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
               "doc": "`true` when no bytes have been written.",
               "source_path": "lang/std/io/write.ks"
             },
@@ -92,8 +92,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Write",
-          "source_path": "std.io.write.Write",
+          "label": "Writable",
+          "source_path": "std.io.write.Writable",
           "members": [
             {
               "kind": "function",
@@ -135,7 +135,7 @@
       "name": "Sink",
       "anchor": "struct-Sink",
       "signature": "public struct Sink { /* private fields */ }",
-      "doc": "`Write` that swallows everything — analogous to `/dev/null`. Useful\nfor tests, benchmarks, and code paths where output is suppressed.\n\n# Representation\n\nZero-sized — no fields.",
+      "doc": "`Writable` that swallows everything — analogous to `/dev/null`. Useful\nfor tests, benchmarks, and code paths where output is suppressed.\n\n# Representation\n\nZero-sized — no fields.",
       "source_path": "lang/std/io/write.ks",
       "member_groups": [
         {
@@ -155,8 +155,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Write",
-          "source_path": "std.io.write.Write",
+          "label": "Writable",
+          "source_path": "std.io.write.Writable",
           "members": [
             {
               "kind": "function",
@@ -180,10 +180,10 @@
     },
     {
       "kind": "protocol",
-      "name": "Write",
-      "anchor": "protocol-Write",
-      "signature": "public protocol Write",
-      "doc": "Protocol for byte-sink streams.\n\nConformers expose a single-shot `write(from:)` and a `flush()` for\nbuffered implementations. As with `Read`, a single `write` may move\nfewer bytes than supplied — this is not an error; use `writeAll` to\nloop until the whole slice is consumed.\n\n# Examples\n\n```\npublic struct CountingSink: Write {\n    var written: Int64 = 0\n    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {\n        self.written = self.written + buf.count;\n        .Ok(buf.count)\n    }\n    public mutating func flush() -> Result[(), IoError] { .Ok(()) }\n}\n```",
+      "name": "Writable",
+      "anchor": "protocol-Writable",
+      "signature": "public protocol Writable",
+      "doc": "Protocol for byte-sink streams.\n\nConformers expose a single-shot `write(from:)` and a `flush()` for\nbuffered implementations. As with `Read`, a single `write` may move\nfewer bytes than supplied — this is not an error; use `writeAll` to\nloop until the whole slice is consumed.\n\n# Examples\n\n```\npublic struct CountingSink: Writable {\n    var written: Int64 = 0\n    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {\n        self.written = self.written + buf.count;\n        .Ok(buf.count)\n    }\n    public mutating func flush() -> Result[(), IoError] { .Ok(()) }\n}\n```",
       "source_path": "lang/std/io/write.ks",
       "member_groups": [
         {
@@ -215,7 +215,7 @@
       "kind": "function",
       "name": "writeAll",
       "anchor": "function-writeAll",
-      "signature": "public func writeAll[W](mutating W, from: Slice[UInt8]) -> Result[(), IoError] where W: Write",
+      "signature": "public func writeAll[W](mutating W, from: Slice[UInt8]) -> Result[(), IoError] where W: Writable",
       "doc": "Writes every byte in `buf`, looping until the full slice has been\nconsumed. Returns `.Err(brokenPipe())` if the writer reports `0` bytes\nwritten before the slice is exhausted (matches Rust's\n`WriteAll`/`ErrorKind::WriteZero`).\n\n# Examples\n\n```\nvar file = try File.create(\"output.bin\");\ntry writeAll(file, from: data.asSlice());\n```",
       "source_path": "lang/std/io/write.ks"
     },
@@ -223,7 +223,7 @@
       "kind": "function",
       "name": "writeByte",
       "anchor": "function-writeByte",
-      "signature": "public func writeByte[W](mutating W, UInt8) -> Result[(), IoError] where W: Write",
+      "signature": "public func writeByte[W](mutating W, UInt8) -> Result[(), IoError] where W: Writable",
       "doc": "Writes a single byte, looping internally until it lands.",
       "source_path": "lang/std/io/write.ks"
     },
@@ -231,15 +231,15 @@
       "kind": "function",
       "name": "writeLine",
       "anchor": "function-writeLine",
-      "signature": "public func writeLine[W](mutating W, String) -> Result[(), IoError] where W: Write",
+      "signature": "public func writeLine[W](mutating W, String) -> Result[(), IoError] where W: Writable",
       "doc": "Writes `s` followed by a single `\\n`. Does not append `\\r` on any\nplatform — Kestrel writes Unix line endings everywhere by default.",
       "source_path": "lang/std/io/write.ks"
     },
     {
       "kind": "function",
-      "name": "writeStr",
-      "anchor": "function-writeStr",
-      "signature": "public func writeStr[W](mutating W, String) -> Result[(), IoError] where W: Write",
+      "name": "writeString",
+      "anchor": "function-writeString",
+      "signature": "public func writeString[W](mutating W, String) -> Result[(), IoError] where W: Writable",
       "doc": "Writes the UTF-8 encoding of `s`. Empty strings short-circuit. Currently\nemits one byte per call into the writer — fine for buffered sinks like\n`Buffer`, expensive for raw `File`/`Stdout` (TODO: collect into a slice\nfirst).",
       "source_path": "lang/std/io/write.ks"
     }

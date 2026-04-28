@@ -14,32 +14,32 @@ module std.core
 /// 0b1100 & 0b1010   // 0b1000
 /// ```
 @builtin(.BitwiseAndOperatorProtocol)
-public protocol BitwiseAnd[Rhs = Self] {
+public protocol BitwiseAnd[Other = Self] {
     type Output
 
     /// Returns `self & other`.
     @builtin(.BitwiseAndOperatorMethod)
-    func bitwiseAnd(other: Rhs) -> Output
+    func bitwiseAnd(other: Other) -> Output
 }
 
 /// Raw protocol backing the `|` operator.
 @builtin(.BitwiseOrOperatorProtocol)
-public protocol BitwiseOr[Rhs = Self] {
+public protocol BitwiseOr[Other = Self] {
     type Output
 
     /// Returns `self | other`.
     @builtin(.BitwiseOrOperatorMethod)
-    func bitwiseOr(other: Rhs) -> Output
+    func bitwiseOr(other: Other) -> Output
 }
 
 /// Raw protocol backing the `^` operator.
 @builtin(.BitwiseXorOperatorProtocol)
-public protocol BitwiseXor[Rhs = Self] {
+public protocol BitwiseXor[Other = Self] {
     type Output
 
     /// Returns `self ^ other`.
     @builtin(.BitwiseXorOperatorMethod)
-    func bitwiseXor(other: Rhs) -> Output
+    func bitwiseXor(other: Other) -> Output
 }
 
 /// Raw protocol backing the unary `~` operator.
@@ -54,7 +54,7 @@ public protocol BitwiseNot {
 
 /// Raw protocol backing the `<<` operator.
 ///
-/// `Rhs` defaults to the primitive `lang.i64` because protocol type defaults
+/// `Other` defaults to the primitive `lang.i64` because protocol type defaults
 /// must be resolvable at parse time, before stdlib types like `Int64` are
 /// available. Conforming integer types narrow this to a more specific shift
 /// count where appropriate.
@@ -64,23 +64,23 @@ public protocol BitwiseNot {
 /// Standard integer types panic on out-of-range shift counts (see the
 /// `shiftLeft` documentation on the integer types).
 @builtin(.ShiftLeftOperatorProtocol)
-public protocol LeftShift[Rhs = lang.i64] {
+public protocol LeftShift[Other = lang.i64] {
     type Output
 
     /// Returns `self << count`.
     @builtin(.ShiftLeftOperatorMethod)
-    func shiftLeft(by count: Rhs) -> Output
+    func shiftLeft(by count: Other) -> Output
 }
 
 /// Raw protocol backing the `>>` operator.
 ///
 /// Behaviour for signed types is arithmetic shift (sign-preserving); unsigned
-/// types use logical shift. The `Rhs` default mirrors `LeftShift`.
+/// types use logical shift. The `Other` default mirrors `LeftShift`.
 @builtin(.ShiftRightOperatorProtocol)
-public protocol RightShift[Rhs = lang.i64] {
+public protocol RightShift[Other = lang.i64] {
     type Output
 
     /// Returns `self >> count`.
     @builtin(.ShiftRightOperatorMethod)
-    func shiftRight(by count: Rhs) -> Output
+    func shiftRight(by count: Other) -> Output
 }

@@ -6,10 +6,10 @@
 public struct Cursor { /* private fields */ }
 ```
 
-`Read` over an in-memory `Array[UInt8]` with a movable position.
+`Readable` over an in-memory `Array[UInt8]` with a movable position.
 
 Mirrors the role of Rust's `io::Cursor` — useful for tests, parsers, and
-any place a byte buffer needs to be presented as a `Read` stream. The
+any place a byte buffer needs to be presented as a `Readable` stream. The
 position is clamped to `[0, count]` by `setPosition`. `Cursor` clones
 share the underlying COW array.
 
@@ -44,21 +44,11 @@ var data: Array[UInt8]
 
 _Defined in `lang/std/io/read.ks`._
 
-#### field `pos`
+#### field `position`
 
 ```kestrel
-var pos: Int64
+public var position: Int64
 ```
-
-_Defined in `lang/std/io/read.ks`._
-
-#### function `position`
-
-```kestrel
-public func position() -> Int64
-```
-
-Current byte offset into the underlying array.
 
 _Defined in `lang/std/io/read.ks`._
 
@@ -73,7 +63,7 @@ end clamp to `count`.
 
 _Defined in `lang/std/io/read.ks`._
 
-### Implements `Read`
+### Implements `Readable`
 
 #### function `read`
 
@@ -104,7 +94,7 @@ _Defined in `lang/std/io/read.ks`._
 public struct Empty { /* private fields */ }
 ```
 
-`Read` that always returns `0` (EOF). Useful as a placeholder reader
+`Readable` that always returns `0` (EOF). Useful as a placeholder reader
 or in tests that need to assert how a consumer handles an empty source.
 
 ### Representation
@@ -125,7 +115,7 @@ Builds the empty reader.
 
 _Defined in `lang/std/io/read.ks`._
 
-### Implements `Read`
+### Implements `Readable`
 
 #### function `read`
 
@@ -137,10 +127,10 @@ Always returns `.Ok(0)`.
 
 _Defined in `lang/std/io/read.ks`._
 
-## protocol `Read`
+## protocol `Readable`
 
 ```kestrel
-public protocol Read
+public protocol Readable
 ```
 
 Protocol for byte-source streams.
@@ -154,7 +144,7 @@ error — the caller is expected to loop, or to use `readExact` /
 ### Examples
 
 ```
-public struct DigitsReader: Read {
+public struct DigitsReader: Readable {
     var next: UInt8
     public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         if buf.count == 0 { return .Ok(0) }
@@ -186,7 +176,7 @@ _Defined in `lang/std/io/read.ks`._
 public struct Repeat { /* private fields */ }
 ```
 
-`Read` that yields the same byte forever — analogous to `/dev/zero`
+`Readable` that yields the same byte forever — analogous to `/dev/zero`
 (with `byte: 0`) or `yes(1)`. Each `read` fills the entire destination.
 
 ### Representation
@@ -215,7 +205,7 @@ var byte: UInt8
 
 _Defined in `lang/std/io/read.ks`._
 
-### Implements `Read`
+### Implements `Readable`
 
 #### function `read`
 
@@ -230,7 +220,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readAll`
 
 ```kestrel
-public func readAll[R](mutating R, into: mutating Array[UInt8]) -> Result[Int64, IoError] where R: Read
+public func readAll[R](mutating R, into: mutating Array[UInt8]) -> Result[Int64, IoError] where R: Readable
 ```
 
 Drains `reader` into `buf`, appending every byte until EOF. Reads in
@@ -249,7 +239,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readByte`
 
 ```kestrel
-public func readByte[R](mutating R) -> Result[Optional[UInt8], IoError] where R: Read
+public func readByte[R](mutating R) -> Result[Optional[UInt8], IoError] where R: Readable
 ```
 
 Reads exactly one byte. Returns `.Ok(.None)` on EOF, `.Ok(.Some(b))`
@@ -269,7 +259,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readExact`
 
 ```kestrel
-public func readExact[R](mutating R, into: Slice[UInt8]) -> Result[(), IoError] where R: Read
+public func readExact[R](mutating R, into: Slice[UInt8]) -> Result[(), IoError] where R: Readable
 ```
 
 Reads exactly `buf.count` bytes; treats a short read (EOF reached

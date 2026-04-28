@@ -4,8 +4,8 @@
 module Test
 
 func main() -> lang.i64 {
-    let x: std.num.Int64 = 6;
-    let y: std.num.Int64 = 7;
+    let x: std.numeric.Int64 = 6;
+    let y: std.numeric.Int64 = 7;
     if x * y != 42 { return 1 }
     0
 }

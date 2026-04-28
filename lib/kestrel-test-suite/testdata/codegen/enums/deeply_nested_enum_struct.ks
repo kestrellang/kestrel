@@ -4,7 +4,7 @@
 module Test
 
 struct Inner {
-    let value: std.num.Int64
+    let value: std.numeric.Int64
 }
 
 enum Middle {
@@ -14,10 +14,10 @@ enum Middle {
 
 struct Outer {
     let middle: Middle
-    let extra: std.num.Int64
+    let extra: std.numeric.Int64
 }
 
-func extract(o: Outer) -> std.num.Int64 {
+func extract(o: Outer) -> std.numeric.Int64 {
     match o.middle {
         .Value(inner: i) => i.value + o.extra,
         .Empty => o.extra

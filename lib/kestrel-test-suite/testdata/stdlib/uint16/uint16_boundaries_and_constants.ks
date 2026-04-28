@@ -5,26 +5,26 @@ module Test
 
         func main() -> lang.i64 {
             // minValue is 0
-            let minVal = std.num.UInt16.minValue;
-            let lit0: std.num.UInt16 = 0;
+            let minVal = std.numeric.UInt16.minValue;
+            let lit0: std.numeric.UInt16 = 0;
             if minVal.equals(lit0) == false { return 1 }
 
             // maxValue is 65535
-            let maxVal = std.num.UInt16.maxValue;
-            let lit65535: std.num.UInt16 = 65535;
+            let maxVal = std.numeric.UInt16.maxValue;
+            let lit65535: std.numeric.UInt16 = 65535;
             if maxVal.equals(lit65535) == false { return 2 }
 
             // bitWidth is 16
-            if std.num.UInt16.bitWidth != 16 { return 3 }
+            if std.numeric.UInt16.bitWidth != 16 { return 3 }
 
             // zero constant
-            let z = std.num.UInt16.zero;
-            let zeroLit: std.num.UInt16 = 0;
+            let z = std.numeric.UInt16.zero;
+            let zeroLit: std.numeric.UInt16 = 0;
             if z.equals(zeroLit) == false { return 4 }
 
             // one constant
-            let o = std.num.UInt16.one;
-            let oneLit: std.num.UInt16 = 1;
+            let o = std.numeric.UInt16.one;
+            let oneLit: std.numeric.UInt16 = 1;
             if o.equals(oneLit) == false { return 5 }
 
             // isZero

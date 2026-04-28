@@ -4,8 +4,8 @@
 module Test
 
 func main() -> lang.i64 {
-    var n: std.num.Int64 = 5;
-    var result: std.num.Int64 = 1;
+    var n: std.numeric.Int64 = 5;
+    var result: std.numeric.Int64 = 1;
     while n > 1 {
         result = result * n;
         n = n - 1;

@@ -7,10 +7,10 @@ import std.io.stdio.println
 
 enum Foo {
     case A
-    static var staticVar: std.num.Int64 = 1;
+    static var staticVar: std.numeric.Int64 = 1;
 }
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let _ = println(Foo.staticVar);
     Foo.staticVar = 2;
     let _ = println(Foo.staticVar);

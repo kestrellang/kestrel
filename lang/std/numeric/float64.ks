@@ -1,11 +1,11 @@
-// Float32 - 32-bit floating point (single precision)
+// Float64 - 64-bit floating point (double precision)
 // Generated from float.ks.template - DO NOT EDIT
 
 // ============================================================================
-// FLOAT32
+// FLOAT64
 // ============================================================================
 
-module std.num
+module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
@@ -14,14 +14,14 @@ import std.core.(
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String, Formattable, FormatOptions)
-import std.num.(Int64, Float64)
+import std.numeric.(Int64, Float32)
 
-/// A 32-bit IEEE 754 single-precision float.
+/// A 64-bit IEEE 754 double-precision float.
 ///
-/// Range is approximately ±3.4×10^38 with 6-9 significant decimal
+/// Range is approximately ±1.8×10^308 with 15-17 significant decimal
 /// digits. Float literals without a type annotation default to `Float64`;
 /// annotate the binding to pick `Float32`. The type is `FFISafe` and lays out
-/// as a single `lang.f32`.
+/// as a single `lang.f64`.
 ///
 /// # Examples
 ///
@@ -49,8 +49,8 @@ import std.num.(Int64, Float64)
 ///
 /// # Representation
 ///
-/// A single `lang.f32` field holding the raw IEEE 754 bit pattern.
-public struct Float32:
+/// A single `lang.f64` field holding the raw IEEE 754 bit pattern.
+public struct Float64:
     Comparable,
     Equatable,
     Formattable,
@@ -63,36 +63,36 @@ public struct Float32:
     ExpressibleByIntLiteral,
     Defaultable,
     Convertible[Int64],
-    Convertible[Float64],
+    Convertible[Float32],
     FFISafe
 {
-    /// The underlying primitive `lang.f32` value (IEEE 754 bit
+    /// The underlying primitive `lang.f64` value (IEEE 754 bit
     /// pattern). Exposed for FFI and intrinsic use; reach for the typed
     /// surface for everything else.
-    public var raw: lang.f32
+    public var raw: lang.f64
 
     // ========================================================================
     // CONSTANTS - Basic Values
     // ========================================================================
 
     /// The additive identity, `0.0`.
-    public static var zero: Float32 { Float32(floatLiteral: 0.0) }
+    public static var zero: Float64 { Float64(floatLiteral: 0.0) }
 
     /// The multiplicative identity, `1.0`.
-    public static var one: Float32 { Float32(floatLiteral: 1.0) }
+    public static var one: Float64 { Float64(floatLiteral: 1.0) }
 
-    /// The most negative finite value, ≈ -3.4028235e38.
-    public static var minValue: Float32 { Float32(floatLiteral: 3.4028235e38).negate() }
+    /// The most negative finite value, ≈ -1.7976931348623157e308.
+    public static var minValue: Float64 { Float64(floatLiteral: 1.7976931348623157e308).negate() }
 
-    /// The most positive finite value, ≈ 3.4028235e38.
-    public static var maxValue: Float32 { Float32(floatLiteral: 3.4028235e38) }
+    /// The most positive finite value, ≈ 1.7976931348623157e308.
+    public static var maxValue: Float64 { Float64(floatLiteral: 1.7976931348623157e308) }
 
-    /// The smallest positive *normal* value, ≈ 1.17549435e-38.
+    /// The smallest positive *normal* value, ≈ 2.2250738585072014e-308.
     /// Values smaller than this are subnormal and lose precision.
-    public static var minPositive: Float32 { Float32(floatLiteral: 1.17549435e-38) }
+    public static var minPositive: Float64 { Float64(floatLiteral: 2.2250738585072014e-308) }
 
     /// Machine epsilon — the smallest `e` such that `1.0 + e != 1.0`,
-    /// ≈ 1.1920929e-7.
+    /// ≈ 2.220446049250313e-16.
     ///
     /// Useful as a tolerance in approximate comparisons; scale by the
     /// operand magnitude for relative-error checks.
@@ -104,7 +104,7 @@ public struct Float32:
     ///     (a - b).abs() < Float64.epsilon * a.abs().max(b.abs());
     /// }
     /// ```
-    public static var epsilon: Float32 { Float32(floatLiteral: 1.1920929e-7) }
+    public static var epsilon: Float64 { Float64(floatLiteral: 2.220446049250313e-16) }
 
     // ========================================================================
     // CONSTANTS - Special Values
@@ -122,7 +122,7 @@ public struct Float32:
     /// 1.0 / 0.0;              // inf
     /// Float64.infinity.negate();  // -inf
     /// ```
-    public static var infinity: Float32 { Float32(raw: lang.f32_infinity()) }
+    public static var infinity: Float64 { Float64(raw: lang.f64_infinity()) }
 
     /// Not-a-Number. Produced by undefined operations like `0.0 / 0.0` or
     /// `sqrt(-1.0)`. NaN propagates through arithmetic and is unequal to
@@ -135,30 +135,30 @@ public struct Float32:
     /// Float64.nan == Float64.nan;    // false (!)
     /// 0.0 / 0.0;                     // nan
     /// ```
-    public static var nan: Float32 { Float32(raw: lang.f32_nan()) }
+    public static var nan: Float64 { Float64(raw: lang.f64_nan()) }
 
     // ========================================================================
     // CONSTANTS - Mathematical
     // ========================================================================
 
     /// The constant π ≈ 3.14159265358979… — circle circumference over diameter.
-    public static var pi: Float32 { Float32(floatLiteral: 3.141592653589793) }
+    public static var pi: Float64 { Float64(floatLiteral: 3.141592653589793) }
 
     /// Euler's number `e` ≈ 2.71828182845904… — base of the natural logarithm.
-    public static var e: Float32 { Float32(floatLiteral: 2.718281828459045) }
+    public static var e: Float64 { Float64(floatLiteral: 2.718281828459045) }
 
     /// Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
     /// "one full turn" rotational math.
-    public static var tau: Float32 { Float32(floatLiteral: 6.283185307179586) }
+    public static var tau: Float64 { Float64(floatLiteral: 6.283185307179586) }
 
     /// Natural logarithm of 2, ≈ 0.69314718055994…
-    public static var ln2: Float32 { Float32(floatLiteral: 0.6931471805599453) }
+    public static var ln2: Float64 { Float64(floatLiteral: 0.6931471805599453) }
 
     /// Natural logarithm of 10, ≈ 2.30258509299404…
-    public static var ln10: Float32 { Float32(floatLiteral: 2.302585092994046) }
+    public static var ln10: Float64 { Float64(floatLiteral: 2.302585092994046) }
 
     /// Square root of 2, ≈ 1.41421356237309…
-    public static var sqrt2: Float32 { Float32(floatLiteral: 1.4142135623730951) }
+    public static var sqrt2: Float64 { Float64(floatLiteral: 1.4142135623730951) }
 
     // ========================================================================
     // INITIALIZERS
@@ -175,7 +175,7 @@ public struct Float32:
     /// let y = Float64(floatLiteral: 3.14);    // explicit
     /// ```
     public init(floatLiteral value: lang.f64) {
-        self.raw = lang.cast_f64_f32(value)
+        self.raw = value
     }
 
     /// @name Default
@@ -195,13 +195,13 @@ public struct Float32:
     /// let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
     /// ```
     public init(intLiteral value: lang.i64) {
-        self.raw = lang.cast_i64_f32(value)
+        self.raw = lang.cast_i64_f64(value)
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f32` bit pattern. Internal; used
+    /// Wraps an existing `lang.f64` bit pattern. Internal; used
     /// by intrinsics.
-    init(raw value: lang.f32) {
+    init(raw value: lang.f64) {
         self.raw = value
     }
 
@@ -216,7 +216,7 @@ public struct Float32:
     /// let f = Float64(from: n);  // 42.0
     /// ```
     public init(from value: Int64) {
-        self.raw = lang.cast_i64_f32(value.raw)
+        self.raw = lang.cast_i64_f64(value.raw)
     }
 
     /// @name From Float
@@ -229,8 +229,8 @@ public struct Float32:
     /// let f32: Float32 = 3.14;
     /// let f64 = Float64(from: f32);
     /// ```
-    public init(from value: Float64) {
-        self.raw = lang.cast_f64_f32(value.raw)
+    public init(from value: Float32) {
+        self.raw = lang.cast_f32_f64(value.raw)
     }
 
     // ========================================================================
@@ -249,7 +249,7 @@ public struct Float32:
     /// Float64.infinity.isNaN;   // false
     /// ```
     public var isNaN: Bool { get {
-        Bool(boolLiteral: lang.f32_is_nan(self.raw))
+        Bool(boolLiteral: lang.f64_is_nan(self.raw))
     }}
 
     /// True if `self` is `+infinity` or `-infinity`.
@@ -263,7 +263,7 @@ public struct Float32:
     /// Float64.nan.isInfinite;                  // false
     /// ```
     public var isInfinite: Bool { get {
-        Bool(boolLiteral: lang.f32_is_infinite(self.raw))
+        Bool(boolLiteral: lang.f64_is_infinite(self.raw))
     }}
 
     /// True if `self` is finite — equivalently, not NaN and not infinite.
@@ -285,14 +285,14 @@ public struct Float32:
     /// (Float64.minPositive / 2.0).isNormal;        // false (subnormal)
     /// ```
     public var isNormal: Bool { get {
-        self.isFinite and not self.isZero and self.abs() >= Float32.minPositive
+        self.isFinite and not self.isZero and self.abs() >= Float64.minPositive
     }}
 
     /// True if `self` is subnormal (denormalized) — finite, non-zero, and
     /// smaller than `minPositive` in magnitude. Subnormals trade precision
     /// for range near zero.
     public var isSubnormal: Bool { get {
-        self.isFinite and not self.isZero and self.abs() < Float32.minPositive
+        self.isFinite and not self.isZero and self.abs() < Float64.minPositive
     }}
 
     // ========================================================================
@@ -310,20 +310,20 @@ public struct Float32:
     /// (3.14).sign;         //  1.0
     /// Float64.nan.sign;    //  nan
     /// ```
-    public var sign: Float32 { get {
-        if self.isNaN { Float32.nan }
+    public var sign: Float64 { get {
+        if self.isNaN { Float64.nan }
         else if self.isZero {
-            let one = Float32.one;
+            let one = Float64.one;
             let inverse = one.divide(self);
             if inverse < 0.0 {
-                let zero = Float32.zero;
+                let zero = Float64.zero;
                 zero.negate()
             } else {
-                Float32(floatLiteral: 0.0)
+                Float64(floatLiteral: 0.0)
             }
         }
-        else if self < 0.0 { Float32(raw: lang.f32_neg(1.0)) }
-        else { Float32(floatLiteral: 1.0) }
+        else if self < 0.0 { Float64(raw: lang.f64_neg(1.0)) }
+        else { Float64(floatLiteral: 1.0) }
     }}
 
     /// True if `self > 0.0`. False for `+0.0`, `-0.0`, `nan`, and negatives.
@@ -355,8 +355,8 @@ public struct Float32:
     /// (0.0).equals(other: -0.0);                   // true
     /// Float64.nan.equals(other: Float64.nan);      // false (!)
     /// ```
-    public func equals(other: Float32) -> Bool {
-        Bool(boolLiteral: lang.f32_eq(self.raw, other.raw))
+    public func equals(other: Float64) -> Bool {
+        Bool(boolLiteral: lang.f64_eq(self.raw, other.raw))
     }
 
     /// Three-way comparison returning an `Ordering`. NaN is *not* an ordered
@@ -372,9 +372,9 @@ public struct Float32:
     /// (3.0).compare(other: 2.0);              // .Greater
     /// (1.0).compare(other: Float64.infinity); // .Less
     /// ```
-    public func compare(other: Float32) -> Ordering {
-        if Bool(boolLiteral: lang.f32_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.f32_gt(self.raw, other.raw)) { .Greater }
+    public func compare(other: Float64) -> Ordering {
+        if Bool(boolLiteral: lang.f64_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.f64_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -382,11 +382,11 @@ public struct Float32:
     // ASSOCIATED TYPE BINDINGS
     // ========================================================================
 
-    type Addable.Output = Float32
-    type Subtractable.Output = Float32
-    type Multipliable.Output = Float32
-    type Divisible.Output = Float32
-    type Negatable.Output = Float32
+    type Addable.Output = Float64
+    type Subtractable.Output = Float64
+    type Multipliable.Output = Float64
+    type Divisible.Output = Float64
+    type Negatable.Output = Float64
 
     // ========================================================================
     // ARITHMETIC
@@ -394,14 +394,14 @@ public struct Float32:
 
     /// IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
     /// is inf.
-    public func add(other: Float32) -> Float32 { Float32(raw: lang.f32_add(self.raw, other.raw)) }
+    public func add(other: Float64) -> Float64 { Float64(raw: lang.f64_add(self.raw, other.raw)) }
 
     /// IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
-    public func subtract(other: Float32) -> Float32 { Float32(raw: lang.f32_sub(self.raw, other.raw)) }
+    public func subtract(other: Float64) -> Float64 { Float64(raw: lang.f64_sub(self.raw, other.raw)) }
 
     /// IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
     /// the result follows the usual algebra.
-    public func multiply(other: Float32) -> Float32 { Float32(raw: lang.f32_mul(self.raw, other.raw)) }
+    public func multiply(other: Float64) -> Float64 { Float64(raw: lang.f64_mul(self.raw, other.raw)) }
 
     /// IEEE 754 division. Unlike integer divide, dividing by zero does not
     /// trap — it produces ±infinity (or NaN for `0.0 / 0.0`).
@@ -418,11 +418,11 @@ public struct Float32:
     /// 1.0 / 0.0;                  // inf
     /// 0.0 / 0.0;                  // nan
     /// ```
-    public func divide(other: Float32) -> Float32 { Float32(raw: lang.f32_div(self.raw, other.raw)) }
+    public func divide(other: Float64) -> Float64 { Float64(raw: lang.f64_div(self.raw, other.raw)) }
 
     /// IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
     /// is `+0.0`.
-    public func negate() -> Float32 { Float32(raw: lang.f32_neg(self.raw)) }
+    public func negate() -> Float64 { Float64(raw: lang.f64_neg(self.raw)) }
 
     // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS
@@ -430,8 +430,8 @@ public struct Float32:
 
     /// Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
     /// `+0.0`.
-    public func abs() -> Float32 {
-        if Bool(boolLiteral: lang.f32_lt(self.raw, 0.0)) { self.negate() } else { self }
+    public func abs() -> Float64 {
+        if Bool(boolLiteral: lang.f64_lt(self.raw, 0.0)) { self.negate() } else { self }
     }
 
     /// Largest integer ≤ `self`. Rounds toward `-infinity`.
@@ -442,7 +442,7 @@ public struct Float32:
     /// (3.7).floor();   //  3.0
     /// (-3.2).floor();  // -4.0
     /// ```
-    public func floor() -> Float32 { Float32(raw: lang.f32_floor(self.raw)) }
+    public func floor() -> Float64 { Float64(raw: lang.f64_floor(self.raw)) }
 
     /// Smallest integer ≥ `self`. Rounds toward `+infinity`.
     ///
@@ -452,7 +452,7 @@ public struct Float32:
     /// (3.2).ceil();   //  4.0
     /// (-3.7).ceil();  // -3.0
     /// ```
-    public func ceil() -> Float32 { Float32(raw: lang.f32_ceil(self.raw)) }
+    public func ceil() -> Float64 { Float64(raw: lang.f64_ceil(self.raw)) }
 
     /// Round to nearest integer, breaking ties *away from zero* (banker's
     /// rounding is not used).
@@ -464,11 +464,11 @@ public struct Float32:
     /// (3.5).round();   //  4.0   (tie → away from zero)
     /// (-3.5).round();  // -4.0
     /// ```
-    public func round() -> Float32 { Float32(raw: lang.f32_round(self.raw)) }
+    public func round() -> Float64 { Float64(raw: lang.f64_round(self.raw)) }
 
     /// Integer part, truncating toward zero. `floor` for positives, `ceil`
     /// for negatives.
-    public func trunc() -> Float32 { Float32(raw: lang.f32_trunc(self.raw)) }
+    public func trunc() -> Float64 { Float64(raw: lang.f64_trunc(self.raw)) }
 
     /// Fractional part — `self - self.trunc()`. Sign matches `self`.
     ///
@@ -478,7 +478,7 @@ public struct Float32:
     /// (3.7).fract();   //  0.7
     /// (-3.7).fract();  // -0.7
     /// ```
-    public func fract() -> Float32 {
+    public func fract() -> Float64 {
         self.subtract(self.trunc())
     }
 
@@ -491,11 +491,11 @@ public struct Float32:
     /// (4.0).sqrt();    // 2.0
     /// (-1.0).sqrt();   // nan
     /// ```
-    public func sqrt() -> Float32 { Float32(raw: lang.f32_sqrt(self.raw)) }
+    public func sqrt() -> Float64 { Float64(raw: lang.f64_sqrt(self.raw)) }
 
     /// Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
-    public func cbrt() -> Float32 {
-        Float32(raw: libm_cbrtf(self.raw))
+    public func cbrt() -> Float64 {
+        Float64(raw: libm_cbrt(self.raw))
     }
 
     /// Hypotenuse — `sqrt(self² + other²)`, computed via libm in a way that
@@ -506,8 +506,8 @@ public struct Float32:
     /// ```
     /// (3.0).hypot(other: 4.0);  // 5.0
     /// ```
-    public func hypot(other: Float32) -> Float32 {
-        Float32(raw: libm_hypotf(self.raw, other.raw))
+    public func hypot(other: Float64) -> Float64 {
+        Float64(raw: libm_hypot(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -515,14 +515,14 @@ public struct Float32:
     // ========================================================================
 
     /// `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
-    public func exp() -> Float32 { Float32(raw: libm_expf(self.raw)) }
+    public func exp() -> Float64 { Float64(raw: libm_exp(self.raw)) }
 
     /// `2^self`. Useful for binary scaling.
-    public func exp2() -> Float32 { Float32(raw: libm_exp2f(self.raw)) }
+    public func exp2() -> Float64 { Float64(raw: libm_exp2(self.raw)) }
 
     /// `e^self - 1`, computed without the cancellation that hurts
     /// `self.exp() - 1.0` for small `self`.
-    public func expm1() -> Float32 { Float32(raw: libm_expm1f(self.raw)) }
+    public func expm1() -> Float64 { Float64(raw: libm_expm1(self.raw)) }
 
     /// Natural logarithm. Negatives return NaN; zero returns `-inf`.
     ///
@@ -534,22 +534,22 @@ public struct Float32:
     /// (0.0).ln();           // -inf
     /// (-1.0).ln();          //  nan
     /// ```
-    public func ln() -> Float32 { Float32(raw: libm_logf(self.raw)) }
+    public func ln() -> Float64 { Float64(raw: libm_log(self.raw)) }
 
     /// `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
     /// would lose digits.
-    public func ln1p() -> Float32 { Float32(raw: libm_log1pf(self.raw)) }
+    public func ln1p() -> Float64 { Float64(raw: libm_log1p(self.raw)) }
 
     /// Base-2 logarithm.
-    public func log2() -> Float32 { Float32(raw: libm_log2f(self.raw)) }
+    public func log2() -> Float64 { Float64(raw: libm_log2(self.raw)) }
 
     /// Base-10 logarithm.
-    public func log10() -> Float32 { Float32(raw: libm_log10f(self.raw)) }
+    public func log10() -> Float64 { Float64(raw: libm_log10(self.raw)) }
 
     /// Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
     /// Pick `log2` or `log10` directly when you can — they avoid the second
     /// libm call.
-    public func log(base: Float32) -> Float32 {
+    public func log(base: Float64) -> Float64 {
         self.ln().divide(base.ln())
     }
 
@@ -563,8 +563,8 @@ public struct Float32:
     /// (2.0).pow(exponent: 0.5);    // sqrt(2)
     /// (-2.0).pow(exponent: 0.5);   // nan
     /// ```
-    public func pow(exponent: Float32) -> Float32 {
-        Float32(raw: libm_powf(self.raw, exponent.raw))
+    public func pow(exponent: Float64) -> Float64 {
+        Float64(raw: libm_pow(self.raw, exponent.raw))
     }
 
     /// Integer-exponent power via repeated squaring. Faster and more accurate
@@ -577,17 +577,17 @@ public struct Float32:
     /// (2.0).powi(exponent: 10);   // 1024.0
     /// (2.0).powi(exponent: -1);   // 0.5
     /// ```
-    public func powi(exponent: Int64) -> Float32 {
-        if exponent == 0 { return Float32(floatLiteral: 1.0) };
-        if exponent < 0 { return Float32(raw: lang.f32_div(1.0, self.powi(exponent.negate()).raw)) };
-        var result = Float32(floatLiteral: 1.0);
+    public func powi(exponent: Int64) -> Float64 {
+        if exponent == 0 { return Float64(floatLiteral: 1.0) };
+        if exponent < 0 { return Float64(raw: lang.f64_div(1.0, self.powi(exponent.negate()).raw)) };
+        var result = Float64(floatLiteral: 1.0);
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = Float32(raw: lang.f32_mul(result.raw, base.raw))
+                result = Float64(raw: lang.f64_mul(result.raw, base.raw))
             };
-            base = Float32(raw: lang.f32_mul(base.raw, base.raw));
+            base = Float64(raw: lang.f64_mul(base.raw, base.raw));
             exp = exp / 2
         };
         result
@@ -598,25 +598,25 @@ public struct Float32:
     // ========================================================================
 
     /// Sine of `self` in radians.
-    public func sin() -> Float32 { Float32(raw: libm_sinf(self.raw)) }
+    public func sin() -> Float64 { Float64(raw: libm_sin(self.raw)) }
 
     /// Cosine of `self` in radians.
-    public func cos() -> Float32 { Float32(raw: libm_cosf(self.raw)) }
+    public func cos() -> Float64 { Float64(raw: libm_cos(self.raw)) }
 
     /// Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
-    public func tan() -> Float32 { Float32(raw: libm_tanf(self.raw)) }
+    public func tan() -> Float64 { Float64(raw: libm_tan(self.raw)) }
 
     /// Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func asin() -> Float32 { Float32(raw: libm_asinf(self.raw)) }
+    public func asin() -> Float64 { Float64(raw: libm_asin(self.raw)) }
 
     /// Arc cosine, result in radians on `[0, π]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func acos() -> Float32 { Float32(raw: libm_acosf(self.raw)) }
+    public func acos() -> Float64 { Float64(raw: libm_acos(self.raw)) }
 
     /// Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
     /// recovery use `atan2`.
-    public func atan() -> Float32 { Float32(raw: libm_atanf(self.raw)) }
+    public func atan() -> Float64 { Float64(raw: libm_atan(self.raw)) }
 
     /// Two-argument arctangent — angle of the point `(x, self)` measured
     /// from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
@@ -630,7 +630,7 @@ public struct Float32:
     /// (-1.0).atan2(x: -1.0);  // -3π/4  (Q3)
     /// (-1.0).atan2(x: 1.0);   // -π/4   (Q4)
     /// ```
-    public func atan2(x: Float32) -> Float32 { Float32(raw: libm_atan2f(self.raw, x.raw)) }
+    public func atan2(x: Float64) -> Float64 { Float64(raw: libm_atan2(self.raw, x.raw)) }
 
     /// Sine and cosine in one call. Implemented via two libm calls today;
     /// kept for ergonomics and as a future optimisation point.
@@ -640,7 +640,7 @@ public struct Float32:
     /// ```
     /// let (s, c) = angle.sinCos();
     /// ```
-    public func sinCos() -> (Float32, Float32) {
+    public func sinCos() -> (Float64, Float64) {
         (self.sin(), self.cos())
     }
 
@@ -649,22 +649,22 @@ public struct Float32:
     // ========================================================================
 
     /// Hyperbolic sine.
-    public func sinh() -> Float32 { Float32(raw: libm_sinhf(self.raw)) }
+    public func sinh() -> Float64 { Float64(raw: libm_sinh(self.raw)) }
 
     /// Hyperbolic cosine.
-    public func cosh() -> Float32 { Float32(raw: libm_coshf(self.raw)) }
+    public func cosh() -> Float64 { Float64(raw: libm_cosh(self.raw)) }
 
     /// Hyperbolic tangent. Saturates at ±1 for large magnitudes.
-    public func tanh() -> Float32 { Float32(raw: libm_tanhf(self.raw)) }
+    public func tanh() -> Float64 { Float64(raw: libm_tanh(self.raw)) }
 
     /// Inverse hyperbolic sine. Defined on all real inputs.
-    public func asinh() -> Float32 { Float32(raw: libm_asinhf(self.raw)) }
+    public func asinh() -> Float64 { Float64(raw: libm_asinh(self.raw)) }
 
     /// Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
-    public func acosh() -> Float32 { Float32(raw: libm_acoshf(self.raw)) }
+    public func acosh() -> Float64 { Float64(raw: libm_acosh(self.raw)) }
 
     /// Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
-    public func atanh() -> Float32 { Float32(raw: libm_atanhf(self.raw)) }
+    public func atanh() -> Float64 { Float64(raw: libm_atanh(self.raw)) }
 
     // ========================================================================
     // IEEE 754 OPERATIONS
@@ -678,32 +678,32 @@ public struct Float32:
     /// ```
     /// (2.0).fma(a: 3.0, b: 4.0);   // 10.0
     /// ```
-    public func fma(a: Float32, b: Float32) -> Float32 {
-        Float32(raw: lang.f32_fma(self.raw, a.raw, b.raw))
+    public func fma(a: Float64, b: Float64) -> Float64 {
+        Float64(raw: lang.f64_fma(self.raw, a.raw, b.raw))
     }
 
     /// Returns a value with `self`'s magnitude and `other`'s sign — i.e. an
     /// IEEE 754 `copysign`. Useful for unbiased rounding tricks.
-    public func copysign(from other: Float32) -> Float32 {
-        Float32(raw: lang.f32_copysign(self.raw, other.raw))
+    public func copysign(from other: Float64) -> Float64 {
+        Float64(raw: lang.f64_copysign(self.raw, other.raw))
     }
 
     /// Next representable value greater than `self`. `+inf` and `nan` are
     /// fixed points; the largest finite value steps up to `+inf`.
-    public func nextUp() -> Float32 {
-        Float32(raw: libm_nextafterf(self.raw, lang.f32_infinity()))
+    public func nextUp() -> Float64 {
+        Float64(raw: libm_nextafter(self.raw, lang.f64_infinity()))
     }
 
     /// Next representable value less than `self`. Mirror of `nextUp`.
-    public func nextDown() -> Float32 {
-        Float32(raw: libm_nextafterf(self.raw, lang.f32_neg(lang.f32_infinity())))
+    public func nextDown() -> Float64 {
+        Float64(raw: libm_nextafter(self.raw, lang.f64_neg(lang.f64_infinity())))
     }
 
     /// IEEE 754 remainder — uses round-to-nearest division, not truncation.
     /// Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
     /// `2.0`.
-    public func remainder(dividingBy other: Float32) -> Float32 {
-        Float32(raw: libm_remainderf(self.raw, other.raw))
+    public func remainder(dividingBy other: Float64) -> Float64 {
+        Float64(raw: libm_remainder(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -720,7 +720,7 @@ public struct Float32:
     /// (-0.5).clamp(min: 0.0, max: 1.0);  // 0.0
     /// (1.5).clamp(min: 0.0, max: 1.0);   // 1.0
     /// ```
-    public func clamp(min: Float32, max: Float32) -> Float32 {
+    public func clamp(min: Float64, max: Float64) -> Float64 {
         if self.isNaN { self }
         else if self < min { min }
         else if self > max { max }
@@ -738,7 +738,7 @@ public struct Float32:
     /// (0.0).lerp(to: 10.0, t: 1.0);   // 10.0
     /// (0.0).lerp(to: 10.0, t: 0.25);  //  2.5
     /// ```
-    public func lerp(to other: Float32, t: Float32) -> Float32 {
+    public func lerp(to other: Float64, t: Float64) -> Float64 {
         self.add(other.subtract(self).multiply(t))
     }
 
@@ -768,20 +768,20 @@ public struct Float32:
         if truncated < -9223372036854775808.0 {
             return .None
         };
-        .Some(Int64(raw: lang.cast_f32_i64(truncated.raw)))
+        .Some(Int64(raw: lang.cast_f64_i64(truncated.raw)))
     }
 
     /// Converts to the sibling float type. Widening (32→64) is exact;
     /// narrowing (64→32) rounds and may overflow to ±infinity.
-    public func toFloat64() -> Float64 {
-        Float64(raw: lang.cast_f32_f64(self.raw))
+    public func toFloat32() -> Float32 {
+        Float32(raw: lang.cast_f64_f32(self.raw))
     }
 
     // ========================================================================
     // PARSING
     // ========================================================================
 
-    /// Parses a `Float32` from a string. Recognises decimal
+    /// Parses a `Float64` from a string. Recognises decimal
     /// (`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
     /// tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
     /// (case-insensitive). Returns `None` for any other input.
@@ -789,14 +789,14 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// Float32.parse(string: "3.14");      // Some(3.14)
-    /// Float32.parse(string: "-2.5e10");   // Some(-2.5e10)
-    /// Float32.parse(string: "inf");       // Some(infinity)
-    /// Float32.parse(string: "nan");       // Some(nan)
-    /// Float32.parse(string: "abc");       // None
-    /// Float32.parse(string: "");          // None
+    /// Float64.parse(string: "3.14");      // Some(3.14)
+    /// Float64.parse(string: "-2.5e10");   // Some(-2.5e10)
+    /// Float64.parse(string: "inf");       // Some(infinity)
+    /// Float64.parse(string: "nan");       // Some(nan)
+    /// Float64.parse(string: "abc");       // None
+    /// Float64.parse(string: "");          // None
     /// ```
-    public static func parse(string: String) -> Float32? {
+    public static func parse(string: String) -> Float64? {
         let len = string.byteCount;
         if len == 0 {
             return .None
@@ -814,7 +814,7 @@ public struct Float32:
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             if isN0 and isA1 and isN2 {
-                return .Some(Float32.nan)
+                return .Some(Float64.nan)
             }
         }
 
@@ -830,7 +830,7 @@ public struct Float32:
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
             if isI and isN and isF {
-                return .Some(Float32.infinity)
+                return .Some(Float64.infinity)
             }
         }
 
@@ -845,7 +845,7 @@ public struct Float32:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isMinus and isI and isN and isF {
-                return .Some(Float32(raw: lang.f32_neg(lang.f32_infinity())))
+                return .Some(Float64(raw: lang.f64_neg(lang.f64_infinity())))
             }
         }
 
@@ -860,7 +860,7 @@ public struct Float32:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isPlus and isI and isN and isF {
-                return .Some(Float32.infinity)
+                return .Some(Float64.infinity)
             }
         }
 
@@ -884,7 +884,7 @@ public struct Float32:
             let isT6 = Int64(from: b6) == 116 or Int64(from: b6) == 84;
             let isY7 = Int64(from: b7) == 121 or Int64(from: b7) == 89;
             if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {
-                return .Some(Float32.infinity)
+                return .Some(Float64.infinity)
             }
         }
 
@@ -908,12 +908,12 @@ public struct Float32:
         }
 
         // Parse integer part - inline digit check (48='0', 57='9')
-        var integerPart: Float32 = 0.0;
+        var integerPart: Float64 = 0.0;
         var hasIntegerPart = false;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            let digit = Float32(from: currentByte - 48);
+            let digit = Float64(from: currentByte - 48);
             integerPart = integerPart * 10.0 + digit;
             hasIntegerPart = true;
             index = index + 1;
@@ -923,17 +923,17 @@ public struct Float32:
         }
 
         // Parse fractional part
-        var fractionalPart: Float32 = 0.0;
+        var fractionalPart: Float64 = 0.0;
         var hasFractionalPart = false;
 
         if index < len and currentByte == 46 {  // '.'
             index = index + 1;
-            var divisor: Float32 = 10.0;
+            var divisor: Float64 = 10.0;
 
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    let digit = Float32(from: currentByte - 48);
+                    let digit = Float64(from: currentByte - 48);
                     fractionalPart = fractionalPart + digit / divisor;
                     divisor = divisor * 10.0;
                     hasFractionalPart = true;
@@ -997,8 +997,8 @@ public struct Float32:
             }
 
             // Apply exponent using pow
-            let expFloat = Float32(from: exponent);
-            let ten: Float32 = 10.0;
+            let expFloat = Float64(from: exponent);
+            let ten: Float64 = 10.0;
             if expNegative {
                 result = result / ten.pow(expFloat)
             } else {
@@ -1076,7 +1076,7 @@ public struct Float32:
         } else {
             isNegative = value < 0.0;
             if value.isZero {
-                let one = Float32.one;
+                let one = Float64.one;
                 let inverse = one.divide(value);
                 if inverse < 0.0 {
                     isNegative = true
@@ -1101,7 +1101,7 @@ public struct Float32:
                     style = .Fixed
                 } else {
                     let expVal = value.log10().floor();
-                    let expInt: Int64 = Int64(raw: lang.cast_f32_i64(expVal.raw));
+                    let expInt: Int64 = Int64(raw: lang.cast_f64_i64(expVal.raw));
                     if expInt < -4 or expInt >= precision {
                         style = .Scientific
                     } else {
@@ -1115,12 +1115,12 @@ public struct Float32:
                 var mantissa = value;
                 if value.isZero == false {
                     let expVal = value.log10().floor();
-                    exponent = Int64(raw: lang.cast_f32_i64(expVal.raw));
-                    let pow10 = Float32(floatLiteral: 10.0).powi(exponent);
+                    exponent = Int64(raw: lang.cast_f64_i64(expVal.raw));
+                    let pow10 = Float64(floatLiteral: 10.0).powi(exponent);
                     mantissa = value.divide(pow10);
                 }
 
-                let scale = Float32(floatLiteral: 10.0).powi(precision);
+                let scale = Float64(floatLiteral: 10.0).powi(precision);
                 mantissa = mantissa.multiply(scale).round().divide(scale);
                 if mantissa >= 10.0 {
                     mantissa = mantissa.divide(10.0);
@@ -1128,7 +1128,7 @@ public struct Float32:
                 }
 
                 let intPart = mantissa.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
+                var intVal: Int64 = Int64(raw: lang.cast_f64_i64(intPart.raw));
 
                 if intVal == 0 {
                     number.appendByte(48)
@@ -1151,13 +1151,13 @@ public struct Float32:
                     number.appendByte(46);
                     var fracPart = mantissa - intPart;
                     var digitCount: Int64 = 0;
-                    let ten: Float32 = 10.0;
+                    let ten: Float64 = 10.0;
                     while digitCount < precision {
                         fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
+                        let digit: Int64 = Int64(raw: lang.cast_f64_i64(fracPart.trunc().raw));
                         let charCode: Int64 = digit + 48;
                         number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
+                        fracPart = fracPart - Float64(raw: lang.cast_i64_f64(digit.raw));
                         digitCount = digitCount + 1
                     }
                 }
@@ -1191,9 +1191,9 @@ public struct Float32:
                 }
             } else {
                 let scale = if precision > 0 {
-                    Float32(floatLiteral: 10.0).powi(precision)
+                    Float64(floatLiteral: 10.0).powi(precision)
                 } else {
-                    Float32(floatLiteral: 1.0)
+                    Float64(floatLiteral: 1.0)
                 };
 
                 var rounded = value;
@@ -1202,7 +1202,7 @@ public struct Float32:
                 }
 
                 let intPart = rounded.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
+                var intVal: Int64 = Int64(raw: lang.cast_f64_i64(intPart.raw));
 
                 if intVal == 0 {
                     number.appendByte(48)
@@ -1225,13 +1225,13 @@ public struct Float32:
                     number.appendByte(46);
                     var fracPart = rounded - intPart;
                     var digitCount: Int64 = 0;
-                    let ten: Float32 = 10.0;
+                    let ten: Float64 = 10.0;
                     while digitCount < precision {
                         fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
+                        let digit: Int64 = Int64(raw: lang.cast_f64_i64(fracPart.trunc().raw));
                         let charCode: Int64 = digit + 48;
                         number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
+                        fracPart = fracPart - Float64(raw: lang.cast_i64_f64(digit.raw));
                         digitCount = digitCount + 1
                     }
                 }
@@ -1332,3 +1332,12 @@ public struct Float32:
         result
     }}
 
+
+// ============================================================================
+// TYPE ALIASES
+// ============================================================================
+
+/// Default floating-point type — alias for `Float64`. Reach for `Float`
+/// when you want the recommended precision/performance trade-off; reach for
+/// `Float32` only when you specifically need 32-bit storage.
+public type Float = Float64

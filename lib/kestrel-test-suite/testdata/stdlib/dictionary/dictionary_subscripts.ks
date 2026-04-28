@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
             let _ = dict.insert(2, 20);
 

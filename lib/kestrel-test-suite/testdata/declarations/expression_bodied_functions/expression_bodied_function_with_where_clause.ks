@@ -8,13 +8,13 @@ protocol Doubler {
     func double() -> Self
 }
 
-extend std.num.Int64: Doubler {
-    func double() -> std.num.Int64 = self + self
+extend std.numeric.Int64: Doubler {
+    func double() -> std.numeric.Int64 = self + self
 }
 
 func doubleIt[T](x: T) -> T where T: Doubler = x.double()
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let _ = println(doubleIt(21));
     0
 }

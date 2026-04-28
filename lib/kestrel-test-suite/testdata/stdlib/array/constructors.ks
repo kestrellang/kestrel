@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test init(capacity:)
-            var arr = std.collections.Array[std.num.Int64](capacity: 10);
+            var arr = std.collections.Array[std.numeric.Int64](capacity: 10);
             if arr.count != 0 { return 1 }
             if arr.capacity < 10 { return 2 }
             arr.append(42);
@@ -16,7 +16,7 @@ module Test
             // implement Cloneable, causing monomorphization failure. See init_repeating test.
 
             // Test init(from:) with a range
-            let fromRange = std.collections.Array[std.num.Int64](from: std.core.Range[std.num.Int64](0, 5));
+            let fromRange = std.collections.Array[std.numeric.Int64](from: std.core.Range[std.numeric.Int64](0, 5));
             if fromRange.count != 5 { return 5 }
             if fromRange(unchecked: 0) != 0 { return 6 }
             if fromRange(unchecked: 4) != 4 { return 7 }

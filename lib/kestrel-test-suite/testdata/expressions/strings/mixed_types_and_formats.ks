@@ -4,7 +4,7 @@
 module Main
 import std.io.stdio.println
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let name = "Result";
     let value = 42;
     let hex_val = 0xAB;

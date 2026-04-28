@@ -5,12 +5,12 @@ module Test
 
         func main() -> lang.i64 {
             // equals(other:) - same dictionaries
-            var a = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var a = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = a.insert(1, 10);
             let _ = a.insert(2, 20);
             let _ = a.insert(3, 30);
 
-            var b = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var b = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = b.insert(1, 10);
             let _ = b.insert(2, 20);
             let _ = b.insert(3, 30);
@@ -18,21 +18,21 @@ module Test
             if a.equals(b) == false { return 1 }
 
             // equals - different values
-            var c = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var c = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = c.insert(1, 10);
             let _ = c.insert(2, 99);
             let _ = c.insert(3, 30);
             if a.equals(c) { return 2 }
 
             // equals - different count
-            var d = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var d = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = d.insert(1, 10);
             let _ = d.insert(2, 20);
             if a.equals(d) { return 3 }
 
             // equals - empty dictionaries
-            let e1 = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
-            let e2 = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            let e1 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
+            let e2 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             if e1.equals(e2) == false { return 4 }
 
             // containsValue(value:) - value exists
@@ -56,7 +56,7 @@ module Test
             if keys10(0) != 1 { return 11 }
 
             // allKeys(forValue:) - multiple matches
-            var multi = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var multi = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = multi.insert(1, 100);
             let _ = multi.insert(2, 200);
             let _ = multi.insert(3, 100);

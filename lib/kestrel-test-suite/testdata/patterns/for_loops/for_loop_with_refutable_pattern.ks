@@ -9,7 +9,7 @@ enum Option[T] {
 }
 
 func test() {
-    var arr = std.collections.Array[Option[std.num.Int64]]();
+    var arr = std.collections.Array[Option[std.numeric.Int64]]();
     for .Some(x) in arr { // ERROR: refutable
         ()
     }

@@ -4,7 +4,7 @@
 module Test
 
 func main() -> lang.i64 {
-    let opt: std.num.Int64? = .Some(7);
+    let opt: std.numeric.Int64? = .Some(7);
     let val = match opt {
         .Some(v) => v,
         .None => 0

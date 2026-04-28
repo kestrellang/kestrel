@@ -8,7 +8,7 @@ struct Box[T] {
 }
 
 func main() -> lang.i64 {
-    let b = Box[std.num.Int64](value: 42);
+    let b = Box[std.numeric.Int64](value: 42);
     if b.value != 42 { return 1 }
     0
 }

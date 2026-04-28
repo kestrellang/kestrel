@@ -3,11 +3,11 @@
 
 module Test
 
-func add_one(x: std.num.Int64) -> std.num.Int64 {
+func add_one(x: std.numeric.Int64) -> std.numeric.Int64 {
     x + 1
 }
 
-func apply(f: (std.num.Int64) -> std.num.Int64, x: std.num.Int64) -> std.num.Int64 {
+func apply(f: (std.numeric.Int64) -> std.numeric.Int64, x: std.numeric.Int64) -> std.numeric.Int64 {
     f(x)
 }
 

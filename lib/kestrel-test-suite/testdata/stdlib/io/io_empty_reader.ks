@@ -8,12 +8,12 @@ module Test
             var empty = std.io.read.Empty();
 
             // Create a buffer to read into
-            let zeroByte: std.num.UInt8 = 0;
-            var buf = std.collections.Array[std.num.UInt8]();
+            let zeroByte: std.numeric.UInt8 = 0;
+            var buf = std.collections.Array[std.numeric.UInt8]();
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
-            let slice = std.memory.Slice[std.num.UInt8](pointer: buf.asPointer(), count: 3);
+            let slice = std.memory.Slice[std.numeric.UInt8](pointer: buf.asPointer(), count: 3);
 
             // Read should return Ok(0) immediately (EOF)
             let result = empty.read(into: slice);

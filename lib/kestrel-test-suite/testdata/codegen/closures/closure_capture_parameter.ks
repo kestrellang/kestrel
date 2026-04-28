@@ -3,7 +3,7 @@
 
 module Test
 
-func make_multiplier(factor: std.num.Int64) -> (std.num.Int64) -> std.num.Int64 {
+func make_multiplier(factor: std.numeric.Int64) -> (std.numeric.Int64) -> std.numeric.Int64 {
     { (x) in x * factor } // ERROR: cannot return a closure that captures variables
 }
 

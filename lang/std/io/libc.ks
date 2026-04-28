@@ -8,9 +8,9 @@
 
 module std.io.libc
 
-import std.num.(Int64, Int32)
+import std.numeric.(Int64, Int32)
 import std.memory.(Pointer, RawPointer)
-import std.num.(UInt8)
+import std.numeric.(UInt8)
 
 // ============================================================================
 // TYPE ALIASES

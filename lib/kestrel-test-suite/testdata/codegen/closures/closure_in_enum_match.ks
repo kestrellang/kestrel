@@ -4,7 +4,7 @@
 module Test
 
 enum MaybeTransform {
-    case Just(f: (std.num.Int64) -> std.num.Int64)
+    case Just(f: (std.numeric.Int64) -> std.numeric.Int64)
     case Nothing
 }
 

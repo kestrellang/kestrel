@@ -4,16 +4,16 @@
 module Test
 
         func main() -> lang.i64 {
-            let maxVal = std.num.UInt8.maxValue;
-            let minVal = std.num.UInt8.minValue;
-            let one: std.num.UInt8 = 1;
-            let two: std.num.UInt8 = 2;
-            let hundred: std.num.UInt8 = 100;
+            let maxVal = std.numeric.UInt8.maxValue;
+            let minVal = std.numeric.UInt8.minValue;
+            let one: std.numeric.UInt8 = 1;
+            let two: std.numeric.UInt8 = 2;
+            let hundred: std.numeric.UInt8 = 100;
 
             // addChecked — normal case
             let addNorm = one.addChecked(two);
             if addNorm.isNone() { return 1 }
-            let three: std.num.UInt8 = 3;
+            let three: std.numeric.UInt8 = 3;
             if addNorm.unwrap().equals(three) == false { return 2 }
 
             // addChecked — overflow at 255
@@ -30,44 +30,44 @@ module Test
             if subUnder.isSome() { return 6 }
 
             // multiplyChecked — normal case
-            let mulThree: std.num.UInt8 = 3;
+            let mulThree: std.numeric.UInt8 = 3;
             let mulNorm = two.multiplyChecked(mulThree);
             if mulNorm.isNone() { return 7 }
-            let six: std.num.UInt8 = 6;
+            let six: std.numeric.UInt8 = 6;
             if mulNorm.unwrap().equals(six) == false { return 8 }
 
             // multiplyChecked — overflow near 255
-            let mulOverThree: std.num.UInt8 = 3;
+            let mulOverThree: std.numeric.UInt8 = 3;
             let mulOver = hundred.multiplyChecked(mulOverThree);
             if mulOver.isSome() { return 9 }
 
             // addSaturating — clamps to maxValue
-            let ten: std.num.UInt8 = 10;
+            let ten: std.numeric.UInt8 = 10;
             let addSat = maxVal.addSaturating(ten);
             if addSat.equals(maxVal) == false { return 10 }
 
             // addSaturating — normal case
             let addSatNorm = one.addSaturating(two);
-            let addSatThree: std.num.UInt8 = 3;
+            let addSatThree: std.numeric.UInt8 = 3;
             if addSatNorm.equals(addSatThree) == false { return 11 }
 
             // subtractSaturating — clamps to 0 (no negative)
             let subSat = minVal.subtractSaturating(one);
-            if subSat.equals(std.num.UInt8.zero) == false { return 12 }
+            if subSat.equals(std.numeric.UInt8.zero) == false { return 12 }
 
             // subtractSaturating — normal case
             let subSatNorm = two.subtractSaturating(one);
             if subSatNorm.equals(one) == false { return 13 }
 
             // multiplySaturating — clamps to maxValue
-            let mulSatThree: std.num.UInt8 = 3;
+            let mulSatThree: std.numeric.UInt8 = 3;
             let mulSat = hundred.multiplySaturating(mulSatThree);
             if mulSat.equals(maxVal) == false { return 14 }
 
             // multiplySaturating — normal case
-            let mulSatNormThree: std.num.UInt8 = 3;
+            let mulSatNormThree: std.numeric.UInt8 = 3;
             let mulSatNorm = two.multiplySaturating(mulSatNormThree);
-            let mulSatSix: std.num.UInt8 = 6;
+            let mulSatSix: std.numeric.UInt8 = 6;
             if mulSatNorm.equals(mulSatSix) == false { return 15 }
 
             // Subtraction wrapping behavior: 0 - 1 wraps to 255

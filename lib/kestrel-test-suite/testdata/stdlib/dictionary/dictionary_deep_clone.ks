@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 100);
             let _ = dict.insert(2, 200);
             let _ = dict.insert(3, 300);
@@ -22,7 +22,7 @@ module Test
             if cloned.count != 3 { return 6 }
 
             // deepClone on empty dictionary
-            let emptyDict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            let emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let emptyClone = emptyDict.deepClone();
             if emptyClone.count != 0 { return 7 }
 

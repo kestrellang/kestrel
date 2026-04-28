@@ -5,7 +5,7 @@
 
 module std.net.libc
 
-import std.num.(Int64, Int32, UInt8, UInt16)
+import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.memory.(Pointer, RawPointer)
 
 // ============================================================================

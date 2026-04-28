@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(10);
             arr.append(20);
             arr.append(30);
@@ -36,7 +36,7 @@ module Test
             if wrapOver.unwrap() != 10 { return 10 }
 
             // Test subscript(wrapped:) on empty array
-            let emptyArr = std.collections.Array[std.num.Int64]();
+            let emptyArr = std.collections.Array[std.numeric.Int64]();
             let wrapEmpty = emptyArr(wrapped: 0);
             if wrapEmpty.isSome() { return 11 }
 

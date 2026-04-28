@@ -8,7 +8,7 @@
       "name": "File",
       "anchor": "struct-File",
       "signature": "public struct File { /* private fields */ }",
-      "doc": "RAII-owned POSIX file handle.\n\nThe wrapped file descriptor is closed automatically when the `File`\ngoes out of scope, so explicit `close` is never necessary. `File` is\n`not Copyable` to keep the descriptor uniquely owned — pass by\nreference or move it instead. Conforms to both `Read` and `Write`,\nalthough calls fail with `EBADF` if the open mode does not permit the\ndirection (e.g. writing to a file opened with `open()`).\n\n# Examples\n\n```\n// Read whole file in 4 KiB chunks.\nvar file = try File.open(\"input.txt\");\nvar buf = Array[UInt8](repeating: 0, count: 4096);\nwhile true {\n    let n = try file.read(into: buf.asSlice());\n    if n == 0 { break }\n    // process buf[0..n]\n}\n```\n\n# Representation\n\nOne `libc.Fd` (32-bit signed integer) field.\n\n# Memory Model\n\nOwning, unique. The `deinit` calls `close(fd)` if `fd >= 0`; close\nerrors are silently ignored — there's no caller to surface them to.",
+      "doc": "RAII-owned POSIX file handle.\n\nThe wrapped file descriptor is closed automatically when the `File`\ngoes out of scope, so explicit `close` is never necessary. `File` is\n`not Copyable` to keep the descriptor uniquely owned — pass by\nreference or move it instead. Conforms to both `Readable` and `Writable`,\nalthough calls fail with `EBADF` if the open mode does not permit the\ndirection (e.g. writing to a file opened with `open()`).\n\n# Examples\n\n```\n// Readable whole file in 4 KiB chunks.\nvar file = try File.open(\"input.txt\");\nvar buf = Array[UInt8](repeating: 0, count: 4096);\nwhile true {\n    let n = try file.read(into: buf.asSlice());\n    if n == 0 { break }\n    // process buf[0..n]\n}\n```\n\n# Representation\n\nOne `libc.Fd` (32-bit signed integer) field.\n\n# Memory Model\n\nOwning, unique. The `deinit` calls `close(fd)` if `fd >= 0`; close\nerrors are silently ignored — there's no caller to surface them to.",
       "source_path": "lang/std/io/file.ks",
       "member_groups": [
         {
@@ -29,7 +29,7 @@
               "name": "create",
               "anchor": "function-create",
               "signature": "public static func create(String) -> Result[File, IoError]",
-              "doc": "Creates (or truncates) `path` for writing with mode `0644`.\nExisting contents are discarded.\n\n# Examples\n\n```\nvar file = try File.create(\"output.txt\");\ntry writeStr(file, \"New content\");\n```",
+              "doc": "Creates (or truncates) `path` for writing with mode `0644`.\nExisting contents are discarded.\n\n# Examples\n\n```\nvar file = try File.create(\"output.txt\");\ntry writeString(file, \"New content\");\n```",
               "source_path": "lang/std/io/file.ks"
             },
             {
@@ -108,8 +108,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Read",
-          "source_path": "std.io.read.Read",
+          "label": "Readable",
+          "source_path": "std.io.read.Readable",
           "members": [
             {
               "kind": "function",
@@ -123,8 +123,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Write",
-          "source_path": "std.io.write.Write",
+          "label": "Writable",
+          "source_path": "std.io.write.Writable",
           "members": [
             {
               "kind": "function",

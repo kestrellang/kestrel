@@ -5,7 +5,7 @@ module std.core
 import std.ffi.(FFISafe)
 import std.core.(Hash, Hasher)
 import std.text.(String, FormatOptions, Formattable)
-import std.num.(UInt8, Int64)
+import std.numeric.(UInt8, Int64)
 import std.memory.(Slice, Pointer)
 
 /// Two-state truth value with `true` and `false` as its only inhabitants.
@@ -77,9 +77,9 @@ public struct Bool:
     /// stdlib hashes other primitives — equal `Bool`s always hash equal.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         if self.value {
-            hasher.write(Slice(pointer: Pointer(to: 1), count: std.num.1))
+            hasher.write(Slice(pointer: Pointer(to: 1), count: 1))
         } else {
-            hasher.write(Slice(pointer: Pointer(to: 0), count: std.num.1))
+            hasher.write(Slice(pointer: Pointer(to: 0), count: 1))
         }
     }
 

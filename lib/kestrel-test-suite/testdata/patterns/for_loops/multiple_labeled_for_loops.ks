@@ -4,9 +4,9 @@
 module Main
 
 func test() {
-    outer: for i in std.core.Range[std.num.Int64](0, 10) {
-        middle: for j in std.core.Range[std.num.Int64](0, 10) {
-            inner: for k in std.core.Range[std.num.Int64](0, 10) {
+    outer: for i in std.core.Range[std.numeric.Int64](0, 10) {
+        middle: for j in std.core.Range[std.numeric.Int64](0, 10) {
+            inner: for k in std.core.Range[std.numeric.Int64](0, 10) {
                 if k > 3 {
                     break inner
                 }

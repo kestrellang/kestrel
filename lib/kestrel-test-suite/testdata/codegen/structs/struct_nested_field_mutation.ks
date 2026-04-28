@@ -4,12 +4,12 @@
 module Test
 
 struct Inner {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 }
 
 struct Outer {
     var inner: Inner
-    var extra: std.num.Int64
+    var extra: std.numeric.Int64
 }
 
 func main() -> lang.i64 {

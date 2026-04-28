@@ -5,14 +5,14 @@ module Test
 
         func main() -> lang.i64 {
             // Flatten nested iterators
-            var nested = std.collections.Array[std.collections.Array[std.num.Int64]]();
-            var inner1 = std.collections.Array[std.num.Int64]();
+            var nested = std.collections.Array[std.collections.Array[std.numeric.Int64]]();
+            var inner1 = std.collections.Array[std.numeric.Int64]();
             inner1.append(1);
             inner1.append(2);
-            var inner2 = std.collections.Array[std.num.Int64]();
+            var inner2 = std.collections.Array[std.numeric.Int64]();
             inner2.append(3);
             inner2.append(4);
-            var inner3 = std.collections.Array[std.num.Int64]();
+            var inner3 = std.collections.Array[std.numeric.Int64]();
             inner3.append(5);
             nested.append(inner1);
             nested.append(inner2);

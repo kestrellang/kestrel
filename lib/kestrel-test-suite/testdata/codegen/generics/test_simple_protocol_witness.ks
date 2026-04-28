@@ -4,16 +4,16 @@
 module Test
 
 protocol Valuable {
-    func value() -> std.num.Int64
+    func value() -> std.numeric.Int64
 }
 
 struct Token: Valuable {
-    func value() -> std.num.Int64 {
+    func value() -> std.numeric.Int64 {
         42
     }
 }
 
-func get_value[T](x: T) -> std.num.Int64 where T: Valuable {
+func get_value[T](x: T) -> std.numeric.Int64 where T: Valuable {
     x.value()
 }
 

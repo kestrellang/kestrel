@@ -3,7 +3,7 @@
 module std.memory
 
 import std.core.(Bool, fatalError)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.memory.(Pointer)
@@ -73,7 +73,7 @@ public struct LiteralSliceIterator[T]: Iterator {
 /// scope is a use-after-free.
 public struct LiteralSlice[T]: Iterable {
     type Item = T
-    type Iter = LiteralSliceIterator[T]
+    type TargetIterator = LiteralSliceIterator[T]
 
     private var ptr: Pointer[T]
     private var len: Int64
@@ -86,10 +86,10 @@ public struct LiteralSlice[T]: Iterable {
     }
 
     /// Number of elements in the literal.
-    public func count() -> Int64 { self.len }
+    public var count: Int64 { self.len }
 
-    /// Returns `true` for `[]`.
-    public func isEmpty() -> Bool { self.len == 0 }
+    /// `true` for `[]`.
+    public var isEmpty: Bool { self.len == 0 }
 
     /// Iterator over the elements in source order.
     public func iter() -> LiteralSliceIterator[T] {

@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1); arr.append(2); arr.append(3); arr.append(4); arr.append(5);
 
             // chunks(of:)
@@ -38,7 +38,7 @@ module Test
             if c4.isSome() { return 12 }
 
             // windows(of:)
-            var arr2 = std.collections.Array[std.num.Int64]();
+            var arr2 = std.collections.Array[std.numeric.Int64]();
             arr2.append(1); arr2.append(2); arr2.append(3); arr2.append(4);
             var winIter = arr2.windows(of: 2);
 

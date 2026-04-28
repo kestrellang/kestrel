@@ -672,6 +672,11 @@ See [docs/memory-model/](docs/memory-model/) for the memory model specification.
 - [ ] Escaping closures — box captures when closure outlives its frame
 - [ ] Indirect enums — heap-box `indirect case` variant payloads via `GlobalAllocator`
 
+Bugfixes:
+- Computed properties allowed in protocol extensions
+- Name collisions between methods and computed properties
+- Keywords as labels
+
 ## Version 0.17: Derives, Attributes & Sugar
 
 - [ ] Attribute system infrastructure — parsed, propagated through AST/HIR/MIR

@@ -6,7 +6,7 @@ import std.io.stdio.println
 
 struct ParseError {}
 
-func parse(valid: std.core.Bool) -> std.num.Int64 throws ParseError {
+func parse(valid: std.core.Bool) -> std.numeric.Int64 throws ParseError {
     if valid {
         .Ok(42)
     } else {

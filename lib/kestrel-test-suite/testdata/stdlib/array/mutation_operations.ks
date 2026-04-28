@@ -5,10 +5,10 @@ module Test
 
         func main() -> lang.i64 {
             // Test append(contentsOf:)
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1);
             arr.append(2);
-            var other = std.collections.Array[std.num.Int64]();
+            var other = std.collections.Array[std.numeric.Int64]();
             other.append(3);
             other.append(4);
             arr.append(contentsOf: other);
@@ -17,7 +17,7 @@ module Test
             if arr(unchecked: 3) != 4 { return 3 }
 
             // Test append(contentsOf:) with empty array
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             arr.append(contentsOf: empty);
             if arr.count != 4 { return 4 }
 
@@ -46,7 +46,7 @@ module Test
             if arr(unchecked: 0) != 1 { return 16 }
 
             // Test popFirst() on empty
-            var emptyArr = std.collections.Array[std.num.Int64]();
+            var emptyArr = std.collections.Array[std.numeric.Int64]();
             let emptyFirst = emptyArr.popFirst();
             if emptyFirst.isSome() { return 17 }
 
@@ -59,7 +59,7 @@ module Test
 
             // Test removeSubrange
             // arr is now [1, 2, 3, 4, 100]
-            arr.removeSubrange(std.core.Range[std.num.Int64](1, 3));
+            arr.removeSubrange(std.core.Range[std.numeric.Int64](1, 3));
             if arr.count != 3 { return 21 }
             if arr(unchecked: 0) != 1 { return 22 }
             if arr(unchecked: 1) != 4 { return 23 }

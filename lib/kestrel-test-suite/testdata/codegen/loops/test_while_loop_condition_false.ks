@@ -4,7 +4,7 @@
 module Test
 
 func main() -> lang.i64 {
-    var x: std.num.Int64 = 100;
+    var x: std.numeric.Int64 = 100;
     while x < 42 {
         x = x + 1;
     }

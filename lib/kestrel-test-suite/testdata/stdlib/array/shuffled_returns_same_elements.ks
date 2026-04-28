@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1); arr.append(2); arr.append(3); arr.append(4); arr.append(5);
 
             // shuffled() returns a new array with same count
@@ -26,7 +26,7 @@ module Test
             if result.contains(5) == false { return 11 }
 
             // shuffle() mutating - same count and same elements
-            var arr2 = std.collections.Array[std.num.Int64]();
+            var arr2 = std.collections.Array[std.numeric.Int64]();
             arr2.append(10); arr2.append(20); arr2.append(30);
             arr2.shuffle();
             if arr2.count != 3 { return 12 }
@@ -35,12 +35,12 @@ module Test
             if arr2.contains(30) == false { return 15 }
 
             // shuffled on empty array
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             let emptyResult = empty.shuffled();
             if emptyResult.count != 0 { return 16 }
 
             // shuffled on single element array
-            var single = std.collections.Array[std.num.Int64]();
+            var single = std.collections.Array[std.numeric.Int64]();
             single.append(42);
             let singleResult = single.shuffled();
             if singleResult.count != 1 { return 17 }

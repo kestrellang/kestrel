@@ -839,7 +839,7 @@ mod tests {
 
         let iter_alias = world.spawn();
         world.set(iter_alias, NodeKind::TypeAlias);
-        world.set(iter_alias, Name("Iter".into()));
+        world.set(iter_alias, Name("TargetIterator".into()));
         world.set(iter_alias, Typed);
         world.set_parent(iter_alias, iterable);
 

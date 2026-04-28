@@ -4,11 +4,11 @@
 module Test
 
 struct Point {
-    var x: std.num.Int64
-    var y: std.num.Int64
+    var x: std.numeric.Int64
+    var y: std.numeric.Int64
 }
 
-func make_and_modify(base: std.num.Int64) -> Point {
+func make_and_modify(base: std.numeric.Int64) -> Point {
     var p = Point(x: base, y: base);
     p.x = p.x + 10;
     p.y = p.y + 12;

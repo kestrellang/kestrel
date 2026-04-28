@@ -18,12 +18,12 @@ module std.core
 /// "a" == "b"  // false
 /// ```
 @builtin(.EqualsOperatorProtocol)
-public protocol Equal[Rhs = Self] {
+public protocol Equal[Other = Self] {
     type Output
 
     /// Returns the equality result as `Output` — typically `Bool`.
     @builtin(.EqualsOperatorMethod)
-    func equals(other: Rhs) -> Output
+    func equals(other: Other) -> Output
 }
 
 /// Raw protocol backing the `!=` operator.
@@ -31,12 +31,12 @@ public protocol Equal[Rhs = Self] {
 /// `Equatable` provides a default `notEquals` derived from `equals`, so
 /// conforming to `Equatable` is enough for both `==` and `!=`.
 @builtin(.NotEqualsOperatorProtocol)
-public protocol NotEqual[Rhs = Self] {
+public protocol NotEqual[Other = Self] {
     type Output
 
     /// Returns the inequality result as `Output` — typically `Bool`.
     @builtin(.NotEqualsOperatorMethod)
-    func notEquals(other: Rhs) -> Output
+    func notEquals(other: Other) -> Output
 }
 
 /// Raw protocol backing the `<` operator.
@@ -45,40 +45,40 @@ public protocol NotEqual[Rhs = Self] {
 /// a single `compare()` method, so prefer conforming to `Comparable` for
 /// totally-ordered types.
 @builtin(.LessThanOperatorProtocol)
-public protocol Less[Rhs = Self] {
+public protocol Less[Other = Self] {
     type Output
 
     /// Returns the less-than result as `Output` — typically `Bool`.
     @builtin(.LessThanOperatorMethod)
-    func lessThan(other: Rhs) -> Output
+    func lessThan(other: Other) -> Output
 }
 
 /// Raw protocol backing the `<=` operator. See `Less` for guidance.
 @builtin(.LessOrEqualOperatorProtocol)
-public protocol LessOrEqual[Rhs = Self] {
+public protocol LessOrEqual[Other = Self] {
     type Output
 
     /// Returns the less-than-or-equal result as `Output` — typically `Bool`.
     @builtin(.LessOrEqualOperatorMethod)
-    func lessThanOrEqual(other: Rhs) -> Output
+    func lessThanOrEqual(other: Other) -> Output
 }
 
 /// Raw protocol backing the `>` operator. See `Less` for guidance.
 @builtin(.GreaterThanOperatorProtocol)
-public protocol Greater[Rhs = Self] {
+public protocol Greater[Other = Self] {
     type Output
 
     /// Returns the greater-than result as `Output` — typically `Bool`.
     @builtin(.GreaterThanOperatorMethod)
-    func greaterThan(other: Rhs) -> Output
+    func greaterThan(other: Other) -> Output
 }
 
 /// Raw protocol backing the `>=` operator. See `Less` for guidance.
 @builtin(.GreaterOrEqualOperatorProtocol)
-public protocol GreaterOrEqual[Rhs = Self] {
+public protocol GreaterOrEqual[Other = Self] {
     type Output
 
     /// Returns the greater-than-or-equal result as `Output` — typically `Bool`.
     @builtin(.GreaterOrEqualOperatorMethod)
-    func greaterThanOrEqual(other: Rhs) -> Output
+    func greaterThanOrEqual(other: Other) -> Output
 }

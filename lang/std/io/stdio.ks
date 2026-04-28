@@ -2,7 +2,7 @@
 
 module std.io.stdio
 
-import std.num.(Int64, UInt8)
+import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
@@ -10,14 +10,14 @@ import std.text.(String, Formattable)
 import std.core.(Bool)
 import std.io.libc
 import std.io.error.(IoError)
-import std.io.read.(Read)
-import std.io.write.(Write, writeStr, writeByte, writeLine)
+import std.io.read.(Readable)
+import std.io.write.(Writable, writeString, writeByte, writeLine)
 
 // ============================================================================
 // STANDARD INPUT
 // ============================================================================
 
-/// `Read` over the process's standard input (file descriptor `0`).
+/// `Readable` over the process's standard input (file descriptor `0`).
 ///
 /// Construct via `Stdin()` or the `stdin()` accessor. Stateless — every
 /// instance shares the same descriptor; concurrent readers race on the
@@ -26,7 +26,7 @@ import std.io.write.(Write, writeStr, writeByte, writeLine)
 /// # Representation
 ///
 /// Zero-sized — operations dispatch directly on `libc.STDIN()`.
-public struct Stdin: Read {
+public struct Stdin: Readable {
     /// @name Default
     /// Builds a stdin handle.
     public init() {}
@@ -46,7 +46,7 @@ public struct Stdin: Read {
 // STANDARD OUTPUT
 // ============================================================================
 
-/// `Write` over the process's standard output (file descriptor `1`).
+/// `Writable` over the process's standard output (file descriptor `1`).
 ///
 /// As with `Stdin`, stateless — `flush` is a no-op because writes go
 /// straight to libc; line buffering / TTY behaviour is handled by libc
@@ -55,7 +55,7 @@ public struct Stdin: Read {
 /// # Representation
 ///
 /// Zero-sized.
-public struct Stdout: Write {
+public struct Stdout: Writable {
     /// @name Default
     /// Builds a stdout handle.
     public init() {}
@@ -79,7 +79,7 @@ public struct Stdout: Write {
 // STANDARD ERROR
 // ============================================================================
 
-/// `Write` over the process's standard error (file descriptor `2`).
+/// `Writable` over the process's standard error (file descriptor `2`).
 ///
 /// Mirrors `Stdout` but writes to `STDERR_FILENO`. Conventionally used
 /// for diagnostics, log lines, and anything that should not be captured
@@ -88,7 +88,7 @@ public struct Stdout: Write {
 /// # Representation
 ///
 /// Zero-sized.
-public struct Stderr: Write {
+public struct Stderr: Writable {
     /// @name Default
     /// Builds a stderr handle.
     public init() {}
@@ -142,7 +142,7 @@ public func stderr() -> Stderr {
 /// ```
 public func print[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
-    writeStr(out, value.format())
+    writeString(out, value.format())
 }
 
 /// Like `print`, plus a trailing `\n`.
@@ -161,7 +161,7 @@ public func printlnEmpty() -> Result[(), IoError] {
 /// pollute a piped stdout.
 public func eprint[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
-    writeStr(err, value.format())
+    writeString(err, value.format())
 }
 
 /// Stderr counterpart to `println`.
@@ -227,7 +227,7 @@ public func readLine() -> Result[String, IoError] {
 /// ```
 public func prompt(message: String) -> Result[String, IoError] {
     var out = stdout();
-    try writeStr(out, message);
+    try writeString(out, message);
     try out.flush();
     readLine()
 }

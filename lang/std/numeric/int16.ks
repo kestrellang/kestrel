@@ -1,7 +1,7 @@
-// Int8 - 8-bit signed integer
+// Int16 - 16-bit signed integer
 // Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
-module std.num
+module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
@@ -15,16 +15,16 @@ import std.core.(
 )
 import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64)
 
-/// A 8-bit signed integer.
+/// A 16-bit signed integer.
 ///
-/// Int8 is the 8-bit member of the integer family. The same surface
+/// Int16 is the 16-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
 /// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
 /// `*Checked` variants for overflow detection or `*Saturating` to clamp to
 /// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
-/// `lang.i8` so it can cross C boundaries unchanged.
+/// `lang.i16` so it can cross C boundaries unchanged.
 ///
 /// # Examples
 ///
@@ -44,9 +44,9 @@ import std.num.(UInt8, Int64, UInt64)
 ///
 /// # Representation
 ///
-/// A single `lang.i8` field. No padding, no headers — bit-identical
+/// A single `lang.i16` field. No padding, no headers — bit-identical
 /// to the corresponding C type.
-public struct Int8:
+public struct Int16:
     SignedInteger,
     Steppable,
     Comparable,
@@ -81,7 +81,7 @@ public struct Int8:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
-    Convertible[Int16],
+    Convertible[Int8],
     Convertible[Int32],
     Convertible[Int64],
     Convertible[UInt8],
@@ -89,43 +89,43 @@ public struct Int8:
     Convertible[UInt32],
     Convertible[UInt64]
 {
-    /// The underlying primitive `lang.i8` value. Exposed for FFI
+    /// The underlying primitive `lang.i16` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
-    public var raw: lang.i8
+    public var raw: lang.i16
 
     // ========================================================================
     // CONSTANTS
     // ========================================================================
 
     /// The additive identity, `0`.
-    public static var zero: Int8 { 0 }
+    public static var zero: Int16 { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: Int8 { 0 }
+    public static var one: Int16 { 0 }
 
     /// The smallest representable value.
-    /// This is -2^7 (-128).
+    /// This is -2^15 (-32_768).
     /// Note that for signed types `minValue.negate()` overflows back to
     /// itself; use `negateChecked()` if you need to detect that.
-    public static var minValue: Int8 { Int8(raw: lang.i8_shl(1, 7)) }
+    public static var minValue: Int16 { Int16(raw: lang.i16_shl(1, 15)) }
 
     /// The largest representable value.
-    /// This is 2^7 - 1 (127).
-    public static var maxValue: Int8 { 127 }
+    /// This is 2^15 - 1 (32_767).
+    public static var maxValue: Int16 { 32767 }
 
-    /// The width in bits (8). Useful for shift bounds and bit-walks.
-    public static var bitWidth: Int64 { 8 }
+    /// The width in bits (16). Useful for shift bounds and bit-walks.
+    public static var bitWidth: Int64 { 16 }
 
     // ========================================================================
     // INITIALIZERS
     // ========================================================================
 
     /// @name Int Literal
-    /// Compiler-emitted bridge that turns an integer literal into a Int8.
+    /// Compiler-emitted bridge that turns an integer literal into a Int16.
     ///
     /// You will rarely call this directly — write the literal and let the
     /// `ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-    /// 64 bits the literal is truncated with `lang.cast_i64_i8`.
+    /// 64 bits the literal is truncated with `lang.cast_i64_i16`.
     ///
     /// # Examples
     ///
@@ -133,7 +133,7 @@ public struct Int8:
     /// let n: Int64 = 42;            // implicit
     /// ```
     public init(intLiteral value: lang.i64) {
-        self.raw = lang.cast_i64_i8(value)
+        self.raw = lang.cast_i64_i16(value)
     }
 
     /// @name Default
@@ -149,65 +149,65 @@ public struct Int8:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i8` without conversion. Internal
+    /// Wraps an existing `lang.i16` without conversion. Internal
     /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i8) {
+    init(raw value: lang.i16) {
         self.raw = value
     }
 
     /// @name From Integer
-    /// Converts from `Int16`. Narrowing conversions truncate the high
+    /// Converts from `Int8`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int16) { self.raw = lang.cast_i16_i8(other.raw) }
+    public init(from other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
     /// @name From Integer
     /// Converts from `Int32`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int32) { self.raw = lang.cast_i32_i8(other.raw) }
+    public init(from other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
     /// @name From Integer
     /// Converts from `Int64`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int64) { self.raw = lang.cast_i64_i8(other.raw) }
+    public init(from other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
     /// @name From Integer
     /// Converts from `UInt8`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt8) { self.raw = other.raw }
+    public init(from other: UInt8) { self.raw = lang.cast_u8_i16(other.raw) }
     /// @name From Integer
     /// Converts from `UInt16`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt16) { self.raw = lang.cast_u16_i8(other.raw) }
+    public init(from other: UInt16) { self.raw = other.raw }
     /// @name From Integer
     /// Converts from `UInt32`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt32) { self.raw = lang.cast_u32_i8(other.raw) }
+    public init(from other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
     /// @name From Integer
     /// Converts from `UInt64`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = lang.cast_u64_i8(other.raw) }
+    public init(from other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
     // ========================================================================
 
-    /// Sign as a `Int8`: `-1`, `0`, or `1`.
-    public var sign: Int8 { get {
-        if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0)) { Int8(intLiteral: lang.i64_neg(1)) }
-        else if Bool(boolLiteral: lang.i8_eq(self.raw, 0)) { Int8.zero }
-        else { Int8.one }
+    /// Sign as a `Int16`: `-1`, `0`, or `1`.
+    public var sign: Int16 { get {
+        if Bool(boolLiteral: lang.i16_signed_lt(self.raw, 0)) { Int16(intLiteral: lang.i64_neg(1)) }
+        else if Bool(boolLiteral: lang.i16_eq(self.raw, 0)) { Int16.zero }
+        else { Int16.one }
     }}
 
     /// True when `self > 0`.
     public var isPositive: Bool { get {
-        Bool(boolLiteral: lang.i8_signed_gt(self.raw, 0))
+        Bool(boolLiteral: lang.i16_signed_gt(self.raw, 0))
     }}
 
     /// True when `self < 0`.
     public var isNegative: Bool { get {
-        Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0))
+        Bool(boolLiteral: lang.i16_signed_lt(self.raw, 0))
     }}
 
     /// True when `self == 0`.
     public var isZero: Bool { get {
-        Bool(boolLiteral: lang.i8_eq(self.raw, 0))
+        Bool(boolLiteral: lang.i16_eq(self.raw, 0))
     }}
 
     // ========================================================================
@@ -228,8 +228,8 @@ public struct Int8:
     /// (0).isPowerOfTwo;   // false
     /// ```
     public var isPowerOfTwo: Bool { get {
-        if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 1)) { false }
-        else { Bool(boolLiteral: lang.i8_eq(lang.i8_and(self.raw, lang.i8_sub(self.raw, 1)), 0)) }
+        if Bool(boolLiteral: lang.i16_signed_lt(self.raw, 1)) { false }
+        else { Bool(boolLiteral: lang.i16_eq(lang.i16_and(self.raw, lang.i16_sub(self.raw, 1)), 0)) }
     }}
 
     /// Population count — the number of `1` bits in the binary representation.
@@ -244,12 +244,12 @@ public struct Int8:
     /// (0).countOnes;       // 0
     /// ```
     public var countOnes: Int64 { get {
-        Int64(raw: lang.cast_i8_i64(lang.i8_popcount(self.raw)))
+        Int64(raw: lang.cast_i16_i64(lang.i16_popcount(self.raw)))
     }}
 
     /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
     public var countZeros: Int64 { get {
-        8 - self.countOnes
+        16 - self.countOnes
     }}
 
     /// Number of leading zero bits, counting from the most-significant end.
@@ -263,20 +263,20 @@ public struct Int8:
     /// (0).leadingZeros;   // bitWidth
     /// ```
     public var leadingZeros: Int64 { get {
-        Int64(raw: lang.cast_i8_i64(lang.i8_clz(self.raw)))
+        Int64(raw: lang.cast_i16_i64(lang.i16_clz(self.raw)))
     }}
 
     /// Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
     /// values; returns `bitWidth` for zero. Useful for finding the largest
     /// power of two dividing the value.
     public var trailingZeros: Int64 { get {
-        Int64(raw: lang.cast_i8_i64(lang.i8_ctz(self.raw)))
+        Int64(raw: lang.cast_i16_i64(lang.i16_ctz(self.raw)))
     }}
 
     /// Value with its byte order reversed. Use to convert between big- and
     /// little-endian; lowered to a `bswap` intrinsic.
-    public var byteSwapped: Int8 { get {
-        self
+    public var byteSwapped: Int16 { get {
+        Int16(raw: lang.i16_bswap(self.raw))
     }}
 
     // ========================================================================
@@ -291,13 +291,13 @@ public struct Int8:
     /// (42).equals(other: 42);  // true
     /// 42 == 42;                // true
     /// ```
-    public func equals(other: Int8) -> Bool {
-        Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
+    public func equals(other: Int16) -> Bool {
+        Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
     }
 
     /// Pattern-matching hook for `Matchable`. Identical to `equals`.
-    public func matches(other: Int8) -> Bool {
-        Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
+    public func matches(other: Int16) -> Bool {
+        Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
     }
 
     /// Three-way comparison returning an `Ordering`. Signed types compare
@@ -310,9 +310,9 @@ public struct Int8:
     /// (2).compare(other: 2);   // .Equal
     /// (3).compare(other: 2);   // .Greater
     /// ```
-    public func compare(other: Int8) -> Ordering {
-        if Bool(boolLiteral: lang.i8_signed_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.i8_signed_gt(self.raw, other.raw)) { .Greater }
+    public func compare(other: Int16) -> Ordering {
+        if Bool(boolLiteral: lang.i16_signed_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.i16_signed_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -322,19 +322,19 @@ public struct Int8:
 
     /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
     /// integer ranges.
-    public func successor() -> Int8 { self.add(Int8.one) }
+    public func successor() -> Int16 { self.add(Int16.one) }
 
     /// Predecessor — `self - 1`. Wraps at `minValue`.
-    public func predecessor() -> Int8 { self.subtract(Int8.one) }
+    public func predecessor() -> Int16 { self.subtract(Int16.one) }
 
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-    public func exclusiveRange(to end: Int8) -> Range[Int8] {
-        Range[Int8](self, end)
+    public func exclusiveRange(to end: Int16) -> Range[Int16] {
+        Range[Int16](self, end)
     }
 
     /// Builds a closed range `self..=end`. Sugar for the `..=` operator.
-    public func inclusiveRange(to end: Int8) -> ClosedRange[Int8] {
-        ClosedRange[Int8](self, end)
+    public func inclusiveRange(to end: Int16) -> ClosedRange[Int16] {
+        ClosedRange[Int16](self, end)
     }
 
     // ========================================================================
@@ -345,27 +345,27 @@ public struct Int8:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[Int8]()))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[Int16]()))
     }
 
     // ========================================================================
     // ASSOCIATED TYPE BINDINGS
     // ========================================================================
 
-    type Addable.Output = Int8
-    type Subtractable.Output = Int8
-    type Multipliable.Output = Int8
-    type Divisible.Output = Int8
-    type Modulo.Output = Int8
-    type Negatable.Output = Int8
-    type BitwiseAnd.Output = Int8
-    type BitwiseOr.Output = Int8
-    type BitwiseXor.Output = Int8
-    type BitwiseNot.Output = Int8
-    type LeftShift.Output = Int8
-    type RightShift.Output = Int8
-    type RangeConstructible.Output = Range[Int8]
-    type ClosedRangeConstructible.Output = ClosedRange[Int8]
+    type Addable.Output = Int16
+    type Subtractable.Output = Int16
+    type Multipliable.Output = Int16
+    type Divisible.Output = Int16
+    type Modulo.Output = Int16
+    type Negatable.Output = Int16
+    type BitwiseAnd.Output = Int16
+    type BitwiseOr.Output = Int16
+    type BitwiseXor.Output = Int16
+    type BitwiseNot.Output = Int16
+    type LeftShift.Output = Int16
+    type RightShift.Output = Int16
+    type RangeConstructible.Output = Range[Int16]
+    type ClosedRangeConstructible.Output = ClosedRange[Int16]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)
@@ -373,13 +373,13 @@ public struct Int8:
 
     /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
     /// `addSaturating` to clamp.
-    public func add(other: Int8) -> Int8 { Int8(raw: lang.i8_add(self.raw, other.raw)) }
+    public func add(other: Int16) -> Int16 { Int16(raw: lang.i16_add(self.raw, other.raw)) }
 
     /// `self - other`, wrapping on overflow.
-    public func subtract(other: Int8) -> Int8 { Int8(raw: lang.i8_sub(self.raw, other.raw)) }
+    public func subtract(other: Int16) -> Int16 { Int16(raw: lang.i16_sub(self.raw, other.raw)) }
 
     /// `self * other`, wrapping on overflow.
-    public func multiply(other: Int8) -> Int8 { Int8(raw: lang.i8_mul(self.raw, other.raw)) }
+    public func multiply(other: Int16) -> Int16 { Int16(raw: lang.i16_mul(self.raw, other.raw)) }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -388,7 +388,7 @@ public struct Int8:
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public func divide(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_div(self.raw, other.raw)) }
+    public func divide(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -396,16 +396,16 @@ public struct Int8:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public func modulo(other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.raw, other.raw)) }
+    public func modulo(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.raw, other.raw)) }
 
     /// Two's-complement negation. Wraps at the minimum value:
-    /// `Int8.minValue.negate() == Int8.minValue`. Use
+    /// `Int16.minValue.negate() == Int16.minValue`. Use
     /// `negateChecked` to surface the overflow.
-    public func negate() -> Int8 { Int8(raw: lang.i8_neg(self.raw)) }
+    public func negate() -> Int16 { Int16(raw: lang.i16_neg(self.raw)) }
     /// Absolute value. Wraps at the minimum value
-    /// (`Int8.minValue.abs() == Int8.minValue`); use
+    /// (`Int16.minValue.abs() == Int16.minValue`); use
     /// `absChecked` if that's a problem.
-    public func abs() -> Int8 { if Bool(boolLiteral: lang.i8_signed_lt(self.raw, 0)) { self.negate() } else { self } }
+    public func abs() -> Int16 { if Bool(boolLiteral: lang.i16_signed_lt(self.raw, 0)) { self.negate() } else { self } }
 
     // ========================================================================
     // ARITHMETIC (Checked - Returns Optional)
@@ -413,7 +413,7 @@ public struct Int8:
 
     // TODO: requires overflow-detecting intrinsics for proper implementation
     /// Wrapping addition that returns `None` instead of overflowing.
-    public func addChecked(other: Int8) -> Int8? {
+    public func addChecked(other: Int16) -> Int16? {
         // Simplified check - detect if signs are same and result sign differs
         let result = self.add(other);
         if self.isPositive and other.isPositive and result.isNegative {
@@ -426,7 +426,7 @@ public struct Int8:
     }
 
     /// Wrapping subtraction that returns `None` instead of overflowing.
-    public func subtractChecked(other: Int8) -> Int8? {
+    public func subtractChecked(other: Int16) -> Int16? {
         // Simplified check
         let result = self.subtract(other);
         if self.isPositive and other.isNegative and result.isNegative {
@@ -441,9 +441,9 @@ public struct Int8:
     /// Wrapping multiplication that returns `None` instead of overflowing.
     /// Implemented by multiplying then dividing back; replace with an
     /// overflow-detecting intrinsic when one is available.
-    public func multiplyChecked(other: Int8) -> Int8? {
-        if other == Int8.zero {
-            return .Some(Int8.zero)
+    public func multiplyChecked(other: Int16) -> Int16? {
+        if other == Int16.zero {
+            return .Some(Int16.zero)
         };
         let result = self.multiply(other);
         // Check by dividing back
@@ -455,20 +455,20 @@ public struct Int8:
 
     /// Division that returns `None` for divide-by-zero or for the
     /// `minValue / -1` overflow case.
-    public func divideChecked(other: Int8) -> Int8? {
-        if other == Int8.zero {
+    public func divideChecked(other: Int16) -> Int16? {
+        if other == Int16.zero {
             return .None
         };
         // Check for minValue / -1 overflow
-        if self == Int8.minValue and other == Int8(intLiteral: lang.i64_neg(1)) {
+        if self == Int16.minValue and other == Int16(intLiteral: lang.i64_neg(1)) {
             return .None
         };
         .Some(self.divide(other))
     }
 
     /// Negation that returns `None` for `minValue` (whose negation overflows).
-    public func negateChecked() -> Int8? {
-        if self == Int8.minValue {
+    public func negateChecked() -> Int16? {
+        if self == Int16.minValue {
             return .None
         };
         .Some(self.negate())
@@ -476,8 +476,8 @@ public struct Int8:
 
     /// Absolute value that returns `None` for `minValue` (whose absolute
     /// value overflows).
-    public func absChecked() -> Int8? {
-        if self == Int8.minValue {
+    public func absChecked() -> Int16? {
+        if self == Int16.minValue {
             return .None
         };
         .Some(self.abs())
@@ -489,50 +489,50 @@ public struct Int8:
     // ========================================================================
 
     /// Addition that clamps to `maxValue`/`minValue` instead of wrapping.
-    public func addSaturating(other: Int8) -> Int8 {
+    public func addSaturating(other: Int16) -> Int16 {
         let checked = self.addChecked(other);
         match checked {
             .Some(result) => result,
-            .None => if other.isPositive { Int8.maxValue } else { Int8.minValue }
+            .None => if other.isPositive { Int16.maxValue } else { Int16.minValue }
         }
     }
 
     /// Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
-    public func subtractSaturating(other: Int8) -> Int8 {
+    public func subtractSaturating(other: Int16) -> Int16 {
         let checked = self.subtractChecked(other);
         match checked {
             .Some(result) => result,
-            .None => if other.isNegative { Int8.maxValue } else { Int8.minValue }
+            .None => if other.isNegative { Int16.maxValue } else { Int16.minValue }
         }
     }
 
     /// Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
     /// The clamp direction follows the algebraic sign of the would-be result.
-    public func multiplySaturating(other: Int8) -> Int8 {
+    public func multiplySaturating(other: Int16) -> Int16 {
         let checked = self.multiplyChecked(other);
         match checked {
             .Some(result) => result,
             .None => {
                 // Determine sign of result
                 let sameSign = (self.isNegative == other.isNegative);
-                if sameSign { Int8.maxValue } else { Int8.minValue }
+                if sameSign { Int16.maxValue } else { Int16.minValue }
             }
         }
     }
 
     /// Negation that returns `maxValue` instead of wrapping `minValue`.
-    public func negateSaturating() -> Int8 {
-        if self == Int8.minValue {
-            Int8.maxValue
+    public func negateSaturating() -> Int16 {
+        if self == Int16.minValue {
+            Int16.maxValue
         } else {
             self.negate()
         }
     }
 
     /// Absolute value that returns `maxValue` instead of wrapping `minValue`.
-    public func absSaturating() -> Int8 {
-        if self == Int8.minValue {
-            Int8.maxValue
+    public func absSaturating() -> Int16 {
+        if self == Int16.minValue {
+            Int16.maxValue
         } else {
             self.abs()
         }
@@ -554,14 +554,14 @@ public struct Int8:
     /// (3).pow(4);   // 81
     /// (5).pow(-1);  // 0
     /// ```
-    public func pow(exponent: Int64) -> Int8 {
+    public func pow(exponent: Int64) -> Int16 {
         if exponent < 0 {
-            return Int8.zero
+            return Int16.zero
         };
         if exponent == 0 {
-            return Int8.one
+            return Int16.one
         };
-        var result = Int8.one;
+        var result = Int16.one;
         var base = self;
         var exp = exponent;
         while exp > 0 {
@@ -584,10 +584,10 @@ public struct Int8:
     /// (17).gcd(5);   // 1   (coprime)
     /// (-12).gcd(8);  // 4
     /// ```
-    public func gcd(other: Int8) -> Int8 {
+    public func gcd(other: Int16) -> Int16 {
         var a = self.abs();
         var b = other.abs();
-        while b != Int8.zero {
+        while b != Int16.zero {
             let t = b;
             b = a.modulo(b);
             a = t
@@ -605,9 +605,9 @@ public struct Int8:
     /// (3).lcm(5);   // 15
     /// (0).lcm(7);   // 0
     /// ```
-    public func lcm(other: Int8) -> Int8 {
-        if self == Int8.zero or other == Int8.zero {
-            return Int8.zero
+    public func lcm(other: Int16) -> Int16 {
+        if self == Int16.zero or other == Int16.zero {
+            return Int16.zero
         };
         let g = self.gcd(other);
         self.abs().divide(g).multiply(other.abs())
@@ -627,7 +627,7 @@ public struct Int8:
     /// (-5).clamp(min: 0, max: 10);   // 0
     /// (15).clamp(min: 0, max: 10);   // 10
     /// ```
-    public func clamp(min: Int8, max: Int8) -> Int8 {
+    public func clamp(min: Int16, max: Int16) -> Int16 {
         if self < min { min }
         else if self > max { max }
         else { self }
@@ -638,30 +638,30 @@ public struct Int8:
     // ========================================================================
 
     /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-    public func bitwiseAnd(other: Int8) -> Int8 { Int8(raw: lang.i8_and(self.raw, other.raw)) }
+    public func bitwiseAnd(other: Int16) -> Int16 { Int16(raw: lang.i16_and(self.raw, other.raw)) }
 
     /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-    public func bitwiseOr(other: Int8) -> Int8 { Int8(raw: lang.i8_or(self.raw, other.raw)) }
+    public func bitwiseOr(other: Int16) -> Int16 { Int16(raw: lang.i16_or(self.raw, other.raw)) }
 
     /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-    public func bitwiseXor(other: Int8) -> Int8 { Int8(raw: lang.i8_xor(self.raw, other.raw)) }
+    public func bitwiseXor(other: Int16) -> Int16 { Int16(raw: lang.i16_xor(self.raw, other.raw)) }
 
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-    public func bitwiseNot() -> Int8 { Int8(raw: lang.i8_not(self.raw)) }
+    public func bitwiseNot() -> Int16 { Int16(raw: lang.i16_not(self.raw)) }
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count))) }
+    public func shiftLeft(by count: lang.i64) -> Int16 { Int16(raw: lang.i16_shl(self.raw, lang.cast_i64_i16(count))) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_signed_shr(self.raw, lang.cast_i64_i8(count))) }
+    public func shiftRight(by count: lang.i64) -> Int16 { Int16(raw: lang.i16_signed_shr(self.raw, lang.cast_i64_i16(count))) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.
-    public func rotateLeft(by count: Int64) -> Int8 {
-        let bits: Int64 = 8;
+    public func rotateLeft(by count: Int64) -> Int16 {
+        let bits: Int64 = 16;
         let c = count % bits;
         if c == 0 { self }
         else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
@@ -669,8 +669,8 @@ public struct Int8:
 
     /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
     /// `rotateLeft`.
-    public func rotateRight(by count: Int64) -> Int8 {
-        let bits: Int64 = 8;
+    public func rotateRight(by count: Int64) -> Int16 {
+        let bits: Int64 = 16;
         let c = count % bits;
         if c == 0 { self }
         else { self.shiftRight(by: c.raw).bitwiseOr(self.shiftLeft(by: (bits - c).raw)) }
@@ -681,21 +681,21 @@ public struct Int8:
     // ========================================================================
 
     /// `self += other`
-    public mutating func addAssign(other: Int8) { self = self.add(other) }
+    public mutating func addAssign(other: Int16) { self = self.add(other) }
     /// `self -= other`
-    public mutating func subtractAssign(other: Int8) { self = self.subtract(other) }
+    public mutating func subtractAssign(other: Int16) { self = self.subtract(other) }
     /// `self *= other`
-    public mutating func multiplyAssign(other: Int8) { self = self.multiply(other) }
+    public mutating func multiplyAssign(other: Int16) { self = self.multiply(other) }
     /// `self /= other`
-    public mutating func divideAssign(other: Int8) { self = self.divide(other) }
+    public mutating func divideAssign(other: Int16) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: Int8) { self = self.modulo(other) }
+    public mutating func modAssign(other: Int16) { self = self.modulo(other) }
     /// `self &= other`
-    public mutating func bitwiseAndAssign(other: Int8) { self = self.bitwiseAnd(other) }
+    public mutating func bitwiseAndAssign(other: Int16) { self = self.bitwiseAnd(other) }
     /// `self |= other`
-    public mutating func bitwiseOrAssign(other: Int8) { self = self.bitwiseOr(other) }
+    public mutating func bitwiseOrAssign(other: Int16) { self = self.bitwiseOr(other) }
     /// `self ^= other`
-    public mutating func bitwiseXorAssign(other: Int8) { self = self.bitwiseXor(other) }
+    public mutating func bitwiseXorAssign(other: Int16) { self = self.bitwiseXor(other) }
     /// `self <<= count`
     public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
     /// `self >>= count`
@@ -705,36 +705,36 @@ public struct Int8:
     // BYTE CONVERSION
     // ========================================================================
 
-    /// Splits this integer into 1 bytes in *native* (host) byte order.
+    /// Splits this integer into 2 bytes in *native* (host) byte order.
     /// Use `toBytesBigEndian` / `toBytesLittleEndian` when serialising for
     /// a fixed wire format.
     ///
     /// # Examples
     ///
     /// ```
-    /// let bytes = Int8.maxValue.toBytes();   // 1 bytes, host order
+    /// let bytes = Int16.maxValue.toBytes();   // 2 bytes, host order
     /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 1);
+        var result = std.collections.Array[UInt8](capacity: 2);
         let value = self;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 2 {
             result.append(ptr.offset(by: i).read());
             i = i + 1
         }
         result
     }
 
-    /// Splits this integer into 1 bytes in big-endian order (most
+    /// Splits this integer into 2 bytes in big-endian order (most
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 1);
+        var result = std.collections.Array[UInt8](capacity: 2);
         let value = UInt64(from: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < 1 {
-            let shift = (1 - 1 - i) * 8;
+        while i < 2 {
+            let shift = (2 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -742,14 +742,14 @@ public struct Int8:
         result
     }
 
-    /// Splits this integer into 1 bytes in little-endian order (least
+    /// Splits this integer into 2 bytes in little-endian order (least
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 1);
+        var result = std.collections.Array[UInt8](capacity: 2);
         let value = UInt64(from: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 2 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
@@ -758,53 +758,53 @@ public struct Int8:
         result
     }
 
-    /// Reassembles a `Int8` from 1 bytes in native (host) byte
-    /// order. Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int8? {
-        if bytes.count != 1 {
+    /// Reassembles a `Int16` from 2 bytes in native (host) byte
+    /// order. Returns `None` if the input is not exactly 2 bytes long.
+    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int16? {
+        if bytes.count != 2 {
             return .None
         }
-        var value = Int8.zero;
+        var value = Int16.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 2 {
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
         .Some(value)
     }
 
-    /// Reassembles a `Int8` from 1 bytes in big-endian order.
-    /// Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int8? {
-        if bytes.count != 1 {
+    /// Reassembles a `Int16` from 2 bytes in big-endian order.
+    /// Returns `None` if the input is not exactly 2 bytes long.
+    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int16? {
+        if bytes.count != 2 {
             return .None
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 2 {
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        .Some(Int8(from: result))
+        .Some(Int16(from: result))
     }
 
-    /// Reassembles a `Int8` from 1 bytes in little-endian order.
-    /// Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int8? {
-        if bytes.count != 1 {
+    /// Reassembles a `Int16` from 2 bytes in little-endian order.
+    /// Returns `None` if the input is not exactly 2 bytes long.
+    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int16? {
+        if bytes.count != 2 {
             return .None
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 2 {
             let shift = i * 8;
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = result | (byteVal << shift);
             i = i + 1
         }
-        .Some(Int8(from: result))
+        .Some(Int16(from: result))
     }
 
     // ========================================================================
@@ -813,17 +813,17 @@ public struct Int8:
 
     /// Parses a base-10 integer literal, optionally prefixed with `+` or
     /// `-`. Returns `None` for an empty string, a non-digit character,
-    /// or a value that does not fit in `Int8`.
+    /// or a value that does not fit in `Int16`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Int8.parse(string: "42");    // Some(42)
-    /// Int8.parse(string: "-7");    // Some(-7)
-    /// Int8.parse(string: "abc");   // None
-    /// Int8.parse(string: "");      // None
+    /// Int16.parse(string: "42");    // Some(42)
+    /// Int16.parse(string: "-7");    // Some(-7)
+    /// Int16.parse(string: "abc");   // None
+    /// Int16.parse(string: "");      // None
     /// ```
-    public static func parse(string: String) -> Int8? {
+    public static func parse(string: String) -> Int16? {
         let len = string.byteCount;
         if len == 0 {
             return .None
@@ -880,30 +880,30 @@ public struct Int8:
         // Apply sign and check bounds for target type
         if isNegative {
             result = result.negate();
-            if result < Int64(from: Int8.minValue) {
+            if result < Int64(from: Int16.minValue) {
                 return .None
             }
         } else {
-            if result > Int64(from: Int8.maxValue) {
+            if result > Int64(from: Int16.maxValue) {
                 return .None
             }
         }
 
-        .Some(Int8(from: result))
+        .Some(Int16(from: result))
     }
     /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
     /// case-insensitive and represent digit values 10–35. Returns `None`
     /// for an out-of-range radix, an empty string, an unrecognised digit,
-    /// or a value that overflows `Int8`.
+    /// or a value that overflows `Int16`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Int8.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-    /// Int8.parse(string: "101010", radix: 2);  // Some(42)
-    /// Int8.parse(string: "z", radix: 36);      // Some(35)
+    /// Int16.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// Int16.parse(string: "101010", radix: 2);  // Some(42)
+    /// Int16.parse(string: "z", radix: 36);      // Some(35)
     /// ```
-    public static func parse(string: String, radix: Int64) -> Int8? {
+    public static func parse(string: String, radix: Int64) -> Int16? {
         if radix < 2 or radix > 36 {
             return .None
         }
@@ -933,9 +933,9 @@ public struct Int8:
 
         let radixU: UInt64 = UInt64(from: radix);
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int8.maxValue) + 1
+            UInt64(from: Int16.maxValue) + 1
         } else {
-            UInt64(from: Int8.maxValue)
+            UInt64(from: Int16.maxValue)
         };
 
         var result: UInt64 = 0;
@@ -971,7 +971,7 @@ public struct Int8:
         // first (the `|minValue|` bit pattern reinterprets to `minValue`)
         // then negate; two's-complement negation of `minValue` wraps back
         // to `minValue`, so the boundary case lands correctly.
-        let typedResult = Int8(from: result);
+        let typedResult = Int16(from: result);
         if isNegative {
             .Some(typedResult.negate())
         } else {
@@ -1021,12 +1021,12 @@ public struct Int8:
 
         // Build digits in reverse order
         var digits = String();
-        if n == Int8.zero {
+        if n == Int16.zero {
             digits.appendByte(48)  // '0'
         } else {
-            let radixVal: Int8 = Int8(from: radix);
-            while n != Int8.zero {
-                let digit: Int8 = n % radixVal;
+            let radixVal: Int16 = Int16(from: radix);
+            while n != Int16.zero {
+                let digit: Int16 = n % radixVal;
                 let digitVal: Int64 = Int64(from: digit);
                 let charCode: Int64 = if digitVal < 10 {
                     digitVal + 48  // '0'-'9'

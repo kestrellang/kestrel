@@ -3,7 +3,7 @@
 // expect-exit: 3
 
 module Test
-import std.num.Int64
+import std.numeric.Int64
 import std.core._ExpressibleByArrayLiteral
 
 struct MyList: _ExpressibleByArrayLiteral {

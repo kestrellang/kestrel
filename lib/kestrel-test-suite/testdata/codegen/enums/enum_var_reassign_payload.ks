@@ -4,11 +4,11 @@
 module Test
 
 enum Option {
-    case Some(value: std.num.Int64)
+    case Some(value: std.numeric.Int64)
     case None
 }
 
-func unwrap_or(opt: Option, default: std.num.Int64) -> std.num.Int64 {
+func unwrap_or(opt: Option, default: std.numeric.Int64) -> std.numeric.Int64 {
     match opt {
         .Some(value: v) => v,
         .None => default

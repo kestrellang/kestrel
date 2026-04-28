@@ -3,7 +3,7 @@
 module std.text
 
 import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, fatalError)
-import std.num.(Int64, UInt8, UInt32)
+import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, Grapheme, Byte, decodeUtf8, String)
@@ -113,7 +113,7 @@ public struct BytesView: Iterable {
     /// The element type yielded by iteration — always `UInt8`.
     type Item = UInt8
     /// The iterator type returned by `iter()`.
-    type Iter = BytesIterator
+    type TargetIterator = BytesIterator
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
@@ -138,8 +138,8 @@ public struct BytesView: Iterable {
     /// `CharsView.count` for the latter (which is O(n)).
     public var count: Int64 { self.length }
 
-    /// Returns true if the view spans zero bytes.
-    public func isEmpty() -> Bool { self.length == 0 }
+    /// `true` if the view spans zero bytes.
+    public var isEmpty: Bool { self.length == 0 }
 
     /// Returns the raw pointer to the underlying byte buffer.
     ///
@@ -330,7 +330,7 @@ public struct CharsView: Iterable {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
-    type Iter = CharsIterator
+    type TargetIterator = CharsIterator
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
@@ -601,7 +601,7 @@ public struct GraphemesView: Iterable {
     /// The element type yielded by iteration — always `Grapheme`.
     type Item = Grapheme
     /// The iterator type returned by `iter()`.
-    type Iter = GraphemesIterator
+    type TargetIterator = GraphemesIterator
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64
@@ -870,7 +870,7 @@ public struct LinesView: Iterable {
     /// The element type yielded by iteration — always `String`.
     type Item = String
     /// The iterator type returned by `iter()`.
-    type Iter = LinesIterator
+    type TargetIterator = LinesIterator
 
     private var ptr: lang.ptr[lang.i8]
     private var length: Int64

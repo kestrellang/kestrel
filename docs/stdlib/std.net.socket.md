@@ -119,7 +119,7 @@ _Defined in `lang/std/net/socket.ks`._
 public struct TcpStream { /* private fields */ }
 ```
 
-A connected TCP byte stream — implements `Read` and `Write` on top of a POSIX socket fd.
+A connected TCP byte stream — implements `Readable` and `Writable` on top of a POSIX socket fd.
 
 Returned by `TcpListener.accept()` (server side) and
 `TcpStream.connect(host:port:)` (client side). Reads and writes
@@ -135,7 +135,7 @@ var stream = match TcpStream.connect(host: "example.com", port: 80) {
     .Ok(s) => s,
     .Err(e) => return .Err(e)
 };
-// stream is Read + Write
+// stream is Readable + Writable
 ```
 
 ### Representation
@@ -237,7 +237,7 @@ yourself — the deinit still will.
 
 _Defined in `lang/std/net/socket.ks`._
 
-### Implements `Read`
+### Implements `Readable`
 
 #### function `read`
 
@@ -248,7 +248,7 @@ public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]
 Reads up to `buf.count` bytes into `buf`. Returns the byte count actually read.
 
 `0` indicates the peer closed the connection cleanly. Required
-by the `Read` protocol.
+by the `Readable` protocol.
 
 ##### Errors
 
@@ -257,7 +257,7 @@ returns `-1`.
 
 _Defined in `lang/std/net/socket.ks`._
 
-### Implements `Write`
+### Implements `Writable`
 
 #### function `flush`
 
@@ -267,7 +267,7 @@ public mutating func flush() -> Result[(), IoError]
 
 No-op — TCP sockets do not have an application-level write buffer.
 
-Always returns `Ok(())`. Provided to satisfy the `Write`
+Always returns `Ok(())`. Provided to satisfy the `Writable`
 protocol so generic writers can call `flush` unconditionally.
 
 _Defined in `lang/std/net/socket.ks`._
@@ -281,7 +281,7 @@ public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 Writes up to `buf.count` bytes from `buf`. Returns the byte count actually written.
 
 May write fewer bytes than requested under back-pressure;
-loop until the buffer is drained. Required by the `Write`
+loop until the buffer is drained. Required by the `Writable`
 protocol.
 
 ##### Errors

@@ -5,12 +5,12 @@ module Test
 
         func main() -> lang.i64 {
             // Setup two sets: a = {1, 2, 3}, b = {2, 3, 4}
-            var a = std.collections.Set[std.num.Int64]();
+            var a = std.collections.Set[std.numeric.Int64]();
             let _ = a.insert(1);
             let _ = a.insert(2);
             let _ = a.insert(3);
 
-            var b = std.collections.Set[std.num.Int64]();
+            var b = std.collections.Set[std.numeric.Int64]();
             let _ = b.insert(2);
             let _ = b.insert(3);
             let _ = b.insert(4);
@@ -42,7 +42,7 @@ module Test
             if symDiff.contains(2) { return 14 }
 
             // Test formUnion() - mutating
-            var fu = std.collections.Set[std.num.Int64]();
+            var fu = std.collections.Set[std.numeric.Int64]();
             let _ = fu.insert(1);
             let _ = fu.insert(2);
             fu.formUnion(b);
@@ -50,7 +50,7 @@ module Test
             if fu.contains(4) == false { return 16 }
 
             // Test formIntersection() - mutating
-            var fi = std.collections.Set[std.num.Int64]();
+            var fi = std.collections.Set[std.numeric.Int64]();
             let _ = fi.insert(1);
             let _ = fi.insert(2);
             let _ = fi.insert(3);
@@ -60,7 +60,7 @@ module Test
             if fi.contains(1) { return 19 }
 
             // Test formDifference() - mutating
-            var fd = std.collections.Set[std.num.Int64]();
+            var fd = std.collections.Set[std.numeric.Int64]();
             let _ = fd.insert(1);
             let _ = fd.insert(2);
             let _ = fd.insert(3);
@@ -69,7 +69,7 @@ module Test
             if fd.contains(1) == false { return 21 }
 
             // Test formSymmetricDifference() - mutating
-            var fsd = std.collections.Set[std.num.Int64]();
+            var fsd = std.collections.Set[std.numeric.Int64]();
             let _ = fsd.insert(1);
             let _ = fsd.insert(2);
             let _ = fsd.insert(3);

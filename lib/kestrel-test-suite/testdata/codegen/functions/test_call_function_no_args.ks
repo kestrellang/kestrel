@@ -3,7 +3,7 @@
 
 module Test
 
-func get_answer() -> std.num.Int64 {
+func get_answer() -> std.numeric.Int64 {
     42
 }
 

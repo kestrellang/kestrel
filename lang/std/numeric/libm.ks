@@ -5,7 +5,7 @@
 // directly only from low-level code that already has raw `lang.f32` /
 // `lang.f64` values.
 
-module std.num
+module std.numeric
 
 // ============================================================================
 // Float64 (double) functions

@@ -4,9 +4,9 @@
 module Test
 
         func main() -> lang.i64 {
-            let some: std.result.Optional[std.num.Int64] = .Some(10);
-            let none: std.result.Optional[std.num.Int64] = .None;
-            let other: std.result.Optional[std.num.Int64] = .Some(20);
+            let some: std.result.Optional[std.numeric.Int64] = .Some(10);
+            let none: std.result.Optional[std.numeric.Int64] = .None;
+            let other: std.result.Optional[std.numeric.Int64] = .Some(20);
 
             // Test then (and combinator)
             let andResult = some.then(other);
@@ -15,9 +15,9 @@ module Test
             if andNone.isSome() { return 2 }
 
             // Test orElse (without closure capture to avoid codegen bug)
-            let orResult: std.result.Optional[std.num.Int64] = none.orElse({ () in .Some(99) });
+            let orResult: std.result.Optional[std.numeric.Int64] = none.orElse({ () in .Some(99) });
             if orResult.unwrap() != 99 { return 3 }
-            let orSome: std.result.Optional[std.num.Int64] = some.orElse({ () in .Some(99) });
+            let orSome: std.result.Optional[std.numeric.Int64] = some.orElse({ () in .Some(99) });
             if orSome.unwrap() != 10 { return 4 }
 
             0

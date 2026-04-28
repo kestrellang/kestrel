@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let ok: std.result.Result[std.num.Int64, std.num.Int64] = .Ok(42);
-            let err: std.result.Result[std.num.Int64, std.num.Int64] = .Err(5);
+            let ok: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(42);
+            let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(5);
 
             // unwrap(orElse:) on Ok - returns contained value, doesn't call function
             let okVal = ok.unwrap(orElse: { (e) in e * 100 });

@@ -4,20 +4,20 @@
 module Test
 
         func main() -> lang.i64 {
-            var small = std.collections.Set[std.num.Int64]();
+            var small = std.collections.Set[std.numeric.Int64]();
             let _ = small.insert(1);
             let _ = small.insert(2);
 
-            var big = std.collections.Set[std.num.Int64]();
+            var big = std.collections.Set[std.numeric.Int64]();
             let _ = big.insert(1);
             let _ = big.insert(2);
             let _ = big.insert(3);
 
-            var equal = std.collections.Set[std.num.Int64]();
+            var equal = std.collections.Set[std.numeric.Int64]();
             let _ = equal.insert(1);
             let _ = equal.insert(2);
 
-            var disjoint = std.collections.Set[std.num.Int64]();
+            var disjoint = std.collections.Set[std.numeric.Int64]();
             let _ = disjoint.insert(10);
             let _ = disjoint.insert(20);
 
@@ -47,7 +47,7 @@ module Test
             if small.isDisjoint(with: big) { return 12 }
 
             // Test empty set relations
-            var empty = std.collections.Set[std.num.Int64]();
+            var empty = std.collections.Set[std.numeric.Int64]();
             if empty.isSubset(of: small) == false { return 13 }
             if empty.isDisjoint(with: small) == false { return 14 }
 

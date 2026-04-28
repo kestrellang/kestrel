@@ -164,8 +164,8 @@
               "kind": "function",
               "name": "rev",
               "anchor": "function-rev",
-              "signature": "public func rev() -> RevIterator[Self]",
-              "doc": "Yields elements back-to-front by pulling `nextBack()` instead of\n`next()`. `O(1)` to construct — no buffering.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]\n[1, 2, 3, 4, 5].iter().rev().take(count: 3).collect();         // [5, 4, 3]\n[1, 2, 3, 4, 5].iter().rev().find({ it % 2 == 0 });            // Some(4)\n```",
+              "signature": "public func rev() -> ReversedIterator[Self]",
+              "doc": "Yields elements back-to-front by pulling `nextBack()` instead of\n`next()`. `O(1)` to construct — no buffering.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]\n[1, 2, 3, 4, 5].iter().rev().take(count: 3).collect();         // [5, 4, 3]\n[1, 2, 3, 4, 5].iter().rev().first(matching: { it % 2 == 0 });            // Some(4)\n```",
               "source_path": "lang/std/iter/iterator.ks"
             }
           ]
@@ -325,7 +325,7 @@
               "name": "isEmpty",
               "anchor": "function-isEmpty",
               "signature": "public func isEmpty() -> Bool",
-              "doc": "True when no elements remain. Equivalent to `remaining == 0`.",
+              "doc": "`true` when no elements remain. Equivalent to `remaining == 0`.",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -380,7 +380,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, predicate: (I.Item) -> Bool)",
+              "signature": "public init(inner: I, matching: (I.Item) -> Bool)",
               "doc": "Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -444,7 +444,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, transform: (I.Item) -> U?)",
+              "signature": "public init(inner: I, mapping: (I.Item) -> U?)",
               "doc": "Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /\n`inner.compactMap()`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -508,7 +508,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, transform: (I.Item) -> U)",
+              "signature": "public init(inner: I, mapping: (I.Item) -> U)",
               "doc": "Builds a `FlatMapIterator` with no inner iterator buffered.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -629,9 +629,9 @@
     },
     {
       "kind": "struct",
-      "name": "FuseIterator",
-      "anchor": "struct-FuseIterator",
-      "signature": "public struct FuseIterator[I] where I: Iterator { /* private fields */ }",
+      "name": "FusedIterator",
+      "anchor": "struct-FusedIterator",
+      "signature": "public struct FusedIterator[I] where I: Iterator { /* private fields */ }",
       "doc": "Wraps a source so that once `None` is returned, future calls also\nreturn `None`. Returned by `Iterator.fuse()`.\n\n# Representation\n\nSource iterator + a one-bit latch.",
       "source_path": "lang/std/iter/adapters.ks",
       "member_groups": [
@@ -645,7 +645,7 @@
               "name": "From Source",
               "anchor": "initializer-From-Source",
               "signature": "public init(inner: I)",
-              "doc": "Builds a `FuseIterator` in the \"still active\" state.",
+              "doc": "Builds a `FusedIterator` in the \"still active\" state.",
               "source_path": "lang/std/iter/adapters.ks"
             },
             {
@@ -708,7 +708,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, inspector: (I.Item) -> ())",
+              "signature": "public init(inner: I, inspecting: (I.Item) -> ())",
               "doc": "Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -772,7 +772,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, separator: I.Item)",
+              "signature": "public init(inner: I, with: I.Item)",
               "doc": "Builds an `IntersperseIterator`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -852,7 +852,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, separator: () -> I.Item)",
+              "signature": "public init(inner: I, with: () -> I.Item)",
               "doc": "Builds an `IntersperseWithIterator`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -938,17 +938,17 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter",
-              "doc": "The concrete iterator type returned by `iter()`. Constrained so\n`Iter.Item` matches `Self.Item`.",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator",
+              "doc": "The concrete iterator type returned by `iter()`. Constrained so\n`TargetIterator.Item` matches `Self.Item`.",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
               "kind": "function",
               "name": "iter",
               "anchor": "function-iter",
-              "signature": "func iter() -> Iter",
+              "signature": "func iter() -> TargetIterator",
               "doc": "Builds a fresh iterator over the contents.",
               "source_path": "lang/std/iter/iterator.ks"
             }
@@ -973,7 +973,7 @@
               "kind": "function",
               "name": "all",
               "anchor": "function-all",
-              "signature": "public mutating func all((Item) -> Bool) -> Bool",
+              "signature": "public mutating func all(matching: (Item) -> Bool) -> Bool",
               "doc": "True if every element satisfies `predicate`. Stops at the first\nfailure. True for an empty iterator (vacuous truth).\n\n# Examples\n\n```\n[2, 4, 6].iter().all({ it % 2 == 0 });   // true\n[2, 3, 4].iter().all({ it % 2 == 0 });   // false (stops at 3)\n[].iter().all({ false });                // true (empty)\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -981,7 +981,7 @@
               "kind": "function",
               "name": "any",
               "anchor": "function-any",
-              "signature": "public mutating func any((Item) -> Bool) -> Bool",
+              "signature": "public mutating func any(matching: (Item) -> Bool) -> Bool",
               "doc": "True if any element satisfies `predicate`. Stops at the first\nmatch. False for an empty iterator.\n\n# Examples\n\n```\n[1, 2, 3, 4].iter().any({ it > 3 });    // true (stops at 4)\n[1, 2, 3].iter().any({ it > 10 });      // false\n[].iter().any({ true });                // false\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1045,7 +1045,7 @@
               "kind": "function",
               "name": "filter",
               "anchor": "function-filter",
-              "signature": "public func filter((Item) -> Bool) -> FilterIterator[Self]",
+              "signature": "public func filter(matching: (Item) -> Bool) -> FilterIterator[Self]",
               "doc": "Yields only elements where `predicate` returns `true`. Lazy —\nelements are tested as they're pulled.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).collect();   // [2, 4]\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1059,10 +1059,10 @@
             },
             {
               "kind": "function",
-              "name": "find",
-              "anchor": "function-find",
-              "signature": "public mutating func find((Item) -> Bool) -> Item?",
-              "doc": "First element matching `predicate`, or `None`. Stops at the first\nmatch.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].iter().find({ it > 3 });   // Some(4)\n[1, 2, 3].iter().find({ it > 10 });        // None\n```",
+              "name": "first",
+              "anchor": "function-first",
+              "signature": "public mutating func first(matching: (Item) -> Bool) -> Item?",
+              "doc": "First element matching `predicate`, or `None`. Stops at the first\nmatch.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].iter().first(matching: { it > 3 });   // Some(4)\n[1, 2, 3].iter().first(matching: { it > 10 });        // None\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1093,8 +1093,8 @@
               "kind": "function",
               "name": "fold",
               "anchor": "function-fold",
-              "signature": "public consuming func fold[Acc](initial: Acc, combine: (Acc, Item) -> Acc) -> Acc",
-              "doc": "Left fold — start at `initial` and walk left to right, applying\n`combine(acc, element)`. Returns `initial` for an empty iterator.\n\n# Examples\n\n```\n[1, 2, 3, 4].iter().fold(initial: 0, combine: |acc, x| acc + x);   // 10\n[1, 2, 3].iter().fold(initial: 1, combine: |acc, x| acc * x);      // 6\n[].iter().fold(initial: 42, combine: |acc, x| acc + x);            // 42\n```",
+              "signature": "public consuming func fold[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> Acc",
+              "doc": "Left fold — start at `initial` and walk left to right, applying\n`combine(acc, element)`. Returns `initial` for an empty iterator.\n\n# Examples\n\n```\n[1, 2, 3, 4].iter().fold(from: 0,  combining: |acc, x| acc + x);   // 10\n[1, 2, 3].iter().fold(from: 1,  combining: |acc, x| acc * x);      // 6\n[].iter().fold(from: 42,  combining: |acc, x| acc + x);            // 42\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1109,7 +1109,7 @@
               "kind": "function",
               "name": "fuse",
               "anchor": "function-fuse",
-              "signature": "public func fuse() -> FuseIterator[Self]",
+              "signature": "public func fuse() -> FusedIterator[Self]",
               "doc": "Locks `None` once seen — protects against iterators that aren't\nfused (i.e. that may produce more elements after returning `None`\nonce). After the first `None`, this adapter returns `None`\nforever.",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1117,7 +1117,7 @@
               "kind": "function",
               "name": "inspect",
               "anchor": "function-inspect",
-              "signature": "public func inspect((Item) -> ()) -> InspectIterator[Self]",
+              "signature": "public func inspect(inspecting: (Item) -> ()) -> InspectIterator[Self]",
               "doc": "Calls `inspector` on each element as it flows through, leaving\nthe value otherwise untouched. Useful for logging or\ninstrumenting an adapter chain mid-pipeline.\n\n# Examples\n\n```\n[1, 2, 3].iter()\n    .inspect({ print(\"before filter: \\{it}\") })\n    .filter({ it > 1 })\n    .inspect({ print(\"after filter: \\{it}\") })\n    .collect();\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1125,7 +1125,7 @@
               "kind": "function",
               "name": "intersperse",
               "anchor": "function-intersperse",
-              "signature": "public func intersperse(Item) -> IntersperseIterator[Self]",
+              "signature": "public func intersperse(with: Item) -> IntersperseIterator[Self]",
               "doc": "Inserts `separator` between consecutive elements. Empty inputs\nstay empty; single-element inputs get no separator.\n\n# Examples\n\n```\n[1, 2, 3].iter().intersperse(separator: 0).collect();\n// [1, 0, 2, 0, 3]\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1133,7 +1133,7 @@
               "kind": "function",
               "name": "intersperseWith",
               "anchor": "function-intersperseWith",
-              "signature": "public func intersperseWith(() -> Item) -> IntersperseWithIterator[Self]",
+              "signature": "public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]",
               "doc": "Like `intersperse`, but builds each separator on demand by calling\n`separator()`. Use when the separator is expensive or needs to\nvary by call.\n\n# Examples\n\n```\nvar counter = 0;\n[1, 2, 3].iter()\n    .intersperseWith(separator: || { counter += 1; counter * 10 })\n    .collect();   // [1, 10, 2, 20, 3]\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1155,10 +1155,10 @@
             },
             {
               "kind": "function",
-              "name": "isSortedBy",
-              "anchor": "function-isSortedBy",
-              "signature": "public consuming func isSortedBy[K]((Item) -> K) -> Bool where K: Comparable",
-              "doc": "True if elements are sorted ascending by `key(element)`. Sugar\nover `isSorted(by:)` for the common \"by-key\" shape.\n\n# Examples\n\n```\nlet words = [\"a\", \"bb\", \"ccc\"];\nwords.iter().isSortedBy(key: { it.count });   // true\n```",
+              "name": "isSorted",
+              "anchor": "function-isSorted",
+              "signature": "public consuming func isSorted[K](byKey: (Item) -> K) -> Bool where K: Comparable",
+              "doc": "True if elements are sorted ascending by `key(element)`. Sugar\nover `isSorted(by:)` for the common \"by-key\" shape.\n\n# Examples\n\n```\nlet words = [\"a\", \"bb\", \"ccc\"];\nwords.iter().isSorted(byKey: { it.count });   // true\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1195,10 +1195,10 @@
             },
             {
               "kind": "function",
-              "name": "maxBy",
-              "anchor": "function-maxBy",
-              "signature": "public consuming func maxBy[K]((Item) -> K) -> Item? where K: Comparable",
-              "doc": "The element with the largest `key(element)`. Mirror of `minBy`.",
+              "name": "max",
+              "anchor": "function-max",
+              "signature": "public consuming func max[K](byKey: (Item) -> K) -> Item? where K: Comparable",
+              "doc": "The element with the largest `key(element)`. Mirror of `min(byKey:)`.",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1211,10 +1211,10 @@
             },
             {
               "kind": "function",
-              "name": "minBy",
-              "anchor": "function-minBy",
-              "signature": "public consuming func minBy[K]((Item) -> K) -> Item? where K: Comparable",
-              "doc": "The element with the smallest `key(element)`. Ties go to the\nfirst occurrence.\n\n# Examples\n\n```\nlet people = [(\"Alice\", 30), (\"Bob\", 25), (\"Charlie\", 35)];\npeople.iter().minBy(key: { it.1 });   // Some((\"Bob\", 25))\n```",
+              "name": "min",
+              "anchor": "function-min",
+              "signature": "public consuming func min[K](byKey: (Item) -> K) -> Item? where K: Comparable",
+              "doc": "The element with the smallest `key(element)`. Ties go to the\nfirst occurrence.\n\n# Examples\n\n```\nlet people = [(\"Alice\", 30), (\"Bob\", 25), (\"Charlie\", 35)];\npeople.iter().min(byKey: { it.1 });   // Some((\"Bob\", 25))\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1245,7 +1245,7 @@
               "kind": "function",
               "name": "position",
               "anchor": "function-position",
-              "signature": "public mutating func position((Item) -> Bool) -> Int64?",
+              "signature": "public mutating func position(matching: (Item) -> Bool) -> Int64?",
               "doc": "Index of the first element matching `predicate`, or `None`.\nMirror of `find` for positions.\n\n# Examples\n\n```\n[\"a\", \"b\", \"c\"].iter().position({ it == \"b\" });   // Some(1)\n[1, 2, 3].iter().position({ it > 10 });           // None\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1261,16 +1261,16 @@
               "kind": "function",
               "name": "reduce",
               "anchor": "function-reduce",
-              "signature": "public consuming func reduce(combine: (Item, Item) -> Item) -> Item?",
-              "doc": "Like `fold`, but seeds the accumulator with the first element\ninstead of taking an explicit `initial`. Returns `None` for an\nempty iterator.\n\n# Examples\n\n```\n[1, 2, 3, 4].iter().reduce(combine: |a, b| a + b);   // Some(10)\n[5].iter().reduce(combine: |a, b| a + b);            // Some(5)\n[].iter().reduce(combine: |a, b| a + b);             // None\n```",
+              "signature": "public consuming func reduce(combining: (Item, Item) -> Item) -> Item?",
+              "doc": "Like `fold`, but seeds the accumulator with the first element\ninstead of taking an explicit `initial`. Returns `None` for an\nempty iterator.\n\n# Examples\n\n```\n[1, 2, 3, 4].iter().reduce(combining: |a, b| a + b);   // Some(10)\n[5].iter().reduce(combining: |a, b| a + b);            // Some(5)\n[].iter().reduce(combining: |a, b| a + b);             // None\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
               "kind": "function",
               "name": "scan",
               "anchor": "function-scan",
-              "signature": "public func scan[Acc](Acc, (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]",
-              "doc": "Like `fold`, but yields each intermediate accumulator value\ninstead of just the final one. Useful for prefix sums, running\nproducts, and any \"carry state along\" pattern.\n\n# Examples\n\n```\n// Running sum\n[1, 2, 3, 4].iter()\n    .scan(initial: 0, combine: |acc, x| acc + x)\n    .collect();   // [1, 3, 6, 10]\n```",
+              "signature": "public func scan[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]",
+              "doc": "Like `fold`, but yields each intermediate accumulator value\ninstead of just the final one. Useful for prefix sums, running\nproducts, and any \"carry state along\" pattern.\n\n# Examples\n\n```\n// Running sum\n[1, 2, 3, 4].iter()\n    .scan(from: 0, combining: |acc, x| acc + x)\n    .collect();   // [1, 3, 6, 10]\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1285,7 +1285,7 @@
               "kind": "function",
               "name": "skipWhile",
               "anchor": "function-skipWhile",
-              "signature": "public func skipWhile((Item) -> Bool) -> SkipWhileIterator[Self]",
+              "signature": "public func skipWhile(matching: (Item) -> Bool) -> SkipWhileIterator[Self]",
               "doc": "Drops elements while `predicate` is `true`, then yields *every*\nremaining element (including ones that would also satisfy the\npredicate). Mirror of `takeWhile`.\n\n# Examples\n\n```\n[1, 2, 3, 4, 1, 2].iter()\n    .skipWhile({ it < 3 })\n    .collect();   // [3, 4, 1, 2]\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1325,7 +1325,7 @@
               "kind": "function",
               "name": "takeWhile",
               "anchor": "function-takeWhile",
-              "signature": "public func takeWhile((Item) -> Bool) -> TakeWhileIterator[Self]",
+              "signature": "public func takeWhile(matching: (Item) -> Bool) -> TakeWhileIterator[Self]",
               "doc": "Yields elements until `predicate` first returns `false`, then\nstops. The \"first failing\" element is *not* yielded.\n\n# Examples\n\n```\n[1, 2, 3, 4, 1, 2].iter()\n    .takeWhile({ it < 4 })\n    .collect();   // [1, 2, 3]\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1333,8 +1333,8 @@
               "kind": "function",
               "name": "tryFold",
               "anchor": "function-tryFold",
-              "signature": "public mutating func tryFold[Acc, E](initial: Acc, combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]",
-              "doc": "Fold with early exit on `Err`. The combine returns `Result`; the\nfirst `Err` halts iteration and is returned. If everything\nsucceeds, returns `Ok(final accumulator)`.\n\n# Examples\n\n```\n// Stop the moment a parse fails\n[\"1\", \"2\", \"3\"].iter()\n    .tryFold(initial: 0, combine: |acc, s| {\n        match Int64.parse(s) {\n            .Some(n) => .Ok(acc + n),\n            .None    => .Err(\"parse error\")\n        }\n    });   // Ok(6)\n\n[\"1\", \"bad\", \"3\"].iter()\n    .tryFold(initial: 0, combine: |acc, s| {\n        match Int64.parse(s) {\n            .Some(n) => .Ok(acc + n),\n            .None    => .Err(\"parse error\")\n        }\n    });   // Err(\"parse error\")\n```",
+              "signature": "public mutating func tryFold[Acc, E](from: Acc, combining: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]",
+              "doc": "Fold with early exit on `Err`. The combine returns `Result`; the\nfirst `Err` halts iteration and is returned. If everything\nsucceeds, returns `Ok(final accumulator)`.\n\n# Examples\n\n```\n// Stop the moment a parse fails\n[\"1\", \"2\", \"3\"].iter()\n    .tryFold(from: 0,  combining: |acc, s| {\n        match Int64.parse(s) {\n            .Some(n) => .Ok(acc + n),\n            .None    => .Err(\"parse error\")\n        }\n    });   // Ok(6)\n\n[\"1\", \"bad\", \"3\"].iter()\n    .tryFold(from: 0,  combining: |acc, s| {\n        match Int64.parse(s) {\n            .Some(n) => .Ok(acc + n),\n            .None    => .Err(\"parse error\")\n        }\n    });   // Err(\"parse error\")\n```",
               "source_path": "lang/std/iter/iterator.ks"
             },
             {
@@ -1386,9 +1386,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = Self",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = Self",
               "doc": "",
               "source_path": "lang/std/iter/iterator.ks"
             },
@@ -1421,7 +1421,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, transform: (I.Item) -> U)",
+              "signature": "public init(inner: I, mapping: (I.Item) -> U)",
               "doc": "Builds a `MapIterator` from `inner` and `transform`. Prefer\n`inner.map(transform)`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -1718,10 +1718,10 @@
     },
     {
       "kind": "struct",
-      "name": "RevIterator",
-      "anchor": "struct-RevIterator",
-      "signature": "public struct RevIterator[I] where I: DoubleEndedIterator, I: Iterator { /* private fields */ }",
-      "doc": "Wraps a `DoubleEndedIterator` to walk it back to front. The\n`Iterator` conformance is added by the `extend RevIterator[I]:\nDoubleEndedIterator` block in `iterator.ks`. Returned by\n`DoubleEndedIterator.rev()`.\n\n# Representation\n\nJust the inner iterator — no buffering.",
+      "name": "ReversedIterator",
+      "anchor": "struct-ReversedIterator",
+      "signature": "public struct ReversedIterator[I] where I: DoubleEndedIterator, I: Iterator { /* private fields */ }",
+      "doc": "Wraps a `DoubleEndedIterator` to walk it back to front. The\n`Iterator` conformance is added by the `extend ReversedIterator[I]:\nDoubleEndedIterator` block in `iterator.ks`. Returned by\n`DoubleEndedIterator.rev()`.\n\n# Representation\n\nJust the inner iterator — no buffering.",
       "source_path": "lang/std/iter/adapters.ks",
       "member_groups": [
         {
@@ -1734,7 +1734,7 @@
               "name": "From Source",
               "anchor": "initializer-From-Source",
               "signature": "public init(inner: I)",
-              "doc": "Builds a `RevIterator`. Prefer `inner.rev()`.",
+              "doc": "Builds a `ReversedIterator`. Prefer `inner.rev()`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
             {
@@ -1804,7 +1804,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, initial: Acc, combine: (Acc, I.Item) -> Acc)",
+              "signature": "public init(inner: I, from: Acc, combining: (Acc, I.Item) -> Acc)",
               "doc": "Builds a `ScanIterator` seeded with `initial`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -1940,7 +1940,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, predicate: (I.Item) -> Bool)",
+              "signature": "public init(inner: I, matching: (I.Item) -> Bool)",
               "doc": "Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.",
               "source_path": "lang/std/iter/adapters.ks"
             },
@@ -2148,7 +2148,7 @@
               "kind": "initializer",
               "name": "From Source",
               "anchor": "initializer-From-Source",
-              "signature": "public init(inner: I, predicate: (I.Item) -> Bool)",
+              "signature": "public init(inner: I, matching: (I.Item) -> Bool)",
               "doc": "Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.",
               "source_path": "lang/std/iter/adapters.ks"
             },

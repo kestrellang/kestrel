@@ -1,9 +1,9 @@
 // Process spawning and control
 
-module std.os.proc
+module std.os
 
-import std.num.(Int64, Int32)
-import std.num.(UInt8)
+import std.numeric.(Int64, Int32)
+import std.numeric.(UInt8)
 import std.memory.(Pointer, RawPointer)
 import std.text.(String)
 import std.core.(Bool)

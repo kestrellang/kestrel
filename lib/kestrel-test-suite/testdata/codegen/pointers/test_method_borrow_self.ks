@@ -4,10 +4,10 @@
 module Test
 
 struct Point {
-    let x: std.num.Int64
-    let y: std.num.Int64
+    let x: std.numeric.Int64
+    let y: std.numeric.Int64
 
-    func sum() -> std.num.Int64 {
+    func sum() -> std.numeric.Int64 {
         self.x + self.y
     }
 }

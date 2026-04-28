@@ -43,7 +43,7 @@
     {
       "path": "std.io.read",
       "name": "read",
-      "item_count": 20
+      "item_count": 19
     },
     {
       "path": "std.io.stdio",
@@ -81,29 +81,14 @@
       "item_count": 15
     },
     {
-      "path": "std.num",
-      "name": "num",
+      "path": "std.numeric",
+      "name": "numeric",
       "item_count": 1132
     },
     {
       "path": "std.os",
       "name": "os",
-      "item_count": 1
-    },
-    {
-      "path": "std.os.env",
-      "name": "env",
-      "item_count": 1
-    },
-    {
-      "path": "std.os.fs",
-      "name": "fs",
-      "item_count": 13
-    },
-    {
-      "path": "std.os.proc",
-      "name": "proc",
-      "item_count": 3
+      "item_count": 18
     },
     {
       "path": "std.result",

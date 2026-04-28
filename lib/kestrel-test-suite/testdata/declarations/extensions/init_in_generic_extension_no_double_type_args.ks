@@ -25,7 +25,7 @@ extend std.collections.Array[T] where T: std.iter.Iterable {
 }
 
 func main() -> lang.i64 {
-    var outer = std.collections.Array[std.collections.Array[std.num.Int64]]();
+    var outer = std.collections.Array[std.collections.Array[std.numeric.Int64]]();
     // T resolves to Array[Int64], so T.Item is Int64 and emptyBag() returns
     // an empty Array[Int64]. Before the fix, Array.init inside emptyBag was
     // mangled with two type args — one Int64, one Error — and the

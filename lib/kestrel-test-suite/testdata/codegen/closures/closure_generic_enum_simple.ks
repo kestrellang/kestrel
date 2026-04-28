@@ -16,7 +16,7 @@ func apply[T](m: MaybeAction[T], x: T) -> T {
 }
 
 func main() -> lang.i64 {
-    let action = MaybeAction[std.num.Int64].Action(f: { (x) in x + 20 });
-    if apply[std.num.Int64](action, 22) != 42 { return 1 }
+    let action = MaybeAction[std.numeric.Int64].Action(f: { (x) in x + 20 });
+    if apply[std.numeric.Int64](action, 22) != 42 { return 1 }
     0
 }

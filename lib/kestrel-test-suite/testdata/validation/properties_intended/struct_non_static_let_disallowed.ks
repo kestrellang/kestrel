@@ -3,6 +3,6 @@
 
 module Main
 public struct Foo {
-    public let x: std.num.Int64
+    public let x: std.numeric.Int64
 }
-func main() -> std.num.Int64 { 0 }
+func main() -> std.numeric.Int64 { 0 }

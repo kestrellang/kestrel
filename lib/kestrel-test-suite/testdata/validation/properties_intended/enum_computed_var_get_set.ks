@@ -7,15 +7,15 @@ import std.io.stdio.println
 
 enum Foo {
     case A
-    private static var _v: std.num.Int64 = 1;
+    private static var _v: std.numeric.Int64 = 1;
 
-    var computed: std.num.Int64 {
+    var computed: std.numeric.Int64 {
         get { Foo._v }
         set { Foo._v = newValue }
     }
 }
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     var f: Foo = .A;
     let _ = println(f.computed);
     f.computed = 3;

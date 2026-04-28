@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let ok: std.result.Result[std.num.Int64, std.num.Int64] = .Ok(42);
-            let err: std.result.Result[std.num.Int64, std.num.Int64] = .Err(99);
+            let ok: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(42);
+            let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(99);
 
             // iter on Ok - yields 1 element
             var okIter = ok.iter();

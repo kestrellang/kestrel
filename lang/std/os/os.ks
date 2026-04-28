@@ -18,12 +18,3 @@
 //   let exitCode = os.spawn(command: "ls -la")
 
 module std.os
-
-// Filesystem operations
-import std.os.fs.(fileExists, isDirectory, isFile, mkdir, mkdirAll, removeDir, listDir, remove, rename, symlink, readlink, chmod, getcwd)
-
-// Environment variables
-import std.os.env.(getenv)
-
-// Process control
-import std.os.proc.(spawn, captureOutput, exit)

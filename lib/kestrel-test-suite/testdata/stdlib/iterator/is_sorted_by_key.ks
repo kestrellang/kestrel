@@ -19,7 +19,7 @@ module Test
             if [1, 2, 3].iter().isSortedBy({ (x) in 0 - x }) { return 4 }
 
             // Empty - always sorted
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             if empty.iter().isSortedBy({ (x) in x }) == false { return 5 }
 
             // Single element - always sorted

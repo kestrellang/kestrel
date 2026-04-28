@@ -15,7 +15,7 @@ module Test
             if ptr.isNull { return 2 }
 
             // Write to and read from the allocated memory
-            let typedPtr = ptr.cast[std.num.Int64]();
+            let typedPtr = ptr.cast[std.numeric.Int64]();
             typedPtr.write(12345);
             if typedPtr.read() != 12345 { return 3 }
 
@@ -31,7 +31,7 @@ module Test
             if newPtr.isNull { return 6 }
 
             // Data should be preserved after realloc
-            let newTyped = newPtr.cast[std.num.Int64]();
+            let newTyped = newPtr.cast[std.numeric.Int64]();
             if newTyped.read() != 12345 { return 7 }
             if newTyped.offset(by: 1).read() != 67890 { return 8 }
 
@@ -39,12 +39,12 @@ module Test
             alloc.deallocate(newPtr, newLayout);
 
             // Test Layout.of
-            let i64Layout = std.memory.Layout.of[std.num.Int64]();
+            let i64Layout = std.memory.Layout.of[std.numeric.Int64]();
             if i64Layout.size != 8 { return 9 }
             if i64Layout.alignment != 8 { return 10 }
 
             // Test Layout.array
-            let arrLayout = std.memory.Layout.array[std.num.Int64](4);
+            let arrLayout = std.memory.Layout.array[std.numeric.Int64](4);
             if arrLayout.size != 32 { return 11 }
             if arrLayout.alignment != 8 { return 12 }
 

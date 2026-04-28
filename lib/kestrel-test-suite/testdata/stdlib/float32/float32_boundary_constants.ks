@@ -5,36 +5,36 @@ module Test
 
         func main() -> lang.i64 {
             // maxValue — 3.4028235e38
-            let maxVal = std.num.Float32.maxValue;
+            let maxVal = std.numeric.Float32.maxValue;
             if maxVal.isFinite == false { return 1 }
             if maxVal.isPositive == false { return 2 }
             // maxValue should be greater than 3.0e38
-            let threshold: std.num.Float32 = 3.0e38;
+            let threshold: std.numeric.Float32 = 3.0e38;
             if maxVal < threshold { return 3 }
 
             // minValue — -3.4028235e38
-            let minVal = std.num.Float32.minValue;
+            let minVal = std.numeric.Float32.minValue;
             if minVal.isFinite == false { return 4 }
             if minVal.isNegative == false { return 5 }
             // minValue should be the negation of maxValue
             if minVal.negate().equals(maxVal) == false { return 6 }
 
             // minPositive — 1.17549435e-38 (smallest normal)
-            let minPos = std.num.Float32.minPositive;
+            let minPos = std.numeric.Float32.minPositive;
             if minPos.isPositive == false { return 7 }
             if minPos.isNormal == false { return 8 }
 
             // A value just below minPositive should be subnormal
-            let two: std.num.Float32 = 2.0;
+            let two: std.numeric.Float32 = 2.0;
             let halfMinPos = minPos.divide(two);
             if halfMinPos.isSubnormal == false { return 9 }
             if halfMinPos.isNormal { return 10 }
 
             // epsilon — 1.1920929e-7
-            let eps = std.num.Float32.epsilon;
+            let eps = std.numeric.Float32.epsilon;
             if eps.isPositive == false { return 11 }
             // 1.0 + epsilon should not equal 1.0
-            let one: std.num.Float32 = 1.0;
+            let one: std.numeric.Float32 = 1.0;
             let onePlusEps = one.add(eps);
             if onePlusEps.equals(one) { return 12 }
 

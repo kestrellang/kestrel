@@ -4,7 +4,7 @@
 module Test
 
 struct Counter {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 }
 
 func main() -> lang.i64 {

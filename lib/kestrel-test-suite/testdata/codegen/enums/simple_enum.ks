@@ -9,7 +9,7 @@ enum Color {
     case Blue
 }
 
-func color_value(c: Color) -> std.num.Int64 {
+func color_value(c: Color) -> std.numeric.Int64 {
     match c {
         .Red => 1,
         .Green => 2,

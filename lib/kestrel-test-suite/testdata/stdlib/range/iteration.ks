@@ -5,10 +5,10 @@ module Test
 
         func main() -> lang.i64 {
             // Create range 0..<5
-            let r = std.core.Range[std.num.Int64](0, 5);
+            let r = std.core.Range[std.numeric.Int64](0, 5);
 
             // Iterate and sum
-            var sum: std.num.Int64 = 0;
+            var sum: std.numeric.Int64 = 0;
             var iter = r.iter();
             var done: std.core.Bool = false;
             while done == false {

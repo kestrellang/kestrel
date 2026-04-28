@@ -4,7 +4,7 @@
 module Main
 
 struct NotIterable {
-    let value: std.num.Int
+    let value: std.numeric.Int
 }
 
 func test() {

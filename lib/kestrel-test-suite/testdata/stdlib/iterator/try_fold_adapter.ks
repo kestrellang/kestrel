@@ -8,7 +8,7 @@ module Test
             // Successful fold - all Ok. The error type `E` is unused here,
             // so it needs an explicit annotation (see try_fold_unconstrained_error_type.ks
             // for the diagnostic we emit when the annotation is missing).
-            let result: std.result.Result[std.num.Int64, std.num.Int64] =
+            let result: std.result.Result[std.numeric.Int64, std.numeric.Int64] =
                 [1, 2, 3, 4].iter().tryFold(initial: 0, combine: { (acc, x) in
                     .Ok(acc + x)
                 });
@@ -20,7 +20,7 @@ module Test
             // tryFold with early exit on error
             let earlyExit = [1, 2, 3, 4, 5].iter().tryFold(initial: 0, combine: { (acc, x) in
                 if acc > 3 {
-                    let err: std.result.Result[std.num.Int64, std.num.Int64] = .Err(acc);
+                    let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(acc);
                     err
                 } else {
                     .Ok(acc + x)
@@ -32,8 +32,8 @@ module Test
             }
 
             // tryFold on empty iterator returns Ok(initial)
-            let empty = std.collections.Array[std.num.Int64]();
-            let emptyResult: std.result.Result[std.num.Int64, std.num.Int64] = empty.iter().tryFold(initial: 42, combine: { (acc, x) in
+            let empty = std.collections.Array[std.numeric.Int64]();
+            let emptyResult: std.result.Result[std.numeric.Int64, std.numeric.Int64] = empty.iter().tryFold(initial: 42, combine: { (acc, x) in
                 .Ok(acc + x)
             });
             match emptyResult {
@@ -43,7 +43,7 @@ module Test
 
             // tryFold that errors on first element
             let firstErr = [1, 2, 3].iter().tryFold(initial: 0, combine: { (acc, x) in
-                let err: std.result.Result[std.num.Int64, std.num.Int64] = .Err(-1);
+                let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(-1);
                 err
             });
             match firstErr {

@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let a: std.num.Int64 = 42;
-            let b: std.num.Int64 = 43;
+            let a: std.numeric.Int64 = 42;
+            let b: std.numeric.Int64 = 43;
 
             // Hash different values into separate hashers, verify they produce different values
             var hasher1 = std.collections.DefaultHasher();
@@ -26,7 +26,7 @@ module Test
             if hashA != hashA2 { return 2 }
 
             // Zero should produce a valid hash
-            let zero: std.num.Int64 = 0;
+            let zero: std.numeric.Int64 = 0;
             var hasher4 = std.collections.DefaultHasher();
             zero.hash(into: hasher4);
             let hashZero = hasher4.finish();
@@ -35,7 +35,7 @@ module Test
             if hashZero == hashA { return 3 }
 
             // Negative value should produce a valid, distinct hash
-            let neg: std.num.Int64 = -42;
+            let neg: std.numeric.Int64 = -42;
             var hasher5 = std.collections.DefaultHasher();
             neg.hash(into: hasher5);
             let hashNeg = hasher5.finish();

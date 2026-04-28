@@ -3,9 +3,9 @@
 
 module Main
 
-func test() -> std.num.Int {
-    var sum: std.num.Int = 0;
-    for i in std.core.Range[std.num.Int](1, 6) {
+func test() -> std.numeric.Int {
+    var sum: std.numeric.Int = 0;
+    for i in std.core.Range[std.numeric.Int](1, 6) {
         sum = sum + i
     }
     sum

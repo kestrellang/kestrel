@@ -4,11 +4,11 @@
 module Test
 
 enum Option {
-    case Some(value: std.num.Int64)
+    case Some(value: std.numeric.Int64)
     case None
 }
 
-func double_if_some(opt: Option) -> std.num.Int64 {
+func double_if_some(opt: Option) -> std.numeric.Int64 {
     match opt {
         .Some(value: v) => v * 2,
         .None => 0

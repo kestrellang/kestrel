@@ -6,8 +6,8 @@ import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Default
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hash)
 import std.text.(Formattable, FormatOptions)
-import std.num.(Int64)
-import std.num.(RandomNumberGenerator, Lcg64)
+import std.numeric.(Int64)
+import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, RcBox)
 import std.iter.(Iterator, Iterable)
@@ -521,12 +521,12 @@ internal protocol ArrayIndex[T] {
     /// Write with bounds check — panics on out-of-bounds. For range
     /// indexes, also panics if the slice's length doesn't match the
     /// range's length.
-    func writeArray(mutating to array: Array[T], value value: ArrayYield)
+    func writeArray(mutating to array: Array[T], with value: ArrayYield)
 
     /// Write with no bounds check — UB on out-of-bounds. For range
     /// indexes, also panics if the slice's length doesn't match the
     /// range's length.
-    func writeArrayUnchecked(mutating to array: Array[T], value value: ArrayYield)
+    func writeArrayUnchecked(mutating to array: Array[T], with value: ArrayYield)
 }
 
 /// Stdlib-internal index types for `Array[T]`'s `(clamped: i)` subscript.
@@ -544,7 +544,7 @@ internal protocol ArrayClampable[T] {
     /// Write with bounds clamped to `[0, count)`. No-op on an empty
     /// array. For range indexes, panics on length mismatch after
     /// clamping.
-    func writeArrayClamped(mutating to array: Array[T], value value: ArrayClampedYield)
+    func writeArrayClamped(mutating to array: Array[T], with value: ArrayClampedYield)
 }
 
 /// Stdlib-internal index types for `Array[T]`'s `(wrapped: i)` subscript.
@@ -561,7 +561,7 @@ internal protocol ArrayWrappable[T] {
 
     /// Write with index wrapped via `index % count`. No-op on an empty
     /// array.
-    func writeArrayWrapped(mutating to array: Array[T], value value: ArrayWrappedYield)
+    func writeArrayWrapped(mutating to array: Array[T], with value: ArrayWrappedYield)
 }
 
 @builtin(.ArrayStruct)
@@ -569,7 +569,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
-    type Iter = ArrayIterator[T]
+    type TargetIterator = ArrayIterator[T]
     /// Pattern-matching element type — used by `ArrayMatchable` for
     /// `[a, b, ..rest]` patterns.
     type Element = T
@@ -1002,7 +1002,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public subscript[I](index: I) -> I.ArrayYield where I: ArrayIndex[T] {
         get { index.readArray(from: self) }
-        set { index.writeArray(to: self, value: newValue) }
+        set { index.writeArray(to: self, with: newValue) }
     }
 
     /// @name Checked Index
@@ -1055,7 +1055,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public subscript[I](unchecked index: I) -> I.ArrayYield where I: ArrayIndex[T] {
         get { index.readArrayUnchecked(from: self) }
-        set { index.writeArrayUnchecked(to: self, value: newValue) }
+        set { index.writeArrayUnchecked(to: self, with: newValue) }
     }
 
     /// @name Clamping
@@ -1082,7 +1082,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public subscript[I](clamped index: I) -> I.ArrayClampedYield where I: ArrayClampable[T] {
         get { index.readArrayClamped(from: self) }
-        set { index.writeArrayClamped(to: self, value: newValue) }
+        set { index.writeArrayClamped(to: self, with: newValue) }
     }
 
     /// @name Wrapping
@@ -1106,7 +1106,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public subscript[I](wrapped index: I) -> I.ArrayWrappedYield where I: ArrayWrappable[T] {
         get { index.readArrayWrapped(from: self) }
-        set { index.writeArrayWrapped(to: self, value: newValue) }
+        set { index.writeArrayWrapped(to: self, with: newValue) }
     }
 
     // ========================================================================
@@ -1924,7 +1924,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // SEARCHING
     // ========================================================================
 
-    /// Returns the index of the first element satisfying `predicate`, or
+    /// Returns the index of the first element matching `predicate`, or
     /// `None`.
     ///
     /// Linear scan from the front; short-circuits on the first match.
@@ -1950,7 +1950,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         .None
     }
 
-    /// Returns the index of the last element satisfying `predicate`, or
+    /// Returns the index of the last element matching `predicate`, or
     /// `None`.
     ///
     /// Linear scan from the back; short-circuits on the first match. The
@@ -1980,7 +1980,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         .None
     }
 
-    /// Returns the first element satisfying `predicate`, or `None`.
+    /// Returns the first element matching `predicate`, or `None`.
     ///
     /// Wraps `firstIndex(matching:)` and reads the element at the
     /// returned index. For just the index, use `firstIndex(matching:)`.
@@ -2000,7 +2000,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    /// Returns the last element satisfying `predicate`, or `None`.
+    /// Returns the last element matching `predicate`, or `None`.
     ///
     /// Wraps `lastIndex(matching:)`. For just the index, use
     /// `lastIndex(matching:)`.
@@ -2027,16 +2027,16 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// for an empty array).
     ///
     /// Short-circuits on the first failure. The dual is
-    /// `any(satisfying:)`.
+    /// `any(matching:)`.
     ///
     /// # Examples
     ///
     /// ```
-    /// [2, 4, 6].all(satisfying: { (x) in x % 2 == 0 });  // true
-    /// [2, 3, 6].all(satisfying: { (x) in x % 2 == 0 });  // false
-    /// [].all(satisfying: { (x) in false });              // true (vacuous)
+    /// [2, 4, 6].all(matching: { (x) in x % 2 == 0 });  // true
+    /// [2, 3, 6].all(matching: { (x) in x % 2 == 0 });  // false
+    /// [].all(matching: { (x) in false });              // true (vacuous)
     /// ```
-    public func all(satisfying predicate: (T) -> Bool) -> Bool {
+    public func all(matching predicate: (T) -> Bool) -> Bool {
         let myLen = self.len();
         let myPtr = self.ptr();
         for i in 0..<myLen {
@@ -2050,16 +2050,16 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// `true` when at least one element satisfies `predicate` (always
     /// `false` for an empty array).
     ///
-    /// Short-circuits on the first match. The dual is `all(satisfying:)`.
+    /// Short-circuits on the first match. The dual is `all(matching:)`.
     ///
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].any(satisfying: { (x) in x > 2 });  // true
-    /// [1, 2, 3].any(satisfying: { (x) in x > 5 });  // false
-    /// [].any(satisfying: { (x) in true });          // false (empty)
+    /// [1, 2, 3].any(matching: { (x) in x > 2 });  // true
+    /// [1, 2, 3].any(matching: { (x) in x > 5 });  // false
+    /// [].any(matching: { (x) in true });          // false (empty)
     /// ```
-    public func any(satisfying predicate: (T) -> Bool) -> Bool {
+    public func any(matching predicate: (T) -> Bool) -> Bool {
         let myLen = self.len();
         let myPtr = self.ptr();
         for i in 0..<myLen {
@@ -2073,8 +2073,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Returns the number of elements for which `predicate` is true.
     ///
     /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(satisfying:)`; for a yes/no on every element,
-    /// `all(satisfying:)`.
+    /// `any(matching:)`; for a yes/no on every element,
+    /// `all(matching:)`.
     ///
     /// # Examples
     ///
@@ -2390,7 +2390,7 @@ extend Int64: ArrayIndex[T] {
         array.ptr().offset(by: self).read()
     }
 
-    public func writeArray(mutating to array: Array[T], value value: T) {
+    public func writeArray(mutating to array: Array[T], with value: T) {
         if self < 0 or self >= array.len() {
             fatalError("Array index out of bounds")
         }
@@ -2398,7 +2398,7 @@ extend Int64: ArrayIndex[T] {
         array.ptr().offset(by: self).write(value)
     }
 
-    public func writeArrayUnchecked(mutating to array: Array[T], value value: T) {
+    public func writeArrayUnchecked(mutating to array: Array[T], with value: T) {
         array.makeUnique();
         array.ptr().offset(by: self).write(value)
     }
@@ -2420,7 +2420,7 @@ extend Int64: ArrayClampable[T] {
         .Some(array.ptr().offset(by: idx).read())
     }
 
-    public func writeArrayClamped(mutating to array: Array[T], value value: T?) {
+    public func writeArrayClamped(mutating to array: Array[T], with value: T?) {
         if let .Some(v) = value {
             let len = array.len();
             if len == 0 {
@@ -2449,7 +2449,7 @@ extend Int64: ArrayWrappable[T] {
         .Some(array.ptr().offset(by: idx).read())
     }
 
-    public func writeArrayWrapped(mutating to array: Array[T], value value: T?) {
+    public func writeArrayWrapped(mutating to array: Array[T], with value: T?) {
         if let .Some(v) = value {
             let len = array.len();
             if len == 0 {
@@ -2494,7 +2494,7 @@ extend Range[Int64]: ArrayIndex[T] {
         Slice(pointer: array.ptr().offset(by: self.start), count: self.end - self.start)
     }
 
-    public func writeArray(mutating to array: Array[T], value value: Slice[T]) {
+    public func writeArray(mutating to array: Array[T], with value: Slice[T]) {
         let start = self.start;
         let end = self.end;
         if start < 0 or end > array.len() or start > end {
@@ -2512,7 +2512,7 @@ extend Range[Int64]: ArrayIndex[T] {
         }
     }
 
-    public func writeArrayUnchecked(mutating to array: Array[T], value value: Slice[T]) {
+    public func writeArrayUnchecked(mutating to array: Array[T], with value: Slice[T]) {
         let start = self.start;
         let rangeLen = self.end - start;
         if value.count != rangeLen {
@@ -2543,7 +2543,7 @@ extend Range[Int64]: ArrayClampable[T] {
         Slice(pointer: array.ptr().offset(by: start), count: end - start)
     }
 
-    public func writeArrayClamped(mutating to array: Array[T], value value: Slice[T]) {
+    public func writeArrayClamped(mutating to array: Array[T], with value: Slice[T]) {
         let len = array.len();
         var start = self.start;
         var end = self.end;
@@ -2594,7 +2594,7 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
         Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
     }
 
-    public func writeArray(mutating to array: Array[T], value value: Slice[T]) {
+    public func writeArray(mutating to array: Array[T], with value: Slice[T]) {
         let start = self.start;
         let endExclusive = self.end + 1;
         if start < 0 or endExclusive > array.len() or start > endExclusive {
@@ -2612,7 +2612,7 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
         }
     }
 
-    public func writeArrayUnchecked(mutating to array: Array[T], value value: Slice[T]) {
+    public func writeArrayUnchecked(mutating to array: Array[T], with value: Slice[T]) {
         let start = self.start;
         let rangeLen = self.end + 1 - start;
         if value.count != rangeLen {
@@ -2667,7 +2667,7 @@ extend Array[T]: Equatable where T: Equatable {
     /// `true` if the array contains an element equal to `element`.
     ///
     /// Linear scan; short-circuits on the first match. For predicate-
-    /// based searching see `any(satisfying:)` or `firstIndex(matching:)`.
+    /// based searching see `any(matching:)` or `firstIndex(matching:)`.
     ///
     /// # Examples
     ///

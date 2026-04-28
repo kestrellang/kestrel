@@ -693,7 +693,7 @@ mod tests {
 
         let iter_proto = world.spawn();
         world.set(iter_proto, NodeKind::Protocol);
-        world.set(iter_proto, Name("Iter".into()));
+        world.set(iter_proto, Name("TargetIterator".into()));
         world.set(iter_proto, Typed);
         world.set_parent(iter_proto, root);
 
@@ -705,7 +705,7 @@ mod tests {
 
         let ctx = world.query_context();
         let ast_ty = AstType::Named {
-            segments: vec![seg("Iter"), seg("Item")],
+            segments: vec![seg("TargetIterator"), seg("Item")],
             span: span(),
         };
         let lowered = lower_ast_type(&ctx, root, root, &ast_ty);

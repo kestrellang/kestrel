@@ -4,9 +4,9 @@
 module Test
 
 struct Inner {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 
-    mutating func setValue(to: std.num.Int64) {
+    mutating func setValue(to: std.numeric.Int64) {
         self.value = to;
     }
 }

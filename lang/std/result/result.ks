@@ -46,7 +46,7 @@ public enum Result[T, E]: Tryable {
 
     // Tryable - associated types
     type Output = T
-    type Early = E
+    type Residual = E
 
     // ========================================================================
     // CONSTRUCTORS

@@ -4,7 +4,7 @@
 module Test
 
 func main() -> lang.i64 {
-    let x: std.num.Int64 = -42;
+    let x: std.numeric.Int64 = -42;
     if -x != 42 { return 1 }
     0
 }

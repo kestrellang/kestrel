@@ -5,13 +5,13 @@ module Test
 
         func main() -> lang.i64 {
             // Create data for cursor
-            let byte10: std.num.UInt8 = 10;
-            let byte20: std.num.UInt8 = 20;
-            let byte30: std.num.UInt8 = 30;
-            let byte40: std.num.UInt8 = 40;
-            let byte50: std.num.UInt8 = 50;
-            let zeroByte: std.num.UInt8 = 0;
-            var data = std.collections.Array[std.num.UInt8]();
+            let byte10: std.numeric.UInt8 = 10;
+            let byte20: std.numeric.UInt8 = 20;
+            let byte30: std.numeric.UInt8 = 30;
+            let byte40: std.numeric.UInt8 = 40;
+            let byte50: std.numeric.UInt8 = 50;
+            let zeroByte: std.numeric.UInt8 = 0;
+            var data = std.collections.Array[std.numeric.UInt8]();
             data.append(byte10);
             data.append(byte20);
             data.append(byte30);
@@ -25,11 +25,11 @@ module Test
             if cursor.position() != 0 { return 1 }
 
             // Read first 3 bytes
-            var buf = std.collections.Array[std.num.UInt8]();
+            var buf = std.collections.Array[std.numeric.UInt8]();
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
-            let slice = std.memory.Slice[std.num.UInt8](pointer: buf.asPointer(), count: 3);
+            let slice = std.memory.Slice[std.numeric.UInt8](pointer: buf.asPointer(), count: 3);
             let result = cursor.read(into: slice);
             match result {
                 .Ok(n) => if n != 3 { return 2 },
@@ -45,13 +45,13 @@ module Test
             if cursor.position() != 3 { return 7 }
 
             // Read remaining 2 bytes (request 5 but only 2 available)
-            var buf2 = std.collections.Array[std.num.UInt8]();
+            var buf2 = std.collections.Array[std.numeric.UInt8]();
             buf2.append(zeroByte);
             buf2.append(zeroByte);
             buf2.append(zeroByte);
             buf2.append(zeroByte);
             buf2.append(zeroByte);
-            let slice2 = std.memory.Slice[std.num.UInt8](pointer: buf2.asPointer(), count: 5);
+            let slice2 = std.memory.Slice[std.numeric.UInt8](pointer: buf2.asPointer(), count: 5);
             let result2 = cursor.read(into: slice2);
             match result2 {
                 .Ok(n) => if n != 2 { return 8 },
@@ -75,10 +75,10 @@ module Test
             if cursor.position() != 1 { return 15 }
 
             // Read after setPosition
-            var buf3 = std.collections.Array[std.num.UInt8]();
+            var buf3 = std.collections.Array[std.numeric.UInt8]();
             buf3.append(zeroByte);
             buf3.append(zeroByte);
-            let slice3 = std.memory.Slice[std.num.UInt8](pointer: buf3.asPointer(), count: 2);
+            let slice3 = std.memory.Slice[std.numeric.UInt8](pointer: buf3.asPointer(), count: 2);
             let result4 = cursor.read(into: slice3);
             match result4 {
                 .Ok(n) => if n != 2 { return 16 },

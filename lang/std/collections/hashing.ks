@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Hasher, Hash, Defaultable)
-import std.num.(UInt8, UInt64, Int64)
+import std.numeric.(UInt8, UInt64, Int64)
 import std.memory.(Slice)
 
 // ============================================================================

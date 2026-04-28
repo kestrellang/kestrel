@@ -4,5 +4,5 @@
 module Test
 enum Foo {
     case A
-    var x: std.num.Int64 // ERROR: enums cannot have stored fields
+    var x: std.numeric.Int64 // ERROR: enums cannot have stored fields
 }

@@ -12,7 +12,7 @@ struct Container[T] {
 }
 
 func main() -> lang.i64 {
-    let c = Container[std.num.Int64](make: { Box[std.num.Int64](value: 42) });
+    let c = Container[std.numeric.Int64](make: { Box[std.numeric.Int64](value: 42) });
     let box = (c.make)();
     if box.value != 42 { return 1 }
     0

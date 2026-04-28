@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Main
-import std.num.Int64
+import std.numeric.Int64
 func test() {
     var x: Int64? = null;
     x = 10;

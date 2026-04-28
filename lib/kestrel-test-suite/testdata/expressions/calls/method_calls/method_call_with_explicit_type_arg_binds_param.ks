@@ -32,7 +32,7 @@ func main() -> lang.i64 {
         // Return value discarded — `U` is only constrained by the explicit
         // type arg. If that path is broken, U stays Error and the call fails
         // to monomorphize/link.
-        m.make[std.num.Int64](0);
+        m.make[std.numeric.Int64](0);
     }
     0
 }

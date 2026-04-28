@@ -5,7 +5,7 @@ module std.result
 import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
 import std.text.(String, FormatOptions, Formattable)
 import std.result.(Result)
-import std.num.(Int64, UInt8)
+import std.numeric.(Int64, UInt8)
 import std.memory.(Slice, Pointer)
 import std.iter.(Iterator)
 
@@ -661,7 +661,7 @@ extend Optional[T] {
 /// ```
 extend Optional[T]: Tryable {
     type Output = T
-    type Early = ()
+    type Residual = ()
 
     /// Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
     public func tryExtract() -> ControlFlow[T, ()] {

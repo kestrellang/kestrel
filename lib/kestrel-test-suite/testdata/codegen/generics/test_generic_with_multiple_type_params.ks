@@ -8,6 +8,6 @@ func first[A, B](a: A, b: B) -> A {
 }
 
 func main() -> lang.i64 {
-    if first[std.num.Int64, std.core.Bool](42, true) != 42 { return 1 }
+    if first[std.numeric.Int64, std.core.Bool](42, true) != 42 { return 1 }
     0
 }

@@ -1,8 +1,8 @@
 // Random number generation protocols and implementations
 
-module std.num
+module std.numeric
 
-import std.num.(UInt64, Int64)
+import std.numeric.(UInt64, Int64)
 import std.core.(Defaultable)
 
 // ============================================================================

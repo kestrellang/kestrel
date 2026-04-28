@@ -4,20 +4,20 @@
 module Test
 
 protocol Doubler {
-    func double() -> std.num.Int64
+    func double() -> std.numeric.Int64
 }
 
 struct Num {
-    let value: std.num.Int64
+    let value: std.numeric.Int64
 }
 
 extend Num: Doubler {
-    func double() -> std.num.Int64 {
+    func double() -> std.numeric.Int64 {
         self.value * 2
     }
 }
 
-func do_double[T](x: T) -> std.num.Int64 where T: Doubler {
+func do_double[T](x: T) -> std.numeric.Int64 where T: Doubler {
     x.double()
 }
 

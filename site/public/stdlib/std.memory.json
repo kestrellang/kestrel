@@ -283,19 +283,19 @@
               "source_path": "lang/std/memory/literal_slice.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "count",
-              "anchor": "function-count",
-              "signature": "public func count() -> Int64",
+              "anchor": "field-count",
+              "signature": "public var count: Int64 { get }",
               "doc": "Number of elements in the literal.",
               "source_path": "lang/std/memory/literal_slice.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "isEmpty",
-              "anchor": "function-isEmpty",
-              "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns `true` for `[]`.",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
+              "doc": "`true` for `[]`.",
               "source_path": "lang/std/memory/literal_slice.ks"
             }
           ]
@@ -315,9 +315,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = LiteralSliceIterator[T]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = LiteralSliceIterator[T]",
               "doc": "",
               "source_path": "lang/std/memory/literal_slice.ks"
             },

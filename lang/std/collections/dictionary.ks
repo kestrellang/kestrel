@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable, fatalError)
 import std.text.(Formattable, FormatOptions, String)
-import std.num.(Int64, UInt64)
+import std.numeric.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.iter.(Iterator, Iterable)
@@ -332,7 +332,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// `Iterable` element type — a `(key, value)` tuple.
     type Item = (K, V)
     /// Concrete iterator type returned by `iter()`.
-    type Iter = DictionaryIterator[K, V]
+    type TargetIterator = DictionaryIterator[K, V]
 
     /// Refcounted storage cell. Sharing this between `Dictionary`
     /// copies enables COW.
@@ -440,7 +440,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// produced by an iterable.
     ///
     /// Last write wins for duplicate keys. For a panic-on-duplicate
-    /// variant use `init(uniqueKeysWithValues:)`. Capacity grows
+    /// variant use `init(uniquePairs:)`. Capacity grows
     /// geometrically as inserts arrive — for sized sources, follow up
     /// with `shrinkToFit()` if memory matters.
     ///
@@ -513,22 +513,22 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// # Errors
     ///
-    /// Panics with `"Dictionary(uniqueKeysWithValues:): duplicate key"`
+    /// Panics with `"Dictionary(uniquePairs:): duplicate key"`
     /// the first time `pairs` yields a key already in the dictionary.
     ///
     /// # Examples
     ///
     /// ```
-    /// let dict = Dictionary(uniqueKeysWithValues: [("a", 1), ("b", 2)]);
-    /// Dictionary(uniqueKeysWithValues: [("a", 1), ("a", 2)]);
-    /// // PANIC: Dictionary(uniqueKeysWithValues:): duplicate key
+    /// let dict = Dictionary(uniquePairs: [("a", 1), ("b", 2)]);
+    /// Dictionary(uniquePairs: [("a", 1), ("a", 2)]);
+    /// // PANIC: Dictionary(uniquePairs:): duplicate key
     /// ```
-    public init[I](uniqueKeysWithValues pairs: I) where I: Iterable, I.Item = (K, V) {
+    public init[I](uniquePairs pairs: I) where I: Iterable, I.Item = (K, V) {
         self.init();
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
             if self.contains( pair.0) {
-                fatalError("Dictionary(uniqueKeysWithValues:): duplicate key")
+                fatalError("Dictionary(uniquePairs:): duplicate key")
             }
             let _ = self.insert( pair.0, pair.1);
         }
@@ -1375,7 +1375,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         false
     }
 
-    /// Returns *some* entry satisfying `predicate(key, value)`, or
+    /// Returns *some* entry matching `predicate(key, value)`, or
     /// `None`.
     ///
     /// "First" is determined by bucket order, which is hash-dependent
@@ -1410,16 +1410,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// `true` when every entry satisfies `predicate(key, value)`
     /// (vacuously true for empty).
     ///
-    /// Short-circuits on the first failure. Dual of `any(satisfying:)`.
+    /// Short-circuits on the first failure. Dual of `any(matching:)`.
     ///
     /// # Examples
     ///
     /// ```
-    /// ["a": 2, "b": 4].all(satisfying: { (k, v) in v % 2 == 0 });  // true
-    /// ["a": 1, "b": 2].all(satisfying: { (k, v) in v % 2 == 0 });  // false
-    /// [:].all(satisfying: { (k, v) in false });                    // true (vacuous)
+    /// ["a": 2, "b": 4].all(matching: { (k, v) in v % 2 == 0 });  // true
+    /// ["a": 1, "b": 2].all(matching: { (k, v) in v % 2 == 0 });  // false
+    /// [:].all(matching: { (k, v) in false });                    // true (vacuous)
     /// ```
-    public func all(satisfying predicate: (K, V) -> Bool) -> Bool {
+    public func all(matching predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1446,10 +1446,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 5].any(satisfying: { (k, v) in v > 3 });  // true
-    /// [:].any(satisfying: { (k, v) in true });                // false (empty)
+    /// ["a": 1, "b": 5].any(matching: { (k, v) in v > 3 });  // true
+    /// [:].any(matching: { (k, v) in true });                // false (empty)
     /// ```
-    public func any(satisfying predicate: (K, V) -> Bool) -> Bool {
+    public func any(matching predicate: (K, V) -> Bool) -> Bool {
         self.contains(matching: predicate)
     }
 
@@ -1457,8 +1457,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// `predicate(key, value)` is true.
     ///
     /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(satisfying:)`; for a yes/no on every entry,
-    /// `all(satisfying:)`.
+    /// `any(matching:)`; for a yes/no on every entry,
+    /// `all(matching:)`.
     ///
     /// # Examples
     ///
@@ -1722,15 +1722,15 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
     ///
     /// O(capacity); short-circuits on the first match. "First" is
     /// determined by bucket order and is unspecified — for an
-    /// exhaustive list use `allKeys(forValue:)`.
+    /// exhaustive list use `allKeys(of:)`.
     ///
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2].firstKey(forValue: 2);  // Some("b")
-    /// ["a": 1, "b": 2].firstKey(forValue: 5);  // None
+    /// ["a": 1, "b": 2].firstKey(of: 2);  // Some("b")
+    /// ["a": 1, "b": 2].firstKey(of: 5);  // None
     /// ```
-    public func firstKey(forValue value: V) -> K? {
+    public func firstKey(of value: V) -> K? {
         let myCap = self.capacity;
         let myBuckets = self.getBuckets();
 
@@ -1757,10 +1757,10 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2, "c": 1].allKeys(forValue: 1);  // ["a", "c"]  — order unspecified
-    /// ["a": 1].allKeys(forValue: 99);                  // []
+    /// ["a": 1, "b": 2, "c": 1].allKeys(of: 1);  // ["a", "c"]  — order unspecified
+    /// ["a": 1].allKeys(of: 99);                  // []
     /// ```
-    public func allKeys(forValue value: V) -> Array[K] {
+    public func allKeys(of value: V) -> Array[K] {
         var result = Array[K]();
         let myCap = self.capacity;
         let myBuckets = self.getBuckets();
@@ -1980,7 +1980,7 @@ public struct KeysView[K, V]: Iterable where K: Hash {
     /// `Iterable` element type — `K`.
     type Item = K
     /// Concrete iterator type returned by `iter()`.
-    type Iter = KeysIterator[K, V]
+    type TargetIterator = KeysIterator[K, V]
 
     /// Pointer into the source dictionary's bucket array.
     private var buckets: Pointer[Bucket[K, V]]
@@ -2092,7 +2092,7 @@ public struct ValuesView[K, V]: Iterable where K: Hash {
     /// `Iterable` element type — `V`.
     type Item = V
     /// Concrete iterator type returned by `iter()`.
-    type Iter = ValuesIterator[K, V]
+    type TargetIterator = ValuesIterator[K, V]
 
     /// Pointer into the source dictionary's bucket array.
     private var buckets: Pointer[Bucket[K, V]]

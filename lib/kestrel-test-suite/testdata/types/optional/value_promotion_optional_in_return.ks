@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Main
-import std.num.Int64
+import std.numeric.Int64
 func getValue() -> Int64? {
     return 5
 }

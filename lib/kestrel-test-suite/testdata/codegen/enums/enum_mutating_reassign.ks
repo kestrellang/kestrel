@@ -8,7 +8,7 @@ enum State {
     case On
 }
 
-func get_value(s: State) -> std.num.Int64 {
+func get_value(s: State) -> std.numeric.Int64 {
     match s {
         .Off => 0,
         .On => 1

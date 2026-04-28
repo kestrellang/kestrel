@@ -5,7 +5,7 @@
 // {{TYPE_NAME_UPPER}}
 // ============================================================================
 
-module std.num
+module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
@@ -14,7 +14,7 @@ import std.core.(
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String, Formattable, FormatOptions)
-import std.num.(Int64, {{OTHER_FLOAT}})
+import std.numeric.(Int64, {{OTHER_FLOAT}})
 
 /// A {{BITS}}-bit IEEE 754 {{PRECISION_KIND}} float.
 ///

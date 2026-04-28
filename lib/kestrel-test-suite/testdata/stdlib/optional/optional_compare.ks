@@ -4,10 +4,10 @@
 module Test
 
         func main() -> lang.i64 {
-            let none: std.result.Optional[std.num.Int64] = .None;
-            let some1: std.result.Optional[std.num.Int64] = .Some(1);
-            let some2: std.result.Optional[std.num.Int64] = .Some(2);
-            let some1b: std.result.Optional[std.num.Int64] = .Some(1);
+            let none: std.result.Optional[std.numeric.Int64] = .None;
+            let some1: std.result.Optional[std.numeric.Int64] = .Some(1);
+            let some2: std.result.Optional[std.numeric.Int64] = .Some(2);
+            let some1b: std.result.Optional[std.numeric.Int64] = .Some(1);
 
             // None < Some(x) for any x
             if none.compare(some1) != std.core.Ordering.Less { return 1 }

@@ -4,7 +4,7 @@
 module Test
 
 struct Handler {
-    let action: (std.num.Int64) -> std.num.Int64
+    let action: (std.numeric.Int64) -> std.numeric.Int64
 }
 
 func main() -> lang.i64 {

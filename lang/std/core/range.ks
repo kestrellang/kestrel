@@ -4,7 +4,7 @@
 module std.core
 
 import std.core.(Equatable, Comparable, Bool)
-import std.num.(Steppable)
+import std.numeric.(Steppable)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 
@@ -13,22 +13,22 @@ import std.iter.(Iterator, Iterable)
 /// `Output` is the range type produced — usually `Range[Self]`, but
 /// custom types may produce their own range flavor (e.g. a date range).
 @builtin(.ExclusiveRangeOperatorProtocol)
-public protocol RangeConstructible[Rhs = Self] {
+public protocol RangeConstructible[Other = Self] {
     type Output
 
     /// Builds the half-open range `[self, end)`.
     @builtin(.ExclusiveRangeOperatorMethod)
-    func exclusiveRange(to end: Rhs) -> Output
+    func exclusiveRange(to end: Other) -> Output
 }
 
 /// Raw protocol backing the closed `..=` operator (`start..=end`).
 @builtin(.InclusiveRangeOperatorProtocol)
-public protocol ClosedRangeConstructible[Rhs = Self] {
+public protocol ClosedRangeConstructible[Other = Self] {
     type Output
 
     /// Builds the closed range `[self, end]`.
     @builtin(.InclusiveRangeOperatorMethod)
-    func inclusiveRange(to end: Rhs) -> Output
+    func inclusiveRange(to end: Other) -> Output
 }
 
 /// Iterator over a half-open `Range[T]`. Yields successive values via
@@ -83,7 +83,7 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
 /// Two values: `start` and `end`. No heap allocation.
 public struct Range[T]: Equatable, Iterable where T: Steppable, T: Comparable {
     type Item = T
-    type Iter = RangeIterator[T]
+    type TargetIterator = RangeIterator[T]
 
     /// Lower bound — included in the range.
     public var start: T
@@ -102,8 +102,8 @@ public struct Range[T]: Equatable, Iterable where T: Steppable, T: Comparable {
         value >= self.start and value < self.end
     }
 
-    /// Returns `true` when `start >= end` (no values are produced).
-    public func isEmpty() -> Bool {
+    /// `true` when `start >= end` (no values are produced).
+    public var isEmpty: Bool {
         self.start >= self.end
     }
 
@@ -175,7 +175,7 @@ public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable
 /// Two values: `start` and `end`. No heap allocation.
 public struct ClosedRange[T]: Equatable, Iterable where T: Steppable, T: Comparable {
     type Item = T
-    type Iter = ClosedRangeIterator[T]
+    type TargetIterator = ClosedRangeIterator[T]
 
     /// Lower bound — included.
     public var start: T
@@ -194,8 +194,8 @@ public struct ClosedRange[T]: Equatable, Iterable where T: Steppable, T: Compara
         value >= self.start and value <= self.end
     }
 
-    /// Returns `true` when `start > end` (no values are produced).
-    public func isEmpty() -> Bool {
+    /// `true` when `start > end` (no values are produced).
+    public var isEmpty: Bool {
         self.start > self.end
     }
 

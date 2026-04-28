@@ -4,18 +4,18 @@
 module Test
 
 protocol Valuable {
-    func value() -> std.num.Int64
+    func value() -> std.numeric.Int64
 }
 
 struct Box: Valuable {
-    let inner: std.num.Int64
+    let inner: std.numeric.Int64
 
-    func value() -> std.num.Int64 {
+    func value() -> std.numeric.Int64 {
         self.inner
     }
 }
 
-func get_value[T](x: T) -> std.num.Int64 where T: Valuable {
+func get_value[T](x: T) -> std.numeric.Int64 where T: Valuable {
     x.value()
 }
 

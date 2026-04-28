@@ -643,14 +643,6 @@ _Defined in `lang/std/result/optional.ks`._
 
 ### Implements `Tryable`
 
-#### typealias `Early`
-
-```kestrel
-type Early = ()
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
 #### typealias `Output`
 
 ```kestrel
@@ -663,6 +655,14 @@ _Defined in `lang/std/result/optional.ks`._
 
 ```kestrel
 type Output = T
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### typealias `Residual`
+
+```kestrel
+type Residual = ()
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -1129,18 +1129,18 @@ _Defined in `lang/std/result/result.ks`._
 
 ### Implements `Tryable`
 
-#### typealias `Early`
-
-```kestrel
-type Early = E
-```
-
-_Defined in `lang/std/result/result.ks`._
-
 #### typealias `Output`
 
 ```kestrel
 type Output = T
+```
+
+_Defined in `lang/std/result/result.ks`._
+
+#### typealias `Residual`
+
+```kestrel
+type Residual = E
 ```
 
 _Defined in `lang/std/result/result.ks`._

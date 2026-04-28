@@ -8,7 +8,7 @@ import std.io.stdio.println
 struct MyError {}
 
 func main() -> lang.i64 {
-    var arr: [std.num.Int64 throws MyError] = std.collections.Array[std.result.Result[std.num.Int64, MyError]]();
+    var arr: [std.numeric.Int64 throws MyError] = std.collections.Array[std.result.Result[std.numeric.Int64, MyError]]();
     arr.append(.Ok(1));
     arr.append(.Err(MyError()));
     arr.append(.Ok(3));

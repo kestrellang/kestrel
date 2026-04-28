@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            let some: std.result.Optional[std.num.Int64] = .Some(10);
+            let some: std.result.Optional[std.numeric.Int64] = .Some(10);
 
             // Test map
             let mapped = some.map({ (x) in x * 2 });
@@ -17,7 +17,7 @@ module Test
             if filteredOut.isSome() { return 3 }
 
             // Test flatMap
-            let flatMapped = some.flatMap[std.num.Int64]({ (x) in .Some(x + 1) });
+            let flatMapped = some.flatMap[std.numeric.Int64]({ (x) in .Some(x + 1) });
             if flatMapped.unwrap() != 11 { return 4 }
 
             0

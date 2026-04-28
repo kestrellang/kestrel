@@ -4,7 +4,7 @@ module std.memory
 
 import std.ffi.(FFISafe)
 import std.core.(Equatable, Bool, Hash, Hasher, ArrayMatchable, Range, ClosedRange, fatalError)
-import std.num.(Int64, UInt64, UInt8)
+import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(Slice)
 import std.result.(Optional)
 import std.iter.(Iterator)
@@ -270,7 +270,7 @@ extend Pointer: FFISafe where T: FFISafe {}
 @builtin(.SliceStruct)
 public struct Slice[T]: Equatable {
     // type Item = T
-    // type Iter = SliceIterator[T]
+    // type TargetIterator = SliceIterator[T]
 
     private var ptr: Pointer[T]
     private var len: Int64
@@ -303,7 +303,7 @@ public struct Slice[T]: Equatable {
     /// the receiver's storage; don't outlive it.
     public subscript[I](index: I) -> I.SliceYield where I: SliceIndex[T] {
         get { index.readSlice(from: self) }
-        set { index.writeSlice(to: self, value: newValue) }
+        set { index.writeSlice(to: self, with: newValue) }
     }
 
     /// @name Checked Index
@@ -320,7 +320,7 @@ public struct Slice[T]: Equatable {
     /// Undefined behavior if the access falls outside `[0, count)`.
     public subscript[I](unchecked index: I) -> I.SliceYield where I: SliceIndex[T] {
         get { index.readSliceUnchecked(from: self) }
-        set { index.writeSliceUnchecked(to: self, value: newValue) }
+        set { index.writeSliceUnchecked(to: self, with: newValue) }
     }
 
     /// @name Clamping
@@ -329,7 +329,7 @@ public struct Slice[T]: Equatable {
     /// `Slice[T]`.
     public subscript[I](clamped index: I) -> I.SliceClampedYield where I: SliceClampable[T] {
         get { index.readSliceClamped(from: self) }
-        set { index.writeSliceClamped(to: self, value: newValue) }
+        set { index.writeSliceClamped(to: self, with: newValue) }
     }
 
     /// @name Wrapping
@@ -337,7 +337,7 @@ public struct Slice[T]: Equatable {
     /// the empty-slice case can surface as `None`.
     public subscript[I](wrapped index: I) -> I.SliceWrappedYield where I: SliceWrappable[T] {
         get { index.readSliceWrapped(from: self) }
-        set { index.writeSliceWrapped(to: self, value: newValue) }
+        set { index.writeSliceWrapped(to: self, with: newValue) }
     }
 
     /// Forward iterator over the elements.
@@ -446,20 +446,20 @@ internal protocol SliceIndex[T] {
     func readSlice(from slice: Slice[T]) -> SliceYield
     func readSliceChecked(from slice: Slice[T]) -> SliceYield?
     func readSliceUnchecked(from slice: Slice[T]) -> SliceYield
-    func writeSlice(to slice: Slice[T], value value: SliceYield)
-    func writeSliceUnchecked(to slice: Slice[T], value value: SliceYield)
+    func writeSlice(to slice: Slice[T], with value: SliceYield)
+    func writeSliceUnchecked(to slice: Slice[T], with value: SliceYield)
 }
 
 internal protocol SliceClampable[T] {
     type SliceClampedYield
     func readSliceClamped(from slice: Slice[T]) -> SliceClampedYield
-    func writeSliceClamped(to slice: Slice[T], value value: SliceClampedYield)
+    func writeSliceClamped(to slice: Slice[T], with value: SliceClampedYield)
 }
 
 internal protocol SliceWrappable[T] {
     type SliceWrappedYield
     func readSliceWrapped(from slice: Slice[T]) -> SliceWrappedYield
-    func writeSliceWrapped(to slice: Slice[T], value value: SliceWrappedYield)
+    func writeSliceWrapped(to slice: Slice[T], with value: SliceWrappedYield)
 }
 
 // ============================================================================
@@ -488,14 +488,14 @@ extend Int64: SliceIndex[T] {
         slice.pointer.offset(by: self).read()
     }
 
-    public func writeSlice(to slice: Slice[T], value value: T) {
+    public func writeSlice(to slice: Slice[T], with value: T) {
         if self < 0 or self >= slice.count {
             fatalError("Slice index out of bounds")
         }
         slice.pointer.offset(by: self).write(value)
     }
 
-    public func writeSliceUnchecked(to slice: Slice[T], value value: T) {
+    public func writeSliceUnchecked(to slice: Slice[T], with value: T) {
         slice.pointer.offset(by: self).write(value)
     }
 }
@@ -514,7 +514,7 @@ extend Int64: SliceClampable[T] {
         .Some(slice.pointer.offset(by: idx).read())
     }
 
-    public func writeSliceClamped(to slice: Slice[T], value value: T?) {
+    public func writeSliceClamped(to slice: Slice[T], with value: T?) {
         if let .Some(v) = value {
             let len = slice.count;
             if len == 0 {
@@ -541,7 +541,7 @@ extend Int64: SliceWrappable[T] {
         .Some(slice.pointer.offset(by: idx).read())
     }
 
-    public func writeSliceWrapped(to slice: Slice[T], value value: T?) {
+    public func writeSliceWrapped(to slice: Slice[T], with value: T?) {
         if let .Some(v) = value {
             let len = slice.count;
             if len == 0 {
@@ -580,7 +580,7 @@ extend Range[Int64]: SliceIndex[T] {
         Slice(pointer: slice.pointer.offset(by: self.start), count: self.end - self.start)
     }
 
-    public func writeSlice(to slice: Slice[T], value value: Slice[T]) {
+    public func writeSlice(to slice: Slice[T], with value: Slice[T]) {
         let start = self.start;
         let end = self.end;
         if start < 0 or end > slice.count or start > end {
@@ -597,7 +597,7 @@ extend Range[Int64]: SliceIndex[T] {
         }
     }
 
-    public func writeSliceUnchecked(to slice: Slice[T], value value: Slice[T]) {
+    public func writeSliceUnchecked(to slice: Slice[T], with value: Slice[T]) {
         let start = self.start;
         let rangeLen = self.end - start;
         if value.count != rangeLen {
@@ -624,7 +624,7 @@ extend Range[Int64]: SliceClampable[T] {
         Slice(pointer: slice.pointer.offset(by: start), count: end - start)
     }
 
-    public func writeSliceClamped(to slice: Slice[T], value value: Slice[T]) {
+    public func writeSliceClamped(to slice: Slice[T], with value: Slice[T]) {
         let len = slice.count;
         var start = self.start;
         var end = self.end;
@@ -671,7 +671,7 @@ extend ClosedRange[Int64]: SliceIndex[T] {
         Slice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
     }
 
-    public func writeSlice(to slice: Slice[T], value value: Slice[T]) {
+    public func writeSlice(to slice: Slice[T], with value: Slice[T]) {
         let start = self.start;
         let endExclusive = self.end + 1;
         if start < 0 or endExclusive > slice.count or start > endExclusive {
@@ -688,7 +688,7 @@ extend ClosedRange[Int64]: SliceIndex[T] {
         }
     }
 
-    public func writeSliceUnchecked(to slice: Slice[T], value value: Slice[T]) {
+    public func writeSliceUnchecked(to slice: Slice[T], with value: Slice[T]) {
         let start = self.start;
         let rangeLen = self.end + 1 - start;
         if value.count != rangeLen {

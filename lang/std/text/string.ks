@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hash, Hasher, Defaultable, fatalError)
 import std.text.(Formattable)
-import std.num.(Int64, UInt8)
+import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, Slice)
 import std.iter.(Iterator, Iterable)
@@ -241,7 +241,7 @@ public struct SplitWhereIterator: Iterator {
     ///
     /// `ptr` must remain valid for `length` bytes for the iterator's
     /// lifetime.
-    public init(ptr ptr: Pointer[UInt8], length length: Int64, predicate predicate: (Char) -> Bool) {
+    public init(pointer ptr: Pointer[UInt8], length length: Int64, matching predicate: (Char) -> Bool) {
         self.ptr = ptr;
         self.length = length;
         self.predicate = predicate;
@@ -463,7 +463,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
-    type Iter = StringIterator
+    type TargetIterator = StringIterator
     /// The output type of `+` (concatenation) — always `String`.
     type Output = String
 
@@ -1754,9 +1754,9 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// ```
     public func split(matching predicate: (Char) -> Bool) -> SplitWhereIterator {
         SplitWhereIterator(
-            ptr: self.ptr(),
+            pointer: self.ptr(),
             length: self.len(),
-            predicate: predicate
+            matching: predicate
         )
     }
 
@@ -1810,7 +1810,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// ```
     /// "42".pad(start: 5, with: '0');  // "00042"
     /// ```
-    public func pad(start length: Int64, with char: Char) -> String {
+    public func pad(leading length: Int64, with char: Char) -> String {
         let currentLen = self.count;
         if currentLen >= length {
             return self.clone()
@@ -1831,7 +1831,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// ```
     /// "42".pad(end: 5, with: '.');  // "42..."
     /// ```
-    public func pad(end length: Int64, with char: Char) -> String {
+    public func pad(trailing length: Int64, with char: Char) -> String {
         let currentLen = self.count;
         if currentLen >= length {
             return self.clone()

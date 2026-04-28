@@ -11,14 +11,14 @@ RAII-owned POSIX file handle.
 The wrapped file descriptor is closed automatically when the `File`
 goes out of scope, so explicit `close` is never necessary. `File` is
 `not Copyable` to keep the descriptor uniquely owned — pass by
-reference or move it instead. Conforms to both `Read` and `Write`,
+reference or move it instead. Conforms to both `Readable` and `Writable`,
 although calls fail with `EBADF` if the open mode does not permit the
 direction (e.g. writing to a file opened with `open()`).
 
 ### Examples
 
 ```
-// Read whole file in 4 KiB chunks.
+// Readable whole file in 4 KiB chunks.
 var file = try File.open("input.txt");
 var buf = Array[UInt8](repeating: 0, count: 4096);
 while true {
@@ -64,7 +64,7 @@ Existing contents are discarded.
 
 ```
 var file = try File.create("output.txt");
-try writeStr(file, "New content");
+try writeString(file, "New content");
 ```
 
 _Defined in `lang/std/io/file.ks`._
@@ -193,7 +193,7 @@ let size = try file.seek(.End(0));   // size of file
 
 _Defined in `lang/std/io/file.ks`._
 
-### Implements `Read`
+### Implements `Readable`
 
 #### function `read`
 
@@ -208,7 +208,7 @@ until `0` is returned (EOF) or an error fires. Use `readAll`/
 
 _Defined in `lang/std/io/file.ks`._
 
-### Implements `Write`
+### Implements `Writable`
 
 #### function `flush`
 

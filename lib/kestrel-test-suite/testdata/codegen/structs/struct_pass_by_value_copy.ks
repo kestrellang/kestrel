@@ -4,10 +4,10 @@
 module Test
 
 struct Counter {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 }
 
-func increment_copy(c: Counter) -> std.num.Int64 {
+func increment_copy(c: Counter) -> std.numeric.Int64 {
     // This is a copy, original is not modified
     c.value + 1
 }

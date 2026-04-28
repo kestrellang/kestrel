@@ -3,7 +3,7 @@
 module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.text.(String, Char)
 import std.result.(Optional)
 import std.collections.(Array)
@@ -382,7 +382,7 @@ public protocol Formattable {
 /// `DefaultStringInterpolation` as its accumulator; custom string-like
 /// types can supply their own to intercept literal pieces or coerce
 /// formatted parts.
-public protocol StringInterpolationProtocol {
+public protocol Interpolatable {
     /// @name With Capacity
     /// Constructs an empty accumulator with capacity hints derived from the literal at compile time.
     ///
@@ -411,10 +411,10 @@ public protocol StringInterpolationProtocol {
 /// Refines `ExpressibleByStringLiteral` so a single conformance covers
 /// both pure-literal `"abc"` and interpolated `"a\{x}b"` forms. The
 /// compiler picks `Interpolation` as the accumulator type, drives it via
-/// `StringInterpolationProtocol`, then hands it to `init(interpolation:)`.
+/// `Interpolatable`, then hands it to `init(interpolation:)`.
 public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
     /// The accumulator type used to build interpolated values of `Self`.
-    type Interpolation: StringInterpolationProtocol
+    type Interpolation: Interpolatable
 
     /// @name From Interpolation
     /// Constructs `Self` from a fully built interpolation accumulator.
@@ -425,7 +425,7 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 // DEFAULT STRING INTERPOLATION
 // ============================================================================
 
-/// The default `StringInterpolationProtocol` accumulator used for `String` interpolation.
+/// The default `Interpolatable` accumulator used for `String` interpolation.
 ///
 /// Stores each literal and each formatted interpolation as a separate
 /// `String` part, then concatenates them in `build()`. The two-pass
@@ -446,7 +446,7 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 /// A single `Array[String]` of accumulated parts. Empty literal pieces
 /// are dropped on append.
 @builtin(.DefaultStringInterpolation)
-public struct DefaultStringInterpolation: StringInterpolationProtocol, Cloneable {
+public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     private var parts: Array[String]
 
     /// @name With Capacity

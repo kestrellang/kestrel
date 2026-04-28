@@ -330,21 +330,21 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `all`
 
 ```kestrel
-public func all(satisfying: (T) -> Bool) -> Bool
+public func all(matching: (T) -> Bool) -> Bool
 ```
 
 `true` when every element satisfies `predicate` (vacuously true
 for an empty array).
 
 Short-circuits on the first failure. The dual is
-`any(satisfying:)`.
+`any(matching:)`.
 
 ##### Examples
 
 ```
-[2, 4, 6].all(satisfying: { (x) in x % 2 == 0 });  // true
-[2, 3, 6].all(satisfying: { (x) in x % 2 == 0 });  // false
-[].all(satisfying: { (x) in false });              // true (vacuous)
+[2, 4, 6].all(matching: { (x) in x % 2 == 0 });  // true
+[2, 3, 6].all(matching: { (x) in x % 2 == 0 });  // false
+[].all(matching: { (x) in false });              // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -352,20 +352,20 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `any`
 
 ```kestrel
-public func any(satisfying: (T) -> Bool) -> Bool
+public func any(matching: (T) -> Bool) -> Bool
 ```
 
 `true` when at least one element satisfies `predicate` (always
 `false` for an empty array).
 
-Short-circuits on the first match. The dual is `all(satisfying:)`.
+Short-circuits on the first match. The dual is `all(matching:)`.
 
 ##### Examples
 
 ```
-[1, 2, 3].any(satisfying: { (x) in x > 2 });  // true
-[1, 2, 3].any(satisfying: { (x) in x > 5 });  // false
-[].any(satisfying: { (x) in true });          // false (empty)
+[1, 2, 3].any(matching: { (x) in x > 2 });  // true
+[1, 2, 3].any(matching: { (x) in x > 5 });  // false
+[].any(matching: { (x) in true });          // false (empty)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -600,7 +600,7 @@ public func contains(T) -> Bool
 `true` if the array contains an element equal to `element`.
 
 Linear scan; short-circuits on the first match. For predicate-
-based searching see `any(satisfying:)` or `firstIndex(matching:)`.
+based searching see `any(matching:)` or `firstIndex(matching:)`.
 
 ##### Examples
 
@@ -640,8 +640,8 @@ public func countItems(matching: (T) -> Bool) -> Int64
 Returns the number of elements for which `predicate` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(satisfying:)`; for a yes/no on every element,
-`all(satisfying:)`.
+`any(matching:)`; for a yes/no on every element,
+`all(matching:)`.
 
 ##### Examples
 
@@ -791,7 +791,7 @@ _Defined in `lang/std/collections/array.ks`._
 public func first(matching: (T) -> Bool) -> T?
 ```
 
-Returns the first element satisfying `predicate`, or `None`.
+Returns the first element matching `predicate`, or `None`.
 
 Wraps `firstIndex(matching:)` and reads the element at the
 returned index. For just the index, use `firstIndex(matching:)`.
@@ -812,7 +812,7 @@ _Defined in `lang/std/collections/array.ks`._
 public func firstIndex(matching: (T) -> Bool) -> Int64?
 ```
 
-Returns the index of the first element satisfying `predicate`, or
+Returns the index of the first element matching `predicate`, or
 `None`.
 
 Linear scan from the front; short-circuits on the first match.
@@ -1049,7 +1049,7 @@ _Defined in `lang/std/collections/array.ks`._
 public func last(matching: (T) -> Bool) -> T?
 ```
 
-Returns the last element satisfying `predicate`, or `None`.
+Returns the last element matching `predicate`, or `None`.
 
 Wraps `lastIndex(matching:)`. For just the index, use
 `lastIndex(matching:)`.
@@ -1069,7 +1069,7 @@ _Defined in `lang/std/collections/array.ks`._
 public func lastIndex(matching: (T) -> Bool) -> Int64?
 ```
 
-Returns the index of the last element satisfying `predicate`, or
+Returns the index of the last element matching `predicate`, or
 `None`.
 
 Linear scan from the back; short-circuits on the first match. The
@@ -1969,10 +1969,10 @@ type Item = T
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = ArrayIterator[T]
+type TargetIterator = ArrayIterator[T]
 ```
 
 `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -2656,7 +2656,7 @@ Creates a dictionary by inserting every `(key, value)` pair
 produced by an iterable.
 
 Last write wins for duplicate keys. For a panic-on-duplicate
-variant use `init(uniqueKeysWithValues:)`. Capacity grows
+variant use `init(uniquePairs:)`. Capacity grows
 geometrically as inserts arrive — for sized sources, follow up
 with `shrinkToFit()` if memory matters.
 
@@ -2747,7 +2747,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Unique Keys`
 
 ```kestrel
-public init[I](uniqueKeysWithValues: I) where I: Iterable, I.Item == (K, V)
+public init[I](uniquePairs: I) where I: Iterable, I.Item == (K, V)
 ```
 
 Creates a dictionary from key-value pairs, panicking on any
@@ -2760,15 +2760,15 @@ than `init(from:)` for large inputs.
 
 ##### Errors
 
-Panics with `"Dictionary(uniqueKeysWithValues:): duplicate key"`
+Panics with `"Dictionary(uniquePairs:): duplicate key"`
 the first time `pairs` yields a key already in the dictionary.
 
 ##### Examples
 
 ```
-let dict = Dictionary(uniqueKeysWithValues: [("a", 1), ("b", 2)]);
-Dictionary(uniqueKeysWithValues: [("a", 1), ("a", 2)]);
-// PANIC: Dictionary(uniqueKeysWithValues:): duplicate key
+let dict = Dictionary(uniquePairs: [("a", 1), ("b", 2)]);
+Dictionary(uniquePairs: [("a", 1), ("a", 2)]);
+// PANIC: Dictionary(uniquePairs:): duplicate key
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2853,20 +2853,20 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `all`
 
 ```kestrel
-public func all(satisfying: (K, V) -> Bool) -> Bool
+public func all(matching: (K, V) -> Bool) -> Bool
 ```
 
 `true` when every entry satisfies `predicate(key, value)`
 (vacuously true for empty).
 
-Short-circuits on the first failure. Dual of `any(satisfying:)`.
+Short-circuits on the first failure. Dual of `any(matching:)`.
 
 ##### Examples
 
 ```
-["a": 2, "b": 4].all(satisfying: { (k, v) in v % 2 == 0 });  // true
-["a": 1, "b": 2].all(satisfying: { (k, v) in v % 2 == 0 });  // false
-[:].all(satisfying: { (k, v) in false });                    // true (vacuous)
+["a": 2, "b": 4].all(matching: { (k, v) in v % 2 == 0 });  // true
+["a": 1, "b": 2].all(matching: { (k, v) in v % 2 == 0 });  // false
+[:].all(matching: { (k, v) in false });                    // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2874,7 +2874,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `allKeys`
 
 ```kestrel
-public func allKeys(forValue: V) -> Array[K]
+public func allKeys(of: V) -> Array[K]
 ```
 
 Returns every key whose value equals `value`.
@@ -2886,8 +2886,8 @@ matches.
 ##### Examples
 
 ```
-["a": 1, "b": 2, "c": 1].allKeys(forValue: 1);  // ["a", "c"]  — order unspecified
-["a": 1].allKeys(forValue: 99);                  // []
+["a": 1, "b": 2, "c": 1].allKeys(of: 1);  // ["a", "c"]  — order unspecified
+["a": 1].allKeys(of: 99);                  // []
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2895,7 +2895,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `any`
 
 ```kestrel
-public func any(satisfying: (K, V) -> Bool) -> Bool
+public func any(matching: (K, V) -> Bool) -> Bool
 ```
 
 `true` when at least one entry satisfies `predicate(key, value)`.
@@ -2907,8 +2907,8 @@ Short-circuits on the first match.
 ##### Examples
 
 ```
-["a": 1, "b": 5].any(satisfying: { (k, v) in v > 3 });  // true
-[:].any(satisfying: { (k, v) in true });                // false (empty)
+["a": 1, "b": 5].any(matching: { (k, v) in v > 3 });  // true
+[:].any(matching: { (k, v) in true });                // false (empty)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3073,8 +3073,8 @@ Returns the number of entries for which
 `predicate(key, value)` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(satisfying:)`; for a yes/no on every entry,
-`all(satisfying:)`.
+`any(matching:)`; for a yes/no on every entry,
+`all(matching:)`.
 
 ##### Examples
 
@@ -3137,7 +3137,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public func first(matching: (K, V) -> Bool) -> (K, V)?
 ```
 
-Returns *some* entry satisfying `predicate(key, value)`, or
+Returns *some* entry matching `predicate(key, value)`, or
 `None`.
 
 "First" is determined by bucket order, which is hash-dependent
@@ -3157,20 +3157,20 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `firstKey`
 
 ```kestrel
-public func firstKey(forValue: V) -> K?
+public func firstKey(of: V) -> K?
 ```
 
 Returns *some* key mapping to `value`, or `None`.
 
 O(capacity); short-circuits on the first match. "First" is
 determined by bucket order and is unspecified — for an
-exhaustive list use `allKeys(forValue:)`.
+exhaustive list use `allKeys(of:)`.
 
 ##### Examples
 
 ```
-["a": 1, "b": 2].firstKey(forValue: 2);  // Some("b")
-["a": 1, "b": 2].firstKey(forValue: 5);  // None
+["a": 1, "b": 2].firstKey(of: 2);  // Some("b")
+["a": 1, "b": 2].firstKey(of: 5);  // None
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3555,10 +3555,10 @@ type Item = (K, V)
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = DictionaryIterator[K, V]
+type TargetIterator = DictionaryIterator[K, V]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -3965,10 +3965,10 @@ type Item = K
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = KeysIterator[K, V]
+type TargetIterator = KeysIterator[K, V]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -4185,21 +4185,21 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `all`
 
 ```kestrel
-public func all(satisfying: (T) -> Bool) -> Bool
+public func all(matching: (T) -> Bool) -> Bool
 ```
 
 `true` when every element satisfies `predicate` (vacuously
 true for empty sets).
 
 Short-circuits on the first failure. Dual of
-`any(satisfying:)`.
+`any(matching:)`.
 
 ##### Examples
 
 ```
-Set([2, 4, 6]).all(satisfying: { (x) in x % 2 == 0 });  // true
-Set([1, 2, 4]).all(satisfying: { (x) in x % 2 == 0 });  // false
-Set[Int64]().all(satisfying: { (x) in false });         // true (vacuous)
+Set([2, 4, 6]).all(matching: { (x) in x % 2 == 0 });  // true
+Set([1, 2, 4]).all(matching: { (x) in x % 2 == 0 });  // false
+Set[Int64]().all(matching: { (x) in false });         // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4207,7 +4207,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `any`
 
 ```kestrel
-public func any(satisfying: (T) -> Bool) -> Bool
+public func any(matching: (T) -> Bool) -> Bool
 ```
 
 `true` when at least one element satisfies `predicate`.
@@ -4219,8 +4219,8 @@ Short-circuits.
 ##### Examples
 
 ```
-Set([1, 2, 3]).any(satisfying: { (x) in x > 2 });  // true
-Set[Int64]().any(satisfying: { (x) in true });     // false (empty)
+Set([1, 2, 3]).any(matching: { (x) in x > 2 });  // true
+Set[Int64]().any(matching: { (x) in true });     // false (empty)
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4321,7 +4321,7 @@ public func contains(matching: (T) -> Bool) -> Bool
 `true` if any element satisfies `predicate`.
 
 Linear scan; short-circuits on the first match. `false` for
-empty sets. The aliased shape `any(satisfying:)` exists for
+empty sets. The aliased shape `any(matching:)` exists for
 symmetry with `Array`.
 
 ##### Examples
@@ -4361,8 +4361,8 @@ public func countItems(matching: (T) -> Bool) -> Int64
 Returns the number of elements for which `predicate` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(satisfying:)`; for a yes/no on every element,
-`all(satisfying:)`.
+`any(matching:)`; for a yes/no on every element,
+`all(matching:)`.
 
 ##### Examples
 
@@ -5097,10 +5097,10 @@ type Item = T
 
 _Defined in `lang/std/collections/set.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = SetIterator[T, H]
+type TargetIterator = SetIterator[T, H]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -5423,10 +5423,10 @@ type Item = V
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = ValuesIterator[K, V]
+type TargetIterator = ValuesIterator[K, V]
 ```
 
 Concrete iterator type returned by `iter()`.

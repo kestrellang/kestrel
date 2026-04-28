@@ -7,10 +7,10 @@ import std.io.stdio.println
 
 enum Foo {
     case A
-    static let staticLet: std.num.Int64 = 4;
+    static let staticLet: std.numeric.Int64 = 4;
 }
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let _ = println(Foo.staticLet);
     0
 }

@@ -4,15 +4,15 @@
 module Test
 
 struct Data {
-    let value: std.num.Int64
+    let value: std.numeric.Int64
 }
 
 enum Container {
-    case Full(data: Data, extra: std.num.Int64)
+    case Full(data: Data, extra: std.numeric.Int64)
     case Empty
 }
 
-func extract_sum(c: Container) -> std.num.Int64 {
+func extract_sum(c: Container) -> std.numeric.Int64 {
     match c {
         .Full(data: d, extra: e) => d.value + e,
         .Empty => 0

@@ -6,7 +6,7 @@ module Test
         func main() -> lang.i64 {
             // Create a buffer with SystemAllocator
             var alloc = std.memory.SystemAllocator();
-            var buf = std.memory.Buffer[std.num.Int64, std.memory.SystemAllocator](10, alloc);
+            var buf = std.memory.Buffer[std.numeric.Int64, std.memory.SystemAllocator](10, alloc);
 
             // Test capacity
             if buf.capacity != 10 { return 1 }

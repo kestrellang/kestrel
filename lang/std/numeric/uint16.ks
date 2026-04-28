@@ -1,7 +1,7 @@
 // UInt16 - 16-bit unsigned integer
 // Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
-module std.num
+module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
@@ -15,7 +15,7 @@ import std.core.(
 )
 import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 16-bit unsigned integer.
 ///

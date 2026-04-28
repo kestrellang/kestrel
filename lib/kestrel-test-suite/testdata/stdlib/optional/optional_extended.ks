@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let some: std.result.Optional[std.num.Int64] = .Some(42);
-            let none: std.result.Optional[std.num.Int64] = .None;
+            let some: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let none: std.result.Optional[std.numeric.Int64] = .None;
 
             // Test isSomeAnd - Some with true predicate
             if some.isSomeAnd({ (x) in x > 0 }) == false { return 1 }
@@ -58,11 +58,11 @@ module Test
             if pair.1 != 100 { return 15 }
 
             // Test zip - Some zip None = None
-            let zippedNone: std.result.Optional[(std.num.Int64, std.num.Int64)] = some.zip(with: .None);
+            let zippedNone: std.result.Optional[(std.numeric.Int64, std.numeric.Int64)] = some.zip(with: .None);
             if zippedNone.isSome() { return 16 }
 
             // Test zip - None zip Some = None
-            let noneZipped: std.result.Optional[(std.num.Int64, std.num.Int64)] = none.zip(with: .Some(100));
+            let noneZipped: std.result.Optional[(std.numeric.Int64, std.numeric.Int64)] = none.zip(with: .Some(100));
             if noneZipped.isSome() { return 17 }
 
             0

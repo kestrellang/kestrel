@@ -9,11 +9,11 @@ module Test
             if nil.isNull == false { return 1 }
 
             // Test address of nil pointer is 0
-            let zeroAddr: std.num.UInt64 = 0;
+            let zeroAddr: std.numeric.UInt64 = 0;
             if nil.address != zeroAddr { return 2 }
 
             // Create a non-null pointer from an array
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(42);
             let ptr = arr.asPointer();
             let raw = ptr.asRaw();
@@ -22,7 +22,7 @@ module Test
             if raw.isNull { return 3 }
 
             // Address should be non-zero
-            let zeroCheck: std.num.UInt64 = 0;
+            let zeroCheck: std.numeric.UInt64 = 0;
             if raw.address == zeroCheck { return 4 }
 
             // Test equals - same pointer should be equal
@@ -38,7 +38,7 @@ module Test
             if offsetPtr.equals(raw) { return 8 }
 
             // Test cast to typed pointer
-            let typedPtr = raw.cast[std.num.Int64]();
+            let typedPtr = raw.cast[std.numeric.Int64]();
             if typedPtr.isNull { return 9 }
             // Read through the casted pointer should give the array element
             if typedPtr.read() != 42 { return 10 }

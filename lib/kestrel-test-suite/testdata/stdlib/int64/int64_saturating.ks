@@ -4,10 +4,10 @@
 module Test
 
         func main() -> lang.i64 {
-            let a: std.num.Int64 = 10;
-            let b: std.num.Int64 = 5;
-            let maxVal = std.num.Int64.maxValue;
-            let minVal = std.num.Int64.minValue;
+            let a: std.numeric.Int64 = 10;
+            let b: std.numeric.Int64 = 5;
+            let maxVal = std.numeric.Int64.maxValue;
+            let minVal = std.numeric.Int64.minValue;
 
             // addSaturating - normal case
             if a.addSaturating(b) != 15 { return 1 }
@@ -29,18 +29,18 @@ module Test
             if maxVal.multiplySaturating(2) != maxVal { return 7 }
 
             // multiplySaturating - negative overflow clamps to minValue
-            let negTwo: std.num.Int64 = -2;
+            let negTwo: std.numeric.Int64 = -2;
             if maxVal.multiplySaturating(negTwo) != minVal { return 8 }
 
             // negateSaturating - normal case
-            let fortyTwo: std.num.Int64 = 42;
+            let fortyTwo: std.numeric.Int64 = 42;
             if fortyTwo.negateSaturating() != -42 { return 9 }
 
             // negateSaturating - minValue clamps to maxValue
             if minVal.negateSaturating() != maxVal { return 10 }
 
             // absSaturating - normal case
-            let negFortyTwo: std.num.Int64 = -42;
+            let negFortyTwo: std.numeric.Int64 = -42;
             if negFortyTwo.absSaturating() != 42 { return 11 }
 
             // absSaturating - minValue clamps to maxValue

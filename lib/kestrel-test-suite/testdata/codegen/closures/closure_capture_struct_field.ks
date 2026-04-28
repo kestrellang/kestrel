@@ -4,12 +4,12 @@
 module Test
 
 struct Config {
-    let multiplier: std.num.Int64
+    let multiplier: std.numeric.Int64
 }
 
 func main() -> lang.i64 {
     let config = Config(multiplier: 2);
-    let f = { (x: std.num.Int64) in x * config.multiplier };
+    let f = { (x: std.numeric.Int64) in x * config.multiplier };
     if f(21) != 42 { return 1 }
     0
 }

@@ -4,13 +4,13 @@
 module Test
 
 struct Counter {
-    var count: std.num.Int64
+    var count: std.numeric.Int64
 
     mutating func increment() {
         self.count = self.count + 1;
     }
 
-    func read() -> std.num.Int64 {
+    func read() -> std.numeric.Int64 {
         self.count
     }
 }

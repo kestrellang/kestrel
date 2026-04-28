@@ -8,8 +8,8 @@ import std.io.stdio.println
 struct MyError {}
 
 func main() -> lang.i64 {
-    let someOk: std.num.Int64 throws MyError? = .Some(.Ok(42));
-    let none: std.num.Int64 throws MyError? = .None;
+    let someOk: std.numeric.Int64 throws MyError? = .Some(.Ok(42));
+    let none: std.numeric.Int64 throws MyError? = .None;
     let _ = println(someOk.unwrap().unwrap());
     let _ = println(none.isNone());
     0

@@ -7,7 +7,7 @@ module Test
             // tryForEach: forEach where action returns Result
             // All succeed
             let result = [1, 2, 3].iter().tryForEach({ (x) in
-                let ok: std.result.Result[(), std.num.Int64] = .Ok(());
+                let ok: std.result.Result[(), std.numeric.Int64] = .Ok(());
                 ok
             });
             match result {
@@ -19,7 +19,7 @@ module Test
             // Error when we encounter a value > 3
             let earlyExit = [1, 2, 3, 4, 5].iter().tryForEach({ (x) in
                 if x > 3 {
-                    let err: std.result.Result[(), std.num.Int64] = .Err(x);
+                    let err: std.result.Result[(), std.numeric.Int64] = .Err(x);
                     err
                 } else {
                     .Ok(())
@@ -31,9 +31,9 @@ module Test
             }
 
             // tryForEach on empty iterator returns Ok
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             let emptyResult = empty.iter().tryForEach({ (x) in
-                let err: std.result.Result[(), std.num.Int64] = .Err(x);
+                let err: std.result.Result[(), std.numeric.Int64] = .Err(x);
                 err
             });
             match emptyResult {

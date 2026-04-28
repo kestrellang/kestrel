@@ -4,5 +4,5 @@
 module Test
 
 protocol P {
-    let value: std.num.Int64 { get } // ERROR: computed properties must use 'var'
+    let value: std.numeric.Int64 { get } // ERROR: computed properties must use 'var'
 }

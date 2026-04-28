@@ -4,10 +4,10 @@
 module Test
 
 struct Handler {
-    let f: (std.num.Int64) -> std.num.Int64
+    let f: (std.numeric.Int64) -> std.numeric.Int64
 }
 
-func triple(x: std.num.Int64) -> std.num.Int64 {
+func triple(x: std.numeric.Int64) -> std.numeric.Int64 {
     x * 3
 }
 

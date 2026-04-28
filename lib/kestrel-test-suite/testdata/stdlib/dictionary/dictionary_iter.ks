@@ -4,15 +4,15 @@
 module Test
 
         func main() -> lang.i64 {
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
             let _ = dict.insert(2, 20);
             let _ = dict.insert(3, 30);
 
             // iter() - iterate over all key-value pairs
-            var count: std.num.Int64 = 0;
-            var keySum: std.num.Int64 = 0;
-            var valSum: std.num.Int64 = 0;
+            var count: std.numeric.Int64 = 0;
+            var keySum: std.numeric.Int64 = 0;
+            var valSum: std.numeric.Int64 = 0;
             var iter = dict.iter();
             while let .Some(pair) = iter.next() {
                 count = count + 1;
@@ -24,7 +24,7 @@ module Test
             if valSum != 60 { return 3 }
 
             // iter() on empty dictionary
-            let emptyDict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            let emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             var emptyIter = emptyDict.iter();
             let first = emptyIter.next();
             if first.isSome() { return 4 }

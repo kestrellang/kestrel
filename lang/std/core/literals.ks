@@ -3,7 +3,7 @@
 
 module std.core
 
-import std.num.(Int64, Float64)
+import std.numeric.(Int64, Float64)
 import std.memory.(LiteralSlice)
 import std.text.(String, Char)
 import std.core.(Bool)
@@ -22,7 +22,7 @@ public protocol ExpressibleByBoolLiteral {
 
 /// Protocol for types that accept an integer literal (e.g. `42`, `0xff`).
 ///
-/// All the standard integer widths conform; types outside `std.num` (for
+/// All the standard integer widths conform; types outside `std.numeric` (for
 /// example a `BigInt` or a fixed-point number) can also conform to opt in
 /// to the literal syntax.
 @builtin(.ExpressibleByIntLiteral)

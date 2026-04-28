@@ -3,17 +3,17 @@
 
 module Test
 
-        func approxEqual(a: std.num.Float64, b: std.num.Float64) -> std.core.Bool {
+        func approxEqual(a: std.numeric.Float64, b: std.numeric.Float64) -> std.core.Bool {
             let diff = a.subtract(b).abs();
             diff < 0.0000001
         }
 
         func main() -> lang.i64 {
-            let pi = std.num.Float64.pi;
+            let pi = std.numeric.Float64.pi;
             let halfPi = pi.divide(2.0);
             let quarterPi = pi.divide(4.0);
-            let zero: std.num.Float64 = 0.0;
-            let one: std.num.Float64 = 1.0;
+            let zero: std.numeric.Float64 = 0.0;
+            let one: std.numeric.Float64 = 1.0;
 
             // sin: sin(0) = 0, sin(pi/2) = 1
             if approxEqual(zero.sin(), 0.0) == false { return 1 }
@@ -36,7 +36,7 @@ module Test
             if approxEqual(zero.acos(), halfPi) == false { return 10 }
 
             // acos(-1) = pi
-            let negOne: std.num.Float64 = -1.0;
+            let negOne: std.numeric.Float64 = -1.0;
             if approxEqual(negOne.acos(), pi) == false { return 11 }
 
             // atan: atan(0) = 0, atan(1) = pi/4
@@ -50,13 +50,13 @@ module Test
             if approxEqual(one.atan2(-1.0), threePiOverFour) == false { return 15 }
 
             // sinCos: sin and cos should match individual calls
-            let angle: std.num.Float64 = 1.0;
+            let angle: std.numeric.Float64 = 1.0;
             let (s, c) = angle.sinCos();
             if approxEqual(s, angle.sin()) == false { return 16 }
             if approxEqual(c, angle.cos()) == false { return 17 }
 
             // asin(2) should be NaN (out of domain)
-            let two: std.num.Float64 = 2.0;
+            let two: std.numeric.Float64 = 2.0;
             if two.asin().isNaN == false { return 18 }
 
             0

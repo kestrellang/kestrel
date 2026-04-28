@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // sort() - in-place ascending
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(3); arr.append(1); arr.append(4); arr.append(1);
             arr.append(5); arr.append(9); arr.append(2); arr.append(6);
             arr.sort();
@@ -19,7 +19,7 @@ module Test
             if arr(7) != 9 { return 8 }
 
             // sorted() - returns new sorted array
-            var unsorted = std.collections.Array[std.num.Int64]();
+            var unsorted = std.collections.Array[std.numeric.Int64]();
             unsorted.append(5); unsorted.append(3); unsorted.append(1);
             unsorted.append(4); unsorted.append(2);
             let s = unsorted.sorted();
@@ -37,7 +37,7 @@ module Test
             if minVal.unwrap() != 1 { return 16 }
 
             // min() on empty
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             let minEmpty = empty.min();
             if minEmpty.isSome() { return 17 }
 
@@ -56,16 +56,16 @@ module Test
             // empty is sorted
             if empty.isSorted() == false { return 23 }
             // single element is sorted
-            var single = std.collections.Array[std.num.Int64]();
+            var single = std.collections.Array[std.numeric.Int64]();
             single.append(42);
             if single.isSorted() == false { return 24 }
             // equal elements are sorted
-            var eq = std.collections.Array[std.num.Int64]();
+            var eq = std.collections.Array[std.numeric.Int64]();
             eq.append(3); eq.append(3); eq.append(3);
             if eq.isSorted() == false { return 25 }
 
             // binarySearch(element:) - positional single-name param
-            var sorted = std.collections.Array[std.num.Int64]();
+            var sorted = std.collections.Array[std.numeric.Int64]();
             sorted.append(1); sorted.append(2); sorted.append(3);
             sorted.append(4); sorted.append(5);
             let bs = sorted.binarySearch(3);

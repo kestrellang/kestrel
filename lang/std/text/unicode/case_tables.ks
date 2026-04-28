@@ -8,7 +8,7 @@
 module std.text.unicode
 
 import std.text.(Char, String)
-import std.num.(Int64, Int32, UInt32)
+import std.numeric.(Int64, Int32, UInt32)
 import std.core.(Bool)
 import std.memory.(LiteralSlice)
 

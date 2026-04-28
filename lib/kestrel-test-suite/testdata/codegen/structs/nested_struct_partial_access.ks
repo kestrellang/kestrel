@@ -4,15 +4,15 @@
 module Test
 
 struct Inner {
-    let a: std.num.Int64
-    let b: std.num.Int64
+    let a: std.numeric.Int64
+    let b: std.numeric.Int64
 }
 
 struct Outer {
     let inner: Inner
 }
 
-func sum_inner(i: Inner) -> std.num.Int64 {
+func sum_inner(i: Inner) -> std.numeric.Int64 {
     i.a + i.b
 }
 

@@ -4,11 +4,11 @@
 module Test
 
 enum Option {
-    case Some(value: std.num.Int64)
+    case Some(value: std.numeric.Int64)
     case None
 }
 
-func make_some(v: std.num.Int64) -> Option {
+func make_some(v: std.numeric.Int64) -> Option {
     Option.Some(value: v)
 }
 

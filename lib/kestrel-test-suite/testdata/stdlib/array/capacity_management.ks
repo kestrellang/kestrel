@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test reserveCapacity
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.reserveCapacity(100);
             if arr.capacity < 100 { return 1 }
             if arr.count != 0 { return 2 }
@@ -26,18 +26,18 @@ module Test
             if arr(unchecked: 2) != 3 { return 9 }
 
             // Test shrinkToFit on empty array with capacity
-            var emptyWithCap = std.collections.Array[std.num.Int64](capacity: 50);
+            var emptyWithCap = std.collections.Array[std.numeric.Int64](capacity: 50);
             if emptyWithCap.capacity < 50 { return 10 }
             emptyWithCap.shrinkToFit();
             if emptyWithCap.count != 0 { return 11 }
 
             // Test capacity property via init(capacity:)
-            let preallocated = std.collections.Array[std.num.Int64](capacity: 16);
+            let preallocated = std.collections.Array[std.numeric.Int64](capacity: 16);
             if preallocated.capacity < 16 { return 12 }
             if preallocated.count != 0 { return 13 }
 
             // Test that capacity grows after appending beyond initial
-            var growing = std.collections.Array[std.num.Int64](capacity: 2);
+            var growing = std.collections.Array[std.numeric.Int64](capacity: 2);
             growing.append(1);
             growing.append(2);
             growing.append(3);

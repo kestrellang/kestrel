@@ -3,7 +3,7 @@
 module std.memory
 
 import std.core.(Bool, Cloneable, Copyable, fatalError)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
 

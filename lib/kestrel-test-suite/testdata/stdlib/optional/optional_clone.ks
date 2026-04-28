@@ -4,8 +4,8 @@
 module Test
 
         func main() -> lang.i64 {
-            let some: std.result.Optional[std.num.Int64] = .Some(42);
-            let none: std.result.Optional[std.num.Int64] = .None;
+            let some: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let none: std.result.Optional[std.numeric.Int64] = .None;
 
             // Clone of Some
             let clonedSome = some.clone();

@@ -4,9 +4,9 @@
 module Test
 
 struct Data {
-    let a: std.num.Int64
-    let b: std.num.Int64
-    let c: std.num.Int64
+    let a: std.numeric.Int64
+    let b: std.numeric.Int64
+    let c: std.numeric.Int64
 }
 
 func main() -> lang.i64 {

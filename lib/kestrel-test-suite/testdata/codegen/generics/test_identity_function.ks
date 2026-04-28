@@ -8,6 +8,6 @@ func identity[T](x: T) -> T {
 }
 
 func main() -> lang.i64 {
-    if identity[std.num.Int64](42) != 42 { return 1 }
+    if identity[std.numeric.Int64](42) != 42 { return 1 }
     0
 }

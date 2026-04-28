@@ -4,7 +4,7 @@
 module Test
 
 enum Option {
-    case Some(value: std.num.Int64)
+    case Some(value: std.numeric.Int64)
     case None
 }
 

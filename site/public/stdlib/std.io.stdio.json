@@ -8,7 +8,7 @@
       "name": "Stderr",
       "anchor": "struct-Stderr",
       "signature": "public struct Stderr { /* private fields */ }",
-      "doc": "`Write` over the process's standard error (file descriptor `2`).\n\nMirrors `Stdout` but writes to `STDERR_FILENO`. Conventionally used\nfor diagnostics, log lines, and anything that should not be captured\nby a downstream pipe consuming `stdout`.\n\n# Representation\n\nZero-sized.",
+      "doc": "`Writable` over the process's standard error (file descriptor `2`).\n\nMirrors `Stdout` but writes to `STDERR_FILENO`. Conventionally used\nfor diagnostics, log lines, and anything that should not be captured\nby a downstream pipe consuming `stdout`.\n\n# Representation\n\nZero-sized.",
       "source_path": "lang/std/io/stdio.ks",
       "member_groups": [
         {
@@ -28,8 +28,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Write",
-          "source_path": "std.io.write.Write",
+          "label": "Writable",
+          "source_path": "std.io.write.Writable",
           "members": [
             {
               "kind": "function",
@@ -56,7 +56,7 @@
       "name": "Stdin",
       "anchor": "struct-Stdin",
       "signature": "public struct Stdin { /* private fields */ }",
-      "doc": "`Read` over the process's standard input (file descriptor `0`).\n\nConstruct via `Stdin()` or the `stdin()` accessor. Stateless — every\ninstance shares the same descriptor; concurrent readers race on the\nsame pipe.\n\n# Representation\n\nZero-sized — operations dispatch directly on `libc.STDIN()`.",
+      "doc": "`Readable` over the process's standard input (file descriptor `0`).\n\nConstruct via `Stdin()` or the `stdin()` accessor. Stateless — every\ninstance shares the same descriptor; concurrent readers race on the\nsame pipe.\n\n# Representation\n\nZero-sized — operations dispatch directly on `libc.STDIN()`.",
       "source_path": "lang/std/io/stdio.ks",
       "member_groups": [
         {
@@ -76,8 +76,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Read",
-          "source_path": "std.io.read.Read",
+          "label": "Readable",
+          "source_path": "std.io.read.Readable",
           "members": [
             {
               "kind": "function",
@@ -96,7 +96,7 @@
       "name": "Stdout",
       "anchor": "struct-Stdout",
       "signature": "public struct Stdout { /* private fields */ }",
-      "doc": "`Write` over the process's standard output (file descriptor `1`).\n\nAs with `Stdin`, stateless — `flush` is a no-op because writes go\nstraight to libc; line buffering / TTY behaviour is handled by libc\nor the terminal.\n\n# Representation\n\nZero-sized.",
+      "doc": "`Writable` over the process's standard output (file descriptor `1`).\n\nAs with `Stdin`, stateless — `flush` is a no-op because writes go\nstraight to libc; line buffering / TTY behaviour is handled by libc\nor the terminal.\n\n# Representation\n\nZero-sized.",
       "source_path": "lang/std/io/stdio.ks",
       "member_groups": [
         {
@@ -116,8 +116,8 @@
         },
         {
           "kind": "protocol",
-          "label": "Write",
-          "source_path": "std.io.write.Write",
+          "label": "Writable",
+          "source_path": "std.io.write.Writable",
           "members": [
             {
               "kind": "function",

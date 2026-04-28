@@ -4,10 +4,10 @@
 module Test
 
 struct Counter {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 }
 
-func increment(mutating c: Counter, by: std.num.Int64) {
+func increment(mutating c: Counter, by: std.numeric.Int64) {
     c.value = c.value + by;
 }
 

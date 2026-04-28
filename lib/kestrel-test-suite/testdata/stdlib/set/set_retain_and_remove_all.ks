@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test retain(matching:)
-            var s = std.collections.Set[std.num.Int64]();
+            var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(1);
             let _ = s.insert(2);
             let _ = s.insert(3);
@@ -20,7 +20,7 @@ module Test
             if s.contains(3) { return 5 }
 
             // Test removeAll(matching:)
-            var s2 = std.collections.Set[std.num.Int64]();
+            var s2 = std.collections.Set[std.numeric.Int64]();
             let _ = s2.insert(1);
             let _ = s2.insert(2);
             let _ = s2.insert(3);

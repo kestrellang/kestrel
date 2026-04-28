@@ -10,13 +10,13 @@ module Test
             let byteArr = s.bytes.iter().collect();
             if byteArr.count != 3 { return 1 }
             // 'a' = 97
-            let byteA: std.num.UInt8 = 97;
+            let byteA: std.numeric.UInt8 = 97;
             if byteArr(unchecked: 0) != byteA { return 2 }
             // 'b' = 98
-            let byteB: std.num.UInt8 = 98;
+            let byteB: std.numeric.UInt8 = 98;
             if byteArr(unchecked: 1) != byteB { return 3 }
             // 'c' = 99
-            let byteC: std.num.UInt8 = 99;
+            let byteC: std.numeric.UInt8 = 99;
             if byteArr(unchecked: 2) != byteC { return 4 }
 
             // Empty string yields empty iter

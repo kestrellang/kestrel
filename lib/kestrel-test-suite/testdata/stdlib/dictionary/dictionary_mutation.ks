@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test clear()
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
             let _ = dict.insert(2, 20);
             let _ = dict.insert(3, 30);
@@ -33,10 +33,10 @@ module Test
             if dict(99).unwrap() != 5 { return 7 }
 
             // Test merge()
-            var base = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var base = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = base.insert(1, 10);
             let _ = base.insert(2, 20);
-            var other = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var other = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = other.insert(2, 200);
             let _ = other.insert(3, 300);
             base.merge(other, uniquingKeysWith: { (old, new) in old + new });
@@ -46,7 +46,7 @@ module Test
             if base(3).unwrap() != 300 { return 11 }
 
             // Test retain(matching:)
-            var dict2 = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict2 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict2.insert(1, 10);
             let _ = dict2.insert(2, 20);
             let _ = dict2.insert(3, 30);
@@ -57,7 +57,7 @@ module Test
             if dict2.contains(2) == false { return 14 }
 
             // Test removeAll(matching:)
-            var dict3 = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict3 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict3.insert(1, 10);
             let _ = dict3.insert(2, 20);
             let _ = dict3.insert(3, 30);

@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // ---- setValue() ----
-            let box1 = std.memory.RcBox[std.num.Int64](10);
+            let box1 = std.memory.RcBox[std.numeric.Int64](10);
             box1.setValue(42);
             if box1.getValue() != 42 { return 1 }
 
@@ -15,7 +15,7 @@ module Test
             if box2.getValue() != 99 { return 2 }
 
             // ---- deepClone() ----
-            let box3 = std.memory.RcBox[std.num.Int64](50);
+            let box3 = std.memory.RcBox[std.numeric.Int64](50);
             let box4 = box3.deepClone();
 
             // Deep clone creates independent storage

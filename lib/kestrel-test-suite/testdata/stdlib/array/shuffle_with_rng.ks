@@ -4,11 +4,11 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1); arr.append(2); arr.append(3); arr.append(4); arr.append(5);
 
             // shuffle(using:) with a seeded RNG for deterministic results
-            var rng = std.num.Lcg64(seed: 42);
+            var rng = std.numeric.Lcg64(seed: 42);
             arr.shuffle(using: rng);
 
             // After shuffle, same count and same elements
@@ -20,9 +20,9 @@ module Test
             if arr.contains(5) == false { return 6 }
 
             // shuffled(using:) returns new array, original unchanged
-            var arr2 = std.collections.Array[std.num.Int64]();
+            var arr2 = std.collections.Array[std.numeric.Int64]();
             arr2.append(10); arr2.append(20); arr2.append(30);
-            var rng2 = std.num.Lcg64(seed: 123);
+            var rng2 = std.numeric.Lcg64(seed: 123);
             let result = arr2.shuffled(using: rng2);
             if result.count != 3 { return 7 }
             if result.contains(10) == false { return 8 }
@@ -35,14 +35,14 @@ module Test
             if arr2(2) != 30 { return 13 }
 
             // Deterministic: same seed gives same result
-            var arr3 = std.collections.Array[std.num.Int64]();
+            var arr3 = std.collections.Array[std.numeric.Int64]();
             arr3.append(1); arr3.append(2); arr3.append(3); arr3.append(4); arr3.append(5);
-            var rng3a = std.num.Lcg64(seed: 999);
+            var rng3a = std.numeric.Lcg64(seed: 999);
             arr3.shuffle(using: rng3a);
 
-            var arr4 = std.collections.Array[std.num.Int64]();
+            var arr4 = std.collections.Array[std.numeric.Int64]();
             arr4.append(1); arr4.append(2); arr4.append(3); arr4.append(4); arr4.append(5);
-            var rng3b = std.num.Lcg64(seed: 999);
+            var rng3b = std.numeric.Lcg64(seed: 999);
             arr4.shuffle(using: rng3b);
 
             if arr3.equals(arr4) == false { return 14 }

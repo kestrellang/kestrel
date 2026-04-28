@@ -4,13 +4,13 @@
 module Test
 
         func main() -> lang.i64 {
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
             let _ = dict.insert(2, 20);
             let _ = dict.insert(3, 30);
 
             // Test keys - iterate and count
-            var keyCount: std.num.Int64 = 0;
+            var keyCount: std.numeric.Int64 = 0;
             var keyIter = dict.keys.iter();
             while let .Some(_) = keyIter.next() {
                 keyCount = keyCount + 1;
@@ -18,7 +18,7 @@ module Test
             if keyCount != 3 { return 1 }
 
             // Test values - iterate and sum
-            var valSum: std.num.Int64 = 0;
+            var valSum: std.numeric.Int64 = 0;
             var valIter = dict.values.iter();
             while let .Some(v) = valIter.next() {
                 valSum = valSum + v;
@@ -64,7 +64,7 @@ module Test
             if notFound.isSome() { return 13 }
 
             // Test all(satisfy:) on empty dictionary - vacuous truth
-            var emptyDict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let vacuousAll = emptyDict.all(satisfying: { (k, v) in false });
             if vacuousAll == false { return 14 }
 

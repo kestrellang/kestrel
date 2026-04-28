@@ -302,14 +302,6 @@
           "members": [
             {
               "kind": "typealias",
-              "name": "Early",
-              "anchor": "typealias-Early",
-              "signature": "type Early = ()",
-              "doc": "",
-              "source_path": "lang/std/result/optional.ks"
-            },
-            {
-              "kind": "typealias",
               "name": "Output",
               "anchor": "typealias-Output",
               "signature": "type Output = T",
@@ -321,6 +313,14 @@
               "name": "Output",
               "anchor": "typealias-Output",
               "signature": "type Output = T",
+              "doc": "",
+              "source_path": "lang/std/result/optional.ks"
+            },
+            {
+              "kind": "typealias",
+              "name": "Residual",
+              "anchor": "typealias-Residual",
+              "signature": "type Residual = ()",
               "doc": "",
               "source_path": "lang/std/result/optional.ks"
             },
@@ -665,17 +665,17 @@
           "members": [
             {
               "kind": "typealias",
-              "name": "Early",
-              "anchor": "typealias-Early",
-              "signature": "type Early = E",
+              "name": "Output",
+              "anchor": "typealias-Output",
+              "signature": "type Output = T",
               "doc": "",
               "source_path": "lang/std/result/result.ks"
             },
             {
               "kind": "typealias",
-              "name": "Output",
-              "anchor": "typealias-Output",
-              "signature": "type Output = T",
+              "name": "Residual",
+              "anchor": "typealias-Residual",
+              "signature": "type Residual = E",
               "doc": "",
               "source_path": "lang/std/result/result.ks"
             },

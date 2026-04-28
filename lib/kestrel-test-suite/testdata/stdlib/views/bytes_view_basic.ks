@@ -21,13 +21,13 @@ module Test
             // 'h' = 104
             let b0 = s.bytes(checked: 0);
             if b0.isNone() { return 5 }
-            let byteH: std.num.UInt8 = 104;
+            let byteH: std.numeric.UInt8 = 104;
             if b0.unwrap() != byteH { return 6 }
 
             // 'e' = 101
             let b1 = s.bytes(checked: 1);
             if b1.isNone() { return 7 }
-            let byteE: std.num.UInt8 = 101;
+            let byteE: std.numeric.UInt8 = 101;
             if b1.unwrap() != byteE { return 8 }
 
             // Out of bounds returns None
@@ -41,7 +41,7 @@ module Test
             // ---- bytes(unchecked:) ----
             // 'o' = 111
             let bu = s.bytes(unchecked: 4);
-            let byteO: std.num.UInt8 = 111;
+            let byteO: std.numeric.UInt8 = 111;
             if bu != byteO { return 11 }
 
             0

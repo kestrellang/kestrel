@@ -6,8 +6,8 @@ module Test
 import std.io.stdio.println
 
 func main() -> lang.i64 {
-    var outer: [[std.num.Int64]] = std.collections.Array[std.collections.Array[std.num.Int64]]();
-    var inner: [std.num.Int64] = std.collections.Array[std.num.Int64]();
+    var outer: [[std.numeric.Int64]] = std.collections.Array[std.collections.Array[std.numeric.Int64]]();
+    var inner: [std.numeric.Int64] = std.collections.Array[std.numeric.Int64]();
     inner.append(1);
     inner.append(2);
     outer.append(inner);

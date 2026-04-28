@@ -471,23 +471,23 @@ do not expose this subscript to user input without checking
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 
-#### function `count`
+#### field `count`
 
 ```kestrel
-public func count() -> Int64
+public var count: Int64 { get }
 ```
 
 Number of elements in the literal.
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 
-#### function `isEmpty`
+#### field `isEmpty`
 
 ```kestrel
-public func isEmpty() -> Bool
+public var isEmpty: Bool { get }
 ```
 
-Returns `true` for `[]`.
+`true` for `[]`.
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 
@@ -501,10 +501,10 @@ type Item = T
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = LiteralSliceIterator[T]
+type TargetIterator = LiteralSliceIterator[T]
 ```
 
 _Defined in `lang/std/memory/literal_slice.ks`._

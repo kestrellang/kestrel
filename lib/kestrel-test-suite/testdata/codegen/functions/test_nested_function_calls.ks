@@ -3,7 +3,7 @@
 
 module Test
 
-func add(a: std.num.Int64, b: std.num.Int64) -> std.num.Int64 {
+func add(a: std.numeric.Int64, b: std.numeric.Int64) -> std.numeric.Int64 {
     a + b
 }
 

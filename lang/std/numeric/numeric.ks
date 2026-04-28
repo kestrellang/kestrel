@@ -1,6 +1,6 @@
 // Numeric protocols
 
-module std.num
+module std.numeric
 
 /// A type whose values can be stepped one position at a time. Underpins
 /// `for-in` over integer ranges and any other "next/previous" walk where

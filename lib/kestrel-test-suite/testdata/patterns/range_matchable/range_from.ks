@@ -4,7 +4,7 @@
 
 module Test
 
-import std.num.Int64
+import std.numeric.Int64
 
 func classify(x: Int64) -> Int64 {
     match x {

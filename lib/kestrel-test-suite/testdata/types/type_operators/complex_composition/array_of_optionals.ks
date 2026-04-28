@@ -6,7 +6,7 @@ module Test
 import std.io.stdio.println
 
 func main() -> lang.i64 {
-    var arr: [std.num.Int64?] = std.collections.Array[std.result.Optional[std.num.Int64]]();
+    var arr: [std.numeric.Int64?] = std.collections.Array[std.result.Optional[std.numeric.Int64]]();
     arr.append(.Some(1));
     arr.append(.None);
     arr.append(.Some(3));

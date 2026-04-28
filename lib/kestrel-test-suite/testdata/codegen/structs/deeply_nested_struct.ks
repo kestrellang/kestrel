@@ -4,17 +4,17 @@
 module Test
 
 struct Level3 {
-    let value: std.num.Int64
+    let value: std.numeric.Int64
 }
 
 struct Level2 {
     let inner: Level3
-    let bonus: std.num.Int64
+    let bonus: std.numeric.Int64
 }
 
 struct Level1 {
     let middle: Level2
-    let top: std.num.Int64
+    let top: std.numeric.Int64
 }
 
 func main() -> lang.i64 {

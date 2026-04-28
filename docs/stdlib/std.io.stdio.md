@@ -6,7 +6,7 @@
 public struct Stderr { /* private fields */ }
 ```
 
-`Write` over the process's standard error (file descriptor `2`).
+`Writable` over the process's standard error (file descriptor `2`).
 
 Mirrors `Stdout` but writes to `STDERR_FILENO`. Conventionally used
 for diagnostics, log lines, and anything that should not be captured
@@ -30,7 +30,7 @@ Builds a stderr handle.
 
 _Defined in `lang/std/io/stdio.ks`._
 
-### Implements `Write`
+### Implements `Writable`
 
 #### function `flush`
 
@@ -58,7 +58,7 @@ _Defined in `lang/std/io/stdio.ks`._
 public struct Stdin { /* private fields */ }
 ```
 
-`Read` over the process's standard input (file descriptor `0`).
+`Readable` over the process's standard input (file descriptor `0`).
 
 Construct via `Stdin()` or the `stdin()` accessor. Stateless — every
 instance shares the same descriptor; concurrent readers race on the
@@ -82,7 +82,7 @@ Builds a stdin handle.
 
 _Defined in `lang/std/io/stdio.ks`._
 
-### Implements `Read`
+### Implements `Readable`
 
 #### function `read`
 
@@ -101,7 +101,7 @@ _Defined in `lang/std/io/stdio.ks`._
 public struct Stdout { /* private fields */ }
 ```
 
-`Write` over the process's standard output (file descriptor `1`).
+`Writable` over the process's standard output (file descriptor `1`).
 
 As with `Stdin`, stateless — `flush` is a no-op because writes go
 straight to libc; line buffering / TTY behaviour is handled by libc
@@ -125,7 +125,7 @@ Builds a stdout handle.
 
 _Defined in `lang/std/io/stdio.ks`._
 
-### Implements `Write`
+### Implements `Writable`
 
 #### function `flush`
 

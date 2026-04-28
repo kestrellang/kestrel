@@ -9,90 +9,90 @@ module std.core
 /// `self = self + other` rewrite would produce — important for collections
 /// (e.g. `Array += other`) and other types where the binary `+` would copy.
 @builtin(.AddAssignProtocol)
-public protocol AddAssign[Rhs = Self] {
+public protocol AddAssign[Other = Self] {
     /// Mutates `self` to `self + other`.
     @builtin(.AddAssignMethod)
-    mutating func addAssign(other: Rhs)
+    mutating func addAssign(other: Other)
 }
 
 /// Raw protocol backing the `-=` operator.
 @builtin(.SubtractAssignProtocol)
-public protocol SubtractAssign[Rhs = Self] {
+public protocol SubtractAssign[Other = Self] {
     /// Mutates `self` to `self - other`.
     @builtin(.SubtractAssignMethod)
-    mutating func subtractAssign(other: Rhs)
+    mutating func subtractAssign(other: Other)
 }
 
 /// Raw protocol backing the `*=` operator.
 @builtin(.MultiplyAssignProtocol)
-public protocol MultiplyAssign[Rhs = Self] {
+public protocol MultiplyAssign[Other = Self] {
     /// Mutates `self` to `self * other`.
     @builtin(.MultiplyAssignMethod)
-    mutating func multiplyAssign(other: Rhs)
+    mutating func multiplyAssign(other: Other)
 }
 
 /// Raw protocol backing the `/=` operator.
 @builtin(.DivideAssignProtocol)
-public protocol DivideAssign[Rhs = Self] {
+public protocol DivideAssign[Other = Self] {
     /// Mutates `self` to `self / other`.
     @builtin(.DivideAssignMethod)
-    mutating func divideAssign(other: Rhs)
+    mutating func divideAssign(other: Other)
 }
 
 /// Raw protocol backing the `%=` operator.
 @builtin(.ModuloAssignProtocol)
-public protocol ModuloAssign[Rhs = Self] {
+public protocol ModuloAssign[Other = Self] {
     /// Mutates `self` to `self % other`.
     @builtin(.ModuloAssignMethod)
-    mutating func modAssign(other: Rhs)
+    mutating func modAssign(other: Other)
 }
 
 /// Raw protocol backing the `&=` operator.
 @builtin(.BitwiseAndAssignProtocol)
-public protocol BitwiseAndAssign[Rhs = Self] {
+public protocol BitwiseAndAssign[Other = Self] {
     /// Mutates `self` to `self & other`.
     @builtin(.BitwiseAndAssignMethod)
-    mutating func bitwiseAndAssign(other: Rhs)
+    mutating func bitwiseAndAssign(other: Other)
 }
 
 /// Raw protocol backing the `|=` operator.
 @builtin(.BitwiseOrAssignProtocol)
-public protocol BitwiseOrAssign[Rhs = Self] {
+public protocol BitwiseOrAssign[Other = Self] {
     /// Mutates `self` to `self | other`.
     @builtin(.BitwiseOrAssignMethod)
-    mutating func bitwiseOrAssign(other: Rhs)
+    mutating func bitwiseOrAssign(other: Other)
 }
 
 /// Raw protocol backing the `^=` operator.
 @builtin(.BitwiseXorAssignProtocol)
-public protocol BitwiseXorAssign[Rhs = Self] {
+public protocol BitwiseXorAssign[Other = Self] {
     /// Mutates `self` to `self ^ other`.
     @builtin(.BitwiseXorAssignMethod)
-    mutating func bitwiseXorAssign(other: Rhs)
+    mutating func bitwiseXorAssign(other: Other)
 }
 
 /// Raw protocol backing the `<<=` operator.
 @builtin(.ShiftLeftAssignProtocol)
-public protocol LeftShiftAssign[Rhs] {
+public protocol LeftShiftAssign[Other] {
     /// Mutates `self` to `self << count`.
     @builtin(.ShiftLeftAssignMethod)
-    mutating func shiftLeftAssign(by count: Rhs)
+    mutating func shiftLeftAssign(by count: Other)
 }
 
 /// Raw protocol backing the `>>=` operator.
 @builtin(.ShiftRightAssignProtocol)
-public protocol RightShiftAssign[Rhs] {
+public protocol RightShiftAssign[Other] {
     /// Mutates `self` to `self >> count`.
     @builtin(.ShiftRightAssignMethod)
-    mutating func shiftRightAssign(by count: Rhs)
+    mutating func shiftRightAssign(by count: Other)
 }
 
 // TODO: Default implementations for types that implement the corresponding binary operator
 // with Output = Self. These are commented out because the where clause syntax
 // `where Protocol[Param].Output = Self` is not yet supported.
 //
-// extend Addable[Rhs]: AddAssign[Rhs] where Addable[Rhs].Output = Self {
-//     public mutating func addAssign(other: Rhs) {
+// extend Addable[Other]: AddAssign[Other] where Addable[Other].Output = Self {
+//     public mutating func addAssign(other: Other) {
 //         self = self.add(other)
 //     }
 // }

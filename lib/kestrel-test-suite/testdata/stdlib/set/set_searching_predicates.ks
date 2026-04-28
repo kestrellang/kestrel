@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var s = std.collections.Set[std.num.Int64]();
+            var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(1);
             let _ = s.insert(2);
             let _ = s.insert(3);
@@ -33,7 +33,7 @@ module Test
             if s.all(satisfying: { (x) in x > 2 }) { return 7 }
 
             // Test all(satisfy:) - empty set (vacuous truth)
-            let empty = std.collections.Set[std.num.Int64]();
+            let empty = std.collections.Set[std.numeric.Int64]();
             if empty.all(satisfying: { (x) in false }) == false { return 8 }
 
             // Test any(satisfy:) - true

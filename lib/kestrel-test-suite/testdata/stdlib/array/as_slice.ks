@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(10); arr.append(20); arr.append(30);
 
             // asSlice() returns a Slice view of the entire array
@@ -15,7 +15,7 @@ module Test
             if slice(unchecked: 2) != 30 { return 4 }
 
             // asSlice on empty array
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             let emptySlice = empty.asSlice();
             if emptySlice.count != 0 { return 5 }
 

@@ -4,11 +4,11 @@
 module Test
 
 enum Option {
-    case Some(value: std.num.Int64)
+    case Some(value: std.numeric.Int64)
     case None
 }
 
-func add_options(a: Option, b: Option) -> std.num.Int64 {
+func add_options(a: Option, b: Option) -> std.numeric.Int64 {
     match a {
         .Some(value: x) => {
             match b {

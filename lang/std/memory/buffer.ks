@@ -4,7 +4,7 @@ module std.memory
 
 import std.result.(Optional)
 import std.core.(Bool, Copyable, fatalError)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
 import std.ffi.(memcpy, memmove, memset)
 

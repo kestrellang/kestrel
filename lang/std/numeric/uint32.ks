@@ -1,7 +1,7 @@
-// UInt8 - 8-bit unsigned integer
+// UInt32 - 32-bit unsigned integer
 // Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
 
-module std.num
+module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
@@ -15,16 +15,16 @@ import std.core.(
 )
 import std.text.(String, Formattable, FormatOptions)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64)
 
-/// A 8-bit unsigned integer.
+/// A 32-bit unsigned integer.
 ///
-/// UInt8 is the 8-bit member of the integer family. The same surface
+/// UInt32 is the 32-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
 /// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
 /// `*Checked` variants for overflow detection or `*Saturating` to clamp to
 /// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
-/// `lang.i8` so it can cross C boundaries unchanged.
+/// `lang.i32` so it can cross C boundaries unchanged.
 ///
 /// # Examples
 ///
@@ -44,9 +44,9 @@ import std.num.(UInt8, Int64, UInt64)
 ///
 /// # Representation
 ///
-/// A single `lang.i8` field. No padding, no headers — bit-identical
+/// A single `lang.i32` field. No padding, no headers — bit-identical
 /// to the corresponding C type.
-public struct UInt8:
+public struct UInt32:
     UnsignedInteger,
     Steppable,
     Comparable,
@@ -85,47 +85,47 @@ public struct UInt8:
     Convertible[Int16],
     Convertible[Int32],
     Convertible[Int64],
+    Convertible[UInt8],
     Convertible[UInt16],
-    Convertible[UInt32],
     Convertible[UInt64]
 {
-    /// The underlying primitive `lang.i8` value. Exposed for FFI
+    /// The underlying primitive `lang.i32` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
-    public var raw: lang.i8
+    public var raw: lang.i32
 
     // ========================================================================
     // CONSTANTS
     // ========================================================================
 
     /// The additive identity, `0`.
-    public static var zero: UInt8 { 0 }
+    public static var zero: UInt32 { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: UInt8 { 0 }
+    public static var one: UInt32 { 0 }
 
     /// The smallest representable value.
     /// This is always 0 for unsigned types.
     /// Note that for signed types `minValue.negate()` overflows back to
     /// itself; use `negateChecked()` if you need to detect that.
-    public static var minValue: UInt8 { UInt8(intLiteral: 0) }
+    public static var minValue: UInt32 { UInt32(intLiteral: 0) }
 
     /// The largest representable value.
-    /// This is 2^8 - 1 (255).
-    public static var maxValue: UInt8 { 255 }
+    /// This is 2^32 - 1 (4_294_967_295).
+    public static var maxValue: UInt32 { 4294967295 }
 
-    /// The width in bits (8). Useful for shift bounds and bit-walks.
-    public static var bitWidth: Int64 { 8 }
+    /// The width in bits (32). Useful for shift bounds and bit-walks.
+    public static var bitWidth: Int64 { 32 }
 
     // ========================================================================
     // INITIALIZERS
     // ========================================================================
 
     /// @name Int Literal
-    /// Compiler-emitted bridge that turns an integer literal into a UInt8.
+    /// Compiler-emitted bridge that turns an integer literal into a UInt32.
     ///
     /// You will rarely call this directly — write the literal and let the
     /// `ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-    /// 64 bits the literal is truncated with `lang.cast_i64_i8`.
+    /// 64 bits the literal is truncated with `lang.cast_i64_i32`.
     ///
     /// # Examples
     ///
@@ -133,7 +133,7 @@ public struct UInt8:
     /// let n: Int64 = 42;            // implicit
     /// ```
     public init(intLiteral value: lang.i64) {
-        self.raw = lang.cast_i64_i8(value)
+        self.raw = lang.cast_i64_i32(value)
     }
 
     /// @name Default
@@ -149,55 +149,55 @@ public struct UInt8:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i8` without conversion. Internal
+    /// Wraps an existing `lang.i32` without conversion. Internal
     /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i8) {
+    init(raw value: lang.i32) {
         self.raw = value
     }
 
     /// @name From Integer
     /// Converts from `Int8`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int8) { self.raw = other.raw }
+    public init(from other: Int8) { self.raw = lang.cast_i8_i32(other.raw) }
     /// @name From Integer
     /// Converts from `Int16`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int16) { self.raw = lang.cast_i16_i8(other.raw) }
+    public init(from other: Int16) { self.raw = lang.cast_i16_i32(other.raw) }
     /// @name From Integer
     /// Converts from `Int32`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int32) { self.raw = lang.cast_i32_i8(other.raw) }
+    public init(from other: Int32) { self.raw = other.raw }
     /// @name From Integer
     /// Converts from `Int64`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int64) { self.raw = lang.cast_i64_i8(other.raw) }
+    public init(from other: Int64) { self.raw = lang.cast_i64_i32(other.raw) }
+    /// @name From Integer
+    /// Converts from `UInt8`. Narrowing conversions truncate the high
+    /// bits; signed→unsigned reinterprets the bit pattern.
+    public init(from other: UInt8) { self.raw = lang.cast_u8_i32(other.raw) }
     /// @name From Integer
     /// Converts from `UInt16`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt16) { self.raw = lang.cast_u16_i8(other.raw) }
-    /// @name From Integer
-    /// Converts from `UInt32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt32) { self.raw = lang.cast_u32_i8(other.raw) }
+    public init(from other: UInt16) { self.raw = lang.cast_u16_i32(other.raw) }
     /// @name From Integer
     /// Converts from `UInt64`. Narrowing conversions truncate the high
     /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = lang.cast_u64_i8(other.raw) }
+    public init(from other: UInt64) { self.raw = lang.cast_u64_i32(other.raw) }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
     // ========================================================================
 
-    /// Sign as a `UInt8`: `0` for zero, `1` otherwise (unsigned types
+    /// Sign as a `UInt32`: `0` for zero, `1` otherwise (unsigned types
     /// have no negative values).
-    public var sign: UInt8 { get {
-        if Bool(boolLiteral: lang.i8_eq(self.raw, 0)) { UInt8.zero }
-        else { UInt8.one }
+    public var sign: UInt32 { get {
+        if Bool(boolLiteral: lang.i32_eq(self.raw, 0)) { UInt32.zero }
+        else { UInt32.one }
     }}
 
     /// True when `self > 0`.
     public var isPositive: Bool { get {
-        Bool(boolLiteral: lang.i8_unsigned_gt(self.raw, 0))
+        Bool(boolLiteral: lang.i32_unsigned_gt(self.raw, 0))
     }}
 
     /// Always `false` — unsigned types cannot be negative.
@@ -208,7 +208,7 @@ public struct UInt8:
 
     /// True when `self == 0`.
     public var isZero: Bool { get {
-        Bool(boolLiteral: lang.i8_eq(self.raw, 0))
+        Bool(boolLiteral: lang.i32_eq(self.raw, 0))
     }}
 
     // ========================================================================
@@ -229,8 +229,8 @@ public struct UInt8:
     /// (0).isPowerOfTwo;   // false
     /// ```
     public var isPowerOfTwo: Bool { get {
-        if Bool(boolLiteral: lang.i8_eq(self.raw, 0)) { false }
-        else { Bool(boolLiteral: lang.i8_eq(lang.i8_and(self.raw, lang.i8_sub(self.raw, 1)), 0)) }
+        if Bool(boolLiteral: lang.i32_eq(self.raw, 0)) { false }
+        else { Bool(boolLiteral: lang.i32_eq(lang.i32_and(self.raw, lang.i32_sub(self.raw, 1)), 0)) }
     }}
 
     /// Population count — the number of `1` bits in the binary representation.
@@ -245,12 +245,12 @@ public struct UInt8:
     /// (0).countOnes;       // 0
     /// ```
     public var countOnes: Int64 { get {
-        Int64(raw: lang.cast_i8_i64(lang.i8_popcount(self.raw)))
+        Int64(raw: lang.cast_i32_i64(lang.i32_popcount(self.raw)))
     }}
 
     /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
     public var countZeros: Int64 { get {
-        8 - self.countOnes
+        32 - self.countOnes
     }}
 
     /// Number of leading zero bits, counting from the most-significant end.
@@ -264,20 +264,20 @@ public struct UInt8:
     /// (0).leadingZeros;   // bitWidth
     /// ```
     public var leadingZeros: Int64 { get {
-        Int64(raw: lang.cast_i8_i64(lang.i8_clz(self.raw)))
+        Int64(raw: lang.cast_i32_i64(lang.i32_clz(self.raw)))
     }}
 
     /// Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
     /// values; returns `bitWidth` for zero. Useful for finding the largest
     /// power of two dividing the value.
     public var trailingZeros: Int64 { get {
-        Int64(raw: lang.cast_i8_i64(lang.i8_ctz(self.raw)))
+        Int64(raw: lang.cast_i32_i64(lang.i32_ctz(self.raw)))
     }}
 
     /// Value with its byte order reversed. Use to convert between big- and
     /// little-endian; lowered to a `bswap` intrinsic.
-    public var byteSwapped: UInt8 { get {
-        self
+    public var byteSwapped: UInt32 { get {
+        UInt32(raw: lang.i32_bswap(self.raw))
     }}
 
     // ========================================================================
@@ -292,13 +292,13 @@ public struct UInt8:
     /// (42).equals(other: 42);  // true
     /// 42 == 42;                // true
     /// ```
-    public func equals(other: UInt8) -> Bool {
-        Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
+    public func equals(other: UInt32) -> Bool {
+        Bool(boolLiteral: lang.i32_eq(self.raw, other.raw))
     }
 
     /// Pattern-matching hook for `Matchable`. Identical to `equals`.
-    public func matches(other: UInt8) -> Bool {
-        Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
+    public func matches(other: UInt32) -> Bool {
+        Bool(boolLiteral: lang.i32_eq(self.raw, other.raw))
     }
 
     /// Three-way comparison returning an `Ordering`. Signed types compare
@@ -311,9 +311,9 @@ public struct UInt8:
     /// (2).compare(other: 2);   // .Equal
     /// (3).compare(other: 2);   // .Greater
     /// ```
-    public func compare(other: UInt8) -> Ordering {
-        if Bool(boolLiteral: lang.i8_unsigned_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.i8_unsigned_gt(self.raw, other.raw)) { .Greater }
+    public func compare(other: UInt32) -> Ordering {
+        if Bool(boolLiteral: lang.i32_unsigned_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.i32_unsigned_gt(self.raw, other.raw)) { .Greater }
         else { .Equal }
     }
 
@@ -323,19 +323,19 @@ public struct UInt8:
 
     /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
     /// integer ranges.
-    public func successor() -> UInt8 { self.add(UInt8.one) }
+    public func successor() -> UInt32 { self.add(UInt32.one) }
 
     /// Predecessor — `self - 1`. Wraps at `minValue`.
-    public func predecessor() -> UInt8 { self.subtract(UInt8.one) }
+    public func predecessor() -> UInt32 { self.subtract(UInt32.one) }
 
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-    public func exclusiveRange(to end: UInt8) -> Range[UInt8] {
-        Range[UInt8](self, end)
+    public func exclusiveRange(to end: UInt32) -> Range[UInt32] {
+        Range[UInt32](self, end)
     }
 
     /// Builds a closed range `self..=end`. Sugar for the `..=` operator.
-    public func inclusiveRange(to end: UInt8) -> ClosedRange[UInt8] {
-        ClosedRange[UInt8](self, end)
+    public func inclusiveRange(to end: UInt32) -> ClosedRange[UInt32] {
+        ClosedRange[UInt32](self, end)
     }
 
     // ========================================================================
@@ -346,27 +346,27 @@ public struct UInt8:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[UInt8]()))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[UInt32]()))
     }
 
     // ========================================================================
     // ASSOCIATED TYPE BINDINGS
     // ========================================================================
 
-    type Addable.Output = UInt8
-    type Subtractable.Output = UInt8
-    type Multipliable.Output = UInt8
-    type Divisible.Output = UInt8
-    type Modulo.Output = UInt8
+    type Addable.Output = UInt32
+    type Subtractable.Output = UInt32
+    type Multipliable.Output = UInt32
+    type Divisible.Output = UInt32
+    type Modulo.Output = UInt32
     
-    type BitwiseAnd.Output = UInt8
-    type BitwiseOr.Output = UInt8
-    type BitwiseXor.Output = UInt8
-    type BitwiseNot.Output = UInt8
-    type LeftShift.Output = UInt8
-    type RightShift.Output = UInt8
-    type RangeConstructible.Output = Range[UInt8]
-    type ClosedRangeConstructible.Output = ClosedRange[UInt8]
+    type BitwiseAnd.Output = UInt32
+    type BitwiseOr.Output = UInt32
+    type BitwiseXor.Output = UInt32
+    type BitwiseNot.Output = UInt32
+    type LeftShift.Output = UInt32
+    type RightShift.Output = UInt32
+    type RangeConstructible.Output = Range[UInt32]
+    type ClosedRangeConstructible.Output = ClosedRange[UInt32]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)
@@ -374,13 +374,13 @@ public struct UInt8:
 
     /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
     /// `addSaturating` to clamp.
-    public func add(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.raw, other.raw)) }
+    public func add(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_add(self.raw, other.raw)) }
 
     /// `self - other`, wrapping on overflow.
-    public func subtract(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.raw, other.raw)) }
+    public func subtract(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_sub(self.raw, other.raw)) }
 
     /// `self * other`, wrapping on overflow.
-    public func multiply(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.raw, other.raw)) }
+    public func multiply(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_mul(self.raw, other.raw)) }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -389,7 +389,7 @@ public struct UInt8:
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public func divide(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_div(self.raw, other.raw)) }
+    public func divide(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -397,7 +397,7 @@ public struct UInt8:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public func modulo(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.raw, other.raw)) }
+    public func modulo(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.raw, other.raw)) }
 
     
     
@@ -409,7 +409,7 @@ public struct UInt8:
     // TODO: requires overflow-detecting intrinsics for proper implementation
     /// Wrapping addition that returns `None` on overflow. For unsigned types
     /// overflow is detected via `result < self`.
-    public func addChecked(other: UInt8) -> UInt8? {
+    public func addChecked(other: UInt32) -> UInt32? {
         let result = self.add(other);
         // For unsigned, overflow if result < either operand
         if result < self {
@@ -419,7 +419,7 @@ public struct UInt8:
     }
 
     /// Subtraction that returns `None` on underflow (`other > self`).
-    public func subtractChecked(other: UInt8) -> UInt8? {
+    public func subtractChecked(other: UInt32) -> UInt32? {
         // For unsigned, underflow if other > self
         if other > self {
             return .None
@@ -429,9 +429,9 @@ public struct UInt8:
 
     /// Wrapping multiplication that returns `None` on overflow. Implemented
     /// by multiplying then dividing back.
-    public func multiplyChecked(other: UInt8) -> UInt8? {
-        if other == UInt8.zero {
-            return .Some(UInt8.zero)
+    public func multiplyChecked(other: UInt32) -> UInt32? {
+        if other == UInt32.zero {
+            return .Some(UInt32.zero)
         };
         let result = self.multiply(other);
         // Check by dividing back
@@ -442,8 +442,8 @@ public struct UInt8:
     }
 
     /// Division that returns `None` for divide-by-zero.
-    public func divideChecked(other: UInt8) -> UInt8? {
-        if other == UInt8.zero {
+    public func divideChecked(other: UInt32) -> UInt32? {
+        if other == UInt32.zero {
             return .None
         };
         .Some(self.divide(other))
@@ -455,30 +455,30 @@ public struct UInt8:
     // ========================================================================
 
     /// Addition that clamps to `maxValue` on overflow.
-    public func addSaturating(other: UInt8) -> UInt8 {
+    public func addSaturating(other: UInt32) -> UInt32 {
         let checked = self.addChecked(other);
         match checked {
             .Some(result) => result,
-            .None => UInt8.maxValue
+            .None => UInt32.maxValue
         }
     }
 
     /// Subtraction that clamps to `0` on underflow (unsigned types cannot
     /// represent negative results).
-    public func subtractSaturating(other: UInt8) -> UInt8 {
+    public func subtractSaturating(other: UInt32) -> UInt32 {
         let checked = self.subtractChecked(other);
         match checked {
             .Some(result) => result,
-            .None => UInt8.zero
+            .None => UInt32.zero
         }
     }
 
     /// Multiplication that clamps to `maxValue` on overflow.
-    public func multiplySaturating(other: UInt8) -> UInt8 {
+    public func multiplySaturating(other: UInt32) -> UInt32 {
         let checked = self.multiplyChecked(other);
         match checked {
             .Some(result) => result,
-            .None => UInt8.maxValue
+            .None => UInt32.maxValue
         }
     }
 
@@ -498,14 +498,14 @@ public struct UInt8:
     /// (3).pow(4);   // 81
     /// (5).pow(-1);  // 0
     /// ```
-    public func pow(exponent: Int64) -> UInt8 {
+    public func pow(exponent: Int64) -> UInt32 {
         if exponent < 0 {
-            return UInt8.zero
+            return UInt32.zero
         };
         if exponent == 0 {
-            return UInt8.one
+            return UInt32.one
         };
-        var result = UInt8.one;
+        var result = UInt32.one;
         var base = self;
         var exp = exponent;
         while exp > 0 {
@@ -528,10 +528,10 @@ public struct UInt8:
     /// (17).gcd(5);   // 1   (coprime)
     /// (-12).gcd(8);  // 4
     /// ```
-    public func gcd(other: UInt8) -> UInt8 {
+    public func gcd(other: UInt32) -> UInt32 {
         var a = self;
         var b = other;
-        while b != UInt8.zero {
+        while b != UInt32.zero {
             let t = b;
             b = a.modulo(b);
             a = t
@@ -549,9 +549,9 @@ public struct UInt8:
     /// (3).lcm(5);   // 15
     /// (0).lcm(7);   // 0
     /// ```
-    public func lcm(other: UInt8) -> UInt8 {
-        if self == UInt8.zero or other == UInt8.zero {
-            return UInt8.zero
+    public func lcm(other: UInt32) -> UInt32 {
+        if self == UInt32.zero or other == UInt32.zero {
+            return UInt32.zero
         };
         let g = self.gcd(other);
         self.divide(g).multiply(other)
@@ -571,7 +571,7 @@ public struct UInt8:
     /// (-5).clamp(min: 0, max: 10);   // 0
     /// (15).clamp(min: 0, max: 10);   // 10
     /// ```
-    public func clamp(min: UInt8, max: UInt8) -> UInt8 {
+    public func clamp(min: UInt32, max: UInt32) -> UInt32 {
         if self < min { min }
         else if self > max { max }
         else { self }
@@ -582,30 +582,30 @@ public struct UInt8:
     // ========================================================================
 
     /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-    public func bitwiseAnd(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_and(self.raw, other.raw)) }
+    public func bitwiseAnd(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_and(self.raw, other.raw)) }
 
     /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-    public func bitwiseOr(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_or(self.raw, other.raw)) }
+    public func bitwiseOr(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_or(self.raw, other.raw)) }
 
     /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-    public func bitwiseXor(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_xor(self.raw, other.raw)) }
+    public func bitwiseXor(other: UInt32) -> UInt32 { UInt32(raw: lang.i32_xor(self.raw, other.raw)) }
 
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-    public func bitwiseNot() -> UInt8 { UInt8(raw: lang.i8_not(self.raw)) }
+    public func bitwiseNot() -> UInt32 { UInt32(raw: lang.i32_not(self.raw)) }
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: lang.i64) -> UInt8 { UInt8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count))) }
+    public func shiftLeft(by count: lang.i64) -> UInt32 { UInt32(raw: lang.i32_shl(self.raw, lang.cast_i64_i32(count))) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: lang.i64) -> UInt8 { UInt8(raw: lang.i8_unsigned_shr(self.raw, lang.cast_i64_i8(count))) }
+    public func shiftRight(by count: lang.i64) -> UInt32 { UInt32(raw: lang.i32_unsigned_shr(self.raw, lang.cast_i64_i32(count))) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.
-    public func rotateLeft(by count: Int64) -> UInt8 {
-        let bits: Int64 = 8;
+    public func rotateLeft(by count: Int64) -> UInt32 {
+        let bits: Int64 = 32;
         let c = count % bits;
         if c == 0 { self }
         else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
@@ -613,8 +613,8 @@ public struct UInt8:
 
     /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
     /// `rotateLeft`.
-    public func rotateRight(by count: Int64) -> UInt8 {
-        let bits: Int64 = 8;
+    public func rotateRight(by count: Int64) -> UInt32 {
+        let bits: Int64 = 32;
         let c = count % bits;
         if c == 0 { self }
         else { self.shiftRight(by: c.raw).bitwiseOr(self.shiftLeft(by: (bits - c).raw)) }
@@ -625,21 +625,21 @@ public struct UInt8:
     // ========================================================================
 
     /// `self += other`
-    public mutating func addAssign(other: UInt8) { self = self.add(other) }
+    public mutating func addAssign(other: UInt32) { self = self.add(other) }
     /// `self -= other`
-    public mutating func subtractAssign(other: UInt8) { self = self.subtract(other) }
+    public mutating func subtractAssign(other: UInt32) { self = self.subtract(other) }
     /// `self *= other`
-    public mutating func multiplyAssign(other: UInt8) { self = self.multiply(other) }
+    public mutating func multiplyAssign(other: UInt32) { self = self.multiply(other) }
     /// `self /= other`
-    public mutating func divideAssign(other: UInt8) { self = self.divide(other) }
+    public mutating func divideAssign(other: UInt32) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: UInt8) { self = self.modulo(other) }
+    public mutating func modAssign(other: UInt32) { self = self.modulo(other) }
     /// `self &= other`
-    public mutating func bitwiseAndAssign(other: UInt8) { self = self.bitwiseAnd(other) }
+    public mutating func bitwiseAndAssign(other: UInt32) { self = self.bitwiseAnd(other) }
     /// `self |= other`
-    public mutating func bitwiseOrAssign(other: UInt8) { self = self.bitwiseOr(other) }
+    public mutating func bitwiseOrAssign(other: UInt32) { self = self.bitwiseOr(other) }
     /// `self ^= other`
-    public mutating func bitwiseXorAssign(other: UInt8) { self = self.bitwiseXor(other) }
+    public mutating func bitwiseXorAssign(other: UInt32) { self = self.bitwiseXor(other) }
     /// `self <<= count`
     public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
     /// `self >>= count`
@@ -649,36 +649,36 @@ public struct UInt8:
     // BYTE CONVERSION
     // ========================================================================
 
-    /// Splits this integer into 1 bytes in *native* (host) byte order.
+    /// Splits this integer into 4 bytes in *native* (host) byte order.
     /// Use `toBytesBigEndian` / `toBytesLittleEndian` when serialising for
     /// a fixed wire format.
     ///
     /// # Examples
     ///
     /// ```
-    /// let bytes = UInt8.maxValue.toBytes();   // 1 bytes, host order
+    /// let bytes = UInt32.maxValue.toBytes();   // 4 bytes, host order
     /// ```
     public func toBytes() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 1);
+        var result = std.collections.Array[UInt8](capacity: 4);
         let value = self;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 4 {
             result.append(ptr.offset(by: i).read());
             i = i + 1
         }
         result
     }
 
-    /// Splits this integer into 1 bytes in big-endian order (most
+    /// Splits this integer into 4 bytes in big-endian order (most
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 1);
+        var result = std.collections.Array[UInt8](capacity: 4);
         let value = UInt64(from: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < 1 {
-            let shift = (1 - 1 - i) * 8;
+        while i < 4 {
+            let shift = (4 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
@@ -686,14 +686,14 @@ public struct UInt8:
         result
     }
 
-    /// Splits this integer into 1 bytes in little-endian order (least
+    /// Splits this integer into 4 bytes in little-endian order (least
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
-        var result = std.collections.Array[UInt8](capacity: 1);
+        var result = std.collections.Array[UInt8](capacity: 4);
         let value = UInt64(from: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 4 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
@@ -702,53 +702,53 @@ public struct UInt8:
         result
     }
 
-    /// Reassembles a `UInt8` from 1 bytes in native (host) byte
-    /// order. Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt8? {
-        if bytes.count != 1 {
+    /// Reassembles a `UInt32` from 4 bytes in native (host) byte
+    /// order. Returns `None` if the input is not exactly 4 bytes long.
+    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt32? {
+        if bytes.count != 4 {
             return .None
         }
-        var value = UInt8.zero;
+        var value = UInt32.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 4 {
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
         .Some(value)
     }
 
-    /// Reassembles a `UInt8` from 1 bytes in big-endian order.
-    /// Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt8? {
-        if bytes.count != 1 {
+    /// Reassembles a `UInt32` from 4 bytes in big-endian order.
+    /// Returns `None` if the input is not exactly 4 bytes long.
+    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt32? {
+        if bytes.count != 4 {
             return .None
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 4 {
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        .Some(UInt8(from: result))
+        .Some(UInt32(from: result))
     }
 
-    /// Reassembles a `UInt8` from 1 bytes in little-endian order.
-    /// Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt8? {
-        if bytes.count != 1 {
+    /// Reassembles a `UInt32` from 4 bytes in little-endian order.
+    /// Returns `None` if the input is not exactly 4 bytes long.
+    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt32? {
+        if bytes.count != 4 {
             return .None
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
-        while i < 1 {
+        while i < 4 {
             let shift = i * 8;
             let byteVal = UInt64(from: bytes(unchecked: i));
             result = result | (byteVal << shift);
             i = i + 1
         }
-        .Some(UInt8(from: result))
+        .Some(UInt32(from: result))
     }
 
     // ========================================================================
@@ -758,16 +758,16 @@ public struct UInt8:
     /// Parses a base-10 unsigned integer literal, optionally prefixed
     /// with `+`. A leading `-` is rejected. Returns `None` for an empty
     /// string, a non-digit character, or a value that does not fit in
-    /// `UInt8`.
+    /// `UInt32`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt8.parse(string: "42");   // Some(42)
-    /// UInt8.parse(string: "-1");   // None  (no sign for unsigned)
-    /// UInt8.parse(string: "");     // None
+    /// UInt32.parse(string: "42");   // Some(42)
+    /// UInt32.parse(string: "-1");   // None  (no sign for unsigned)
+    /// UInt32.parse(string: "");     // None
     /// ```
-    public static func parse(string: String) -> UInt8? {
+    public static func parse(string: String) -> UInt32? {
         let len = string.byteCount;
         if len == 0 {
             return .None
@@ -792,7 +792,7 @@ public struct UInt8:
         // Parse digits using UInt64 for accumulation
         var result: UInt64 = 0;
         let maxBeforeMultiply: UInt64 = 1844674407370955161;
-        let maxVal: UInt64 = UInt64(from: UInt8.maxValue);
+        let maxVal: UInt64 = UInt64(from: UInt32.maxValue);
 
         while index < len {
             let byte: UInt8 = string.bytes(unchecked: index);
@@ -825,21 +825,21 @@ public struct UInt8:
             return .None
         }
 
-        .Some(UInt8(from: result))
+        .Some(UInt32(from: result))
     }
     /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
     /// a–z are case-insensitive and represent digit values 10–35. A
     /// leading `+` is allowed but a leading `-` is rejected. Returns
     /// `None` for an out-of-range radix, an empty string, an
-    /// unrecognised digit, or a value that overflows `UInt8`.
+    /// unrecognised digit, or a value that overflows `UInt32`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt8.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-    /// UInt8.parse(string: "101010", radix: 2);  // Some(42)
+    /// UInt32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// UInt32.parse(string: "101010", radix: 2);  // Some(42)
     /// ```
-    public static func parse(string: String, radix: Int64) -> UInt8? {
+    public static func parse(string: String, radix: Int64) -> UInt32? {
         if radix < 2 or radix > 36 {
             return .None
         }
@@ -866,7 +866,7 @@ public struct UInt8:
         }
 
         let radixU: UInt64 = UInt64(from: radix);
-        let maxVal: UInt64 = UInt64(from: UInt8.maxValue);
+        let maxVal: UInt64 = UInt64(from: UInt32.maxValue);
 
         var result: UInt64 = 0;
 
@@ -896,7 +896,7 @@ public struct UInt8:
             index = index + 1
         }
 
-        .Some(UInt8(from: result))
+        .Some(UInt32(from: result))
     }
 
     // ========================================================================
@@ -938,12 +938,12 @@ public struct UInt8:
 
         // Build digits in reverse order
         var digits = String();
-        if n == UInt8.zero {
+        if n == UInt32.zero {
             digits.appendByte(48)  // '0'
         } else {
-            let radixVal: UInt8 = UInt8(from: radix);
-            while n != UInt8.zero {
-                let digit: UInt8 = n % radixVal;
+            let radixVal: UInt32 = UInt32(from: radix);
+            while n != UInt32.zero {
+                let digit: UInt32 = n % radixVal;
                 let digitVal: Int64 = Int64(from: digit);
                 let charCode: Int64 = if digitVal < 10 {
                     digitVal + 48  // '0'-'9'

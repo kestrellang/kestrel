@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test unzip on iterator of tuples
-            var pairs = std.collections.Array[(std.num.Int64, std.num.Int64)]();
+            var pairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();
             pairs.append((1, 10));
             pairs.append((2, 20));
             pairs.append((3, 30));
@@ -21,7 +21,7 @@ module Test
             if right(unchecked: 2) != 30 { return 8 }
 
             // Unzip empty
-            let emptyPairs = std.collections.Array[(std.num.Int64, std.num.Int64)]();
+            let emptyPairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();
             let (emptyLeft, emptyRight) = emptyPairs.iter().unzip();
             if emptyLeft.count != 0 { return 9 }
             if emptyRight.count != 0 { return 10 }

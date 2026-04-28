@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            let r = std.core.Range[std.num.Int64](2, 8);
+            let r = std.core.Range[std.numeric.Int64](2, 8);
 
             // contains - value in range
             if r.contains(2) == false { return 1 }
@@ -24,20 +24,20 @@ module Test
             if r.isEmpty() { return 7 }
 
             // isEmpty - empty range (start >= end)
-            let emptyRange = std.core.Range[std.num.Int64](5, 5);
+            let emptyRange = std.core.Range[std.numeric.Int64](5, 5);
             if emptyRange.isEmpty() == false { return 8 }
 
-            let reverseRange = std.core.Range[std.num.Int64](8, 2);
+            let reverseRange = std.core.Range[std.numeric.Int64](8, 2);
             if reverseRange.isEmpty() == false { return 9 }
 
             // equals
-            let r2 = std.core.Range[std.num.Int64](2, 8);
+            let r2 = std.core.Range[std.numeric.Int64](2, 8);
             if r.equals(r2) == false { return 10 }
 
-            let r3 = std.core.Range[std.num.Int64](2, 9);
+            let r3 = std.core.Range[std.numeric.Int64](2, 9);
             if r.equals(r3) { return 11 }
 
-            let r4 = std.core.Range[std.num.Int64](3, 8);
+            let r4 = std.core.Range[std.numeric.Int64](3, 8);
             if r.equals(r4) { return 12 }
 
             0

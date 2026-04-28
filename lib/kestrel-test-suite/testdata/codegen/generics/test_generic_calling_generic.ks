@@ -12,6 +12,6 @@ func wrap[T](x: T) -> T {
 }
 
 func main() -> lang.i64 {
-    if wrap[std.num.Int64](42) != 42 { return 1 }
+    if wrap[std.numeric.Int64](42) != 42 { return 1 }
     0
 }

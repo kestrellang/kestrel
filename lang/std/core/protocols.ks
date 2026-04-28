@@ -6,7 +6,7 @@ module std.core
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
 import std.memory.(Slice, Pointer)
-import std.num.(UInt64, Int64)
+import std.numeric.(UInt64, Int64)
 
 /// Protocol for types whose values can be compared for equality.
 ///

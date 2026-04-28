@@ -198,7 +198,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `rev`
 
 ```kestrel
-public func rev() -> RevIterator[Self]
+public func rev() -> ReversedIterator[Self]
 ```
 
 Yields elements back-to-front by pulling `nextBack()` instead of
@@ -209,7 +209,7 @@ Yields elements back-to-front by pulling `nextBack()` instead of
 ```
 [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
 [1, 2, 3, 4, 5].iter().rev().take(count: 3).collect();         // [5, 4, 3]
-[1, 2, 3, 4, 5].iter().rev().find({ it % 2 == 0 });            // Some(4)
+[1, 2, 3, 4, 5].iter().rev().first(matching: { it % 2 == 0 });            // Some(4)
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -369,7 +369,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 public func isEmpty() -> Bool
 ```
 
-True when no elements remain. Equivalent to `remaining == 0`.
+`true` when no elements remain. Equivalent to `remaining == 0`.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
@@ -430,7 +430,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, predicate: (I.Item) -> Bool)
+public init(inner: I, matching: (I.Item) -> Bool)
 ```
 
 Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
@@ -496,7 +496,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, transform: (I.Item) -> U?)
+public init(inner: I, mapping: (I.Item) -> U?)
 ```
 
 Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
@@ -561,7 +561,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, transform: (I.Item) -> U)
+public init(inner: I, mapping: (I.Item) -> U)
 ```
 
 Builds a `FlatMapIterator` with no inner iterator buffered.
@@ -679,10 +679,10 @@ iterator from the source.
 
 _Defined in `lang/std/iter/adapters.ks`._
 
-## struct `FuseIterator`
+## struct `FusedIterator`
 
 ```kestrel
-public struct FuseIterator[I] where I: Iterator { /* private fields */ }
+public struct FusedIterator[I] where I: Iterator { /* private fields */ }
 ```
 
 Wraps a source so that once `None` is returned, future calls also
@@ -702,7 +702,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 public init(inner: I)
 ```
 
-Builds a `FuseIterator` in the "still active" state.
+Builds a `FusedIterator` in the "still active" state.
 
 _Defined in `lang/std/iter/adapters.ks`._
 
@@ -763,7 +763,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, inspector: (I.Item) -> ())
+public init(inner: I, inspecting: (I.Item) -> ())
 ```
 
 Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
@@ -829,7 +829,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, separator: I.Item)
+public init(inner: I, with: I.Item)
 ```
 
 Builds an `IntersperseIterator`.
@@ -912,7 +912,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, separator: () -> I.Item)
+public init(inner: I, with: () -> I.Item)
 ```
 
 Builds an `IntersperseWithIterator`.
@@ -1011,21 +1011,21 @@ The element type that iteration yields.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter
+type TargetIterator
 ```
 
 The concrete iterator type returned by `iter()`. Constrained so
-`Iter.Item` matches `Self.Item`.
+`TargetIterator.Item` matches `Self.Item`.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
 #### function `iter`
 
 ```kestrel
-func iter() -> Iter
+func iter() -> TargetIterator
 ```
 
 Builds a fresh iterator over the contents.
@@ -1045,7 +1045,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `all`
 
 ```kestrel
-public mutating func all((Item) -> Bool) -> Bool
+public mutating func all(matching: (Item) -> Bool) -> Bool
 ```
 
 True if every element satisfies `predicate`. Stops at the first
@@ -1064,7 +1064,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `any`
 
 ```kestrel
-public mutating func any((Item) -> Bool) -> Bool
+public mutating func any(matching: (Item) -> Bool) -> Bool
 ```
 
 True if any element satisfies `predicate`. Stops at the first
@@ -1210,7 +1210,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter((Item) -> Bool) -> FilterIterator[Self]
+public func filter(matching: (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -1244,10 +1244,10 @@ transform itself decides whether the element belongs.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### function `find`
+#### function `first`
 
 ```kestrel
-public mutating func find((Item) -> Bool) -> Item?
+public mutating func first(matching: (Item) -> Bool) -> Item?
 ```
 
 First element matching `predicate`, or `None`. Stops at the first
@@ -1256,8 +1256,8 @@ match.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().find({ it > 3 });   // Some(4)
-[1, 2, 3].iter().find({ it > 10 });        // None
+[1, 2, 3, 4, 5].iter().first(matching: { it > 3 });   // Some(4)
+[1, 2, 3].iter().first(matching: { it > 10 });        // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1322,7 +1322,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `fold`
 
 ```kestrel
-public consuming func fold[Acc](initial: Acc, combine: (Acc, Item) -> Acc) -> Acc
+public consuming func fold[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> Acc
 ```
 
 Left fold — start at `initial` and walk left to right, applying
@@ -1331,9 +1331,9 @@ Left fold — start at `initial` and walk left to right, applying
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().fold(initial: 0, combine: |acc, x| acc + x);   // 10
-[1, 2, 3].iter().fold(initial: 1, combine: |acc, x| acc * x);      // 6
-[].iter().fold(initial: 42, combine: |acc, x| acc + x);            // 42
+[1, 2, 3, 4].iter().fold(from: 0,  combining: |acc, x| acc + x);   // 10
+[1, 2, 3].iter().fold(from: 1,  combining: |acc, x| acc * x);      // 6
+[].iter().fold(from: 42,  combining: |acc, x| acc + x);            // 42
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1358,7 +1358,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `fuse`
 
 ```kestrel
-public func fuse() -> FuseIterator[Self]
+public func fuse() -> FusedIterator[Self]
 ```
 
 Locks `None` once seen — protects against iterators that aren't
@@ -1371,7 +1371,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(inspecting: (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -1393,7 +1393,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperse`
 
 ```kestrel
-public func intersperse(Item) -> IntersperseIterator[Self]
+public func intersperse(with: Item) -> IntersperseIterator[Self]
 ```
 
 Inserts `separator` between consecutive elements. Empty inputs
@@ -1411,7 +1411,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(() -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -1469,10 +1469,10 @@ i.e. they are already in the order `comparator` defines.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### function `isSortedBy`
+#### function `isSorted`
 
 ```kestrel
-public consuming func isSortedBy[K]((Item) -> K) -> Bool where K: Comparable
+public consuming func isSorted[K](byKey: (Item) -> K) -> Bool where K: Comparable
 ```
 
 True if elements are sorted ascending by `key(element)`. Sugar
@@ -1482,7 +1482,7 @@ over `isSorted(by:)` for the common "by-key" shape.
 
 ```
 let words = ["a", "bb", "ccc"];
-words.iter().isSortedBy(key: { it.count });   // true
+words.iter().isSorted(byKey: { it.count });   // true
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1539,13 +1539,13 @@ first occurrence.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### function `maxBy`
+#### function `max`
 
 ```kestrel
-public consuming func maxBy[K]((Item) -> K) -> Item? where K: Comparable
+public consuming func max[K](byKey: (Item) -> K) -> Item? where K: Comparable
 ```
 
-The element with the largest `key(element)`. Mirror of `minBy`.
+The element with the largest `key(element)`. Mirror of `min(byKey:)`.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
@@ -1567,10 +1567,10 @@ first occurrence.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### function `minBy`
+#### function `min`
 
 ```kestrel
-public consuming func minBy[K]((Item) -> K) -> Item? where K: Comparable
+public consuming func min[K](byKey: (Item) -> K) -> Item? where K: Comparable
 ```
 
 The element with the smallest `key(element)`. Ties go to the
@@ -1580,7 +1580,7 @@ first occurrence.
 
 ```
 let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)];
-people.iter().minBy(key: { it.1 });   // Some(("Bob", 25))
+people.iter().min(byKey: { it.1 });   // Some(("Bob", 25))
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1640,7 +1640,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `position`
 
 ```kestrel
-public mutating func position((Item) -> Bool) -> Int64?
+public mutating func position(matching: (Item) -> Bool) -> Int64?
 ```
 
 Index of the first element matching `predicate`, or `None`.
@@ -1677,7 +1677,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `reduce`
 
 ```kestrel
-public consuming func reduce(combine: (Item, Item) -> Item) -> Item?
+public consuming func reduce(combining: (Item, Item) -> Item) -> Item?
 ```
 
 Like `fold`, but seeds the accumulator with the first element
@@ -1687,9 +1687,9 @@ empty iterator.
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().reduce(combine: |a, b| a + b);   // Some(10)
-[5].iter().reduce(combine: |a, b| a + b);            // Some(5)
-[].iter().reduce(combine: |a, b| a + b);             // None
+[1, 2, 3, 4].iter().reduce(combining: |a, b| a + b);   // Some(10)
+[5].iter().reduce(combining: |a, b| a + b);            // Some(5)
+[].iter().reduce(combining: |a, b| a + b);             // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1697,7 +1697,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](Acc, (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -1709,7 +1709,7 @@ products, and any "carry state along" pattern.
 ```
 // Running sum
 [1, 2, 3, 4].iter()
-    .scan(initial: 0, combine: |acc, x| acc + x)
+    .scan(from: 0, combining: |acc, x| acc + x)
     .collect();   // [1, 3, 6, 10]
 ```
 
@@ -1735,7 +1735,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile((Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(matching: (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -1826,7 +1826,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile((Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(matching: (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -1845,7 +1845,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryFold`
 
 ```kestrel
-public mutating func tryFold[Acc, E](initial: Acc, combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+public mutating func tryFold[Acc, E](from: Acc, combining: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
 ```
 
 Fold with early exit on `Err`. The combine returns `Result`; the
@@ -1857,7 +1857,7 @@ succeeds, returns `Ok(final accumulator)`.
 ```
 // Stop the moment a parse fails
 ["1", "2", "3"].iter()
-    .tryFold(initial: 0, combine: |acc, s| {
+    .tryFold(from: 0,  combining: |acc, s| {
         match Int64.parse(s) {
             .Some(n) => .Ok(acc + n),
             .None    => .Err("parse error")
@@ -1865,7 +1865,7 @@ succeeds, returns `Ok(final accumulator)`.
     });   // Ok(6)
 
 ["1", "bad", "3"].iter()
-    .tryFold(initial: 0, combine: |acc, s| {
+    .tryFold(from: 0,  combining: |acc, s| {
         match Int64.parse(s) {
             .Some(n) => .Ok(acc + n),
             .None    => .Err("parse error")
@@ -1953,10 +1953,10 @@ type Item = Self.Item
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = Self
+type TargetIterator = Self
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1993,7 +1993,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, transform: (I.Item) -> U)
+public init(inner: I, mapping: (I.Item) -> U)
 ```
 
 Builds a `MapIterator` from `inner` and `transform`. Prefer
@@ -2288,14 +2288,14 @@ returns `None` once the counter hits zero.
 
 _Defined in `lang/std/iter/adapters.ks`._
 
-## struct `RevIterator`
+## struct `ReversedIterator`
 
 ```kestrel
-public struct RevIterator[I] where I: DoubleEndedIterator, I: Iterator { /* private fields */ }
+public struct ReversedIterator[I] where I: DoubleEndedIterator, I: Iterator { /* private fields */ }
 ```
 
 Wraps a `DoubleEndedIterator` to walk it back to front. The
-`Iterator` conformance is added by the `extend RevIterator[I]:
+`Iterator` conformance is added by the `extend ReversedIterator[I]:
 DoubleEndedIterator` block in `iterator.ks`. Returned by
 `DoubleEndedIterator.rev()`.
 
@@ -2313,7 +2313,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 public init(inner: I)
 ```
 
-Builds a `RevIterator`. Prefer `inner.rev()`.
+Builds a `ReversedIterator`. Prefer `inner.rev()`.
 
 _Defined in `lang/std/iter/adapters.ks`._
 
@@ -2380,7 +2380,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, initial: Acc, combine: (Acc, I.Item) -> Acc)
+public init(inner: I, from: Acc, combining: (Acc, I.Item) -> Acc)
 ```
 
 Builds a `ScanIterator` seeded with `initial`.
@@ -2520,7 +2520,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, predicate: (I.Item) -> Bool)
+public init(inner: I, matching: (I.Item) -> Bool)
 ```
 
 Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
@@ -2733,7 +2733,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, predicate: (I.Item) -> Bool)
+public init(inner: I, matching: (I.Item) -> Bool)
 ```
 
 Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.

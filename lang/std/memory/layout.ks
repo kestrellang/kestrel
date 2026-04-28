@@ -3,7 +3,7 @@
 module std.memory
 
 import std.core.(Equatable, Bool)
-import std.num.(Int64)
+import std.numeric.(Int64)
 
 /// Size + alignment pair describing the memory footprint of a type.
 ///

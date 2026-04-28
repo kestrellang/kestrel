@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
 
             // Test isEmpty initially
             if dict.isEmpty == false { return 1 }

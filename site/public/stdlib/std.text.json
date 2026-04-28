@@ -411,11 +411,11 @@
               "source_path": "lang/std/text/views.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "isEmpty",
-              "anchor": "function-isEmpty",
-              "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns true if the view spans zero bytes.",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
+              "doc": "`true` if the view spans zero bytes.",
               "source_path": "lang/std/text/views.ks"
             },
             {
@@ -451,9 +451,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = BytesIterator",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = BytesIterator",
               "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
@@ -983,9 +983,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = CharsIterator",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = CharsIterator",
               "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
@@ -1006,7 +1006,7 @@
       "name": "DefaultStringInterpolation",
       "anchor": "struct-DefaultStringInterpolation",
       "signature": "public struct DefaultStringInterpolation { /* private fields */ }",
-      "doc": "The default `StringInterpolationProtocol` accumulator used for `String` interpolation.\n\nStores each literal and each formatted interpolation as a separate\n`String` part, then concatenates them in `build()`. The two-pass\ndesign lets `build()` size the result buffer exactly, avoiding the\nrepeated reallocation cost a single-buffer accumulator would pay.\n\n# Examples\n\n```\nvar acc = DefaultStringInterpolation(literalCapacity: 7, interpolationCount: 1);\nacc.appendLiteral(\"hello, \");\nacc.appendInterpolation(\"world\", options: FormatOptions.default());\nacc.build();  // \"hello, world\"\n```\n\n# Representation\n\nA single `Array[String]` of accumulated parts. Empty literal pieces\nare dropped on append.",
+      "doc": "The default `Interpolatable` accumulator used for `String` interpolation.\n\nStores each literal and each formatted interpolation as a separate\n`String` part, then concatenates them in `build()`. The two-pass\ndesign lets `build()` size the result buffer exactly, avoiding the\nrepeated reallocation cost a single-buffer accumulator would pay.\n\n# Examples\n\n```\nvar acc = DefaultStringInterpolation(literalCapacity: 7, interpolationCount: 1);\nacc.appendLiteral(\"hello, \");\nacc.appendInterpolation(\"world\", options: FormatOptions.default());\nacc.build();  // \"hello, world\"\n```\n\n# Representation\n\nA single `Array[String]` of accumulated parts. Empty literal pieces\nare dropped on append.",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1034,8 +1034,8 @@
         },
         {
           "kind": "protocol",
-          "label": "StringInterpolationProtocol",
-          "source_path": "std.text.StringInterpolationProtocol",
+          "label": "Interpolatable",
+          "source_path": "std.text.Interpolatable",
           "members": [
             {
               "kind": "initializer",
@@ -1085,7 +1085,7 @@
       "name": "ExpressibleByStringInterpolation",
       "anchor": "protocol-ExpressibleByStringInterpolation",
       "signature": "public protocol ExpressibleByStringInterpolation",
-      "doc": "Marker protocol for types constructible from a completed string interpolation.\n\nRefines `ExpressibleByStringLiteral` so a single conformance covers\nboth pure-literal `\"abc\"` and interpolated `\"a\\{x}b\"` forms. The\ncompiler picks `Interpolation` as the accumulator type, drives it via\n`StringInterpolationProtocol`, then hands it to `init(interpolation:)`.",
+      "doc": "Marker protocol for types constructible from a completed string interpolation.\n\nRefines `ExpressibleByStringLiteral` so a single conformance covers\nboth pure-literal `\"abc\"` and interpolated `\"a\\{x}b\"` forms. The\ncompiler picks `Interpolation` as the accumulator type, drives it via\n`Interpolatable`, then hands it to `init(interpolation:)`.",
       "source_path": "lang/std/text/format.ks",
       "member_groups": [
         {
@@ -1678,9 +1678,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = GraphemesIterator",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = GraphemesIterator",
               "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
@@ -1691,6 +1691,47 @@
               "signature": "public func iter() -> GraphemesIterator",
               "doc": "Returns a `GraphemesIterator` positioned at byte 0.",
               "source_path": "lang/std/text/views.ks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "protocol",
+      "name": "Interpolatable",
+      "anchor": "protocol-Interpolatable",
+      "signature": "public protocol Interpolatable",
+      "doc": "Protocol for the accumulator type that string interpolation builds into.\n\nThe compiler lowers `\"hello, \\{name}!\"` to a sequence of\n`appendLiteral` and `appendInterpolation` calls on a fresh value of\nthe implementor's type, then reads the final string out (typically\nvia a `build()` method on the concrete accumulator). `String` ships\n`DefaultStringInterpolation` as its accumulator; custom string-like\ntypes can supply their own to intercept literal pieces or coerce\nformatted parts.",
+      "source_path": "lang/std/text/format.ks",
+      "member_groups": [
+        {
+          "kind": "direct",
+          "label": null,
+          "source_path": null,
+          "members": [
+            {
+              "kind": "initializer",
+              "name": "With Capacity",
+              "anchor": "initializer-With-Capacity",
+              "signature": "init(Int64, Int64)",
+              "doc": "Constructs an empty accumulator with capacity hints derived from the literal at compile time.\n\n`literalCapacity` is the total byte count of the static segments;\n`interpolationCount` is the number of `\\{...}` holes. Implementors\ncan use these to preallocate.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "function",
+              "name": "appendInterpolation",
+              "anchor": "function-appendInterpolation",
+              "signature": "mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable",
+              "doc": "Appends one formatted interpolation hole.\n\nReceives the runtime `value`, the parsed `options` from the\ntrailing spec (or defaults if no spec was given), and a generic\nconstraint that the value is `Formattable`.",
+              "source_path": "lang/std/text/format.ks"
+            },
+            {
+              "kind": "function",
+              "name": "appendLiteral",
+              "anchor": "function-appendLiteral",
+              "signature": "mutating func appendLiteral(String)",
+              "doc": "Appends a static literal segment.\n\nCalled once per run of literal text between `\\{...}` holes. May be\ncalled with the empty string; implementors should be cheap in\nthat case.",
+              "source_path": "lang/std/text/format.ks"
             }
           ]
         }
@@ -1855,9 +1896,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = LinesIterator",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = LinesIterator",
               "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/views.ks"
             },
@@ -2009,7 +2050,7 @@
               "kind": "initializer",
               "name": "From Predicate",
               "anchor": "initializer-From-Predicate",
-              "signature": "public init(ptr: Pointer[UInt8], length: Int64, predicate: (Char) -> Bool)",
+              "signature": "public init(pointer: Pointer[UInt8], length: Int64, matching: (Char) -> Bool)",
               "doc": "Constructs a split-where iterator from a buffer pointer and a `Char` predicate.\n\nPrefer `someString.split(matching:)` over calling this directly.\n\n# Safety\n\n`ptr` must remain valid for `length` bytes for the iterator's\nlifetime.",
               "source_path": "lang/std/text/string.ks"
             }
@@ -2313,7 +2354,7 @@
               "kind": "function",
               "name": "pad",
               "anchor": "function-pad",
-              "signature": "public func pad(start: Int64, with: Char) -> String",
+              "signature": "public func pad(leading: Int64, with: Char) -> String",
               "doc": "Returns the string padded at the start with `char` so the total *code-point* count is `length`.\n\nIf the string is already at least `length` code points long,\nreturns a clone. Compare with `pad(end:with:)` for trailing\npadding.\n\n# Examples\n\n```\n\"42\".pad(start: 5, with: '0');  // \"00042\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
@@ -2321,7 +2362,7 @@
               "kind": "function",
               "name": "pad",
               "anchor": "function-pad",
-              "signature": "public func pad(end: Int64, with: Char) -> String",
+              "signature": "public func pad(trailing: Int64, with: Char) -> String",
               "doc": "Returns the string padded at the end with `char` so the total *code-point* count is `length`.\n\n# Examples\n\n```\n\"42\".pad(end: 5, with: '.');  // \"42...\"\n```",
               "source_path": "lang/std/text/string.ks"
             },
@@ -2558,9 +2599,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = StringIterator",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = StringIterator",
               "doc": "The iterator type returned by `iter()`.",
               "source_path": "lang/std/text/string.ks"
             },
@@ -2722,47 +2763,6 @@
               "signature": "init(from: From)",
               "doc": "Creates an instance from `value`.",
               "source_path": "lang/std/core/convertible.ks"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "kind": "protocol",
-      "name": "StringInterpolationProtocol",
-      "anchor": "protocol-StringInterpolationProtocol",
-      "signature": "public protocol StringInterpolationProtocol",
-      "doc": "Protocol for the accumulator type that string interpolation builds into.\n\nThe compiler lowers `\"hello, \\{name}!\"` to a sequence of\n`appendLiteral` and `appendInterpolation` calls on a fresh value of\nthe implementor's type, then reads the final string out (typically\nvia a `build()` method on the concrete accumulator). `String` ships\n`DefaultStringInterpolation` as its accumulator; custom string-like\ntypes can supply their own to intercept literal pieces or coerce\nformatted parts.",
-      "source_path": "lang/std/text/format.ks",
-      "member_groups": [
-        {
-          "kind": "direct",
-          "label": null,
-          "source_path": null,
-          "members": [
-            {
-              "kind": "initializer",
-              "name": "With Capacity",
-              "anchor": "initializer-With-Capacity",
-              "signature": "init(Int64, Int64)",
-              "doc": "Constructs an empty accumulator with capacity hints derived from the literal at compile time.\n\n`literalCapacity` is the total byte count of the static segments;\n`interpolationCount` is the number of `\\{...}` holes. Implementors\ncan use these to preallocate.",
-              "source_path": "lang/std/text/format.ks"
-            },
-            {
-              "kind": "function",
-              "name": "appendInterpolation",
-              "anchor": "function-appendInterpolation",
-              "signature": "mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable",
-              "doc": "Appends one formatted interpolation hole.\n\nReceives the runtime `value`, the parsed `options` from the\ntrailing spec (or defaults if no spec was given), and a generic\nconstraint that the value is `Formattable`.",
-              "source_path": "lang/std/text/format.ks"
-            },
-            {
-              "kind": "function",
-              "name": "appendLiteral",
-              "anchor": "function-appendLiteral",
-              "signature": "mutating func appendLiteral(String)",
-              "doc": "Appends a static literal segment.\n\nCalled once per run of literal text between `\\{...}` holes. May be\ncalled with the empty string; implementors should be cheap in\nthat case.",
-              "source_path": "lang/std/text/format.ks"
             }
           ]
         }

@@ -4,11 +4,11 @@
 module Test
 
 struct Point {
-    let x: std.num.Int64
-    let y: std.num.Int64
+    let x: std.numeric.Int64
+    let y: std.numeric.Int64
 }
 
-func sum(p: Point) -> std.num.Int64 {
+func sum(p: Point) -> std.numeric.Int64 {
     p.x + p.y
 }
 

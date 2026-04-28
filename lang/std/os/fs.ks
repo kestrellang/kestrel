@@ -2,11 +2,11 @@
 //
 // Provides high-level functions for working with files and directories.
 
-module std.os.fs
+module std.os
 
-import std.num.(Int64, Int32, Int16)
+import std.numeric.(Int64, Int32, Int16)
 import std.memory.(Pointer, RawPointer)
-import std.num.(UInt8)
+import std.numeric.(UInt8)
 import std.text.(String)
 import std.core.(Bool)
 import std.collections.(Array)

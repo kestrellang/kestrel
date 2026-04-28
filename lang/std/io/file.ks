@@ -2,7 +2,7 @@
 
 module std.io.file
 
-import std.num.(Int64, Int32, UInt8)
+import std.numeric.(Int64, Int32, UInt8)
 import std.result.(Result, Optional)
 import std.memory.(Slice, Pointer)
 import std.collections.(Array)
@@ -10,8 +10,8 @@ import std.text.(String)
 import std.core.(Bool, Copyable)
 import std.io.libc
 import std.io.error.(IoError)
-import std.io.read.(Read, readAll)
-import std.io.write.(Write, writeAll, writeStr)
+import std.io.read.(Readable, readAll)
+import std.io.write.(Writable, writeAll, writeString)
 
 // ============================================================================
 // SEEK POSITION
@@ -50,14 +50,14 @@ public enum Seek {
 /// The wrapped file descriptor is closed automatically when the `File`
 /// goes out of scope, so explicit `close` is never necessary. `File` is
 /// `not Copyable` to keep the descriptor uniquely owned — pass by
-/// reference or move it instead. Conforms to both `Read` and `Write`,
+/// reference or move it instead. Conforms to both `Readable` and `Writable`,
 /// although calls fail with `EBADF` if the open mode does not permit the
 /// direction (e.g. writing to a file opened with `open()`).
 ///
 /// # Examples
 ///
 /// ```
-/// // Read whole file in 4 KiB chunks.
+/// // Readable whole file in 4 KiB chunks.
 /// var file = try File.open("input.txt");
 /// var buf = Array[UInt8](repeating: 0, count: 4096);
 /// while true {
@@ -75,7 +75,7 @@ public enum Seek {
 ///
 /// Owning, unique. The `deinit` calls `close(fd)` if `fd >= 0`; close
 /// errors are silently ignored — there's no caller to surface them to.
-public struct File: Read, Write, not Copyable {
+public struct File: Readable, Writable, not Copyable {
     var fd: libc.Fd
 
     /// @name From Fd
@@ -118,7 +118,7 @@ public struct File: Read, Write, not Copyable {
     ///
     /// ```
     /// var file = try File.create("output.txt");
-    /// try writeStr(file, "New content");
+    /// try writeString(file, "New content");
     /// ```
     public static func create(path: String) -> Result[File, IoError] {
         let len = path.byteCount;
@@ -356,7 +356,7 @@ public func readFileBytes(path: String) -> Result[Array[UInt8], IoError] {
 /// are the UTF-8 encoding of the string. The mirror of `readFileString`.
 public func writeFileString(path: String, content: String) -> Result[(), IoError] {
     var file = try File.create(path);
-    writeStr(file, content)
+    writeString(file, content)
 }
 
 /// Writes `content` to `path`, creating or truncating as needed.
@@ -372,7 +372,7 @@ public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), Io
 /// than `PIPE_BUF` may interleave.
 public func appendFileString(path: String, content: String) -> Result[(), IoError] {
     var file = try File.openAppend(path);
-    writeStr(file, content)
+    writeString(file, content)
 }
 
 /// Appends bytes to `path`, creating if absent. Binary counterpart to

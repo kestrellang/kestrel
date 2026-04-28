@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable, Comparable)
 import std.text.(Formattable, FormatOptions)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.collections.(Dictionary, DictionaryIterator, DefaultHasher)
@@ -178,7 +178,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// `Iterable` element type — `T`.
     type Item = T
     /// Concrete iterator type returned by `iter()`.
-    type Iter = SetIterator[T, H]
+    type TargetIterator = SetIterator[T, H]
 
     /// Backing dictionary. Keys are the set's elements; values are
     /// always `Unit()`.
@@ -847,7 +847,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// `true` if any element satisfies `predicate`.
     ///
     /// Linear scan; short-circuits on the first match. `false` for
-    /// empty sets. The aliased shape `any(satisfying:)` exists for
+    /// empty sets. The aliased shape `any(matching:)` exists for
     /// symmetry with `Array`.
     ///
     /// # Examples
@@ -893,16 +893,16 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// true for empty sets).
     ///
     /// Short-circuits on the first failure. Dual of
-    /// `any(satisfying:)`.
+    /// `any(matching:)`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Set([2, 4, 6]).all(satisfying: { (x) in x % 2 == 0 });  // true
-    /// Set([1, 2, 4]).all(satisfying: { (x) in x % 2 == 0 });  // false
-    /// Set[Int64]().all(satisfying: { (x) in false });         // true (vacuous)
+    /// Set([2, 4, 6]).all(matching: { (x) in x % 2 == 0 });  // true
+    /// Set([1, 2, 4]).all(matching: { (x) in x % 2 == 0 });  // false
+    /// Set[Int64]().all(matching: { (x) in false });         // true (vacuous)
     /// ```
-    public func all(satisfying predicate: (T) -> Bool) -> Bool {
+    public func all(matching predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if not predicate(elem) {
@@ -921,18 +921,18 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// # Examples
     ///
     /// ```
-    /// Set([1, 2, 3]).any(satisfying: { (x) in x > 2 });  // true
-    /// Set[Int64]().any(satisfying: { (x) in true });     // false (empty)
+    /// Set([1, 2, 3]).any(matching: { (x) in x > 2 });  // true
+    /// Set[Int64]().any(matching: { (x) in true });     // false (empty)
     /// ```
-    public func any(satisfying predicate: (T) -> Bool) -> Bool {
+    public func any(matching predicate: (T) -> Bool) -> Bool {
         self.contains(matching: predicate)
     }
 
     /// Returns the number of elements for which `predicate` is true.
     ///
     /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(satisfying:)`; for a yes/no on every element,
-    /// `all(satisfying:)`.
+    /// `any(matching:)`; for a yes/no on every element,
+    /// `all(matching:)`.
     ///
     /// # Examples
     ///

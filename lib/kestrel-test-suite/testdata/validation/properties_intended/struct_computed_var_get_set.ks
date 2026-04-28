@@ -6,9 +6,9 @@ module Main
 import std.io.stdio.println
 
 public struct Foo {
-    private var _v: std.num.Int64
+    private var _v: std.numeric.Int64
 
-    public var structComputedVar: std.num.Int64 {
+    public var structComputedVar: std.numeric.Int64 {
         get { self._v }
         set { self._v = newValue }
     }
@@ -16,7 +16,7 @@ public struct Foo {
     init() { self._v = 5 }
 }
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     var foo = Foo();
     let _ = println(foo.structComputedVar);
     foo.structComputedVar = 9;

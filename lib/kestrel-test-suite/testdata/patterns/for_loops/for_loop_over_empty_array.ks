@@ -4,8 +4,8 @@
 module Main
 
 func test() {
-    let arr = std.collections.Array[std.num.Int64]();
-    var count: std.num.Int64 = 0;
+    let arr = std.collections.Array[std.numeric.Int64]();
+    var count: std.numeric.Int64 = 0;
     for item in arr {
         count = count + 1
     }

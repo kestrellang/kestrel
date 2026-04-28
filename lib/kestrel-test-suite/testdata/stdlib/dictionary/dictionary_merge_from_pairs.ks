@@ -5,11 +5,11 @@ module Test
 
         func main() -> lang.i64 {
             // mergeFrom with another dictionary's iter
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
             let _ = dict.insert(2, 20);
 
-            var other = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var other = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = other.insert(2, 200);
             let _ = other.insert(3, 300);
 
@@ -20,10 +20,10 @@ module Test
             if dict(3).unwrap() != 300 { return 4 }
 
             // mergeFrom with "take new" strategy
-            var dict2 = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict2 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict2.insert(1, 10);
 
-            var src = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var src = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = src.insert(1, 99);
             let _ = src.insert(2, 200);
 
@@ -33,9 +33,9 @@ module Test
             if dict2(2).unwrap() != 200 { return 7 }
 
             // mergeFrom with empty source - no change
-            var dict3 = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict3 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict3.insert(1, 10);
-            let emptySrc = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            let emptySrc = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             dict3.mergeFrom(emptySrc, uniquingKeysWith: { (old, new) in new });
             if dict3.count != 1 { return 8 }
             if dict3(1).unwrap() != 10 { return 9 }

@@ -4,7 +4,7 @@
 module Test
 
 func main() -> lang.i64 {
-    let x: std.num.Int64 = 3;
+    let x: std.numeric.Int64 = 3;
     if x < 5 {
         0
     } else {

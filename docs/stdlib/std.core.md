@@ -3,7 +3,7 @@
 ## protocol `AddAssign`
 
 ```kestrel
-public protocol AddAssign[Rhs = Self]
+public protocol AddAssign[Other = Self]
 ```
 
 Raw protocol backing the `+=` operator.
@@ -19,7 +19,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `addAssign`
 
 ```kestrel
-mutating func addAssign(Rhs)
+mutating func addAssign(Other)
 ```
 
 Mutates `self` to `self + other`.
@@ -29,12 +29,12 @@ _Defined in `lang/std/core/assign.ks`._
 ## protocol `Addable`
 
 ```kestrel
-public protocol Addable[Rhs = Self]
+public protocol Addable[Other = Self]
 ```
 
 Raw protocol backing the `+` operator.
 
-`Output` may differ from `Self` and `Rhs` — this is what allows mixed-type
+`Output` may differ from `Self` and `Other` — this is what allows mixed-type
 arithmetic (e.g. `Vector + Scalar -> Vector`) without losing precision.
 The associated `zero` value gives sums (and `Iterator.sum`) a starting
 point and is the additive identity by definition.
@@ -61,7 +61,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `add`
 
 ```kestrel
-func add(Rhs) -> Output
+func add(Other) -> Output
 ```
 
 Returns `self + other`.
@@ -81,7 +81,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 ## protocol `And`
 
 ```kestrel
-public protocol And[Rhs = Self]
+public protocol And[Other = Self]
 ```
 
 Raw protocol backing the `and` keyword operator.
@@ -113,7 +113,7 @@ _Defined in `lang/std/core/logical.ks`._
 #### function `logicalAnd`
 
 ```kestrel
-func logicalAnd(() -> Rhs) -> Output
+func logicalAnd(() -> Other) -> Output
 ```
 
 Returns `self and other()`. The closure runs only if needed.
@@ -192,7 +192,7 @@ _Defined in `lang/std/core/protocols.ks`._
 ## protocol `BitwiseAnd`
 
 ```kestrel
-public protocol BitwiseAnd[Rhs = Self]
+public protocol BitwiseAnd[Other = Self]
 ```
 
 Raw protocol backing the `&` operator.
@@ -221,7 +221,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-func bitwiseAnd(Rhs) -> Output
+func bitwiseAnd(Other) -> Output
 ```
 
 Returns `self & other`.
@@ -231,7 +231,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 ## protocol `BitwiseAndAssign`
 
 ```kestrel
-public protocol BitwiseAndAssign[Rhs = Self]
+public protocol BitwiseAndAssign[Other = Self]
 ```
 
 Raw protocol backing the `&=` operator.
@@ -243,7 +243,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `bitwiseAndAssign`
 
 ```kestrel
-mutating func bitwiseAndAssign(Rhs)
+mutating func bitwiseAndAssign(Other)
 ```
 
 Mutates `self` to `self & other`.
@@ -283,7 +283,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 ## protocol `BitwiseOr`
 
 ```kestrel
-public protocol BitwiseOr[Rhs = Self]
+public protocol BitwiseOr[Other = Self]
 ```
 
 Raw protocol backing the `|` operator.
@@ -303,7 +303,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-func bitwiseOr(Rhs) -> Output
+func bitwiseOr(Other) -> Output
 ```
 
 Returns `self | other`.
@@ -313,7 +313,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 ## protocol `BitwiseOrAssign`
 
 ```kestrel
-public protocol BitwiseOrAssign[Rhs = Self]
+public protocol BitwiseOrAssign[Other = Self]
 ```
 
 Raw protocol backing the `|=` operator.
@@ -325,7 +325,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `bitwiseOrAssign`
 
 ```kestrel
-mutating func bitwiseOrAssign(Rhs)
+mutating func bitwiseOrAssign(Other)
 ```
 
 Mutates `self` to `self | other`.
@@ -335,7 +335,7 @@ _Defined in `lang/std/core/assign.ks`._
 ## protocol `BitwiseXor`
 
 ```kestrel
-public protocol BitwiseXor[Rhs = Self]
+public protocol BitwiseXor[Other = Self]
 ```
 
 Raw protocol backing the `^` operator.
@@ -355,7 +355,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-func bitwiseXor(Rhs) -> Output
+func bitwiseXor(Other) -> Output
 ```
 
 Returns `self ^ other`.
@@ -365,7 +365,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 ## protocol `BitwiseXorAssign`
 
 ```kestrel
-public protocol BitwiseXorAssign[Rhs = Self]
+public protocol BitwiseXorAssign[Other = Self]
 ```
 
 Raw protocol backing the `^=` operator.
@@ -377,7 +377,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `bitwiseXorAssign`
 
 ```kestrel
-mutating func bitwiseXorAssign(Rhs)
+mutating func bitwiseXorAssign(Other)
 ```
 
 Mutates `self` to `self ^ other`.
@@ -727,13 +727,13 @@ Upper bound — included.
 
 _Defined in `lang/std/core/range.ks`._
 
-#### function `isEmpty`
+#### field `isEmpty`
 
 ```kestrel
-public func isEmpty() -> Bool
+public var isEmpty: Bool { get }
 ```
 
-Returns `true` when `start > end` (no values are produced).
+`true` when `start > end` (no values are produced).
 
 _Defined in `lang/std/core/range.ks`._
 
@@ -769,10 +769,10 @@ type Item = T
 
 _Defined in `lang/std/core/range.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = ClosedRangeIterator[T]
+type TargetIterator = ClosedRangeIterator[T]
 ```
 
 _Defined in `lang/std/core/range.ks`._
@@ -824,7 +824,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArray`
 
 ```kestrel
-public func writeArray(to: mutating Array[T], value: Slice[T])
+public func writeArray(to: mutating Array[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -832,7 +832,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArrayUnchecked`
 
 ```kestrel
-public func writeArrayUnchecked(to: mutating Array[T], value: Slice[T])
+public func writeArrayUnchecked(to: mutating Array[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -874,7 +874,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSlice`
 
 ```kestrel
-public func writeSlice(to: Slice[T], value: Slice[T])
+public func writeSlice(to: Slice[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -882,7 +882,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSliceUnchecked`
 
 ```kestrel
-public func writeSliceUnchecked(to: Slice[T], value: Slice[T])
+public func writeSliceUnchecked(to: Slice[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -1042,7 +1042,7 @@ _Defined in `lang/std/text/views.ks`._
 ## protocol `ClosedRangeConstructible`
 
 ```kestrel
-public protocol ClosedRangeConstructible[Rhs = Self]
+public protocol ClosedRangeConstructible[Other = Self]
 ```
 
 Raw protocol backing the closed `..=` operator (`start..=end`).
@@ -1062,7 +1062,7 @@ _Defined in `lang/std/core/range.ks`._
 #### function `inclusiveRange`
 
 ```kestrel
-func inclusiveRange(to: Rhs) -> Output
+func inclusiveRange(to: Other) -> Output
 ```
 
 Builds the closed range `[self, end]`.
@@ -1412,7 +1412,7 @@ _Defined in `lang/std/core/error.ks`._
 case Break(B)
 ```
 
-Early-return flow — carries the residual to propagate via `FromResidual`.
+Residual-return flow — carries the residual to propagate via `FromResidual`.
 
 _Defined in `lang/std/core/error.ks`._
 
@@ -1517,7 +1517,7 @@ _Defined in `lang/std/core/literals.ks`._
 ## protocol `DivideAssign`
 
 ```kestrel
-public protocol DivideAssign[Rhs = Self]
+public protocol DivideAssign[Other = Self]
 ```
 
 Raw protocol backing the `/=` operator.
@@ -1529,7 +1529,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `divideAssign`
 
 ```kestrel
-mutating func divideAssign(Rhs)
+mutating func divideAssign(Other)
 ```
 
 Mutates `self` to `self / other`.
@@ -1539,7 +1539,7 @@ _Defined in `lang/std/core/assign.ks`._
 ## protocol `Divisible`
 
 ```kestrel
-public protocol Divisible[Rhs = Self]
+public protocol Divisible[Other = Self]
 ```
 
 Raw protocol backing the `/` operator.
@@ -1562,7 +1562,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-func divide(Rhs) -> Output
+func divide(Other) -> Output
 ```
 
 Returns `self / other`.
@@ -1572,7 +1572,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 ## protocol `Equal`
 
 ```kestrel
-public protocol Equal[Rhs = Self]
+public protocol Equal[Other = Self]
 ```
 
 Raw protocol backing the `==` operator.
@@ -1604,7 +1604,7 @@ _Defined in `lang/std/core/comparison.ks`._
 #### function `equals`
 
 ```kestrel
-func equals(Rhs) -> Output
+func equals(Other) -> Output
 ```
 
 Returns the equality result as `Output` — typically `Bool`.
@@ -1865,7 +1865,7 @@ public protocol ExpressibleByIntLiteral
 
 Protocol for types that accept an integer literal (e.g. `42`, `0xff`).
 
-All the standard integer widths conform; types outside `std.num` (for
+All the standard integer widths conform; types outside `std.numeric` (for
 example a `BigInt` or a fixed-point number) can also conform to opt in
 to the literal syntax.
 
@@ -1948,7 +1948,7 @@ _Defined in `lang/std/core/literals.ks`._
 ## protocol `FromResidual`
 
 ```kestrel
-public protocol FromResidual[Early]
+public protocol FromResidual[Residual]
 ```
 
 Protocol that lets a return type absorb a `try`-propagated residual.
@@ -1965,7 +1965,7 @@ _Defined in `lang/std/core/error.ks`._
 #### function `fromResidual`
 
 ```kestrel
-static func fromResidual(Early) -> Self
+static func fromResidual(Residual) -> Self
 ```
 
 Builds an instance carrying `residual` as its failure payload.
@@ -1975,7 +1975,7 @@ _Defined in `lang/std/core/error.ks`._
 ## protocol `Greater`
 
 ```kestrel
-public protocol Greater[Rhs = Self]
+public protocol Greater[Other = Self]
 ```
 
 Raw protocol backing the `>` operator. See `Less` for guidance.
@@ -1995,7 +1995,7 @@ _Defined in `lang/std/core/comparison.ks`._
 #### function `greaterThan`
 
 ```kestrel
-func greaterThan(Rhs) -> Output
+func greaterThan(Other) -> Output
 ```
 
 Returns the greater-than result as `Output` — typically `Bool`.
@@ -2005,7 +2005,7 @@ _Defined in `lang/std/core/comparison.ks`._
 ## protocol `GreaterOrEqual`
 
 ```kestrel
-public protocol GreaterOrEqual[Rhs = Self]
+public protocol GreaterOrEqual[Other = Self]
 ```
 
 Raw protocol backing the `>=` operator. See `Less` for guidance.
@@ -2025,7 +2025,7 @@ _Defined in `lang/std/core/comparison.ks`._
 #### function `greaterThanOrEqual`
 
 ```kestrel
-func greaterThanOrEqual(Rhs) -> Output
+func greaterThanOrEqual(Other) -> Output
 ```
 
 Returns the greater-than-or-equal result as `Output` — typically `Bool`.
@@ -2138,12 +2138,12 @@ _Defined in `lang/std/core/literals.ks`._
 ## protocol `LeftShift`
 
 ```kestrel
-public protocol LeftShift[Rhs = lang.i64]
+public protocol LeftShift[Other = lang.i64]
 ```
 
 Raw protocol backing the `<<` operator.
 
-`Rhs` defaults to the primitive `lang.i64` because protocol type defaults
+`Other` defaults to the primitive `lang.i64` because protocol type defaults
 must be resolvable at parse time, before stdlib types like `Int64` are
 available. Conforming integer types narrow this to a more specific shift
 count where appropriate.
@@ -2168,7 +2168,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-func shiftLeft(by: Rhs) -> Output
+func shiftLeft(by: Other) -> Output
 ```
 
 Returns `self << count`.
@@ -2178,7 +2178,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 ## protocol `LeftShiftAssign`
 
 ```kestrel
-public protocol LeftShiftAssign[Rhs]
+public protocol LeftShiftAssign[Other]
 ```
 
 Raw protocol backing the `<<=` operator.
@@ -2190,7 +2190,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-mutating func shiftLeftAssign(by: Rhs)
+mutating func shiftLeftAssign(by: Other)
 ```
 
 Mutates `self` to `self << count`.
@@ -2200,7 +2200,7 @@ _Defined in `lang/std/core/assign.ks`._
 ## protocol `Less`
 
 ```kestrel
-public protocol Less[Rhs = Self]
+public protocol Less[Other = Self]
 ```
 
 Raw protocol backing the `<` operator.
@@ -2224,7 +2224,7 @@ _Defined in `lang/std/core/comparison.ks`._
 #### function `lessThan`
 
 ```kestrel
-func lessThan(Rhs) -> Output
+func lessThan(Other) -> Output
 ```
 
 Returns the less-than result as `Output` — typically `Bool`.
@@ -2234,7 +2234,7 @@ _Defined in `lang/std/core/comparison.ks`._
 ## protocol `LessOrEqual`
 
 ```kestrel
-public protocol LessOrEqual[Rhs = Self]
+public protocol LessOrEqual[Other = Self]
 ```
 
 Raw protocol backing the `<=` operator. See `Less` for guidance.
@@ -2254,7 +2254,7 @@ _Defined in `lang/std/core/comparison.ks`._
 #### function `lessThanOrEqual`
 
 ```kestrel
-func lessThanOrEqual(Rhs) -> Output
+func lessThanOrEqual(Other) -> Output
 ```
 
 Returns the less-than-or-equal result as `Output` — typically `Bool`.
@@ -2290,7 +2290,7 @@ _Defined in `lang/std/core/protocols.ks`._
 ## protocol `Modulo`
 
 ```kestrel
-public protocol Modulo[Rhs = Self]
+public protocol Modulo[Other = Self]
 ```
 
 Raw protocol backing the `%` operator.
@@ -2314,7 +2314,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-func modulo(Rhs) -> Output
+func modulo(Other) -> Output
 ```
 
 Returns `self % other`.
@@ -2324,7 +2324,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 ## protocol `ModuloAssign`
 
 ```kestrel
-public protocol ModuloAssign[Rhs = Self]
+public protocol ModuloAssign[Other = Self]
 ```
 
 Raw protocol backing the `%=` operator.
@@ -2336,7 +2336,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `modAssign`
 
 ```kestrel
-mutating func modAssign(Rhs)
+mutating func modAssign(Other)
 ```
 
 Mutates `self` to `self % other`.
@@ -2346,7 +2346,7 @@ _Defined in `lang/std/core/assign.ks`._
 ## protocol `Multipliable`
 
 ```kestrel
-public protocol Multipliable[Rhs = Self]
+public protocol Multipliable[Other = Self]
 ```
 
 Raw protocol backing the `*` operator.
@@ -2376,7 +2376,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-func multiply(Rhs) -> Output
+func multiply(Other) -> Output
 ```
 
 Returns `self * other`.
@@ -2396,7 +2396,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 ## protocol `MultiplyAssign`
 
 ```kestrel
-public protocol MultiplyAssign[Rhs = Self]
+public protocol MultiplyAssign[Other = Self]
 ```
 
 Raw protocol backing the `*=` operator.
@@ -2408,7 +2408,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `multiplyAssign`
 
 ```kestrel
-mutating func multiplyAssign(Rhs)
+mutating func multiplyAssign(Other)
 ```
 
 Mutates `self` to `self * other`.
@@ -2482,7 +2482,7 @@ _Defined in `lang/std/core/logical.ks`._
 ## protocol `NotEqual`
 
 ```kestrel
-public protocol NotEqual[Rhs = Self]
+public protocol NotEqual[Other = Self]
 ```
 
 Raw protocol backing the `!=` operator.
@@ -2505,7 +2505,7 @@ _Defined in `lang/std/core/comparison.ks`._
 #### function `notEquals`
 
 ```kestrel
-func notEquals(Rhs) -> Output
+func notEquals(Other) -> Output
 ```
 
 Returns the inequality result as `Output` — typically `Bool`.
@@ -2525,7 +2525,7 @@ _Defined in `lang/std/core/literals.ks`._
 ## protocol `Or`
 
 ```kestrel
-public protocol Or[Rhs = Self]
+public protocol Or[Other = Self]
 ```
 
 Raw protocol backing the `or` keyword operator.
@@ -2548,7 +2548,7 @@ _Defined in `lang/std/core/logical.ks`._
 #### function `logicalOr`
 
 ```kestrel
-func logicalOr(() -> Rhs) -> Output
+func logicalOr(() -> Other) -> Output
 ```
 
 Returns `self or other()`. The closure runs only if needed.
@@ -2763,13 +2763,13 @@ Upper bound — excluded from the range.
 
 _Defined in `lang/std/core/range.ks`._
 
-#### function `isEmpty`
+#### field `isEmpty`
 
 ```kestrel
-public func isEmpty() -> Bool
+public var isEmpty: Bool { get }
 ```
 
-Returns `true` when `start >= end` (no values are produced).
+`true` when `start >= end` (no values are produced).
 
 _Defined in `lang/std/core/range.ks`._
 
@@ -2806,10 +2806,10 @@ type Item = T
 
 _Defined in `lang/std/core/range.ks`._
 
-#### typealias `Iter`
+#### typealias `TargetIterator`
 
 ```kestrel
-type Iter = RangeIterator[T]
+type TargetIterator = RangeIterator[T]
 ```
 
 _Defined in `lang/std/core/range.ks`._
@@ -2862,7 +2862,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArray`
 
 ```kestrel
-public func writeArray(to: mutating Array[T], value: Slice[T])
+public func writeArray(to: mutating Array[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -2870,7 +2870,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArrayUnchecked`
 
 ```kestrel
-public func writeArrayUnchecked(to: mutating Array[T], value: Slice[T])
+public func writeArrayUnchecked(to: mutating Array[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -2896,7 +2896,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `writeArrayClamped`
 
 ```kestrel
-public func writeArrayClamped(to: mutating Array[T], value: Slice[T])
+public func writeArrayClamped(to: mutating Array[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -2938,7 +2938,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSlice`
 
 ```kestrel
-public func writeSlice(to: Slice[T], value: Slice[T])
+public func writeSlice(to: Slice[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -2946,7 +2946,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSliceUnchecked`
 
 ```kestrel
-public func writeSliceUnchecked(to: Slice[T], value: Slice[T])
+public func writeSliceUnchecked(to: Slice[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -2972,7 +2972,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `writeSliceClamped`
 
 ```kestrel
-public func writeSliceClamped(to: Slice[T], value: Slice[T])
+public func writeSliceClamped(to: Slice[T], with: Slice[T])
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -3204,7 +3204,7 @@ _Defined in `lang/std/text/views.ks`._
 ## protocol `RangeConstructible`
 
 ```kestrel
-public protocol RangeConstructible[Rhs = Self]
+public protocol RangeConstructible[Other = Self]
 ```
 
 Raw protocol backing the half-open `..<` operator (`start..<end`).
@@ -3227,7 +3227,7 @@ _Defined in `lang/std/core/range.ks`._
 #### function `exclusiveRange`
 
 ```kestrel
-func exclusiveRange(to: Rhs) -> Output
+func exclusiveRange(to: Other) -> Output
 ```
 
 Builds the half-open range `[self, end)`.
@@ -3333,13 +3333,13 @@ _Defined in `lang/std/core/protocols.ks`._
 ## protocol `RightShift`
 
 ```kestrel
-public protocol RightShift[Rhs = lang.i64]
+public protocol RightShift[Other = lang.i64]
 ```
 
 Raw protocol backing the `>>` operator.
 
 Behaviour for signed types is arithmetic shift (sign-preserving); unsigned
-types use logical shift. The `Rhs` default mirrors `LeftShift`.
+types use logical shift. The `Other` default mirrors `LeftShift`.
 
 _Defined in `lang/std/core/bitwise.ks`._
 
@@ -3356,7 +3356,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-func shiftRight(by: Rhs) -> Output
+func shiftRight(by: Other) -> Output
 ```
 
 Returns `self >> count`.
@@ -3366,7 +3366,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 ## protocol `RightShiftAssign`
 
 ```kestrel
-public protocol RightShiftAssign[Rhs]
+public protocol RightShiftAssign[Other]
 ```
 
 Raw protocol backing the `>>=` operator.
@@ -3378,7 +3378,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-mutating func shiftRightAssign(by: Rhs)
+mutating func shiftRightAssign(by: Other)
 ```
 
 Mutates `self` to `self >> count`.
@@ -3398,7 +3398,7 @@ _Defined in `lang/std/core/literals.ks`._
 ## protocol `SubtractAssign`
 
 ```kestrel
-public protocol SubtractAssign[Rhs = Self]
+public protocol SubtractAssign[Other = Self]
 ```
 
 Raw protocol backing the `-=` operator.
@@ -3410,7 +3410,7 @@ _Defined in `lang/std/core/assign.ks`._
 #### function `subtractAssign`
 
 ```kestrel
-mutating func subtractAssign(Rhs)
+mutating func subtractAssign(Other)
 ```
 
 Mutates `self` to `self - other`.
@@ -3420,7 +3420,7 @@ _Defined in `lang/std/core/assign.ks`._
 ## protocol `Subtractable`
 
 ```kestrel
-public protocol Subtractable[Rhs = Self]
+public protocol Subtractable[Other = Self]
 ```
 
 Raw protocol backing the `-` binary operator.
@@ -3440,7 +3440,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-func subtract(Rhs) -> Output
+func subtract(Other) -> Output
 ```
 
 Returns `self - other`.
@@ -3455,12 +3455,12 @@ public protocol Tryable
 
 Protocol enabling the `try expr` operator.
 
-`Output` is the success value the operator yields; `Early` is the
+`Output` is the success value the operator yields; `Residual` is the
 "residual" — typically an `Err` variant, a `None`, or a typed error —
 that gets propagated. The compiler lowers `try x` to roughly
 `match x.tryExtract() { .Continue(v) => v, .Break(r) => return Self.fromResidual(r) }`,
 which is why the enclosing function's return type must conform to
-`FromResidual[Early]`.
+`FromResidual[Residual]`.
 
 ### Examples
 
@@ -3476,16 +3476,6 @@ _Defined in `lang/std/core/error.ks`._
 
 ### Members
 
-#### typealias `Early`
-
-```kestrel
-type Early
-```
-
-The residual carried out of `try expr` on failure.
-
-_Defined in `lang/std/core/error.ks`._
-
 #### typealias `Output`
 
 ```kestrel
@@ -3496,10 +3486,20 @@ The value produced by `try expr` on success.
 
 _Defined in `lang/std/core/error.ks`._
 
+#### typealias `Residual`
+
+```kestrel
+type Residual
+```
+
+The residual carried out of `try expr` on failure.
+
+_Defined in `lang/std/core/error.ks`._
+
 #### function `tryExtract`
 
 ```kestrel
-func tryExtract() -> ControlFlow[Output, Early]
+func tryExtract() -> ControlFlow[Output, Residual]
 ```
 
 Splits `self` into the success value or the early-return residual.

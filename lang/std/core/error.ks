@@ -14,18 +14,18 @@ module std.core
 public enum ControlFlow[C, B] {
     /// Normal flow — carries the value to use as the operator result.
     case Continue(C)
-    /// Early-return flow — carries the residual to propagate via `FromResidual`.
+    /// Residual-return flow — carries the residual to propagate via `FromResidual`.
     case Break(B)
 }
 
 /// Protocol enabling the `try expr` operator.
 ///
-/// `Output` is the success value the operator yields; `Early` is the
+/// `Output` is the success value the operator yields; `Residual` is the
 /// "residual" — typically an `Err` variant, a `None`, or a typed error —
 /// that gets propagated. The compiler lowers `try x` to roughly
 /// `match x.tryExtract() { .Continue(v) => v, .Break(r) => return Self.fromResidual(r) }`,
 /// which is why the enclosing function's return type must conform to
-/// `FromResidual[Early]`.
+/// `FromResidual[Residual]`.
 ///
 /// # Examples
 ///
@@ -41,11 +41,11 @@ public protocol Tryable {
     /// The value produced by `try expr` on success.
     type Output
     /// The residual carried out of `try expr` on failure.
-    type Early
+    type Residual
 
     /// Splits `self` into the success value or the early-return residual.
     @builtin(.TryExtractMethod)
-    func tryExtract() -> ControlFlow[Output, Early]
+    func tryExtract() -> ControlFlow[Output, Residual]
 }
 
 /// Protocol that lets a return type absorb a `try`-propagated residual.
@@ -55,10 +55,10 @@ public protocol Tryable {
 /// implements `FromResidual[E]` so that `try someResult` inside a function
 /// returning `Result[T, E]` rebuilds the failure.
 @builtin(.FromResidualProtocol)
-public protocol FromResidual[Early] {
+public protocol FromResidual[Residual] {
     /// Builds an instance carrying `residual` as its failure payload.
     @builtin(.FromResidualMethod)
-    static func fromResidual(residual: Early) -> Self
+    static func fromResidual(residual: Residual) -> Self
 }
 
 /// Protocol enabling implicit promotion of a bare value into a wrapping type.

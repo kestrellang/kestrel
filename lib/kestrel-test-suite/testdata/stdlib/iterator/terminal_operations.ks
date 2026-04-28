@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1);
             arr.append(2);
             arr.append(3);
@@ -42,7 +42,7 @@ module Test
             if arr.iter().last().unwrap() != 5 { return 13 }
 
             // Test forEach
-            var total: std.num.Int64 = 0;
+            var total: std.numeric.Int64 = 0;
             arr.iter().forEach({ (x) in total = total + x }); // ERROR: cannot assign to captured variable
             if total != 15 { return 14 }
 

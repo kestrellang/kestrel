@@ -7,7 +7,7 @@
       "kind": "protocol",
       "name": "AddAssign",
       "anchor": "protocol-AddAssign",
-      "signature": "public protocol AddAssign[Rhs = Self]",
+      "signature": "public protocol AddAssign[Other = Self]",
       "doc": "Raw protocol backing the `+=` operator.\n\nIn-place mutation lets conforming types avoid the temporary that a\n`self = self + other` rewrite would produce — important for collections\n(e.g. `Array += other`) and other types where the binary `+` would copy.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -20,7 +20,7 @@
               "kind": "function",
               "name": "addAssign",
               "anchor": "function-addAssign",
-              "signature": "mutating func addAssign(Rhs)",
+              "signature": "mutating func addAssign(Other)",
               "doc": "Mutates `self` to `self + other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -32,8 +32,8 @@
       "kind": "protocol",
       "name": "Addable",
       "anchor": "protocol-Addable",
-      "signature": "public protocol Addable[Rhs = Self]",
-      "doc": "Raw protocol backing the `+` operator.\n\n`Output` may differ from `Self` and `Rhs` — this is what allows mixed-type\narithmetic (e.g. `Vector + Scalar -> Vector`) without losing precision.\nThe associated `zero` value gives sums (and `Iterator.sum`) a starting\npoint and is the additive identity by definition.\n\n# Examples\n\n```\n2 + 3            // 5\nInt64.zero       // 0\n```",
+      "signature": "public protocol Addable[Other = Self]",
+      "doc": "Raw protocol backing the `+` operator.\n\n`Output` may differ from `Self` and `Other` — this is what allows mixed-type\narithmetic (e.g. `Vector + Scalar -> Vector`) without losing precision.\nThe associated `zero` value gives sums (and `Iterator.sum`) a starting\npoint and is the additive identity by definition.\n\n# Examples\n\n```\n2 + 3            // 5\nInt64.zero       // 0\n```",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
         {
@@ -53,7 +53,7 @@
               "kind": "function",
               "name": "add",
               "anchor": "function-add",
-              "signature": "func add(Rhs) -> Output",
+              "signature": "func add(Other) -> Output",
               "doc": "Returns `self + other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             },
@@ -73,7 +73,7 @@
       "kind": "protocol",
       "name": "And",
       "anchor": "protocol-And",
-      "signature": "public protocol And[Rhs = Self]",
+      "signature": "public protocol And[Other = Self]",
       "doc": "Raw protocol backing the `and` keyword operator.\n\nThe `other` operand is a thunk so that conformers can short-circuit:\nthe right-hand side must not be evaluated when `self` is falsy. The\nstdlib implementations on `Bool` and the optional types all honour\nthis; user implementations should too.\n\n# Examples\n\n```\ntrue and false        // false\ntrue and { true }     // true (closure form, mostly internal)\n```",
       "source_path": "lang/std/core/logical.ks",
       "member_groups": [
@@ -94,7 +94,7 @@
               "kind": "function",
               "name": "logicalAnd",
               "anchor": "function-logicalAnd",
-              "signature": "func logicalAnd(() -> Rhs) -> Output",
+              "signature": "func logicalAnd(() -> Other) -> Output",
               "doc": "Returns `self and other()`. The closure runs only if needed.",
               "source_path": "lang/std/core/logical.ks"
             }
@@ -163,7 +163,7 @@
       "kind": "protocol",
       "name": "BitwiseAnd",
       "anchor": "protocol-BitwiseAnd",
-      "signature": "public protocol BitwiseAnd[Rhs = Self]",
+      "signature": "public protocol BitwiseAnd[Other = Self]",
       "doc": "Raw protocol backing the `&` operator.\n\nImplemented by every integer width; `Output` is `Self` for the standard\ninteger types but may differ for SIMD or bitset wrappers.\n\n# Examples\n\n```\n0b1100 & 0b1010   // 0b1000\n```",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
@@ -184,7 +184,7 @@
               "kind": "function",
               "name": "bitwiseAnd",
               "anchor": "function-bitwiseAnd",
-              "signature": "func bitwiseAnd(Rhs) -> Output",
+              "signature": "func bitwiseAnd(Other) -> Output",
               "doc": "Returns `self & other`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
@@ -196,7 +196,7 @@
       "kind": "protocol",
       "name": "BitwiseAndAssign",
       "anchor": "protocol-BitwiseAndAssign",
-      "signature": "public protocol BitwiseAndAssign[Rhs = Self]",
+      "signature": "public protocol BitwiseAndAssign[Other = Self]",
       "doc": "Raw protocol backing the `&=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -209,7 +209,7 @@
               "kind": "function",
               "name": "bitwiseAndAssign",
               "anchor": "function-bitwiseAndAssign",
-              "signature": "mutating func bitwiseAndAssign(Rhs)",
+              "signature": "mutating func bitwiseAndAssign(Other)",
               "doc": "Mutates `self` to `self & other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -254,7 +254,7 @@
       "kind": "protocol",
       "name": "BitwiseOr",
       "anchor": "protocol-BitwiseOr",
-      "signature": "public protocol BitwiseOr[Rhs = Self]",
+      "signature": "public protocol BitwiseOr[Other = Self]",
       "doc": "Raw protocol backing the `|` operator.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
@@ -275,7 +275,7 @@
               "kind": "function",
               "name": "bitwiseOr",
               "anchor": "function-bitwiseOr",
-              "signature": "func bitwiseOr(Rhs) -> Output",
+              "signature": "func bitwiseOr(Other) -> Output",
               "doc": "Returns `self | other`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
@@ -287,7 +287,7 @@
       "kind": "protocol",
       "name": "BitwiseOrAssign",
       "anchor": "protocol-BitwiseOrAssign",
-      "signature": "public protocol BitwiseOrAssign[Rhs = Self]",
+      "signature": "public protocol BitwiseOrAssign[Other = Self]",
       "doc": "Raw protocol backing the `|=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -300,7 +300,7 @@
               "kind": "function",
               "name": "bitwiseOrAssign",
               "anchor": "function-bitwiseOrAssign",
-              "signature": "mutating func bitwiseOrAssign(Rhs)",
+              "signature": "mutating func bitwiseOrAssign(Other)",
               "doc": "Mutates `self` to `self | other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -312,7 +312,7 @@
       "kind": "protocol",
       "name": "BitwiseXor",
       "anchor": "protocol-BitwiseXor",
-      "signature": "public protocol BitwiseXor[Rhs = Self]",
+      "signature": "public protocol BitwiseXor[Other = Self]",
       "doc": "Raw protocol backing the `^` operator.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
@@ -333,7 +333,7 @@
               "kind": "function",
               "name": "bitwiseXor",
               "anchor": "function-bitwiseXor",
-              "signature": "func bitwiseXor(Rhs) -> Output",
+              "signature": "func bitwiseXor(Other) -> Output",
               "doc": "Returns `self ^ other`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
@@ -345,7 +345,7 @@
       "kind": "protocol",
       "name": "BitwiseXorAssign",
       "anchor": "protocol-BitwiseXorAssign",
-      "signature": "public protocol BitwiseXorAssign[Rhs = Self]",
+      "signature": "public protocol BitwiseXorAssign[Other = Self]",
       "doc": "Raw protocol backing the `^=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -358,7 +358,7 @@
               "kind": "function",
               "name": "bitwiseXorAssign",
               "anchor": "function-bitwiseXorAssign",
-              "signature": "mutating func bitwiseXorAssign(Rhs)",
+              "signature": "mutating func bitwiseXorAssign(Other)",
               "doc": "Mutates `self` to `self ^ other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -670,11 +670,11 @@
               "source_path": "lang/std/core/range.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "isEmpty",
-              "anchor": "function-isEmpty",
-              "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns `true` when `start > end` (no values are produced).",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
+              "doc": "`true` when `start > end` (no values are produced).",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -717,9 +717,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = ClosedRangeIterator[T]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = ClosedRangeIterator[T]",
               "doc": "",
               "source_path": "lang/std/core/range.ks"
             },
@@ -774,7 +774,7 @@
               "kind": "function",
               "name": "writeArray",
               "anchor": "function-writeArray",
-              "signature": "public func writeArray(to: mutating Array[T], value: Slice[T])",
+              "signature": "public func writeArray(to: mutating Array[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/collections/array.ks"
             },
@@ -782,7 +782,7 @@
               "kind": "function",
               "name": "writeArrayUnchecked",
               "anchor": "function-writeArrayUnchecked",
-              "signature": "public func writeArrayUnchecked(to: mutating Array[T], value: Slice[T])",
+              "signature": "public func writeArrayUnchecked(to: mutating Array[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/collections/array.ks"
             }
@@ -829,7 +829,7 @@
               "kind": "function",
               "name": "writeSlice",
               "anchor": "function-writeSlice",
-              "signature": "public func writeSlice(to: Slice[T], value: Slice[T])",
+              "signature": "public func writeSlice(to: Slice[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/memory/pointer.ks"
             },
@@ -837,7 +837,7 @@
               "kind": "function",
               "name": "writeSliceUnchecked",
               "anchor": "function-writeSliceUnchecked",
-              "signature": "public func writeSliceUnchecked(to: Slice[T], value: Slice[T])",
+              "signature": "public func writeSliceUnchecked(to: Slice[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/memory/pointer.ks"
             }
@@ -1041,7 +1041,7 @@
       "kind": "protocol",
       "name": "ClosedRangeConstructible",
       "anchor": "protocol-ClosedRangeConstructible",
-      "signature": "public protocol ClosedRangeConstructible[Rhs = Self]",
+      "signature": "public protocol ClosedRangeConstructible[Other = Self]",
       "doc": "Raw protocol backing the closed `..=` operator (`start..=end`).",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
@@ -1062,7 +1062,7 @@
               "kind": "function",
               "name": "inclusiveRange",
               "anchor": "function-inclusiveRange",
-              "signature": "func inclusiveRange(to: Rhs) -> Output",
+              "signature": "func inclusiveRange(to: Other) -> Output",
               "doc": "Builds the closed range `[self, end]`.",
               "source_path": "lang/std/core/range.ks"
             }
@@ -1387,7 +1387,7 @@
               "name": "Break",
               "anchor": "case-Break",
               "signature": "case Break(B)",
-              "doc": "Early-return flow — carries the residual to propagate via `FromResidual`.",
+              "doc": "Residual-return flow — carries the residual to propagate via `FromResidual`.",
               "source_path": "lang/std/core/error.ks"
             },
             {
@@ -1472,7 +1472,7 @@
       "kind": "protocol",
       "name": "DivideAssign",
       "anchor": "protocol-DivideAssign",
-      "signature": "public protocol DivideAssign[Rhs = Self]",
+      "signature": "public protocol DivideAssign[Other = Self]",
       "doc": "Raw protocol backing the `/=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -1485,7 +1485,7 @@
               "kind": "function",
               "name": "divideAssign",
               "anchor": "function-divideAssign",
-              "signature": "mutating func divideAssign(Rhs)",
+              "signature": "mutating func divideAssign(Other)",
               "doc": "Mutates `self` to `self / other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -1497,7 +1497,7 @@
       "kind": "protocol",
       "name": "Divisible",
       "anchor": "protocol-Divisible",
-      "signature": "public protocol Divisible[Rhs = Self]",
+      "signature": "public protocol Divisible[Other = Self]",
       "doc": "Raw protocol backing the `/` operator.\n\nDivision by zero is not modelled at the protocol level; conforming types\ndocument their own behavior (integer types panic, floats produce `inf`/`nan`).",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
@@ -1518,7 +1518,7 @@
               "kind": "function",
               "name": "divide",
               "anchor": "function-divide",
-              "signature": "func divide(Rhs) -> Output",
+              "signature": "func divide(Other) -> Output",
               "doc": "Returns `self / other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
@@ -1530,7 +1530,7 @@
       "kind": "protocol",
       "name": "Equal",
       "anchor": "protocol-Equal",
-      "signature": "public protocol Equal[Rhs = Self]",
+      "signature": "public protocol Equal[Other = Self]",
       "doc": "Raw protocol backing the `==` operator.\n\nMost user code should conform to `Equatable` instead, which conforms to\n`Equal[Self]` automatically with `Output = Bool`. Implement `Equal` directly\nonly when you need a non-Bool result (e.g. lifting equality into a vector\ntype that returns a mask).\n\n# Examples\n\n```\n1 == 1   // true\n\"a\" == \"b\"  // false\n```",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
@@ -1551,7 +1551,7 @@
               "kind": "function",
               "name": "equals",
               "anchor": "function-equals",
-              "signature": "func equals(Rhs) -> Output",
+              "signature": "func equals(Other) -> Output",
               "doc": "Returns the equality result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
@@ -1807,7 +1807,7 @@
       "name": "ExpressibleByIntLiteral",
       "anchor": "protocol-ExpressibleByIntLiteral",
       "signature": "public protocol ExpressibleByIntLiteral",
-      "doc": "Protocol for types that accept an integer literal (e.g. `42`, `0xff`).\n\nAll the standard integer widths conform; types outside `std.num` (for\nexample a `BigInt` or a fixed-point number) can also conform to opt in\nto the literal syntax.",
+      "doc": "Protocol for types that accept an integer literal (e.g. `42`, `0xff`).\n\nAll the standard integer widths conform; types outside `std.numeric` (for\nexample a `BigInt` or a fixed-point number) can also conform to opt in\nto the literal syntax.",
       "source_path": "lang/std/core/literals.ks",
       "member_groups": [
         {
@@ -1889,7 +1889,7 @@
       "kind": "protocol",
       "name": "FromResidual",
       "anchor": "protocol-FromResidual",
-      "signature": "public protocol FromResidual[Early]",
+      "signature": "public protocol FromResidual[Residual]",
       "doc": "Protocol that lets a return type absorb a `try`-propagated residual.\n\nImplement when your error/optional type should be reachable via `try`\nfrom another type with a different residual. For example, `Result[T, E]`\nimplements `FromResidual[E]` so that `try someResult` inside a function\nreturning `Result[T, E]` rebuilds the failure.",
       "source_path": "lang/std/core/error.ks",
       "member_groups": [
@@ -1902,7 +1902,7 @@
               "kind": "function",
               "name": "fromResidual",
               "anchor": "function-fromResidual",
-              "signature": "static func fromResidual(Early) -> Self",
+              "signature": "static func fromResidual(Residual) -> Self",
               "doc": "Builds an instance carrying `residual` as its failure payload.",
               "source_path": "lang/std/core/error.ks"
             }
@@ -1914,7 +1914,7 @@
       "kind": "protocol",
       "name": "Greater",
       "anchor": "protocol-Greater",
-      "signature": "public protocol Greater[Rhs = Self]",
+      "signature": "public protocol Greater[Other = Self]",
       "doc": "Raw protocol backing the `>` operator. See `Less` for guidance.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
@@ -1935,7 +1935,7 @@
               "kind": "function",
               "name": "greaterThan",
               "anchor": "function-greaterThan",
-              "signature": "func greaterThan(Rhs) -> Output",
+              "signature": "func greaterThan(Other) -> Output",
               "doc": "Returns the greater-than result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
@@ -1947,7 +1947,7 @@
       "kind": "protocol",
       "name": "GreaterOrEqual",
       "anchor": "protocol-GreaterOrEqual",
-      "signature": "public protocol GreaterOrEqual[Rhs = Self]",
+      "signature": "public protocol GreaterOrEqual[Other = Self]",
       "doc": "Raw protocol backing the `>=` operator. See `Less` for guidance.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
@@ -1968,7 +1968,7 @@
               "kind": "function",
               "name": "greaterThanOrEqual",
               "anchor": "function-greaterThanOrEqual",
-              "signature": "func greaterThanOrEqual(Rhs) -> Output",
+              "signature": "func greaterThanOrEqual(Other) -> Output",
               "doc": "Returns the greater-than-or-equal result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
@@ -2061,8 +2061,8 @@
       "kind": "protocol",
       "name": "LeftShift",
       "anchor": "protocol-LeftShift",
-      "signature": "public protocol LeftShift[Rhs = lang.i64]",
-      "doc": "Raw protocol backing the `<<` operator.\n\n`Rhs` defaults to the primitive `lang.i64` because protocol type defaults\nmust be resolvable at parse time, before stdlib types like `Int64` are\navailable. Conforming integer types narrow this to a more specific shift\ncount where appropriate.\n\n# Errors\n\nStandard integer types panic on out-of-range shift counts (see the\n`shiftLeft` documentation on the integer types).",
+      "signature": "public protocol LeftShift[Other = lang.i64]",
+      "doc": "Raw protocol backing the `<<` operator.\n\n`Other` defaults to the primitive `lang.i64` because protocol type defaults\nmust be resolvable at parse time, before stdlib types like `Int64` are\navailable. Conforming integer types narrow this to a more specific shift\ncount where appropriate.\n\n# Errors\n\nStandard integer types panic on out-of-range shift counts (see the\n`shiftLeft` documentation on the integer types).",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -2082,7 +2082,7 @@
               "kind": "function",
               "name": "shiftLeft",
               "anchor": "function-shiftLeft",
-              "signature": "func shiftLeft(by: Rhs) -> Output",
+              "signature": "func shiftLeft(by: Other) -> Output",
               "doc": "Returns `self << count`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
@@ -2094,7 +2094,7 @@
       "kind": "protocol",
       "name": "LeftShiftAssign",
       "anchor": "protocol-LeftShiftAssign",
-      "signature": "public protocol LeftShiftAssign[Rhs]",
+      "signature": "public protocol LeftShiftAssign[Other]",
       "doc": "Raw protocol backing the `<<=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -2107,7 +2107,7 @@
               "kind": "function",
               "name": "shiftLeftAssign",
               "anchor": "function-shiftLeftAssign",
-              "signature": "mutating func shiftLeftAssign(by: Rhs)",
+              "signature": "mutating func shiftLeftAssign(by: Other)",
               "doc": "Mutates `self` to `self << count`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -2119,7 +2119,7 @@
       "kind": "protocol",
       "name": "Less",
       "anchor": "protocol-Less",
-      "signature": "public protocol Less[Rhs = Self]",
+      "signature": "public protocol Less[Other = Self]",
       "doc": "Raw protocol backing the `<` operator.\n\n`Comparable` derives `Less`, `LessOrEqual`, `Greater`, `GreaterOrEqual` from\na single `compare()` method, so prefer conforming to `Comparable` for\ntotally-ordered types.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
@@ -2140,7 +2140,7 @@
               "kind": "function",
               "name": "lessThan",
               "anchor": "function-lessThan",
-              "signature": "func lessThan(Rhs) -> Output",
+              "signature": "func lessThan(Other) -> Output",
               "doc": "Returns the less-than result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
@@ -2152,7 +2152,7 @@
       "kind": "protocol",
       "name": "LessOrEqual",
       "anchor": "protocol-LessOrEqual",
-      "signature": "public protocol LessOrEqual[Rhs = Self]",
+      "signature": "public protocol LessOrEqual[Other = Self]",
       "doc": "Raw protocol backing the `<=` operator. See `Less` for guidance.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
@@ -2173,7 +2173,7 @@
               "kind": "function",
               "name": "lessThanOrEqual",
               "anchor": "function-lessThanOrEqual",
-              "signature": "func lessThanOrEqual(Rhs) -> Output",
+              "signature": "func lessThanOrEqual(Other) -> Output",
               "doc": "Returns the less-than-or-equal result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
@@ -2210,7 +2210,7 @@
       "kind": "protocol",
       "name": "Modulo",
       "anchor": "protocol-Modulo",
-      "signature": "public protocol Modulo[Rhs = Self]",
+      "signature": "public protocol Modulo[Other = Self]",
       "doc": "Raw protocol backing the `%` operator.\n\nFor integers this is the remainder of truncated division, with the sign of\nthe dividend. Use `floorMod` (defined on integer types) when you want\nEuclidean / floor-style remainder semantics.",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
@@ -2231,7 +2231,7 @@
               "kind": "function",
               "name": "modulo",
               "anchor": "function-modulo",
-              "signature": "func modulo(Rhs) -> Output",
+              "signature": "func modulo(Other) -> Output",
               "doc": "Returns `self % other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
@@ -2243,7 +2243,7 @@
       "kind": "protocol",
       "name": "ModuloAssign",
       "anchor": "protocol-ModuloAssign",
-      "signature": "public protocol ModuloAssign[Rhs = Self]",
+      "signature": "public protocol ModuloAssign[Other = Self]",
       "doc": "Raw protocol backing the `%=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -2256,7 +2256,7 @@
               "kind": "function",
               "name": "modAssign",
               "anchor": "function-modAssign",
-              "signature": "mutating func modAssign(Rhs)",
+              "signature": "mutating func modAssign(Other)",
               "doc": "Mutates `self` to `self % other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -2268,7 +2268,7 @@
       "kind": "protocol",
       "name": "Multipliable",
       "anchor": "protocol-Multipliable",
-      "signature": "public protocol Multipliable[Rhs = Self]",
+      "signature": "public protocol Multipliable[Other = Self]",
       "doc": "Raw protocol backing the `*` operator.\n\nThe associated `one` value is the multiplicative identity, used as the\nstarting accumulator for products and powers.\n\n# Examples\n\n```\n6 * 7         // 42\nInt64.one     // 1\n```",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
@@ -2289,7 +2289,7 @@
               "kind": "function",
               "name": "multiply",
               "anchor": "function-multiply",
-              "signature": "func multiply(Rhs) -> Output",
+              "signature": "func multiply(Other) -> Output",
               "doc": "Returns `self * other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             },
@@ -2309,7 +2309,7 @@
       "kind": "protocol",
       "name": "MultiplyAssign",
       "anchor": "protocol-MultiplyAssign",
-      "signature": "public protocol MultiplyAssign[Rhs = Self]",
+      "signature": "public protocol MultiplyAssign[Other = Self]",
       "doc": "Raw protocol backing the `*=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -2322,7 +2322,7 @@
               "kind": "function",
               "name": "multiplyAssign",
               "anchor": "function-multiplyAssign",
-              "signature": "mutating func multiplyAssign(Rhs)",
+              "signature": "mutating func multiplyAssign(Other)",
               "doc": "Mutates `self` to `self * other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -2400,7 +2400,7 @@
       "kind": "protocol",
       "name": "NotEqual",
       "anchor": "protocol-NotEqual",
-      "signature": "public protocol NotEqual[Rhs = Self]",
+      "signature": "public protocol NotEqual[Other = Self]",
       "doc": "Raw protocol backing the `!=` operator.\n\n`Equatable` provides a default `notEquals` derived from `equals`, so\nconforming to `Equatable` is enough for both `==` and `!=`.",
       "source_path": "lang/std/core/comparison.ks",
       "member_groups": [
@@ -2421,7 +2421,7 @@
               "kind": "function",
               "name": "notEquals",
               "anchor": "function-notEquals",
-              "signature": "func notEquals(Rhs) -> Output",
+              "signature": "func notEquals(Other) -> Output",
               "doc": "Returns the inequality result as `Output` — typically `Bool`.",
               "source_path": "lang/std/core/comparison.ks"
             }
@@ -2441,7 +2441,7 @@
       "kind": "protocol",
       "name": "Or",
       "anchor": "protocol-Or",
-      "signature": "public protocol Or[Rhs = Self]",
+      "signature": "public protocol Or[Other = Self]",
       "doc": "Raw protocol backing the `or` keyword operator.\n\nAs with `And`, `other` is a thunk so the right-hand side can be skipped\nwhen `self` already determines the result.",
       "source_path": "lang/std/core/logical.ks",
       "member_groups": [
@@ -2462,7 +2462,7 @@
               "kind": "function",
               "name": "logicalOr",
               "anchor": "function-logicalOr",
-              "signature": "func logicalOr(() -> Rhs) -> Output",
+              "signature": "func logicalOr(() -> Other) -> Output",
               "doc": "Returns `self or other()`. The closure runs only if needed.",
               "source_path": "lang/std/core/logical.ks"
             }
@@ -2611,11 +2611,11 @@
               "source_path": "lang/std/core/range.ks"
             },
             {
-              "kind": "function",
+              "kind": "field",
               "name": "isEmpty",
-              "anchor": "function-isEmpty",
-              "signature": "public func isEmpty() -> Bool",
-              "doc": "Returns `true` when `start >= end` (no values are produced).",
+              "anchor": "field-isEmpty",
+              "signature": "public var isEmpty: Bool { get }",
+              "doc": "`true` when `start >= end` (no values are produced).",
               "source_path": "lang/std/core/range.ks"
             },
             {
@@ -2658,9 +2658,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = RangeIterator[T]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = RangeIterator[T]",
               "doc": "",
               "source_path": "lang/std/core/range.ks"
             },
@@ -2715,7 +2715,7 @@
               "kind": "function",
               "name": "writeArray",
               "anchor": "function-writeArray",
-              "signature": "public func writeArray(to: mutating Array[T], value: Slice[T])",
+              "signature": "public func writeArray(to: mutating Array[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/collections/array.ks"
             },
@@ -2723,7 +2723,7 @@
               "kind": "function",
               "name": "writeArrayUnchecked",
               "anchor": "function-writeArrayUnchecked",
-              "signature": "public func writeArrayUnchecked(to: mutating Array[T], value: Slice[T])",
+              "signature": "public func writeArrayUnchecked(to: mutating Array[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/collections/array.ks"
             }
@@ -2754,7 +2754,7 @@
               "kind": "function",
               "name": "writeArrayClamped",
               "anchor": "function-writeArrayClamped",
-              "signature": "public func writeArrayClamped(to: mutating Array[T], value: Slice[T])",
+              "signature": "public func writeArrayClamped(to: mutating Array[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/collections/array.ks"
             }
@@ -2801,7 +2801,7 @@
               "kind": "function",
               "name": "writeSlice",
               "anchor": "function-writeSlice",
-              "signature": "public func writeSlice(to: Slice[T], value: Slice[T])",
+              "signature": "public func writeSlice(to: Slice[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/memory/pointer.ks"
             },
@@ -2809,7 +2809,7 @@
               "kind": "function",
               "name": "writeSliceUnchecked",
               "anchor": "function-writeSliceUnchecked",
-              "signature": "public func writeSliceUnchecked(to: Slice[T], value: Slice[T])",
+              "signature": "public func writeSliceUnchecked(to: Slice[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/memory/pointer.ks"
             }
@@ -2840,7 +2840,7 @@
               "kind": "function",
               "name": "writeSliceClamped",
               "anchor": "function-writeSliceClamped",
-              "signature": "public func writeSliceClamped(to: Slice[T], value: Slice[T])",
+              "signature": "public func writeSliceClamped(to: Slice[T], with: Slice[T])",
               "doc": "",
               "source_path": "lang/std/memory/pointer.ks"
             }
@@ -3136,7 +3136,7 @@
       "kind": "protocol",
       "name": "RangeConstructible",
       "anchor": "protocol-RangeConstructible",
-      "signature": "public protocol RangeConstructible[Rhs = Self]",
+      "signature": "public protocol RangeConstructible[Other = Self]",
       "doc": "Raw protocol backing the half-open `..<` operator (`start..<end`).\n\n`Output` is the range type produced — usually `Range[Self]`, but\ncustom types may produce their own range flavor (e.g. a date range).",
       "source_path": "lang/std/core/range.ks",
       "member_groups": [
@@ -3157,7 +3157,7 @@
               "kind": "function",
               "name": "exclusiveRange",
               "anchor": "function-exclusiveRange",
-              "signature": "func exclusiveRange(to: Rhs) -> Output",
+              "signature": "func exclusiveRange(to: Other) -> Output",
               "doc": "Builds the half-open range `[self, end)`.",
               "source_path": "lang/std/core/range.ks"
             }
@@ -3258,8 +3258,8 @@
       "kind": "protocol",
       "name": "RightShift",
       "anchor": "protocol-RightShift",
-      "signature": "public protocol RightShift[Rhs = lang.i64]",
-      "doc": "Raw protocol backing the `>>` operator.\n\nBehaviour for signed types is arithmetic shift (sign-preserving); unsigned\ntypes use logical shift. The `Rhs` default mirrors `LeftShift`.",
+      "signature": "public protocol RightShift[Other = lang.i64]",
+      "doc": "Raw protocol backing the `>>` operator.\n\nBehaviour for signed types is arithmetic shift (sign-preserving); unsigned\ntypes use logical shift. The `Other` default mirrors `LeftShift`.",
       "source_path": "lang/std/core/bitwise.ks",
       "member_groups": [
         {
@@ -3279,7 +3279,7 @@
               "kind": "function",
               "name": "shiftRight",
               "anchor": "function-shiftRight",
-              "signature": "func shiftRight(by: Rhs) -> Output",
+              "signature": "func shiftRight(by: Other) -> Output",
               "doc": "Returns `self >> count`.",
               "source_path": "lang/std/core/bitwise.ks"
             }
@@ -3291,7 +3291,7 @@
       "kind": "protocol",
       "name": "RightShiftAssign",
       "anchor": "protocol-RightShiftAssign",
-      "signature": "public protocol RightShiftAssign[Rhs]",
+      "signature": "public protocol RightShiftAssign[Other]",
       "doc": "Raw protocol backing the `>>=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -3304,7 +3304,7 @@
               "kind": "function",
               "name": "shiftRightAssign",
               "anchor": "function-shiftRightAssign",
-              "signature": "mutating func shiftRightAssign(by: Rhs)",
+              "signature": "mutating func shiftRightAssign(by: Other)",
               "doc": "Mutates `self` to `self >> count`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -3324,7 +3324,7 @@
       "kind": "protocol",
       "name": "SubtractAssign",
       "anchor": "protocol-SubtractAssign",
-      "signature": "public protocol SubtractAssign[Rhs = Self]",
+      "signature": "public protocol SubtractAssign[Other = Self]",
       "doc": "Raw protocol backing the `-=` operator.",
       "source_path": "lang/std/core/assign.ks",
       "member_groups": [
@@ -3337,7 +3337,7 @@
               "kind": "function",
               "name": "subtractAssign",
               "anchor": "function-subtractAssign",
-              "signature": "mutating func subtractAssign(Rhs)",
+              "signature": "mutating func subtractAssign(Other)",
               "doc": "Mutates `self` to `self - other`.",
               "source_path": "lang/std/core/assign.ks"
             }
@@ -3349,7 +3349,7 @@
       "kind": "protocol",
       "name": "Subtractable",
       "anchor": "protocol-Subtractable",
-      "signature": "public protocol Subtractable[Rhs = Self]",
+      "signature": "public protocol Subtractable[Other = Self]",
       "doc": "Raw protocol backing the `-` binary operator.",
       "source_path": "lang/std/core/arithmetic.ks",
       "member_groups": [
@@ -3370,7 +3370,7 @@
               "kind": "function",
               "name": "subtract",
               "anchor": "function-subtract",
-              "signature": "func subtract(Rhs) -> Output",
+              "signature": "func subtract(Other) -> Output",
               "doc": "Returns `self - other`.",
               "source_path": "lang/std/core/arithmetic.ks"
             }
@@ -3383,7 +3383,7 @@
       "name": "Tryable",
       "anchor": "protocol-Tryable",
       "signature": "public protocol Tryable",
-      "doc": "Protocol enabling the `try expr` operator.\n\n`Output` is the success value the operator yields; `Early` is the\n\"residual\" — typically an `Err` variant, a `None`, or a typed error —\nthat gets propagated. The compiler lowers `try x` to roughly\n`match x.tryExtract() { .Continue(v) => v, .Break(r) => return Self.fromResidual(r) }`,\nwhich is why the enclosing function's return type must conform to\n`FromResidual[Early]`.\n\n# Examples\n\n```\n// Optional and Result both conform; `try` chains them seamlessly.\nfunc parseAndDouble(s: String) -> Int64? {\n    let n = try Int64.parse(s);    // .None short-circuits the whole function\n    .Some(n * 2)\n}\n```",
+      "doc": "Protocol enabling the `try expr` operator.\n\n`Output` is the success value the operator yields; `Residual` is the\n\"residual\" — typically an `Err` variant, a `None`, or a typed error —\nthat gets propagated. The compiler lowers `try x` to roughly\n`match x.tryExtract() { .Continue(v) => v, .Break(r) => return Self.fromResidual(r) }`,\nwhich is why the enclosing function's return type must conform to\n`FromResidual[Residual]`.\n\n# Examples\n\n```\n// Optional and Result both conform; `try` chains them seamlessly.\nfunc parseAndDouble(s: String) -> Int64? {\n    let n = try Int64.parse(s);    // .None short-circuits the whole function\n    .Some(n * 2)\n}\n```",
       "source_path": "lang/std/core/error.ks",
       "member_groups": [
         {
@@ -3393,14 +3393,6 @@
           "members": [
             {
               "kind": "typealias",
-              "name": "Early",
-              "anchor": "typealias-Early",
-              "signature": "type Early",
-              "doc": "The residual carried out of `try expr` on failure.",
-              "source_path": "lang/std/core/error.ks"
-            },
-            {
-              "kind": "typealias",
               "name": "Output",
               "anchor": "typealias-Output",
               "signature": "type Output",
@@ -3408,10 +3400,18 @@
               "source_path": "lang/std/core/error.ks"
             },
             {
+              "kind": "typealias",
+              "name": "Residual",
+              "anchor": "typealias-Residual",
+              "signature": "type Residual",
+              "doc": "The residual carried out of `try expr` on failure.",
+              "source_path": "lang/std/core/error.ks"
+            },
+            {
               "kind": "function",
               "name": "tryExtract",
               "anchor": "function-tryExtract",
-              "signature": "func tryExtract() -> ControlFlow[Output, Early]",
+              "signature": "func tryExtract() -> ControlFlow[Output, Residual]",
               "doc": "Splits `self` into the success value or the early-return residual.",
               "source_path": "lang/std/core/error.ks"
             }

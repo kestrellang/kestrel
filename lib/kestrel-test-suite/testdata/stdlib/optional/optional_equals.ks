@@ -4,11 +4,11 @@
 module Test
 
         func main() -> lang.i64 {
-            let a: std.result.Optional[std.num.Int64] = .Some(42);
-            let b: std.result.Optional[std.num.Int64] = .Some(42);
-            let c: std.result.Optional[std.num.Int64] = .Some(99);
-            let none1: std.result.Optional[std.num.Int64] = .None;
-            let none2: std.result.Optional[std.num.Int64] = .None;
+            let a: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let b: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let c: std.result.Optional[std.numeric.Int64] = .Some(99);
+            let none1: std.result.Optional[std.numeric.Int64] = .None;
+            let none2: std.result.Optional[std.numeric.Int64] = .None;
 
             // Some(42) == Some(42)
             if a.equals(b) == false { return 1 }

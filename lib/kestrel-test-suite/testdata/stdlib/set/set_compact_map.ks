@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var s = std.collections.Set[std.num.Int64]();
+            var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(1);
             let _ = s.insert(2);
             let _ = s.insert(3);
@@ -28,7 +28,7 @@ module Test
 
             // compactMap where all return None
             let allNone = s.compactMap({ (x) in
-                let r: std.num.Int64? = .None;
+                let r: std.numeric.Int64? = .None;
                 r
             });
             if allNone.count != 0 { return 6 }
@@ -38,7 +38,7 @@ module Test
             if allSome.count != 5 { return 7 }
 
             // compactMap on empty set
-            let empty = std.collections.Set[std.num.Int64]();
+            let empty = std.collections.Set[std.numeric.Int64]();
             let emptyResult = empty.compactMap({ (x) in .Some(x * 10) });
             if emptyResult.count != 0 { return 8 }
 

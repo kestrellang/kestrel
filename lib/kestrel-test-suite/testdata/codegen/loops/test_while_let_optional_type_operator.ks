@@ -4,8 +4,8 @@
 module Test
 
 func main() -> lang.i64 {
-    var opt: std.num.Int64? = .Some(3);
-    var sum: std.num.Int64 = 0;
+    var opt: std.numeric.Int64? = .Some(3);
+    var sum: std.numeric.Int64 = 0;
     while let .Some(v) = opt {
         sum = sum + v;
         opt = .None;

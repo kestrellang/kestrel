@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var dict = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
             let _ = dict.insert(2, 20);
             let _ = dict.insert(3, 30);
@@ -34,7 +34,7 @@ module Test
             if filtered(3).unwrap() != 30 { return 12 }
 
             // Test merging() - non-mutating
-            var other = std.collections.Dictionary[std.num.Int64, std.num.Int64]();
+            var other = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = other.insert(3, 300);
             let _ = other.insert(4, 400);
             let merged = dict.merging(other, uniquingKeysWith: { (old, new) in new });

@@ -4,18 +4,18 @@
 module Test
 
 protocol Container {
-    func read() -> std.num.Int64
+    func read() -> std.numeric.Int64
 }
 
 struct Wrapper[T]: Container {
-    let value: std.num.Int64
+    let value: std.numeric.Int64
 
-    func read() -> std.num.Int64 {
+    func read() -> std.numeric.Int64 {
         self.value
     }
 }
 
-func extract[C](c: C) -> std.num.Int64 where C: Container {
+func extract[C](c: C) -> std.numeric.Int64 where C: Container {
     c.read()
 }
 

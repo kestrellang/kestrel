@@ -4,12 +4,12 @@
 module Test
 
         func main() -> lang.i64 {
-            let ok1: std.result.Result[std.num.Int64, std.num.Int64] = .Ok(42);
-            let ok2: std.result.Result[std.num.Int64, std.num.Int64] = .Ok(42);
-            let ok3: std.result.Result[std.num.Int64, std.num.Int64] = .Ok(99);
-            let err1: std.result.Result[std.num.Int64, std.num.Int64] = .Err(5);
-            let err2: std.result.Result[std.num.Int64, std.num.Int64] = .Err(5);
-            let err3: std.result.Result[std.num.Int64, std.num.Int64] = .Err(10);
+            let ok1: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(42);
+            let ok2: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(42);
+            let ok3: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(99);
+            let err1: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(5);
+            let err2: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(5);
+            let err3: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(10);
 
             // Ok(42) == Ok(42)
             if ok1.equals(ok2) == false { return 1 }

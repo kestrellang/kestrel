@@ -3,7 +3,7 @@
 
 module Test
 
-func make_curried_add() -> (std.num.Int64) -> (std.num.Int64) -> std.num.Int64 {
+func make_curried_add() -> (std.numeric.Int64) -> (std.numeric.Int64) -> std.numeric.Int64 {
     { (a) in { (b) in a + b } } // ERROR: cannot return a closure that captures variables
 }
 

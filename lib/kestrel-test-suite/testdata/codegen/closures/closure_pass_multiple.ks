@@ -4,10 +4,10 @@
 module Test
 
 func combine(
-    f: (std.num.Int64) -> std.num.Int64,
-    g: (std.num.Int64) -> std.num.Int64,
-    x: std.num.Int64
-) -> std.num.Int64 {
+    f: (std.numeric.Int64) -> std.numeric.Int64,
+    g: (std.numeric.Int64) -> std.numeric.Int64,
+    x: std.numeric.Int64
+) -> std.numeric.Int64 {
     g(f(x))
 }
 

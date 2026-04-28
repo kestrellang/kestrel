@@ -30,11 +30,11 @@ import std.io.libc
 // Error types
 import std.io.error.(IoError)
 
-// Read protocol and implementations
-import std.io.read.(Read, Empty, Repeat, Cursor, readByte, readAll)
+// Readable protocol and implementations
+import std.io.read.(Readable, Empty, Repeat, Cursor, readByte, readAll)
 
-// Write protocol and implementations
-import std.io.write.(Write, Sink, Buffer, writeAll, writeByte, writeStr, writeLine)
+// Writable protocol and implementations
+import std.io.write.(Writable, Sink, Buffer, writeAll, writeByte, writeString, writeLine)
 
 // File I/O
 import std.io.file.(Seek, File, readFileString, writeFileString, appendFileString)

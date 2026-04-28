@@ -26,7 +26,7 @@ module Test
             }) { return 4 }
 
             // Empty iterator is sorted by any comparator
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             if empty.iter().isSorted(by: { (a, b) in false }) == false { return 5 }
 
             // Single element is sorted by any comparator

@@ -4,13 +4,13 @@
 module Main
 import std.io.stdio.println
 
-func makePair(a: std.num.Int64, b: std.num.Int64) -> (std.num.Int64, std.num.Int64) =
+func makePair(a: std.numeric.Int64, b: std.numeric.Int64) -> (std.numeric.Int64, std.numeric.Int64) =
     (
         a,
         b
     )
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let (x, y) = makePair(3, 7);
     let _ = println(x);
     let _ = println(y);

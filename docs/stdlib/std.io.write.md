@@ -6,7 +6,7 @@
 public struct Buffer { /* private fields */ }
 ```
 
-`Write` that appends bytes to a growable `Array[UInt8]` — the in-memory
+`Writable` that appends bytes to a growable `Array[UInt8]` — the in-memory
 counterpart to writing to a file. Useful for capturing output, building
 byte sequences before flushing to a real sink, or testing formatters.
 
@@ -16,8 +16,8 @@ byte sequences before flushing to a real sink, or testing formatters.
 
 ```
 var b = Buffer();
-try writeStr(b, "Hello, ");
-try writeStr(b, "World!");
+try writeString(b, "Hello, ");
+try writeString(b, "World!");
 b.toString()       // "Hello, World!"
 ```
 
@@ -72,10 +72,10 @@ Drops every byte but keeps the allocated capacity for reuse.
 
 _Defined in `lang/std/io/write.ks`._
 
-#### function `count`
+#### field `count`
 
 ```kestrel
-public func count() -> Int64
+public var count: Int64 { get }
 ```
 
 Bytes currently held.
@@ -90,10 +90,10 @@ var data: Array[UInt8]
 
 _Defined in `lang/std/io/write.ks`._
 
-#### function `isEmpty`
+#### field `isEmpty`
 
 ```kestrel
-public func isEmpty() -> Bool
+public var isEmpty: Bool { get }
 ```
 
 `true` when no bytes have been written.
@@ -122,7 +122,7 @@ validate upstream if untrusted bytes are involved.
 
 _Defined in `lang/std/io/write.ks`._
 
-### Implements `Write`
+### Implements `Writable`
 
 #### function `flush`
 
@@ -162,7 +162,7 @@ _Defined in `lang/std/io/write.ks`._
 public struct Sink { /* private fields */ }
 ```
 
-`Write` that swallows everything — analogous to `/dev/null`. Useful
+`Writable` that swallows everything — analogous to `/dev/null`. Useful
 for tests, benchmarks, and code paths where output is suppressed.
 
 ### Representation
@@ -183,7 +183,7 @@ Builds the discarding sink.
 
 _Defined in `lang/std/io/write.ks`._
 
-### Implements `Write`
+### Implements `Writable`
 
 #### function `flush`
 
@@ -205,10 +205,10 @@ Returns `.Ok(buf.count)` without storing the bytes.
 
 _Defined in `lang/std/io/write.ks`._
 
-## protocol `Write`
+## protocol `Writable`
 
 ```kestrel
-public protocol Write
+public protocol Writable
 ```
 
 Protocol for byte-sink streams.
@@ -221,7 +221,7 @@ loop until the whole slice is consumed.
 ### Examples
 
 ```
-public struct CountingSink: Write {
+public struct CountingSink: Writable {
     var written: Int64 = 0
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         self.written = self.written + buf.count;
@@ -264,7 +264,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeAll`
 
 ```kestrel
-public func writeAll[W](mutating W, from: Slice[UInt8]) -> Result[(), IoError] where W: Write
+public func writeAll[W](mutating W, from: Slice[UInt8]) -> Result[(), IoError] where W: Writable
 ```
 
 Writes every byte in `buf`, looping until the full slice has been
@@ -284,7 +284,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeByte`
 
 ```kestrel
-public func writeByte[W](mutating W, UInt8) -> Result[(), IoError] where W: Write
+public func writeByte[W](mutating W, UInt8) -> Result[(), IoError] where W: Writable
 ```
 
 Writes a single byte, looping internally until it lands.
@@ -294,7 +294,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeLine`
 
 ```kestrel
-public func writeLine[W](mutating W, String) -> Result[(), IoError] where W: Write
+public func writeLine[W](mutating W, String) -> Result[(), IoError] where W: Writable
 ```
 
 Writes `s` followed by a single `\n`. Does not append `\r` on any
@@ -302,10 +302,10 @@ platform — Kestrel writes Unix line endings everywhere by default.
 
 _Defined in `lang/std/io/write.ks`._
 
-## function `writeStr`
+## function `writeString`
 
 ```kestrel
-public func writeStr[W](mutating W, String) -> Result[(), IoError] where W: Write
+public func writeString[W](mutating W, String) -> Result[(), IoError] where W: Writable
 ```
 
 Writes the UTF-8 encoding of `s`. Empty strings short-circuit. Currently

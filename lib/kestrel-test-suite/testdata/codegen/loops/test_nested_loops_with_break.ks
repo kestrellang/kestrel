@@ -4,10 +4,10 @@
 module Test
 
 func main() -> lang.i64 {
-    var sum: std.num.Int64 = 0;
-    var i: std.num.Int64 = 0;
+    var sum: std.numeric.Int64 = 0;
+    var i: std.numeric.Int64 = 0;
     while i < 10 {
-        var j: std.num.Int64 = 0;
+        var j: std.numeric.Int64 = 0;
         while j < 10 {
             sum = sum + 1;
             if sum == 42 {

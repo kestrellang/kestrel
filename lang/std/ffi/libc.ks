@@ -5,7 +5,7 @@
 module std.ffi
 
 import std.memory.(RawPointer)
-import std.num.(Int64, Int32)
+import std.numeric.(Int64, Int32)
 
 // Memory allocation
 

@@ -4,9 +4,9 @@
 module Test
 
 struct Counter {
-    var value: std.num.Int64
+    var value: std.numeric.Int64
 
-    mutating func incrementAndGet(by: std.num.Int64) -> std.num.Int64 {
+    mutating func incrementAndGet(by: std.numeric.Int64) -> std.numeric.Int64 {
         self.value = self.value + by;
         self.value
     }

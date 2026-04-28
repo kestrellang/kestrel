@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // init and basic properties
-            let r = std.core.ClosedRange[std.num.Int64](2, 5);
+            let r = std.core.ClosedRange[std.numeric.Int64](2, 5);
 
             // contains - value in range (inclusive of both endpoints)
             if r.contains(2) == false { return 1 }
@@ -20,22 +20,22 @@ module Test
             if r.isEmpty() { return 6 }
 
             // isEmpty - single element range (start == end)
-            let singleRange = std.core.ClosedRange[std.num.Int64](5, 5);
+            let singleRange = std.core.ClosedRange[std.numeric.Int64](5, 5);
             if singleRange.isEmpty() { return 7 }
 
             // isEmpty - empty range (start > end)
-            let emptyRange = std.core.ClosedRange[std.num.Int64](8, 2);
+            let emptyRange = std.core.ClosedRange[std.numeric.Int64](8, 2);
             if emptyRange.isEmpty() == false { return 8 }
 
             // equals
-            let r2 = std.core.ClosedRange[std.num.Int64](2, 5);
+            let r2 = std.core.ClosedRange[std.numeric.Int64](2, 5);
             if r.equals(r2) == false { return 9 }
 
-            let r3 = std.core.ClosedRange[std.num.Int64](2, 6);
+            let r3 = std.core.ClosedRange[std.numeric.Int64](2, 6);
             if r.equals(r3) { return 10 }
 
             // iter - iterate and sum 2+3+4+5 = 14
-            var sum: std.num.Int64 = 0;
+            var sum: std.numeric.Int64 = 0;
             var iter = r.iter();
             var done: std.core.Bool = false;
             while done == false {
@@ -49,7 +49,7 @@ module Test
             if sum != 14 { return 11 }
 
             // iter - single element range should yield one element
-            var singleSum: std.num.Int64 = 0;
+            var singleSum: std.numeric.Int64 = 0;
             var singleIter = singleRange.iter();
             var singleDone: std.core.Bool = false;
             while singleDone == false {
@@ -63,7 +63,7 @@ module Test
             if singleSum != 5 { return 12 }
 
             // iter - empty range should yield nothing
-            var emptySum: std.num.Int64 = 0;
+            var emptySum: std.numeric.Int64 = 0;
             var emptyIter = emptyRange.iter();
             var emptyDone: std.core.Bool = false;
             while emptyDone == false {

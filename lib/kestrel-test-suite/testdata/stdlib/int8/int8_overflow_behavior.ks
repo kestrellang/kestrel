@@ -4,24 +4,24 @@
 module Test
 
         func main() -> lang.i64 {
-            let maxVal = std.num.Int8.maxValue;
-            let minVal = std.num.Int8.minValue;
-            let one: std.num.Int8 = 1;
-            let negOne: std.num.Int8 = -1;
+            let maxVal = std.numeric.Int8.maxValue;
+            let minVal = std.numeric.Int8.minValue;
+            let one: std.numeric.Int8 = 1;
+            let negOne: std.numeric.Int8 = -1;
 
             // addChecked — overflow at 127
-            let addCheckZero: std.num.Int8 = 0;
+            let addCheckZero: std.numeric.Int8 = 0;
             let addOk = maxVal.addChecked(addCheckZero);
             if addOk.isNone() { return 1 }
             let addOverflow = maxVal.addChecked(one);
             if addOverflow.isSome() { return 2 }
 
             // addChecked — normal case
-            let ten: std.num.Int8 = 10;
-            let five: std.num.Int8 = 5;
+            let ten: std.numeric.Int8 = 10;
+            let five: std.numeric.Int8 = 5;
             let addNormal = ten.addChecked(five);
             if addNormal.isNone() { return 3 }
-            let expectedFifteen: std.num.Int8 = 15;
+            let expectedFifteen: std.numeric.Int8 = 15;
             if addNormal.unwrap() != expectedFifteen { return 4 }
 
             // subtractChecked — underflow at -128
@@ -31,20 +31,20 @@ module Test
             // subtractChecked — normal case
             let subNormal = ten.subtractChecked(five);
             if subNormal.isNone() { return 6 }
-            let expectedFive: std.num.Int8 = 5;
+            let expectedFive: std.numeric.Int8 = 5;
             if subNormal.unwrap() != expectedFive { return 7 }
 
             // multiplyChecked — overflow near boundaries
-            let big: std.num.Int8 = 100;
-            let two: std.num.Int8 = 2;
+            let big: std.numeric.Int8 = 100;
+            let two: std.numeric.Int8 = 2;
             let mulOverflow = big.multiplyChecked(two);
             if mulOverflow.isSome() { return 8 }
 
             // multiplyChecked — normal case
-            let three: std.num.Int8 = 3;
+            let three: std.numeric.Int8 = 3;
             let mulNormal = five.multiplyChecked(three);
             if mulNormal.isNone() { return 9 }
-            let expectedMulFifteen: std.num.Int8 = 15;
+            let expectedMulFifteen: std.numeric.Int8 = 15;
             if mulNormal.unwrap() != expectedMulFifteen { return 10 }
 
             // negateChecked — overflow at -128 (no positive 128 in Int8)
@@ -54,7 +54,7 @@ module Test
             // negateChecked — normal case
             let negTen = ten.negateChecked();
             if negTen.isNone() { return 12 }
-            let expectedNegTen: std.num.Int8 = -10;
+            let expectedNegTen: std.numeric.Int8 = -10;
             if negTen.unwrap() != expectedNegTen { return 13 }
 
             // absChecked — overflow at -128
@@ -62,7 +62,7 @@ module Test
             if absMin.isSome() { return 14 }
 
             // absChecked — normal case
-            let negFive: std.num.Int8 = -5;
+            let negFive: std.numeric.Int8 = -5;
             let absFive = negFive.absChecked();
             if absFive.isNone() { return 15 }
             if absFive.unwrap() != five { return 16 }
@@ -70,7 +70,7 @@ module Test
             // addSaturating — clamps to 127
             let addSat = maxVal.addSaturating(one);
             if addSat != maxVal { return 17 }
-            let satHundred: std.num.Int8 = 100;
+            let satHundred: std.numeric.Int8 = 100;
             let addSatBig = maxVal.addSaturating(satHundred);
             if addSatBig != maxVal { return 18 }
 
@@ -91,7 +91,7 @@ module Test
             if mulSat != maxVal { return 22 }
 
             // multiplySaturating — clamps to -128 (positive * negative overflow)
-            let negBig: std.num.Int8 = -100;
+            let negBig: std.numeric.Int8 = -100;
             let mulSatNeg = negBig.multiplySaturating(two);
             if mulSatNeg != minVal { return 23 }
 
@@ -101,7 +101,7 @@ module Test
 
             // negateSaturating — normal case
             let negSatTen = ten.negateSaturating();
-            let expectedNegSatTen: std.num.Int8 = -10;
+            let expectedNegSatTen: std.numeric.Int8 = -10;
             if negSatTen != expectedNegSatTen { return 25 }
 
             // absSaturating — -128 saturates to 127

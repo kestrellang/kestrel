@@ -4,8 +4,8 @@
 module Test
 
 struct Point {
-    var x: std.num.Int64
-    var y: std.num.Int64
+    var x: std.numeric.Int64
+    var y: std.numeric.Int64
 }
 
 func reset(mutating p: Point) {

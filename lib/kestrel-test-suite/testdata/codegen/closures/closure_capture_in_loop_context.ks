@@ -4,11 +4,11 @@
 module Test
 
 func main() -> lang.i64 {
-    let base: std.num.Int64 = 40;
-    let f = { (x: std.num.Int64) in base + x };
+    let base: std.numeric.Int64 = 40;
+    let f = { (x: std.numeric.Int64) in base + x };
 
-    var sum: std.num.Int64 = 0;
-    var i: std.num.Int64 = 0;
+    var sum: std.numeric.Int64 = 0;
+    var i: std.numeric.Int64 = 0;
     while i < 2 {
         sum = sum + f(1);
         i = i + 1

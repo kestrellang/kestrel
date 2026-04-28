@@ -116,16 +116,16 @@
               "kind": "function",
               "name": "all",
               "anchor": "function-all",
-              "signature": "public func all(satisfying: (T) -> Bool) -> Bool",
-              "doc": "`true` when every element satisfies `predicate` (vacuously true\nfor an empty array).\n\nShort-circuits on the first failure. The dual is\n`any(satisfying:)`.\n\n# Examples\n\n```\n[2, 4, 6].all(satisfying: { (x) in x % 2 == 0 });  // true\n[2, 3, 6].all(satisfying: { (x) in x % 2 == 0 });  // false\n[].all(satisfying: { (x) in false });              // true (vacuous)\n```",
+              "signature": "public func all(matching: (T) -> Bool) -> Bool",
+              "doc": "`true` when every element satisfies `predicate` (vacuously true\nfor an empty array).\n\nShort-circuits on the first failure. The dual is\n`any(matching:)`.\n\n# Examples\n\n```\n[2, 4, 6].all(matching: { (x) in x % 2 == 0 });  // true\n[2, 3, 6].all(matching: { (x) in x % 2 == 0 });  // false\n[].all(matching: { (x) in false });              // true (vacuous)\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
               "kind": "function",
               "name": "any",
               "anchor": "function-any",
-              "signature": "public func any(satisfying: (T) -> Bool) -> Bool",
-              "doc": "`true` when at least one element satisfies `predicate` (always\n`false` for an empty array).\n\nShort-circuits on the first match. The dual is `all(satisfying:)`.\n\n# Examples\n\n```\n[1, 2, 3].any(satisfying: { (x) in x > 2 });  // true\n[1, 2, 3].any(satisfying: { (x) in x > 5 });  // false\n[].any(satisfying: { (x) in true });          // false (empty)\n```",
+              "signature": "public func any(matching: (T) -> Bool) -> Bool",
+              "doc": "`true` when at least one element satisfies `predicate` (always\n`false` for an empty array).\n\nShort-circuits on the first match. The dual is `all(matching:)`.\n\n# Examples\n\n```\n[1, 2, 3].any(matching: { (x) in x > 2 });  // true\n[1, 2, 3].any(matching: { (x) in x > 5 });  // false\n[].any(matching: { (x) in true });          // false (empty)\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -205,7 +205,7 @@
               "name": "contains",
               "anchor": "function-contains",
               "signature": "public func contains(T) -> Bool",
-              "doc": "`true` if the array contains an element equal to `element`.\n\nLinear scan; short-circuits on the first match. For predicate-\nbased searching see `any(satisfying:)` or `firstIndex(matching:)`.\n\n# Examples\n\n```\n[1, 2, 3].contains(element: 2);  // true\n[1, 2, 3].contains(element: 5);  // false\n```",
+              "doc": "`true` if the array contains an element equal to `element`.\n\nLinear scan; short-circuits on the first match. For predicate-\nbased searching see `any(matching:)` or `firstIndex(matching:)`.\n\n# Examples\n\n```\n[1, 2, 3].contains(element: 2);  // true\n[1, 2, 3].contains(element: 5);  // false\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -221,7 +221,7 @@
               "name": "countItems",
               "anchor": "function-countItems",
               "signature": "public func countItems(matching: (T) -> Bool) -> Int64",
-              "doc": "Returns the number of elements for which `predicate` is true.\n\nLinear scan, no short-circuit. For just a presence check use\n`any(satisfying:)`; for a yes/no on every element,\n`all(satisfying:)`.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].countItems(matching: { (x) in x % 2 == 0 });  // 2\n[].countItems(matching: { (x) in true });                     // 0\n```",
+              "doc": "Returns the number of elements for which `predicate` is true.\n\nLinear scan, no short-circuit. For just a presence check use\n`any(matching:)`; for a yes/no on every element,\n`all(matching:)`.\n\n# Examples\n\n```\n[1, 2, 3, 4, 5].countItems(matching: { (x) in x % 2 == 0 });  // 2\n[].countItems(matching: { (x) in true });                     // 0\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -277,7 +277,7 @@
               "name": "first",
               "anchor": "function-first",
               "signature": "public func first(matching: (T) -> Bool) -> T?",
-              "doc": "Returns the first element satisfying `predicate`, or `None`.\n\nWraps `firstIndex(matching:)` and reads the element at the\nreturned index. For just the index, use `firstIndex(matching:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 4, 5];\narr.first(matching: { (x) in x > 3 });   // Some(4)\narr.first(matching: { (x) in x > 99 });  // None\n```",
+              "doc": "Returns the first element matching `predicate`, or `None`.\n\nWraps `firstIndex(matching:)` and reads the element at the\nreturned index. For just the index, use `firstIndex(matching:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 4, 5];\narr.first(matching: { (x) in x > 3 });   // Some(4)\narr.first(matching: { (x) in x > 99 });  // None\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -285,7 +285,7 @@
               "name": "firstIndex",
               "anchor": "function-firstIndex",
               "signature": "public func firstIndex(matching: (T) -> Bool) -> Int64?",
-              "doc": "Returns the index of the first element satisfying `predicate`, or\n`None`.\n\nLinear scan from the front; short-circuits on the first match.\nTo get the element instead of the index, use `first(matching:)`.\nFor value-based search on `Equatable` arrays, use\n`firstIndex(of:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 4, 5];\narr.firstIndex(matching: { (x) in x > 3 });   // Some(3)\narr.firstIndex(matching: { (x) in x > 10 });  // None\n```",
+              "doc": "Returns the index of the first element matching `predicate`, or\n`None`.\n\nLinear scan from the front; short-circuits on the first match.\nTo get the element instead of the index, use `first(matching:)`.\nFor value-based search on `Equatable` arrays, use\n`firstIndex(of:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 4, 5];\narr.firstIndex(matching: { (x) in x > 3 });   // Some(3)\narr.firstIndex(matching: { (x) in x > 10 });  // None\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -365,7 +365,7 @@
               "name": "last",
               "anchor": "function-last",
               "signature": "public func last(matching: (T) -> Bool) -> T?",
-              "doc": "Returns the last element satisfying `predicate`, or `None`.\n\nWraps `lastIndex(matching:)`. For just the index, use\n`lastIndex(matching:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 2, 1];\narr.last(matching: { (x) in x > 1 });  // Some(2) — the second 2\n```",
+              "doc": "Returns the last element matching `predicate`, or `None`.\n\nWraps `lastIndex(matching:)`. For just the index, use\n`lastIndex(matching:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 2, 1];\narr.last(matching: { (x) in x > 1 });  // Some(2) — the second 2\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -373,7 +373,7 @@
               "name": "lastIndex",
               "anchor": "function-lastIndex",
               "signature": "public func lastIndex(matching: (T) -> Bool) -> Int64?",
-              "doc": "Returns the index of the last element satisfying `predicate`, or\n`None`.\n\nLinear scan from the back; short-circuits on the first match. The\nmirror of `firstIndex(matching:)`. For value-based search on\n`Equatable` arrays, use `lastIndex(of:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 2, 1];\narr.lastIndex(matching: { (x) in x == 2 });   // Some(3)\narr.lastIndex(matching: { (x) in x == 99 });  // None\n```",
+              "doc": "Returns the index of the last element matching `predicate`, or\n`None`.\n\nLinear scan from the back; short-circuits on the first match. The\nmirror of `firstIndex(matching:)`. For value-based search on\n`Equatable` arrays, use `lastIndex(of:)`.\n\n# Examples\n\n```\nlet arr = [1, 2, 3, 2, 1];\narr.lastIndex(matching: { (x) in x == 2 });   // Some(3)\narr.lastIndex(matching: { (x) in x == 99 });  // None\n```",
               "source_path": "lang/std/collections/array.ks"
             },
             {
@@ -689,9 +689,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = ArrayIterator[T]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = ArrayIterator[T]",
               "doc": "`Iterable` iterator type — the concrete iterator returned by `iter()`.",
               "source_path": "lang/std/collections/array.ks"
             },
@@ -1053,7 +1053,7 @@
               "name": "From Pairs",
               "anchor": "initializer-From-Pairs",
               "signature": "public init[I](from: I) where I: Iterable, I.Item == (K, V)",
-              "doc": "Creates a dictionary by inserting every `(key, value)` pair\nproduced by an iterable.\n\nLast write wins for duplicate keys. For a panic-on-duplicate\nvariant use `init(uniqueKeysWithValues:)`. Capacity grows\ngeometrically as inserts arrive — for sized sources, follow up\nwith `shrinkToFit()` if memory matters.\n\n# Examples\n\n```\nlet pairs = [(\"a\", 1), (\"b\", 2)];\nlet dict = Dictionary(from: pairs);              // [\"a\": 1, \"b\": 2]\nlet dups = Dictionary(from: [(\"a\", 1), (\"a\", 2)]);  // [\"a\": 2] — later wins\n```",
+              "doc": "Creates a dictionary by inserting every `(key, value)` pair\nproduced by an iterable.\n\nLast write wins for duplicate keys. For a panic-on-duplicate\nvariant use `init(uniquePairs:)`. Capacity grows\ngeometrically as inserts arrive — for sized sources, follow up\nwith `shrinkToFit()` if memory matters.\n\n# Examples\n\n```\nlet pairs = [(\"a\", 1), (\"b\", 2)];\nlet dict = Dictionary(from: pairs);              // [\"a\": 1, \"b\": 2]\nlet dups = Dictionary(from: [(\"a\", 1), (\"a\", 2)]);  // [\"a\": 2] — later wins\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
@@ -1084,8 +1084,8 @@
               "kind": "initializer",
               "name": "Unique Keys",
               "anchor": "initializer-Unique-Keys",
-              "signature": "public init[I](uniqueKeysWithValues: I) where I: Iterable, I.Item == (K, V)",
-              "doc": "Creates a dictionary from key-value pairs, panicking on any\nduplicate key.\n\nUse this when duplicate keys would indicate a bug in upstream\ndata; for last-write-wins semantics use `init(from:)`. Each pair\ntriggers a `contains` check before insertion, so it's slower\nthan `init(from:)` for large inputs.\n\n# Errors\n\nPanics with `\"Dictionary(uniqueKeysWithValues:): duplicate key\"`\nthe first time `pairs` yields a key already in the dictionary.\n\n# Examples\n\n```\nlet dict = Dictionary(uniqueKeysWithValues: [(\"a\", 1), (\"b\", 2)]);\nDictionary(uniqueKeysWithValues: [(\"a\", 1), (\"a\", 2)]);\n// PANIC: Dictionary(uniqueKeysWithValues:): duplicate key\n```",
+              "signature": "public init[I](uniquePairs: I) where I: Iterable, I.Item == (K, V)",
+              "doc": "Creates a dictionary from key-value pairs, panicking on any\nduplicate key.\n\nUse this when duplicate keys would indicate a bug in upstream\ndata; for last-write-wins semantics use `init(from:)`. Each pair\ntriggers a `contains` check before insertion, so it's slower\nthan `init(from:)` for large inputs.\n\n# Errors\n\nPanics with `\"Dictionary(uniquePairs:): duplicate key\"`\nthe first time `pairs` yields a key already in the dictionary.\n\n# Examples\n\n```\nlet dict = Dictionary(uniquePairs: [(\"a\", 1), (\"b\", 2)]);\nDictionary(uniquePairs: [(\"a\", 1), (\"a\", 2)]);\n// PANIC: Dictionary(uniquePairs:): duplicate key\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
@@ -1116,24 +1116,24 @@
               "kind": "function",
               "name": "all",
               "anchor": "function-all",
-              "signature": "public func all(satisfying: (K, V) -> Bool) -> Bool",
-              "doc": "`true` when every entry satisfies `predicate(key, value)`\n(vacuously true for empty).\n\nShort-circuits on the first failure. Dual of `any(satisfying:)`.\n\n# Examples\n\n```\n[\"a\": 2, \"b\": 4].all(satisfying: { (k, v) in v % 2 == 0 });  // true\n[\"a\": 1, \"b\": 2].all(satisfying: { (k, v) in v % 2 == 0 });  // false\n[:].all(satisfying: { (k, v) in false });                    // true (vacuous)\n```",
+              "signature": "public func all(matching: (K, V) -> Bool) -> Bool",
+              "doc": "`true` when every entry satisfies `predicate(key, value)`\n(vacuously true for empty).\n\nShort-circuits on the first failure. Dual of `any(matching:)`.\n\n# Examples\n\n```\n[\"a\": 2, \"b\": 4].all(matching: { (k, v) in v % 2 == 0 });  // true\n[\"a\": 1, \"b\": 2].all(matching: { (k, v) in v % 2 == 0 });  // false\n[:].all(matching: { (k, v) in false });                    // true (vacuous)\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
               "kind": "function",
               "name": "allKeys",
               "anchor": "function-allKeys",
-              "signature": "public func allKeys(forValue: V) -> Array[K]",
-              "doc": "Returns every key whose value equals `value`.\n\nO(capacity), allocates an `Array[K]`. Result order matches\nbucket layout and is therefore unspecified. Empty array if no\nmatches.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 2, \"c\": 1].allKeys(forValue: 1);  // [\"a\", \"c\"]  — order unspecified\n[\"a\": 1].allKeys(forValue: 99);                  // []\n```",
+              "signature": "public func allKeys(of: V) -> Array[K]",
+              "doc": "Returns every key whose value equals `value`.\n\nO(capacity), allocates an `Array[K]`. Result order matches\nbucket layout and is therefore unspecified. Empty array if no\nmatches.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 2, \"c\": 1].allKeys(of: 1);  // [\"a\", \"c\"]  — order unspecified\n[\"a\": 1].allKeys(of: 99);                  // []\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
               "kind": "function",
               "name": "any",
               "anchor": "function-any",
-              "signature": "public func any(satisfying: (K, V) -> Bool) -> Bool",
-              "doc": "`true` when at least one entry satisfies `predicate(key, value)`.\n\nAlias for `contains(matching:)` — the two names exist so\npredicate-style code reads naturally regardless of context.\nShort-circuits on the first match.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 5].any(satisfying: { (k, v) in v > 3 });  // true\n[:].any(satisfying: { (k, v) in true });                // false (empty)\n```",
+              "signature": "public func any(matching: (K, V) -> Bool) -> Bool",
+              "doc": "`true` when at least one entry satisfies `predicate(key, value)`.\n\nAlias for `contains(matching:)` — the two names exist so\npredicate-style code reads naturally regardless of context.\nShort-circuits on the first match.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 5].any(matching: { (k, v) in v > 3 });  // true\n[:].any(matching: { (k, v) in true });                // false (empty)\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
@@ -1197,7 +1197,7 @@
               "name": "countItems",
               "anchor": "function-countItems",
               "signature": "public func countItems(matching: (K, V) -> Bool) -> Int64",
-              "doc": "Returns the number of entries for which\n`predicate(key, value)` is true.\n\nLinear scan, no short-circuit. For just a presence check use\n`any(satisfying:)`; for a yes/no on every entry,\n`all(satisfying:)`.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 2, \"c\": 3].countItems(matching: { (k, v) in v > 1 });  // 2\n[:].countItems(matching: { (k, v) in true });                        // 0\n```",
+              "doc": "Returns the number of entries for which\n`predicate(key, value)` is true.\n\nLinear scan, no short-circuit. For just a presence check use\n`any(matching:)`; for a yes/no on every entry,\n`all(matching:)`.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 2, \"c\": 3].countItems(matching: { (k, v) in v > 1 });  // 2\n[:].countItems(matching: { (k, v) in true });                        // 0\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
@@ -1221,15 +1221,15 @@
               "name": "first",
               "anchor": "function-first",
               "signature": "public func first(matching: (K, V) -> Bool) -> (K, V)?",
-              "doc": "Returns *some* entry satisfying `predicate(key, value)`, or\n`None`.\n\n\"First\" is determined by bucket order, which is hash-dependent\nand unspecified — treat the result as arbitrary among matching\nentries. Short-circuits on the first match.\n\n# Examples\n\n```\nlet dict = [\"a\": 1, \"b\": 5, \"c\": 3];\ndict.first(matching: { (k, v) in v > 2 });  // Some entry with v > 2\ndict.first(matching: { (k, v) in v > 99 }); // None\n```",
+              "doc": "Returns *some* entry matching `predicate(key, value)`, or\n`None`.\n\n\"First\" is determined by bucket order, which is hash-dependent\nand unspecified — treat the result as arbitrary among matching\nentries. Short-circuits on the first match.\n\n# Examples\n\n```\nlet dict = [\"a\": 1, \"b\": 5, \"c\": 3];\ndict.first(matching: { (k, v) in v > 2 });  // Some entry with v > 2\ndict.first(matching: { (k, v) in v > 99 }); // None\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
               "kind": "function",
               "name": "firstKey",
               "anchor": "function-firstKey",
-              "signature": "public func firstKey(forValue: V) -> K?",
-              "doc": "Returns *some* key mapping to `value`, or `None`.\n\nO(capacity); short-circuits on the first match. \"First\" is\ndetermined by bucket order and is unspecified — for an\nexhaustive list use `allKeys(forValue:)`.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 2].firstKey(forValue: 2);  // Some(\"b\")\n[\"a\": 1, \"b\": 2].firstKey(forValue: 5);  // None\n```",
+              "signature": "public func firstKey(of: V) -> K?",
+              "doc": "Returns *some* key mapping to `value`, or `None`.\n\nO(capacity); short-circuits on the first match. \"First\" is\ndetermined by bucket order and is unspecified — for an\nexhaustive list use `allKeys(of:)`.\n\n# Examples\n\n```\n[\"a\": 1, \"b\": 2].firstKey(of: 2);  // Some(\"b\")\n[\"a\": 1, \"b\": 2].firstKey(of: 5);  // None\n```",
               "source_path": "lang/std/collections/dictionary.ks"
             },
             {
@@ -1377,9 +1377,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = DictionaryIterator[K, V]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = DictionaryIterator[K, V]",
               "doc": "Concrete iterator type returned by `iter()`.",
               "source_path": "lang/std/collections/dictionary.ks"
             },
@@ -1643,9 +1643,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = KeysIterator[K, V]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = KeysIterator[K, V]",
               "doc": "Concrete iterator type returned by `iter()`.",
               "source_path": "lang/std/collections/dictionary.ks"
             },
@@ -1726,16 +1726,16 @@
               "kind": "function",
               "name": "all",
               "anchor": "function-all",
-              "signature": "public func all(satisfying: (T) -> Bool) -> Bool",
-              "doc": "`true` when every element satisfies `predicate` (vacuously\ntrue for empty sets).\n\nShort-circuits on the first failure. Dual of\n`any(satisfying:)`.\n\n# Examples\n\n```\nSet([2, 4, 6]).all(satisfying: { (x) in x % 2 == 0 });  // true\nSet([1, 2, 4]).all(satisfying: { (x) in x % 2 == 0 });  // false\nSet[Int64]().all(satisfying: { (x) in false });         // true (vacuous)\n```",
+              "signature": "public func all(matching: (T) -> Bool) -> Bool",
+              "doc": "`true` when every element satisfies `predicate` (vacuously\ntrue for empty sets).\n\nShort-circuits on the first failure. Dual of\n`any(matching:)`.\n\n# Examples\n\n```\nSet([2, 4, 6]).all(matching: { (x) in x % 2 == 0 });  // true\nSet([1, 2, 4]).all(matching: { (x) in x % 2 == 0 });  // false\nSet[Int64]().all(matching: { (x) in false });         // true (vacuous)\n```",
               "source_path": "lang/std/collections/set.ks"
             },
             {
               "kind": "function",
               "name": "any",
               "anchor": "function-any",
-              "signature": "public func any(satisfying: (T) -> Bool) -> Bool",
-              "doc": "`true` when at least one element satisfies `predicate`.\n\nAlias for `contains(matching:)` — both names exist so\npredicate-style code reads naturally regardless of context.\nShort-circuits.\n\n# Examples\n\n```\nSet([1, 2, 3]).any(satisfying: { (x) in x > 2 });  // true\nSet[Int64]().any(satisfying: { (x) in true });     // false (empty)\n```",
+              "signature": "public func any(matching: (T) -> Bool) -> Bool",
+              "doc": "`true` when at least one element satisfies `predicate`.\n\nAlias for `contains(matching:)` — both names exist so\npredicate-style code reads naturally regardless of context.\nShort-circuits.\n\n# Examples\n\n```\nSet([1, 2, 3]).any(matching: { (x) in x > 2 });  // true\nSet[Int64]().any(matching: { (x) in true });     // false (empty)\n```",
               "source_path": "lang/std/collections/set.ks"
             },
             {
@@ -1775,7 +1775,7 @@
               "name": "contains",
               "anchor": "function-contains",
               "signature": "public func contains(matching: (T) -> Bool) -> Bool",
-              "doc": "`true` if any element satisfies `predicate`.\n\nLinear scan; short-circuits on the first match. `false` for\nempty sets. The aliased shape `any(satisfying:)` exists for\nsymmetry with `Array`.\n\n# Examples\n\n```\nSet([1, 2, 3]).contains(matching: { (x) in x > 2 });  // true\nSet([1, 2, 3]).contains(matching: { (x) in x > 5 });  // false\n```",
+              "doc": "`true` if any element satisfies `predicate`.\n\nLinear scan; short-circuits on the first match. `false` for\nempty sets. The aliased shape `any(matching:)` exists for\nsymmetry with `Array`.\n\n# Examples\n\n```\nSet([1, 2, 3]).contains(matching: { (x) in x > 2 });  // true\nSet([1, 2, 3]).contains(matching: { (x) in x > 5 });  // false\n```",
               "source_path": "lang/std/collections/set.ks"
             },
             {
@@ -1791,7 +1791,7 @@
               "name": "countItems",
               "anchor": "function-countItems",
               "signature": "public func countItems(matching: (T) -> Bool) -> Int64",
-              "doc": "Returns the number of elements for which `predicate` is true.\n\nLinear scan, no short-circuit. For just a presence check use\n`any(satisfying:)`; for a yes/no on every element,\n`all(satisfying:)`.\n\n# Examples\n\n```\nSet([1, 2, 3, 4, 5]).countItems(matching: { (x) in x % 2 == 0 });  // 2\nSet[Int64]().countItems(matching: { (x) in true });                // 0\n```",
+              "doc": "Returns the number of elements for which `predicate` is true.\n\nLinear scan, no short-circuit. For just a presence check use\n`any(matching:)`; for a yes/no on every element,\n`all(matching:)`.\n\n# Examples\n\n```\nSet([1, 2, 3, 4, 5]).countItems(matching: { (x) in x % 2 == 0 });  // 2\nSet[Int64]().countItems(matching: { (x) in true });                // 0\n```",
               "source_path": "lang/std/collections/set.ks"
             },
             {
@@ -2075,9 +2075,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = SetIterator[T, H]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = SetIterator[T, H]",
               "doc": "Concrete iterator type returned by `iter()`.",
               "source_path": "lang/std/collections/set.ks"
             },
@@ -2287,9 +2287,9 @@
             },
             {
               "kind": "typealias",
-              "name": "Iter",
-              "anchor": "typealias-Iter",
-              "signature": "type Iter = ValuesIterator[K, V]",
+              "name": "TargetIterator",
+              "anchor": "typealias-TargetIterator",
+              "signature": "type TargetIterator = ValuesIterator[K, V]",
               "doc": "Concrete iterator type returned by `iter()`.",
               "source_path": "lang/std/collections/dictionary.ks"
             },

@@ -15,7 +15,7 @@ module Test
             if single.unwrap() != 42 { return 4 }
 
             // reduce on empty returns None
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             let none = empty.iter().reduce(combine: { (a, b) in a + b });
             if none.isSome() { return 5 }
 

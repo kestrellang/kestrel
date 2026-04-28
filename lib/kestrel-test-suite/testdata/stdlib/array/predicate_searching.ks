@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr = std.collections.Array[std.num.Int64]();
+            var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1);
             arr.append(2);
             arr.append(3);
@@ -55,7 +55,7 @@ module Test
             if allBig { return 14 }
 
             // all(satisfy:) on empty array - vacuous truth
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             let allEmpty = empty.all(satisfying: { (x) in false });
             if allEmpty == false { return 15 }
 

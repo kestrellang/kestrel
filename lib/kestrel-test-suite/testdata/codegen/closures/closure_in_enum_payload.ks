@@ -4,11 +4,11 @@
 module Test
 
 enum Action {
-    case Transform(f: (std.num.Int64) -> std.num.Int64)
+    case Transform(f: (std.numeric.Int64) -> std.numeric.Int64)
     case NoOp
 }
 
-func apply_action(a: Action, x: std.num.Int64) -> std.num.Int64 {
+func apply_action(a: Action, x: std.numeric.Int64) -> std.numeric.Int64 {
     match a {
         .Transform(f: f) => f(x),
         .NoOp => x

@@ -5,7 +5,7 @@
 module Test
 
 import std.text.Char
-import std.num.Int64
+import std.numeric.Int64
 
 func isUpperOrBeyond(c: Char) -> Int64 {
     match c {

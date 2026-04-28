@@ -27,8 +27,8 @@
 module assoc_subscript_regression
 
 import std.text.String
-import std.num.Int64
-import std.num.Float64
+import std.numeric.Int64
+import std.numeric.Float64
 import std.collections.Array
 
 func main() -> lang.i64 {

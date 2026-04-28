@@ -4,16 +4,16 @@
 module Test
 
 struct Point {
-    let x: std.num.Int64
-    let y: std.num.Int64
+    let x: std.numeric.Int64
+    let y: std.numeric.Int64
 }
 
 enum Shape {
-    case Circle(center: Point, radius: std.num.Int64)
-    case Rectangle(origin: Point, width: std.num.Int64, height: std.num.Int64)
+    case Circle(center: Point, radius: std.numeric.Int64)
+    case Rectangle(origin: Point, width: std.numeric.Int64, height: std.numeric.Int64)
 }
 
-func get_value(s: Shape) -> std.num.Int64 {
+func get_value(s: Shape) -> std.numeric.Int64 {
     match s {
         .Circle(center: c, radius: r) => c.x + c.y + r,
         .Rectangle(origin: o, width: w, height: h) => o.x + o.y + w + h

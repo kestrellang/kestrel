@@ -5,9 +5,9 @@
 module Main
 import std.io.stdio.println
 
-public let globalLet: std.num.Int64 = 7;
+public let globalLet: std.numeric.Int64 = 7;
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let _ = println(globalLet);
     0
 }

@@ -4,8 +4,8 @@
 module Test
 
 func main() -> lang.i64 {
-    var countdown: std.num.Int64 = 10;
-    var result: std.num.Int64 = 0;
+    var countdown: std.numeric.Int64 = 10;
+    var result: std.numeric.Int64 = 0;
     while countdown > 0 {
         result = result + countdown;
         countdown = countdown - 1;

@@ -5,18 +5,18 @@ module Test
 
         func main() -> lang.i64 {
             // Create a Repeat reader that yields byte 42
-            let byte42: std.num.UInt8 = 42;
+            let byte42: std.numeric.UInt8 = 42;
             var rep = std.io.read.Repeat(byte: byte42);
 
             // Create a buffer to read into
-            let zeroByte: std.num.UInt8 = 0;
-            var buf = std.collections.Array[std.num.UInt8]();
+            let zeroByte: std.numeric.UInt8 = 0;
+            var buf = std.collections.Array[std.numeric.UInt8]();
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
-            let slice = std.memory.Slice[std.num.UInt8](pointer: buf.asPointer(), count: 5);
+            let slice = std.memory.Slice[std.numeric.UInt8](pointer: buf.asPointer(), count: 5);
 
             // Read should fill the entire buffer with byte 42
             let result = rep.read(into: slice);
@@ -33,10 +33,10 @@ module Test
             if buf(unchecked: 4) != byte42 { return 7 }
 
             // Read again with a different size buffer
-            var buf2 = std.collections.Array[std.num.UInt8]();
+            var buf2 = std.collections.Array[std.numeric.UInt8]();
             buf2.append(zeroByte);
             buf2.append(zeroByte);
-            let slice2 = std.memory.Slice[std.num.UInt8](pointer: buf2.asPointer(), count: 2);
+            let slice2 = std.memory.Slice[std.numeric.UInt8](pointer: buf2.asPointer(), count: 2);
             let result2 = rep.read(into: slice2);
             match result2 {
                 .Ok(n) => if n != 2 { return 8 },

@@ -3,8 +3,8 @@
 
 module Main
 
-func findFirst(target: std.num.Int64) -> std.result.Optional[std.num.Int64] {
-    for i in std.core.Range[std.num.Int64](0, 100) {
+func findFirst(target: std.numeric.Int64) -> std.result.Optional[std.numeric.Int64] {
+    for i in std.core.Range[std.numeric.Int64](0, 100) {
         if i == target {
             return .Some(i)
         }

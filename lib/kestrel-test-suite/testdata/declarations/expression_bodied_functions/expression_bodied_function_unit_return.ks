@@ -6,7 +6,7 @@ import std.io.stdio.println
 
 func doNothing() -> () = ()
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     doNothing();
     let _ = println(1);
     0

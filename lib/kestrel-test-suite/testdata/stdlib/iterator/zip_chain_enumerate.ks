@@ -4,12 +4,12 @@
 module Test
 
         func main() -> lang.i64 {
-            var arr1 = std.collections.Array[std.num.Int64]();
+            var arr1 = std.collections.Array[std.numeric.Int64]();
             arr1.append(1);
             arr1.append(2);
             arr1.append(3);
 
-            var arr2 = std.collections.Array[std.num.Int64]();
+            var arr2 = std.collections.Array[std.numeric.Int64]();
             arr2.append(10);
             arr2.append(20);
             arr2.append(30);

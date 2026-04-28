@@ -3,14 +3,14 @@
 
 module Test
 
-        func approxEqual(a: std.num.Float64, b: std.num.Float64) -> std.core.Bool {
+        func approxEqual(a: std.numeric.Float64, b: std.numeric.Float64) -> std.core.Bool {
             let diff = a.subtract(b).abs();
             diff < 0.0000001
         }
 
         func main() -> lang.i64 {
-            let a: std.num.Float64 = 10.5;
-            let b: std.num.Float64 = 3.2;
+            let a: std.numeric.Float64 = 10.5;
+            let b: std.numeric.Float64 = 3.2;
 
             // add
             let sum = a.add(b);
@@ -35,16 +35,16 @@ module Test
             if approxEqual(doubleNeg, 10.5) == false { return 6 }
 
             // abs
-            let negVal: std.num.Float64 = -7.5;
+            let negVal: std.numeric.Float64 = -7.5;
             let absVal = negVal.abs();
             if approxEqual(absVal, 7.5) == false { return 7 }
-            let posVal: std.num.Float64 = 7.5;
+            let posVal: std.numeric.Float64 = 7.5;
             let absPosVal = posVal.abs();
             if approxEqual(absPosVal, 7.5) == false { return 8 }
 
             // division by zero produces infinity
-            let one: std.num.Float64 = 1.0;
-            let zero = std.num.Float64.zero;
+            let one: std.numeric.Float64 = 1.0;
+            let zero = std.numeric.Float64.zero;
             let divByZero = one.divide(zero);
             if divByZero.isInfinite == false { return 9 }
 
@@ -53,7 +53,7 @@ module Test
             if zeroOverZero.isNaN == false { return 10 }
 
             // NaN arithmetic produces NaN
-            let nan = std.num.Float64.nan;
+            let nan = std.numeric.Float64.nan;
             if nan.add(1.0).isNaN == false { return 11 }
             if nan.multiply(2.0).isNaN == false { return 12 }
 

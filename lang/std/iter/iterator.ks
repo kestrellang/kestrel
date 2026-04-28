@@ -4,7 +4,7 @@ module std.iter
 
 import std.result.(Optional, Result)
 import std.core.(Bool, Equatable, Comparable, Addable, Multipliable, Copyable, Cloneable, Ordering)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.collections.(Array)
 import std.iter.(
     MapIterator,
@@ -20,14 +20,14 @@ import std.iter.(
     ZipIterator,
     ChainIterator,
     PeekableIterator,
-    FuseIterator,
+    FusedIterator,
     InspectIterator,
     StepByIterator,
     IntersperseIterator,
     IntersperseWithIterator,
     CycleIterator,
     FlattenIterator,
-    RevIterator
+    ReversedIterator
 )
 
 // ============================================================================
@@ -110,12 +110,12 @@ public protocol Iterable {
     type Item
 
     /// The concrete iterator type returned by `iter()`. Constrained so
-    /// `Iter.Item` matches `Self.Item`.
-    type Iter: Iterator where Iter.Item = Item
+    /// `TargetIterator.Item` matches `Self.Item`.
+    type TargetIterator: Iterator where TargetIterator.Item = Item
 
     /// Builds a fresh iterator over the contents.
     @builtin(.IterableIterMethod)
-    func iter() -> Iter
+    func iter() -> TargetIterator
 }
 
 // ============================================================================
@@ -128,7 +128,7 @@ public protocol Iterable {
 /// `iter()` call.
 extend Iterator: Iterable {
     type Iterable.Item = Self.Item
-    type Iterable.Iter = Self
+    type Iterable.TargetIterator = Self
 
     /// Returns `self`. The blanket conformance pivot — iterators *are*
     /// iterables.
@@ -205,8 +205,8 @@ extend Iterator {
     /// [1, 2, 3].iter().map({ it * 2 }).collect();         // [2, 4, 6]
     /// ["hi", "yo"].iter().map({ it.count }).collect();    // [2, 2]
     /// ```
-    public func map[U](transform: (Item) -> U) -> MapIterator[Self, U] {
-        MapIterator(inner: self, transform: transform)
+    public func map[U](mapping: (Item) -> U) -> MapIterator[Self, U] {
+        MapIterator(inner: self, mapping: mapping)
     }
 
     /// Yields only elements where `predicate` returns `true`. Lazy —
@@ -217,8 +217,8 @@ extend Iterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).collect();   // [2, 4]
     /// ```
-    public func filter(predicate: (Item) -> Bool) -> FilterIterator[Self] {
-        FilterIterator(inner: self, predicate: predicate)
+    public func filter(matching predicate: (Item) -> Bool) -> FilterIterator[Self] {
+        FilterIterator(inner: self, matching: predicate)
     }
 
     /// Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -232,8 +232,8 @@ extend Iterator {
     ///     .filterMap({ Int64.parse(it) })
     ///     .collect();   // [1, 3]
     /// ```
-    public func filterMap[U](transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
-        FilterMapIterator(inner: self, transform: transform)
+    public func filterMap[U](mapping: (Item) -> U?) -> FilterMapIterator[Self, U] {
+        FilterMapIterator(inner: self, mapping: mapping)
     }
 
     /// Drops `None`s and unwraps `Some`s — the identity-transform special
@@ -247,7 +247,7 @@ extend Iterator {
     /// xs.iter().compactMap().collect();   // [1, 2, 3]
     /// ```
     public func compactMap[T]() -> FilterMapIterator[Self, T] where Item = Optional[T] {
-        FilterMapIterator(inner: self, transform: { it })
+        FilterMapIterator(inner: self, mapping: { it })
     }
 
     /// Pairs each element with its zero-based position.
@@ -280,8 +280,8 @@ extend Iterator {
     ///     .flatMap({ if it % 2 == 0 { [it, it].iter() } else { [].iter() } })
     ///     .collect();   // [2, 2]
     /// ```
-    public func flatMap[U](transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
-        FlatMapIterator(inner: self, transform: transform)
+    public func flatMap[U](mapping: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
+        FlatMapIterator(inner: self, mapping: mapping)
     }
 
     /// Like `fold`, but yields each intermediate accumulator value
@@ -293,11 +293,11 @@ extend Iterator {
     /// ```
     /// // Running sum
     /// [1, 2, 3, 4].iter()
-    ///     .scan(initial: 0, combine: |acc, x| acc + x)
+    ///     .scan(from: 0, combining: |acc, x| acc + x)
     ///     .collect();   // [1, 3, 6, 10]
     /// ```
-    public func scan[Acc](initial: Acc, combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
-        ScanIterator(inner: self, initial: initial, combine: combine)
+    public func scan[Acc](from initial: Acc, combining combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
+        ScanIterator(inner: self, from: initial, combining: combine)
     }
 }
 
@@ -331,8 +331,8 @@ extend Iterator {
     ///     .takeWhile({ it < 4 })
     ///     .collect();   // [1, 2, 3]
     /// ```
-    public func takeWhile(predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
-        TakeWhileIterator(inner: self, predicate: predicate)
+    public func takeWhile(matching predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
+        TakeWhileIterator(inner: self, matching: predicate)
     }
 
     /// Drops the first `count` elements, then yields the rest.
@@ -358,8 +358,8 @@ extend Iterator {
     ///     .skipWhile({ it < 3 })
     ///     .collect();   // [3, 4, 1, 2]
     /// ```
-    public func skipWhile(predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
-        SkipWhileIterator(inner: self, predicate: predicate)
+    public func skipWhile(matching predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
+        SkipWhileIterator(inner: self, matching: predicate)
     }
 }
 
@@ -425,8 +425,8 @@ extend Iterator {
     /// fused (i.e. that may produce more elements after returning `None`
     /// once). After the first `None`, this adapter returns `None`
     /// forever.
-    public func fuse() -> FuseIterator[Self] {
-        FuseIterator(inner: self)
+    public func fuse() -> FusedIterator[Self] {
+        FusedIterator(inner: self)
     }
 
     /// Calls `inspector` on each element as it flows through, leaving
@@ -442,8 +442,8 @@ extend Iterator {
     ///     .inspect({ print("after filter: \{it}") })
     ///     .collect();
     /// ```
-    public func inspect(inspector: (Item) -> ()) -> InspectIterator[Self] {
-        InspectIterator(inner: self, inspector: inspector)
+    public func inspect(inspecting inspector: (Item) -> ()) -> InspectIterator[Self] {
+        InspectIterator(inner: self, inspecting: inspector)
     }
 
     /// Yields every `n`-th element, starting at the first. `n == 0` is
@@ -472,8 +472,8 @@ extend Iterator {
     /// [1, 2, 3].iter().intersperse(separator: 0).collect();
     /// // [1, 0, 2, 0, 3]
     /// ```
-    public func intersperse(separator: Item) -> IntersperseIterator[Self] {
-        IntersperseIterator(inner: self, separator: separator)
+    public func intersperse(with separator: Item) -> IntersperseIterator[Self] {
+        IntersperseIterator(inner: self, with: separator)
     }
 }
 
@@ -492,8 +492,8 @@ extend Iterator {
     ///     .intersperseWith(separator: || { counter += 1; counter * 10 })
     ///     .collect();   // [1, 10, 2, 20, 3]
     /// ```
-    public func intersperseWith(separator: () -> Item) -> IntersperseWithIterator[Self] {
-        IntersperseWithIterator(inner: self, separator: separator)
+    public func intersperseWith(with separator: () -> Item) -> IntersperseWithIterator[Self] {
+        IntersperseWithIterator(inner: self, with: separator)
     }
 }
 
@@ -592,11 +592,11 @@ extend Iterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4].iter().fold(initial: 0, combine: |acc, x| acc + x);   // 10
-    /// [1, 2, 3].iter().fold(initial: 1, combine: |acc, x| acc * x);      // 6
-    /// [].iter().fold(initial: 42, combine: |acc, x| acc + x);            // 42
+    /// [1, 2, 3, 4].iter().fold(from: 0,  combining: |acc, x| acc + x);   // 10
+    /// [1, 2, 3].iter().fold(from: 1,  combining: |acc, x| acc * x);      // 6
+    /// [].iter().fold(from: 42,  combining: |acc, x| acc + x);            // 42
     /// ```
-    public consuming func fold[Acc](initial initial: Acc, combine combine: (Acc, Item) -> Acc) -> Acc {
+    public consuming func fold[Acc](from initial: Acc, combining combine: (Acc, Item) -> Acc) -> Acc {
         var acc = initial;
         while let .Some(item) = self.next() {
             acc = combine(acc, item);
@@ -611,13 +611,13 @@ extend Iterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4].iter().reduce(combine: |a, b| a + b);   // Some(10)
-    /// [5].iter().reduce(combine: |a, b| a + b);            // Some(5)
-    /// [].iter().reduce(combine: |a, b| a + b);             // None
+    /// [1, 2, 3, 4].iter().reduce(combining: |a, b| a + b);   // Some(10)
+    /// [5].iter().reduce(combining: |a, b| a + b);            // Some(5)
+    /// [].iter().reduce(combining: |a, b| a + b);             // None
     /// ```
-    public consuming func reduce(combine combine: (Item, Item) -> Item) -> Item? {
+    public consuming func reduce(combining combine: (Item, Item) -> Item) -> Item? {
         if let .Some(first) = self.next() {
-            .Some(self.fold(initial: first, combine: combine))
+            .Some(self.fold(from: first, combining: combine))
         } else {
             .None
         }
@@ -632,7 +632,7 @@ extend Iterator {
     /// ```
     /// // Stop the moment a parse fails
     /// ["1", "2", "3"].iter()
-    ///     .tryFold(initial: 0, combine: |acc, s| {
+    ///     .tryFold(from: 0,  combining: |acc, s| {
     ///         match Int64.parse(s) {
     ///             .Some(n) => .Ok(acc + n),
     ///             .None    => .Err("parse error")
@@ -640,14 +640,14 @@ extend Iterator {
     ///     });   // Ok(6)
     ///
     /// ["1", "bad", "3"].iter()
-    ///     .tryFold(initial: 0, combine: |acc, s| {
+    ///     .tryFold(from: 0,  combining: |acc, s| {
     ///         match Int64.parse(s) {
     ///             .Some(n) => .Ok(acc + n),
     ///             .None    => .Err("parse error")
     ///         }
     ///     });   // Err("parse error")
     /// ```
-    public mutating func tryFold[Acc, E](initial initial: Acc, combine combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E] {
+    public mutating func tryFold[Acc, E](from initial: Acc, combining combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E] {
         var acc = initial;
         while let .Some(item) = self.next() {
             match combine(acc, item) {
@@ -669,7 +669,7 @@ extend Iterator {
     /// });   // stops on first failure
     /// ```
     public mutating func tryForEach[E](action: (Item) -> Result[(), E]) -> Result[(), E] {
-        self.tryFold(initial: (), combine: { (_, item) in action(item) })
+        self.tryFold(from: (), combining: { (_, item) in action(item) })
     }
 }
 
@@ -712,7 +712,7 @@ extend Iterator {
     /// [1, 2, 3].iter().any({ it > 10 });      // false
     /// [].iter().any({ true });                // false
     /// ```
-    public mutating func any(predicate: (Item) -> Bool) -> Bool {
+    public mutating func any(matching predicate: (Item) -> Bool) -> Bool {
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return true
@@ -731,7 +731,7 @@ extend Iterator {
     /// [2, 3, 4].iter().all({ it % 2 == 0 });   // false (stops at 3)
     /// [].iter().all({ false });                // true (empty)
     /// ```
-    public mutating func all(predicate: (Item) -> Bool) -> Bool {
+    public mutating func all(matching predicate: (Item) -> Bool) -> Bool {
         while let .Some(item) = self.next() {
             if not predicate(item) {
                 return false
@@ -754,10 +754,10 @@ extend Iterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].iter().find({ it > 3 });   // Some(4)
-    /// [1, 2, 3].iter().find({ it > 10 });        // None
+    /// [1, 2, 3, 4, 5].iter().first(matching: { it > 3 });   // Some(4)
+    /// [1, 2, 3].iter().first(matching: { it > 10 });        // None
     /// ```
-    public mutating func find(predicate: (Item) -> Bool) -> Item? {
+    public mutating func first(matching predicate: (Item) -> Bool) -> Item? {
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return .Some(item)
@@ -775,7 +775,7 @@ extend Iterator {
     /// ["a", "b", "c"].iter().position({ it == "b" });   // Some(1)
     /// [1, 2, 3].iter().position({ it > 10 });           // None
     /// ```
-    public mutating func position(predicate: (Item) -> Bool) -> Int64? {
+    public mutating func position(matching predicate: (Item) -> Bool) -> Int64? {
         var index = 0;
         while let .Some(item) = self.next() {
             if predicate(item) {
@@ -843,7 +843,7 @@ extend Iterator where Item: Equatable {
     /// [1, 2, 3].iter().contains(element: 5);   // false
     /// ```
     public mutating func contains(element: Item) -> Bool {
-        self.any({ (item) in item.equals(element) })
+        self.any(matching: { (item) in item.equals(element) })
     }
 }
 
@@ -864,13 +864,13 @@ extend Iterator where Item: Comparable {
     /// [].iter().min();                // None
     /// ```
     public consuming func min() -> Item? {
-        self.reduce(combine: { (a, b) in if a.compare(b) == Ordering.Less { a } else { b } })
+        self.reduce(combining: { (a, b) in if a.compare(b) == Ordering.Less { a } else { b } })
     }
 
     /// Largest element, or `None` for an empty iterator. Ties go to the
     /// first occurrence.
     public consuming func max() -> Item? {
-        self.reduce(combine: { (a, b) in if a.compare(b) == Ordering.Greater { a } else { b } })
+        self.reduce(combining: { (a, b) in if a.compare(b) == Ordering.Greater { a } else { b } })
     }
 
     /// Collects into an `Array[Item]`, sorted ascending. Eager and
@@ -895,9 +895,9 @@ extend Iterator where Item: Comparable {
     ///
     /// ```
     /// let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)];
-    /// people.iter().minBy(key: { it.1 });   // Some(("Bob", 25))
+    /// people.iter().min(byKey: { it.1 });   // Some(("Bob", 25))
     /// ```
-    public consuming func minBy[K](key: (Item) -> K) -> Item? where K: Comparable {
+    public consuming func min[K](byKey key: (Item) -> K) -> Item? where K: Comparable {
         if let .Some(first) = self.next() {
             var minItem = first;
             var minKey = key(first);
@@ -914,8 +914,8 @@ extend Iterator where Item: Comparable {
         }
     }
 
-    /// The element with the largest `key(element)`. Mirror of `minBy`.
-    public consuming func maxBy[K](key: (Item) -> K) -> Item? where K: Comparable {
+    /// The element with the largest `key(element)`. Mirror of `min(byKey:)`.
+    public consuming func max[K](byKey key: (Item) -> K) -> Item? where K: Comparable {
         if let .Some(first) = self.next() {
             var maxItem = first;
             var maxKey = key(first);
@@ -1006,9 +1006,9 @@ extend Iterator {
     ///
     /// ```
     /// let words = ["a", "bb", "ccc"];
-    /// words.iter().isSortedBy(key: { it.count });   // true
+    /// words.iter().isSorted(byKey: { it.count });   // true
     /// ```
-    public consuming func isSortedBy[K](key: (Item) -> K) -> Bool where K: Comparable {
+    public consuming func isSorted[K](byKey key: (Item) -> K) -> Bool where K: Comparable {
         self.isSorted(by: { (a, b) in key(a).compare(key(b)) != Ordering.Greater })
     }
 }
@@ -1030,7 +1030,7 @@ extend Iterator where Item: Addable, Item.Output = Item {
     /// [].iter().sum();                 // 0
     /// ```
     public consuming func sum() -> Item {
-        self.fold(initial: Item.zero, combine: { (acc, x) in acc.add(x) })
+        self.fold(from: Item.zero, combining: { (acc, x) in acc.add(x) })
     }
 }
 
@@ -1048,7 +1048,7 @@ extend Iterator where Item: Multipliable, Item.Output = Item {
     /// [].iter().product();                // 1
     /// ```
     public consuming func product() -> Item {
-        self.fold(initial: Item.one, combine: { (acc, x) in acc.multiply(x) })
+        self.fold(from: Item.one, combining: { (acc, x) in acc.multiply(x) })
     }
 }
 
@@ -1089,16 +1089,16 @@ extend DoubleEndedIterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
     /// [1, 2, 3, 4, 5].iter().rev().take(count: 3).collect();         // [5, 4, 3]
-    /// [1, 2, 3, 4, 5].iter().rev().find({ it % 2 == 0 });            // Some(4)
+    /// [1, 2, 3, 4, 5].iter().rev().first(matching: { it % 2 == 0 });            // Some(4)
     /// ```
-    public func rev() -> RevIterator[Self] {
-        RevIterator(inner: self)
+    public func rev() -> ReversedIterator[Self] {
+        ReversedIterator(inner: self)
     }
 }
 
-/// `RevIterator` is itself double-ended when the wrapped iterator is, so
+/// `ReversedIterator` is itself double-ended when the wrapped iterator is, so
 /// `rev().rev()` gives back the original direction in `O(1)`.
-extend RevIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
+extend ReversedIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
 
     /// Pulls from the back of the inner iterator (which is the front of
     /// the reversed view).
@@ -1116,7 +1116,7 @@ extend RevIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
 /// Convenience helper available on every `ExactSizeIterator`.
 extend ExactSizeIterator {
 
-    /// True when no elements remain. Equivalent to `remaining == 0`.
+    /// `true` when no elements remain. Equivalent to `remaining == 0`.
     public func isEmpty() -> Bool {
         self.remaining == 0
     }

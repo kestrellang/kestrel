@@ -6,11 +6,11 @@ module Test
 enum Status {
     case Active
     case Inactive
-    case Pending(reason: std.num.Int64)
+    case Pending(reason: std.numeric.Int64)
 }
 
 struct Task {
-    let id: std.num.Int64
+    let id: std.numeric.Int64
     let status: Status
 }
 

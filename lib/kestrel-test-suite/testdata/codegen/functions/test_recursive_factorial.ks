@@ -3,7 +3,7 @@
 
 module Test
 
-func factorial(n: std.num.Int64) -> std.num.Int64 {
+func factorial(n: std.numeric.Int64) -> std.numeric.Int64 {
     if n <= 1 {
         1
     } else {

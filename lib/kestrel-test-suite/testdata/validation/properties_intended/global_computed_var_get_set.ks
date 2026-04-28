@@ -5,14 +5,14 @@
 module Main
 import std.io.stdio.println
 
-private var _g: std.num.Int64 = 1;
+private var _g: std.numeric.Int64 = 1;
 
-public var globalComputedVar: std.num.Int64 {
+public var globalComputedVar: std.numeric.Int64 {
     get { _g }
     set { _g = newValue }
 }
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let _ = println(globalComputedVar);
     globalComputedVar = 2;
     let _ = println(globalComputedVar);

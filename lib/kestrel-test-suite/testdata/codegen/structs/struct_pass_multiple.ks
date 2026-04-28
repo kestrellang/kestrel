@@ -4,8 +4,8 @@
 module Test
 
 struct Point {
-    let x: std.num.Int64
-    let y: std.num.Int64
+    let x: std.numeric.Int64
+    let y: std.numeric.Int64
 }
 
 func add_points(a: Point, b: Point) -> Point {

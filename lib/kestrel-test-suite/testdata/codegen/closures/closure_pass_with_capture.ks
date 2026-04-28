@@ -3,12 +3,12 @@
 
 module Test
 
-func apply(f: (std.num.Int64) -> std.num.Int64, x: std.num.Int64) -> std.num.Int64 {
+func apply(f: (std.numeric.Int64) -> std.numeric.Int64, x: std.numeric.Int64) -> std.numeric.Int64 {
     f(x)
 }
 
 func main() -> lang.i64 {
-    let multiplier: std.num.Int64 = 2;
+    let multiplier: std.numeric.Int64 = 2;
     let result = apply({ (x) in x * multiplier }, 21);
     if result != 42 { return 1 }
     0

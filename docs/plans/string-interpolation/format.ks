@@ -3,7 +3,7 @@
 module std.text
 
 import std.core.(Bool, Equatable, Matchable)
-import std.num.(Int64)
+import std.numeric.(Int64)
 import std.text.(String, Char)
 import std.collections.(Array)
 import std.result.(Optional)

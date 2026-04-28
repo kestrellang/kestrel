@@ -4,15 +4,15 @@
 module Test
 
 struct Inner {
-    let value: std.num.Int64
+    let value: std.numeric.Int64
 }
 
 struct Outer {
     let inner: Inner
-    let extra: std.num.Int64
+    let extra: std.numeric.Int64
 }
 
-func make_outer(v: std.num.Int64, e: std.num.Int64) -> Outer {
+func make_outer(v: std.numeric.Int64, e: std.numeric.Int64) -> Outer {
     Outer(inner: Inner(value: v), extra: e)
 }
 

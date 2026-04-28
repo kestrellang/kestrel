@@ -3,7 +3,7 @@
 
 module Test
 
-func double(x: std.num.Int64) -> std.num.Int64 {
+func double(x: std.numeric.Int64) -> std.numeric.Int64 {
     x * 2
 }
 

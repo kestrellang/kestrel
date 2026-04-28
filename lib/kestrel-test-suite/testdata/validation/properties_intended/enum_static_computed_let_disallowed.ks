@@ -4,5 +4,5 @@
 module Test
 enum Foo {
     case A
-    static let computed: std.num.Int64 { 0 } // ERROR: computed properties must use 'var'
+    static let computed: std.numeric.Int64 { 0 } // ERROR: computed properties must use 'var'
 }

@@ -4,7 +4,7 @@
 module Main
 import std.io.stdio.println
 
-func main() -> std.num.Int64 {
+func main() -> std.numeric.Int64 {
     let first = "Hello";
     let second = "World";
     let third = "Kestrel";

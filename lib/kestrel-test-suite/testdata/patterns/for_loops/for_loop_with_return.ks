@@ -3,8 +3,8 @@
 
 module Main
 
-func test() -> std.num.Int {
-    for i in std.core.Range[std.num.Int](0, 100) {
+func test() -> std.numeric.Int {
+    for i in std.core.Range[std.numeric.Int](0, 100) {
         if i > 50 {
             return i
         }

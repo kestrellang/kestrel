@@ -14,7 +14,7 @@ module Test
             if [1, 1, 2, 2, 3].iter().isSorted() == false { return 3 }
 
             // Test isSorted - empty
-            let empty = std.collections.Array[std.num.Int64]();
+            let empty = std.collections.Array[std.numeric.Int64]();
             if empty.iter().isSorted() == false { return 4 }
 
             // Test isSorted - single element

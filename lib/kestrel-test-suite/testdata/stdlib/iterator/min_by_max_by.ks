@@ -5,7 +5,7 @@ module Test
 
         func main() -> lang.i64 {
             // Test minBy - find element with minimum key
-            var pairs = std.collections.Array[(std.num.Int64, std.num.Int64)]();
+            var pairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();
             pairs.append((1, 30));
             pairs.append((2, 10));
             pairs.append((3, 20));
@@ -24,7 +24,7 @@ module Test
             if maxVal.1 != 30 { return 6 }
 
             // minBy on empty
-            let emptyPairs = std.collections.Array[(std.num.Int64, std.num.Int64)]();
+            let emptyPairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();
             let emptyMin = emptyPairs.iter().minBy({ (p) in p.1 });
             if emptyMin.isSome() { return 7 }
 
@@ -33,7 +33,7 @@ module Test
             if emptyMax.isSome() { return 8 }
 
             // minBy on single element
-            var singleArr = std.collections.Array[(std.num.Int64, std.num.Int64)]();
+            var singleArr = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();
             singleArr.append((42, 99));
             let singleMin = singleArr.iter().minBy({ (p) in p.1 });
             if singleMin.isNone() { return 9 }

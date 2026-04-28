@@ -3,7 +3,7 @@
 
 module Test
 
-        func makeOpts(radix: std.num.Int64, uppercase: std.core.Bool, alternate: std.core.Bool) -> std.text.FormatOptions {
+        func makeOpts(radix: std.numeric.Int64, uppercase: std.core.Bool, alternate: std.core.Bool) -> std.text.FormatOptions {
             var opts = std.text.FormatOptions();
             opts.radix = radix;
             opts.uppercase = uppercase;
@@ -11,7 +11,7 @@ module Test
             opts
         }
 
-        func makeWidthOpts(width: std.num.Int64, alignment: std.text.Alignment, fill: std.text.Char) -> std.text.FormatOptions {
+        func makeWidthOpts(width: std.numeric.Int64, alignment: std.text.Alignment, fill: std.text.Char) -> std.text.FormatOptions {
             var opts = std.text.FormatOptions();
             opts.width = .Some(width);
             opts.alignment = alignment;
@@ -26,7 +26,7 @@ module Test
         }
 
         func main() -> lang.i64 {
-            let val: std.num.Int64 = 255;
+            let val: std.numeric.Int64 = 255;
 
             // Default format (decimal)
             let dec = val.format();
@@ -45,7 +45,7 @@ module Test
             if hexAlt.equals("0xff") == false { return 4 }
 
             // Binary
-            let fortyTwo: std.num.Int64 = 42;
+            let fortyTwo: std.numeric.Int64 = 42;
             let bin = fortyTwo.format(makeOpts(2, false, false));
             if bin.equals("101010") == false { return 5 }
 
@@ -62,12 +62,12 @@ module Test
             if octAlt.equals("0o377") == false { return 8 }
 
             // Zero formats as "0"
-            let zero: std.num.Int64 = 0;
+            let zero: std.numeric.Int64 = 0;
             let zeroStr = zero.format();
             if zeroStr.equals("0") == false { return 9 }
 
             // Negative value
-            let neg: std.num.Int64 = -42;
+            let neg: std.numeric.Int64 = -42;
             let negStr = neg.format();
             if negStr.equals("-42") == false { return 10 }
 

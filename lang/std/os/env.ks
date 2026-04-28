@@ -1,8 +1,8 @@
 // Environment variable access
 
-module std.os.env
+module std.os
 
-import std.num.(UInt8)
+import std.numeric.(UInt8)
 import std.memory.(Pointer, RawPointer)
 import std.text.(String)
 import std.core.(Bool)

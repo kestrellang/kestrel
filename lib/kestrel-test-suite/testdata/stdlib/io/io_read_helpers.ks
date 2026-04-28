@@ -5,10 +5,10 @@ module Test
 
         func main() -> lang.i64 {
             // Test readByte using a Cursor
-            let byte65: std.num.UInt8 = 65; // 'A'
-            let byte66: std.num.UInt8 = 66; // 'B'
-            let byte67: std.num.UInt8 = 67; // 'C'
-            var data = std.collections.Array[std.num.UInt8]();
+            let byte65: std.numeric.UInt8 = 65; // 'A'
+            let byte66: std.numeric.UInt8 = 66; // 'B'
+            let byte67: std.numeric.UInt8 = 67; // 'C'
+            var data = std.collections.Array[std.numeric.UInt8]();
             data.append(byte65);
             data.append(byte66);
             data.append(byte67);
@@ -56,15 +56,15 @@ module Test
             }
 
             // Test readAll using a Cursor
-            let byte1: std.num.UInt8 = 1;
-            let byte2: std.num.UInt8 = 2;
-            let byte3: std.num.UInt8 = 3;
-            var data2 = std.collections.Array[std.num.UInt8]();
+            let byte1: std.numeric.UInt8 = 1;
+            let byte2: std.numeric.UInt8 = 2;
+            let byte3: std.numeric.UInt8 = 3;
+            var data2 = std.collections.Array[std.numeric.UInt8]();
             data2.append(byte1);
             data2.append(byte2);
             data2.append(byte3);
             var cursor2 = std.io.read.Cursor(data: data2);
-            var dest = std.collections.Array[std.num.UInt8]();
+            var dest = std.collections.Array[std.numeric.UInt8]();
             let raResult = std.io.read.readAll( cursor2, into: dest);
             match raResult {
                 .Ok(n) => if n != 3 { return 12 },
@@ -77,7 +77,7 @@ module Test
 
             // Test readAll on Empty reader
             var empty = std.io.read.Empty();
-            var emptyDest = std.collections.Array[std.num.UInt8]();
+            var emptyDest = std.collections.Array[std.numeric.UInt8]();
             let raEmpty = std.io.read.readAll( empty, into: emptyDest);
             match raEmpty {
                 .Ok(n) => if n != 0 { return 18 },
