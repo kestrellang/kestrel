@@ -4,7 +4,7 @@
 - [ ] Rewrite README.md
 - [x] Write naming guide
 - [ ] Add custom written docs
-- [ ] Move to github org
+- [x] Move to github org
 - [ ] Write blog post
 - [ ] Play with extension
 - [ ] Create claude code plugin
