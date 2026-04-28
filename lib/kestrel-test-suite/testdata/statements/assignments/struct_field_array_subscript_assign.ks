@@ -13,11 +13,17 @@
 
 module Test
 
-struct Holder {
+struct Holder: Cloneable {
     var data: Array[Int64]
 
     init() {
         self.data = Array[Int64](repeating: 0, count: 4)
+    }
+
+    func clone() -> Holder {
+        var h = Holder();
+        h.data = self.data.clone();
+        h
     }
 
     mutating func light(at i: Int64) {

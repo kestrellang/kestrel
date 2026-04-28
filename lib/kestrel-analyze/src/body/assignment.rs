@@ -287,6 +287,49 @@ fn check_target(
             }
         },
 
+        // Subscript-set through a field: `obj.field(i) = v`. The HIR
+        // represents this as MethodCall (receiver = obj, method = field),
+        // and inference resolves the target to the subscript entity on
+        // the field's type. Same logic as the Call arm above.
+        HirExpr::MethodCall { receiver, .. } => {
+            let Some(&sub_entity) = cx.typed.resolutions.get(&target) else {
+                push_assign_to_expression(cx, target, &mut *diags);
+                return;
+            };
+            if cx.query.get::<NodeKind>(sub_entity) != Some(&NodeKind::Subscript) {
+                push_assign_to_expression(cx, target, &mut *diags);
+                return;
+            }
+            if cx.query.get::<Settable>(sub_entity).is_none() {
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[1].id,
+                    severity: DESCRIPTORS[1].default_severity,
+                    message: "cannot assign to read-only subscript".into(),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, target),
+                        message: "subscript has no setter".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+                return;
+            }
+            let is_static = cx.query.get::<Static>(sub_entity).is_some();
+            if !is_static && !is_mutable_base(cx, *receiver) {
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[1].id,
+                    severity: DESCRIPTORS[1].default_severity,
+                    message: "cannot assign to subscript on immutable binding".into(),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, target),
+                        message: "cannot assign through immutable binding".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+            }
+        },
+
         // All other expressions are invalid assignment targets
         _ => {
             push_assign_to_expression(cx, target, &mut *diags);

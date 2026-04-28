@@ -1,8 +1,12 @@
+<p align="center">
+<img src="site/public/kestrel-bird.png" alt="Kestrel" width="200">
+</p>
+
 # Kestrel
 
-A compiled programming language with Swift-inspired syntax, value semantics, and monomorphized generics. The compiler, standard library, package manager, web framework, and tooling were built in ~3 months by one developer using AI-assisted development.
+[kestrel-lang.com](https://kestrel-lang.com)
 
-**The ecosystem is self-hosting** — the [package manager](#ecosystem), [version manager](#ecosystem), and several libraries are written in Kestrel itself.
+Kestrel is a programming language with clean syntax, a powerful type system and deterministic memory management. Kestrel is currently in its first preview release, and is able to be used to write 2d games and web apps. It compiles to native code via Cranelift, and ships with a full ecosystem: package manager, web framework, http client, vscode extension, and more - many written in Kestrel themselves.
 
 <p>
 <img src="site/public/breakout.gif" alt="Breakout game written in Kestrel" width="280">
@@ -64,9 +68,9 @@ struct Register : not Copyable {
     // throws desugars to Result[(), CafeError]
     mutating func ring(order: Order) -> () throws CafeError {
         if self.beansLeft < order.shots {
-            return .Err(CafeError(reason: "not enough beans for \(order.drink)"))
+            throw CafeError(reason: "not enough beans for \(order.drink)")
         };
-        self.beansLeft = self.beansLeft - order.shots;
+        self.beansLeft -= order.shots;
         self.orders.append(order);
         .Ok(())
     }
@@ -100,39 +104,44 @@ func main() -> () throws CafeError {
 
 ## Features
 
-- **Value semantics** — copy-on-assignment with `not Copyable` for move-only types and copy-on-write collections
-- **Protocols and extensions** — protocol-based polymorphism with retroactive conformance
+- **Value semantics** — copy-on-assignment, `not Copyable` for move-only types, copy-on-write collections
+- **Protocols and extensions** — polymorphism with retroactive conformance
 - **Monomorphized generics** — zero-cost abstractions with `where` clause constraints
-- **Enums with associated values** — algebraic data types with exhaustive pattern matching
-- **Error handling** — `throws` / `try` sugar over `Result[T, E]` types
-- **RAII** — deterministic cleanup via `deinit` blocks
+- **Algebraic data types** — enums with associated values and exhaustive pattern matching (`match`, `if let`, `while let`)
+- **Error handling** — `throws` / `try` sugar over `Result[T, E]`
+- **RAII** — deterministic cleanup via `deinit`
 - **Closures** — trailing closure syntax, implicit `it` parameter
-- **Pattern matching** — `match`, `if let`, `while let` with exhaustiveness checking
-- **Type inference** — bidirectional constraint-based inference within function bodies
-- **String interpolation** — `"\(expr)"` with formattable protocol support
-- **Computed properties** — `var name: Type { expression }`
+- **Type inference** — bidirectional constraint-based inference
+- **String interpolation** — `"\(expr)"` via the Formattable protocol
 - **Iterators** — `for`-`in` loops with 20+ adapters (map, filter, zip, scan, take, ...)
 - **C interop** — `@extern(.C)` for calling C functions and linking native libraries
 - **Parameter labels** — named parameters for readable call sites
 
 ## Ecosystem
 
-The tooling is written in Kestrel, proving the language works for real software:
+Every tool below is written in Kestrel:
 
-| Tool | Description |
-|------|-------------|
-| [**Flock**](lang/flock) | Package manager — dependency resolution, registry, lock files, TOML manifests |
-| [**Jessup**](lang/jessup) | Toolchain version manager (like rustup) |
-| [**Perch**](lang/perch) | Web framework — routing, middleware, generic context |
-| [**Swoop**](lang/swoop) | HTTP/HTTPS client |
-| [**Clutch**](lang/clutch) | CLI argument parser |
-| [**Quill**](lang/quill) | JSON and TOML parsing |
-| [**Plume**](lang/plume) | Template engine |
+| Tool                              | Description                                                                   |
+| --------------------------------- | ----------------------------------------------------------------------------- |
+| [**Flock**](lang/flock)           | Package manager — dependency resolution, registry, lock files, TOML manifests |
+| [**Jessup**](lang/jessup)         | Toolchain version manager (like rustup)                                       |
+| [**Perch**](lang/perch)           | Web framework — routing, middleware, generic context                          |
+| [**Swoop**](lang/swoop)           | HTTP/HTTPS client                                                             |
+| [**Clutch**](lang/clutch)         | CLI argument parser                                                           |
+| [**Quill**](lang/quill)           | Serialization framework                                                       |
+| [**Quill JSON**](lang/quill-json) | JSON support for Quill                                                        |
+| [**Quill TOML**](lang/quill-toml) | TOML support for Quill                                                        |
+| [**HTTP**](lang/http)             | Shared HTTP types                                                             |
+| [**Plume**](lang/plume)           | Template engine                                                               |
 
 ### Example apps
 
 - [**Weather Dashboard**](examples/weather) — full-stack web app using Perch, htmx, and the Open-Meteo API
+- [**Pokédex**](examples/pokedex) — Kanto Pokédex using PokéAPI, Perch, and Plume templates
+- [**Wordle**](examples/wordle) — Wordle clone with shareable URL state
+- [**APOD**](examples/apod) — NASA Astronomy Picture of the Day viewer
 - [**Counter**](examples/counter) — HTMX counter app with Perch
+- [**Game of Life**](examples/life) — Conway's Game of Life rendered with SDL2
 - [**Breakout**](examples/breakout) — terminal brick breaker with Iterator-based game loop
 - [**Snake**](examples/snake) — terminal snake with RAII terminal management
 - [**Pong**](examples/pong) — terminal pong with AI opponent
@@ -141,8 +150,8 @@ The tooling is written in Kestrel, proving the language works for real software:
 ## Quick Start
 
 ```bash
-# Build the compiler
-cargo build --release
+# Install the compiler
+cargo install --git https://github.com/jkpdino/kestrel
 
 # Run a program
 kestrel run file.ks
@@ -157,50 +166,50 @@ kestrel build file.ks -o output
 ### Using Flock (package manager)
 
 ```bash
-flock init myproject
+flock new myproject
 cd myproject
 flock run
 ```
+
+## Editor Support
+
+Kestrel ships with a language server (`kestrel-lsp`) and a VS Code extension.
+
+**Features:** diagnostics, go-to-definition, hover, completions, signature help, rename, code actions, document symbols, semantic highlighting, and inlay hints.
+
+```bash
+# Install the language server
+cargo install --git https://github.com/jkpdino/kestrel kestrel-lsp
+```
+
+The [VS Code extension](editors/vscode) picks up `kestrel-lsp` from PATH automatically. You can also point it at a custom binary via the `kestrel.lsp.path` setting.
 
 ## Standard Library
 
 All public stdlib types are auto-imported — no `import` statements needed for common types.
 
-| Module | Contents |
-|--------|----------|
-| **core** | Protocols (Equatable, Comparable, Hashable, Cloneable, Formattable) |
-| **collections** | Array, Dictionary, Set with copy-on-write semantics |
-| **result** | Optional (`T?`) and Result types with `try` operator |
-| **text** | String with Unicode support |
-| **io** | File I/O, stdin/stdout, networking |
-| **memory** | Allocator, Buffer, Pointer, reference counting |
-| **iter** | Iterator protocol and 20+ adapters |
-| **num** | Int8–64, UInt8–64, Float32/64 |
+| Module          | Contents                                                            |
+| --------------- | ------------------------------------------------------------------- |
+| **core**        | Protocols (Equatable, Comparable, Hashable, Cloneable, Formattable) |
+| **collections** | Array, Dictionary, Set with copy-on-write semantics                 |
+| **result**      | Optional (`T?`) and Result types with `try` operator                |
+| **text**        | String with Unicode support                                         |
+| **io**          | File I/O, stdin/stdout, networking                                  |
+| **memory**      | Allocator, Buffer, Pointer, reference counting                      |
+| **iter**        | Iterator protocol and 20+ adapters                                  |
+| **num**         | Int8–64, UInt8–64, Float32/64                                       |
 
 ## Building from Source
 
 Requirements:
+
 - Rust 2024 edition (1.85+)
 
 ```bash
 git clone https://github.com/jkpdino/kestrel
 cd kestrel
-cargo build --release
-cargo test
+cargo install --path .
 ```
-
-## Architecture
-
-The compiler is a 6-phase pipeline:
-
-```
-Source → Lex → Parse → Semantic Tree → Type Inference → MIR → Cranelift → Native
-         │       │          │               │             │        │
-       Logos  Chumsky    BUILD/BIND    Constraint      Execution  Codegen
-                          phases       Solver          Graph
-```
-
-See [docs/contributing/architecture.md](docs/contributing/architecture.md) for details.
 
 ## License
 
