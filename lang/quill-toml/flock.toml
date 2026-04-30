@@ -4,7 +4,7 @@ version = "0.1.2"
 description = "TOML support for quill"
 author = "jkpdino"
 license = "MIT"
-repository = "https://github.com/jkpdino/kestrel"
+repository = "https://github.com/kestrellang/kestrel"
 
 [dependencies]
-"kestrel/quill" = "0.1.0"
+quill = { path = "../quill" }

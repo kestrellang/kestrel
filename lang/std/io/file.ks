@@ -24,9 +24,9 @@ import std.io.write.(Writable, writeAll, writeString)
 /// # Examples
 ///
 /// ```
-/// try file.seek(.Start(0));        // beginning
-/// try file.seek(.Current(-10));    // back 10 bytes
-/// try file.seek(.End(0));          // end of file
+/// try file.seek(to: .Start(0));        // beginning
+/// try file.seek(to: .Current(-10));    // back 10 bytes
+/// try file.seek(to: .End(0));          // end of file
 /// ```
 public enum Seek {
     /// Seek to an absolute byte offset from the start of the file.
@@ -261,9 +261,9 @@ public struct File: Readable, Writable, not Copyable {
     ///
     /// ```
     /// var file = try File.openReadWrite("data.bin");
-    /// try file.seek(.Start(0));        // rewind
-    /// try file.seek(.Current(100));    // skip 100 bytes
-    /// let size = try file.seek(.End(0));   // size of file
+    /// try file.seek(to: .Start(0));        // rewind
+    /// try file.seek(to: .Current(100));    // skip 100 bytes
+    /// let size = try file.seek(to: .End(0));   // size of file
     /// ```
     public mutating func seek(to pos: Seek) -> Result[Int64, IoError] {
         let pair = match pos {

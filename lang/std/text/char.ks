@@ -397,8 +397,8 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// Char.fromDigit(d: 7);   // Some('7')
-    /// Char.fromDigit(d: 12);  // None
+    /// Char.fromDigit(7);   // Some('7')
+    /// Char.fromDigit(12);  // None
     /// ```
     public static func fromDigit(d: UInt32) -> Char? {
         if d <= 9 {
@@ -548,7 +548,7 @@ public struct Grapheme: Equatable, Cloneable {
     public init(chars chars: Array[Char]) {
         let n = chars.count;
         if n == 0 {
-            self._first = Char(value: 0);
+            self._first = Char(0);
             self._rest = .None
         } else if n == 1 {
             self._first = chars(unchecked: 0);
@@ -943,8 +943,8 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
 ///
 /// ```
 /// // Conceptually, given a buffer `buf` of length 4:
-/// // encodeUtf8(c: 'a',         ptr: buf, at: 0);  // 1
-/// // encodeUtf8(c: '\u{1F600}', ptr: buf, at: 0);  // 4
+/// // encodeUtf8('a',         buf, at: 0);  // 1
+/// // encodeUtf8('\u{1F600}', buf, at: 0);  // 4
 /// ```
 public func encodeUtf8(c: Char, ptr: lang.ptr[lang.i8], at index: Int64) -> Int64 {
     let v: lang.i32 = c.value().raw;

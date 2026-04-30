@@ -28,7 +28,7 @@ import std.numeric.(Int64, Float64)
 /// ```
 /// let pi = Float64.pi;
 /// let area = pi * radius * radius;
-/// let s = area.format(options: .{precision: 2});  // "314.16"
+/// let s = area.format(.{precision: 2});  // "314.16"
 /// ```
 ///
 /// ```
@@ -351,9 +351,9 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (3.14).equals(other: 3.14);                  // true
-    /// (0.0).equals(other: -0.0);                   // true
-    /// Float64.nan.equals(other: Float64.nan);      // false (!)
+    /// (3.14).equals(3.14);                  // true
+    /// (0.0).equals(-0.0);                   // true
+    /// Float64.nan.equals(Float64.nan);      // false (!)
     /// ```
     public func equals(other: Float32) -> Bool {
         Bool(boolLiteral: lang.f32_eq(self.raw, other.raw))
@@ -367,10 +367,10 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (1.0).compare(other: 2.0);              // .Less
-    /// (2.0).compare(other: 2.0);              // .Equal
-    /// (3.0).compare(other: 2.0);              // .Greater
-    /// (1.0).compare(other: Float64.infinity); // .Less
+    /// (1.0).compare(2.0);              // .Less
+    /// (2.0).compare(2.0);              // .Equal
+    /// (3.0).compare(2.0);              // .Greater
+    /// (1.0).compare(Float64.infinity); // .Less
     /// ```
     public func compare(other: Float32) -> Ordering {
         if Bool(boolLiteral: lang.f32_lt(self.raw, other.raw)) { .Less }
@@ -414,7 +414,7 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (10.0).divide(other: 4.0);  // 2.5
+    /// (10.0).divide(4.0);  // 2.5
     /// 1.0 / 0.0;                  // inf
     /// 0.0 / 0.0;                  // nan
     /// ```
@@ -504,7 +504,7 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (3.0).hypot(other: 4.0);  // 5.0
+    /// (3.0).hypot(4.0);  // 5.0
     /// ```
     public func hypot(other: Float32) -> Float32 {
         Float32(raw: libm_hypotf(self.raw, other.raw))
@@ -559,9 +559,9 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (2.0).pow(exponent: 10.0);   // 1024.0
-    /// (2.0).pow(exponent: 0.5);    // sqrt(2)
-    /// (-2.0).pow(exponent: 0.5);   // nan
+    /// (2.0).pow(10.0);   // 1024.0
+    /// (2.0).pow(0.5);    // sqrt(2)
+    /// (-2.0).pow(0.5);   // nan
     /// ```
     public func pow(exponent: Float32) -> Float32 {
         Float32(raw: libm_powf(self.raw, exponent.raw))
@@ -574,8 +574,8 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (2.0).powi(exponent: 10);   // 1024.0
-    /// (2.0).powi(exponent: -1);   // 0.5
+    /// (2.0).powi(10);   // 1024.0
+    /// (2.0).powi(-1);   // 0.5
     /// ```
     public func powi(exponent: Int64) -> Float32 {
         if exponent == 0 { return Float32(floatLiteral: 1.0) };
@@ -625,10 +625,10 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (1.0).atan2(x: 1.0);    //  π/4   (Q1)
-    /// (1.0).atan2(x: -1.0);   //  3π/4  (Q2)
-    /// (-1.0).atan2(x: -1.0);  // -3π/4  (Q3)
-    /// (-1.0).atan2(x: 1.0);   // -π/4   (Q4)
+    /// (1.0).atan2(1.0);    //  π/4   (Q1)
+    /// (1.0).atan2(-1.0);   //  3π/4  (Q2)
+    /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
+    /// (-1.0).atan2(1.0);   // -π/4   (Q4)
     /// ```
     public func atan2(x: Float32) -> Float32 { Float32(raw: libm_atan2f(self.raw, x.raw)) }
 
@@ -676,7 +676,7 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (2.0).fma(a: 3.0, b: 4.0);   // 10.0
+    /// (2.0).fma(3.0, 4.0);   // 10.0
     /// ```
     public func fma(a: Float32, b: Float32) -> Float32 {
         Float32(raw: lang.f32_fma(self.raw, a.raw, b.raw))
@@ -716,9 +716,9 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (0.5).clamp(min: 0.0, max: 1.0);   // 0.5
-    /// (-0.5).clamp(min: 0.0, max: 1.0);  // 0.0
-    /// (1.5).clamp(min: 0.0, max: 1.0);   // 1.0
+    /// (0.5).clamp(0.0, 1.0);   // 0.5
+    /// (-0.5).clamp(0.0, 1.0);  // 0.0
+    /// (1.5).clamp(0.0, 1.0);   // 1.0
     /// ```
     public func clamp(min: Float32, max: Float32) -> Float32 {
         if self.isNaN { self }
@@ -733,10 +733,10 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// (0.0).lerp(to: 10.0, t: 0.0);   //  0.0
-    /// (0.0).lerp(to: 10.0, t: 0.5);   //  5.0
-    /// (0.0).lerp(to: 10.0, t: 1.0);   // 10.0
-    /// (0.0).lerp(to: 10.0, t: 0.25);  //  2.5
+    /// (0.0).lerp(to: 10.0, 0.0);   //  0.0
+    /// (0.0).lerp(to: 10.0, 0.5);   //  5.0
+    /// (0.0).lerp(to: 10.0, 1.0);   // 10.0
+    /// (0.0).lerp(to: 10.0, 0.25);  //  2.5
     /// ```
     public func lerp(to other: Float32, t: Float32) -> Float32 {
         self.add(other.subtract(self).multiply(t))
@@ -789,12 +789,12 @@ public struct Float32:
     /// # Examples
     ///
     /// ```
-    /// Float32.parse(string: "3.14");      // Some(3.14)
-    /// Float32.parse(string: "-2.5e10");   // Some(-2.5e10)
-    /// Float32.parse(string: "inf");       // Some(infinity)
-    /// Float32.parse(string: "nan");       // Some(nan)
-    /// Float32.parse(string: "abc");       // None
-    /// Float32.parse(string: "");          // None
+    /// Float32.parse("3.14");      // Some(3.14)
+    /// Float32.parse("-2.5e10");   // Some(-2.5e10)
+    /// Float32.parse("inf");       // Some(infinity)
+    /// Float32.parse("nan");       // Some(nan)
+    /// Float32.parse("abc");       // None
+    /// Float32.parse("");          // None
     /// ```
     public static func parse(string: String) -> Float32? {
         let len = string.byteCount;
@@ -1042,11 +1042,11 @@ public struct Float32:
     ///
     /// ```
     /// (3.14159).format();                                          // "3.14159"
-    /// (3.14159).format(options: .{precision: 2});                  // "3.14"
-    /// (1234.5).format(options: .{floatStyle: .Scientific});        // "1.2345e3"
-    /// (0.756).format(options: .{floatStyle: .Percent});            // "75.6%"
-    /// (3.14).format(options: .{width: 8, fill: '0'});              // "00003.14"
-    /// (3.14).format(options: .{sign: .Always});                    // "+3.14"
+    /// (3.14159).format(.{precision: 2});                  // "3.14"
+    /// (1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
+    /// (0.756).format(.{floatStyle: .Percent});            // "75.6%"
+    /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
+    /// (3.14).format(.{sign: .Always});                    // "+3.14"
     /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var precision: Int64 = 6;

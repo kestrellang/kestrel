@@ -472,11 +472,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// let words = ["apple", "apricot", "banana", "blueberry"];
-    /// let grouped = Dictionary(grouping: words, by: { (w) in w.chars.first().unwrap() });
+    /// let grouped = Dictionary(grouping: words) { (w) in w.chars.first().unwrap() };
     /// // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
     ///
     /// let nums = [1, 2, 3, 4, 5];
-    /// let parity = Dictionary(grouping: nums, by: { (n) in n % 2 });
+    /// let parity = Dictionary(grouping: nums) { (n) in n % 2 };
     /// // [0: [2, 4], 1: [1, 3, 5]]
     /// ```
     public init[I, E](grouping elements: I, by keyFunc: (E) -> K)
@@ -978,8 +978,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2].contains(key: "a");  // true
-    /// ["a": 1, "b": 2].contains(key: "z");  // false
+    /// ["a": 1, "b": 2].contains("a");  // true
+    /// ["a": 1, "b": 2].contains("z");  // false
     /// ```
     public func contains(key: K) -> Bool {
         self.findEntry(key).isSome()
@@ -1000,8 +1000,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1];
-    /// dict.insert(key: "b", value: 2);  // None;     dict = ["a": 1, "b": 2]
-    /// dict.insert(key: "a", value: 9);  // Some(1);  dict = ["a": 9, "b": 2]
+    /// dict.insert("b", 2);  // None;     dict = ["a": 1, "b": 2]
+    /// dict.insert("a", 9);  // Some(1);  dict = ["a": 9, "b": 2]
     /// ```
     public mutating func insert(key: K, value: V) -> V? {
         let hashValue = self.hashKey(key);
@@ -1047,8 +1047,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1, "b": 2];
-    /// dict.remove(key: "a");  // Some(1); dict = ["b": 2]
-    /// dict.remove(key: "z");  // None;    dict unchanged
+    /// dict.remove("a");  // Some(1); dict = ["b": 2]
+    /// dict.remove("z");  // None;    dict unchanged
     /// ```
     public mutating func remove(key: K) -> V? {
         let maybeIndex = self.findEntry(key);
@@ -1107,8 +1107,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1, "b": 2];
-    /// dict.update(key: "a", with: { (v) in v * 10 });  // true;  dict("a") == Some(10)
-    /// dict.update(key: "z", with: { (v) in v * 10 });  // false; dict unchanged
+    /// dict.update("a") { (v) in v * 10 };  // true;  dict("a") == Some(10)
+    /// dict.update("z") { (v) in v * 10 };  // false; dict unchanged
     /// ```
     public mutating func update(key: K, with transform: (V) -> V) -> Bool {
         let maybeValue = self(key);
@@ -1133,8 +1133,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var counts: [String: Int64] = [:];
-    /// counts.upsert(key: "apple", default: 0, with: { (n) in n + 1 });
-    /// counts.upsert(key: "apple", default: 0, with: { (n) in n + 1 });
+    /// counts.upsert("apple", default: 0) { (n) in n + 1 };
+    /// counts.upsert("apple", default: 0) { (n) in n + 1 };
     /// counts("apple");  // Some(2)
     /// ```
     public mutating func upsert(key: K, default defaultValue: V, with transform: (V) -> V) {
@@ -1162,7 +1162,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     /// var a = ["x": 1, "y": 2];
     /// let b = ["y": 20, "z": 30];
-    /// a.merge(b, uniquingKeysWith: { (old, new) in old + new });
+    /// a.merge(b) { (old, new) in old + new };
     /// // a == ["x": 1, "y": 22, "z": 30]
     /// ```
     public mutating func merge(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V) {
@@ -1191,7 +1191,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1];
-    /// dict.mergeFrom(pairs: [("b", 2), ("c", 3)], uniquingKeysWith: { (_, new) in new });
+    /// dict.mergeFrom([("b", 2), ("c", 3)]) { (_, new) in new };
     /// // dict == ["a": 1, "b": 2, "c": 3]
     /// ```
     public mutating func mergeFrom[I](pairs: I, uniquingKeysWith combine: (V, V) -> V)
@@ -1222,7 +1222,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1, "b": 2, "c": 3];
-    /// dict.retain(matching: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
+    /// dict.retain { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
     public mutating func retain(matching predicate: (K, V) -> Bool) {
         self.makeUnique();
@@ -1258,7 +1258,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1, "b": 2, "c": 3];
-    /// dict.removeAll(matching: { (k, v) in v < 2 });  // ["b": 2, "c": 3]
+    /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
     /// ```
     public mutating func removeAll(matching predicate: (K, V) -> Bool) {
         self.retain(matching: { (k, v) in not predicate(k, v) })
@@ -1276,7 +1276,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = Dictionary[String, Int64]();
-    /// dict.reserveCapacity(minimumCapacity: 1000);
+    /// dict.reserveCapacity(1000);
     /// // No reallocations for the first ~750 inserts.
     /// ```
     public mutating func reserveCapacity(minimumCapacity: Int64) {
@@ -1354,8 +1354,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 5].contains(matching: { (k, v) in v > 3 });  // true
-    /// ["a": 1, "b": 2].contains(matching: { (k, v) in v > 3 });  // false
+    /// ["a": 1, "b": 5].contains { (k, v) in v > 3 };  // true
+    /// ["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
     /// ```
     public func contains(matching predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
@@ -1386,8 +1386,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// let dict = ["a": 1, "b": 5, "c": 3];
-    /// dict.first(matching: { (k, v) in v > 2 });  // Some entry with v > 2
-    /// dict.first(matching: { (k, v) in v > 99 }); // None
+    /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
+    /// dict.first { (k, v) in v > 99 }; // None
     /// ```
     public func first(matching predicate: (K, V) -> Bool) -> (K, V)? {
         let myCap = self.cap();
@@ -1415,9 +1415,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// # Examples
     ///
     /// ```
-    /// ["a": 2, "b": 4].all(matching: { (k, v) in v % 2 == 0 });  // true
-    /// ["a": 1, "b": 2].all(matching: { (k, v) in v % 2 == 0 });  // false
-    /// [:].all(matching: { (k, v) in false });                    // true (vacuous)
+    /// ["a": 2, "b": 4].all { (k, v) in v % 2 == 0 };  // true
+    /// ["a": 1, "b": 2].all { (k, v) in v % 2 == 0 };  // false
+    /// [:].all { (k, v) in false };                    // true (vacuous)
     /// ```
     public func all(matching predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
@@ -1446,8 +1446,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 5].any(matching: { (k, v) in v > 3 });  // true
-    /// [:].any(matching: { (k, v) in true });                // false (empty)
+    /// ["a": 1, "b": 5].any { (k, v) in v > 3 };  // true
+    /// [:].any { (k, v) in true };                // false (empty)
     /// ```
     public func any(matching predicate: (K, V) -> Bool) -> Bool {
         self.contains(matching: predicate)
@@ -1463,8 +1463,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2, "c": 3].countItems(matching: { (k, v) in v > 1 });  // 2
-    /// [:].countItems(matching: { (k, v) in true });                        // 0
+    /// ["a": 1, "b": 2, "c": 3].countItems { (k, v) in v > 1 };  // 2
+    /// [:].countItems { (k, v) in true };                        // 0
     /// ```
     public func countItems(matching predicate: (K, V) -> Bool) -> Int64 {
         var result: Int64 = 0;
@@ -1500,7 +1500,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// let dict = ["a": 1, "b": 2];
-    /// let doubled = dict.mapValues(transform: { (v) in v * 2 });
+    /// let doubled = dict.mapValues { (v) in v * 2 };
     /// // ["a": 2, "b": 4]
     /// ```
     public func mapValues[U](transform: (V) -> U) -> Dictionary[K, U, H] {
@@ -1532,7 +1532,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// let dict = ["a": "1", "b": "two", "c": "3"];
-    /// let parsed = dict.compactMapValues(transform: { (s) in Int64.parse(s) });
+    /// let parsed = dict.compactMapValues { (s) in Int64.parse(s) };
     /// // ["a": 1, "c": 3] — "two" failed to parse
     /// ```
     public func compactMapValues[U](transform: (V) -> U?) -> Dictionary[K, U, H] {
@@ -1565,7 +1565,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// let dict = ["a": 1, "b": 2, "c": 3];
-    /// let big = dict.filter(matching: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
+    /// let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
     public func filter(matching predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
         var result = Dictionary[K, V, H]();
@@ -1597,7 +1597,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     /// let a = ["x": 1, "y": 2];
     /// let b = ["y": 20, "z": 30];
-    /// let merged = a.merging(other: b, uniquingKeysWith: { (_, new) in new });
+    /// let merged = a.merging(b) { (_, new) in new };
     /// // merged == ["x": 1, "y": 20, "z": 30]
     /// // a is unchanged
     /// ```
@@ -1651,9 +1651,9 @@ extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H:
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2].equals(other: ["b": 2, "a": 1]);  // true
-    /// ["a": 1].equals(other: ["a": 2]);                  // false
-    /// ["a": 1].equals(other: [:]);                       // false
+    /// ["a": 1, "b": 2].equals(["b": 2, "a": 1]);  // true
+    /// ["a": 1].equals(["a": 2]);                  // false
+    /// ["a": 1].equals([:]);                       // false
     /// ```
     public func equals(other: Dictionary[K, V, H]) -> Bool {
         let selfCount = self.count;
@@ -1697,8 +1697,8 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2].containsValue(value: 2);  // true
-    /// ["a": 1, "b": 2].containsValue(value: 5);  // false
+    /// ["a": 1, "b": 2].containsValue(2);  // true
+    /// ["a": 1, "b": 2].containsValue(5);  // false
     /// ```
     public func containsValue(value: V) -> Bool {
         let myCap = self.capacity;

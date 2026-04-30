@@ -102,7 +102,7 @@ public struct StringIterator: Iterator {
 /// # Examples
 ///
 /// ```
-/// var it = "a,b,c".split(separator: ",");
+/// var it = "a,b,c".split(",");
 /// it.next();  // Some("a")
 /// it.next();  // Some("b")
 /// it.next();  // Some("c")
@@ -212,7 +212,7 @@ public struct SplitIterator: Iterator {
 /// # Examples
 ///
 /// ```
-/// var it = "a1b2c".split(matching: |c| c.isDigit());
+/// var it = "a1b2c".split { (c) in c.isDigit() };
 /// it.next();  // Some("a")
 /// it.next();  // Some("b")
 /// it.next();  // Some("c")
@@ -302,7 +302,7 @@ fileprivate func _memcpyBytes(dst dst: Pointer[UInt8], src src: Pointer[UInt8], 
     if n <= 0 {
         return
     }
-    let _ = memcpy(dst.asRaw(), src.asRaw(), n)
+    let _ = memcpy(dst.asRaw(), src.asRaw(), n);
 }
 
 /// Byte-wise equality of two regions via libc `memcmp`. Caller ensures
@@ -426,7 +426,7 @@ struct StringStorage: Cloneable {
 /// var s = "hello";
 /// s.append(", world");
 /// s.byteCount;            // 12
-/// s.contains(substring: ",");  // true
+/// s.contains(",");  // true
 /// for line in "a\nb".lines { /* ... */ }
 /// ```
 ///
@@ -603,8 +603,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// String.fromUtf8(bytes: "héllo".bytes.asSlice());  // Some("héllo")
-    /// String.fromUtf8(bytes: badSlice);                 // None
+    /// String.fromUtf8("héllo".bytes.asSlice());  // Some("héllo")
+    /// String.fromUtf8(badSlice);                 // None
     /// ```
     public static func fromUtf8(bytes: Slice[UInt8]) -> String? {
         let count = bytes.count;
@@ -1194,7 +1194,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     ///
     /// ```
     /// var s = "***hi***";
-    /// s.trim(matching: |c| c == '*');
+    /// s.trim { (c) in c == '*' };
     /// s;  // "hi"
     /// ```
     public mutating func trim(matching predicate: (Char) -> Bool) {
@@ -1727,7 +1727,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     ///
     /// ```
     /// var parts = Array[String]();
-    /// for p in "a,b,c".split(separator: ",") { parts.append(p); }
+    /// for p in "a,b,c".split(",") { parts.append(p); }
     /// parts.count;  // 3
     /// ```
     public func split(separator: String) -> SplitIterator {
@@ -1747,7 +1747,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     ///
     /// ```
     /// var parts = Array[String]();
-    /// for p in "a 1 b 2 c".split(matching: |c| c.isDigit() or c.isWhitespace()) {
+    /// for p in "a 1 b 2 c".split { (c) in c.isDigit() or c.isWhitespace() } {
     ///     if p.isEmpty == false { parts.append(p); }
     /// }
     /// // parts: ["a", "b", "c"]
@@ -1772,8 +1772,8 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// "ab".repeated(count: 3);  // "ababab"
-    /// "ab".repeated(count: 0);  // ""
+    /// "ab".repeated(3);  // "ababab"
+    /// "ab".repeated(0);  // ""
     /// ```
     public func repeated(count: Int64) -> String {
         if count <= 0 {
@@ -1802,13 +1802,13 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// Returns the string padded at the start with `char` so the total *code-point* count is `length`.
     ///
     /// If the string is already at least `length` code points long,
-    /// returns a clone. Compare with `pad(end:with:)` for trailing
+    /// returns a clone. Compare with `pad(trailing:with:)` for trailing
     /// padding.
     ///
     /// # Examples
     ///
     /// ```
-    /// "42".pad(start: 5, with: '0');  // "00042"
+    /// "42".pad(leading: 5, with: '0');  // "00042"
     /// ```
     public func pad(leading length: Int64, with char: Char) -> String {
         let currentLen = self.count;
@@ -1829,7 +1829,7 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// # Examples
     ///
     /// ```
-    /// "42".pad(end: 5, with: '.');  // "42..."
+    /// "42".pad(trailing: 5, with: '.');  // "42..."
     /// ```
     public func pad(trailing length: Int64, with char: Char) -> String {
         let currentLen = self.count;
@@ -1956,11 +1956,11 @@ public struct String: Iterable, Equatable, Comparable, Cloneable, Formattable, A
     /// var opts = FormatOptions();
     /// opts.width = .Some(10);
     /// opts.alignment = .Left;
-    /// "test".format(options: opts);   // "test      "
+    /// "test".format(opts);   // "test      "
     /// opts.alignment = .Right;
-    /// "test".format(options: opts);   // "      test"
+    /// "test".format(opts);   // "      test"
     /// opts.alignment = .Center;
-    /// "test".format(options: opts);   // "   test   "
+    /// "test".format(opts);   // "   test   "
     /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         // Apply width and alignment padding

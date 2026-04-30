@@ -4,7 +4,7 @@ version = "0.1.1"
 description = "Package manager for Kestrel"
 author = "jkpdino"
 license = "MIT"
-repository = "https://github.com/jkpdino/kestrel"
+repository = "https://github.com/kestrellang/kestrel"
 
 [dependencies]
 "kestrel/clutch" = "0.1.0"

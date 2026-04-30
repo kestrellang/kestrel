@@ -27,7 +27,7 @@ import std.iter.(Iterator)
 ///     null
 /// }
 ///
-/// match find(id: 42) {
+/// match find(42) {
 ///     .Some(let u) => print(u.name),
 ///     .None        => print("Not found")
 /// }
@@ -70,7 +70,7 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// let opt = Optional.some(value: 42);   // Some(42)
+    /// let opt = Optional.some(42);   // Some(42)
     /// let opt: Int64? = 42;                 // identical, preferred
     /// ```
     public static func some(value: T) -> Optional[T] {
@@ -123,9 +123,9 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(42).isSomeAnd({ it > 0 });    // true
-    /// Some(-1).isSomeAnd({ it > 0 });    // false
-    /// None.isSomeAnd({ it > 0 });        // false
+    /// Some(42).isSomeAnd { it > 0 };    // true
+    /// Some(-1).isSomeAnd { it > 0 };    // false
+    /// None.isSomeAnd { it > 0 };        // false
     /// ```
     public func isSomeAnd(predicate: (T) -> Bool) -> Bool {
         match self {
@@ -170,7 +170,7 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// let cfg = loadConfig().expect(message: "Config file required");
+    /// let cfg = loadConfig().expect("Config file required");
     /// ```
     public func expect(message: String) -> T {
         match self {
@@ -186,8 +186,8 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(42).unwrapOr(default: 0);   // 42
-    /// None.unwrapOr(default: 0);       // 0
+    /// Some(42).unwrapOr(0);   // 42
+    /// None.unwrapOr(0);       // 0
     /// ```
     public func unwrapOr(default: T) -> T {
         match self {
@@ -202,8 +202,8 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(42).unwrap(orElse: || expensiveDefault());   // 42, no call
-    /// None.unwrap(orElse: || expensiveDefault());       // calls fn
+    /// Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
+    /// None.unwrap(orElse: { expensiveDefault() });       // calls fn
     /// ```
     public func unwrap(orElse defaultFn: () -> T) -> T {
         match self {
@@ -222,9 +222,9 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(2).map({ it * 2 });           // Some(4)
-    /// None.map({ it * 2 });              // None
-    /// Some("hello").map({ it.len });     // Some(5)
+    /// Some(2).map { it * 2 };           // Some(4)
+    /// None.map { it * 2 };              // None
+    /// Some("hello").map { it.len };     // Some(5)
     /// ```
     public func map[U](transform: (T) -> U) -> Optional[U] {
         match self {
@@ -275,9 +275,9 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(4).filter({ it % 2 == 0 });   // Some(4)
-    /// Some(3).filter({ it % 2 == 0 });   // None
-    /// None.filter({ it % 2 == 0 });      // None
+    /// Some(4).filter { it % 2 == 0 };   // Some(4)
+    /// Some(3).filter { it % 2 == 0 };   // None
+    /// None.filter { it % 2 == 0 };      // None
     /// ```
     public func filter(predicate: (T) -> Bool) -> Optional[T] {
         match self {
@@ -300,8 +300,8 @@ public enum Optional[T] {
     ///
     /// ```
     /// getUser(id)
-    ///     .inspect({ print("Found: \{it.name}") })
-    ///     .map({ it.email });
+    ///     .inspect { print("Found: \{it.name}") }
+    ///     .map { it.email };
     /// ```
     public func inspect(fn: (T) -> ()) -> Optional[T] {
         match self {
@@ -323,9 +323,9 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(1).then(other: Some("a"));    // Some("a")
-    /// Some(1).then(other: None);         // None
-    /// None.then(other: Some("a"));       // None
+    /// Some(1).then(Some("a"));    // Some("a")
+    /// Some(1).then(None);         // None
+    /// None.then(Some("a"));       // None
     /// ```
     public func then[U](other: Optional[U]) -> Optional[U] {
         match self {
@@ -341,9 +341,9 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(1).orElse(|| Some(2));        // Some(1), fn not called
-    /// None.orElse(|| Some(2));           // Some(2)
-    /// None.orElse(|| loadFromCache());   // calls fn
+    /// Some(1).orElse { Some(2) };        // Some(1), fn not called
+    /// None.orElse { Some(2) };           // Some(2)
+    /// None.orElse { loadFromCache() };   // calls fn
     ///
     /// // For unwrapping with a default, prefer ??:
     /// let value = optionalInt ?? 0;
@@ -361,10 +361,10 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(1).xor(other: None);       // Some(1)
-    /// None.xor(other: Some(2));       // Some(2)
-    /// Some(1).xor(other: Some(2));    // None
-    /// None.xor(other: None);          // None
+    /// Some(1).xor(None);       // Some(1)
+    /// None.xor(Some(2));       // Some(2)
+    /// Some(1).xor(Some(2));    // None
+    /// None.xor(None);          // None
     /// ```
     public func xor(other: Optional[T]) -> Optional[T] {
         match (self, other) {
@@ -401,8 +401,8 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(42).okOr(error: "missing");   // Ok(42)
-    /// None.okOr(error: "missing");       // Err("missing")
+    /// Some(42).okOr("missing");   // Ok(42)
+    /// None.okOr("missing");       // Err("missing")
     /// ```
     public func okOr[E](error: E) -> Result[T, E] {
         match self {
@@ -416,8 +416,8 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(42).okOrElse(|| NotFoundError());   // Ok(42), fn not called
-    /// None.okOrElse(|| NotFoundError());       // Err(NotFoundError())
+    /// Some(42).okOrElse { NotFoundError() };   // Ok(42), fn not called
+    /// None.okOrElse { NotFoundError() };       // Err(NotFoundError())
     /// ```
     public func okOrElse[E](error: () -> E) -> Result[T, E] {
         match self {
@@ -453,10 +453,10 @@ public enum Optional[T] {
     ///
     /// ```
     /// var opt = Some(1);
-    /// opt.replace(value: 2);    // Some(1); opt is now Some(2)
+    /// opt.replace(2);    // Some(1); opt is now Some(2)
     ///
     /// var none: Int64? = null;
-    /// none.replace(value: 1);   // None;    none is now Some(1)
+    /// none.replace(1);   // None;    none is now Some(1)
     /// ```
     public mutating func replace(value: T) -> Optional[T] {
         let old = self;
@@ -472,10 +472,10 @@ public enum Optional[T] {
     ///
     /// ```
     /// var opt = Some(42);
-    /// opt.takeIf({ it > 0 });    // Some(42); opt is now None
+    /// opt.takeIf { it > 0 };    // Some(42); opt is now None
     ///
     /// var opt2 = Some(42);
-    /// opt2.takeIf({ it < 0 });   // None;     opt2 is still Some(42)
+    /// opt2.takeIf { it < 0 };   // None;     opt2 is still Some(42)
     /// ```
     public mutating func takeIf(predicate: (T) -> Bool) -> Optional[T] {
         match self {
@@ -549,9 +549,9 @@ extend Optional[T]: Equatable where T: Equatable {
     /// # Examples
     ///
     /// ```
-    /// Some(42).contains(value: 42);   // true
-    /// Some(42).contains(value: 0);    // false
-    /// None.contains(value: 42);       // false
+    /// Some(42).contains(42);   // true
+    /// Some(42).contains(0);    // false
+    /// None.contains(42);       // false
     /// ```
     public func contains(value: T) -> Bool {
         match self {

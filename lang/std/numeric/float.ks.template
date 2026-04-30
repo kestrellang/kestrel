@@ -28,7 +28,7 @@ import std.numeric.(Int64, {{OTHER_FLOAT}})
 /// ```
 /// let pi = Float64.pi;
 /// let area = pi * radius * radius;
-/// let s = area.format(options: .{precision: 2});  // "314.16"
+/// let s = area.format(.{precision: 2});  // "314.16"
 /// ```
 ///
 /// ```
@@ -351,9 +351,9 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (3.14).equals(other: 3.14);                  // true
-    /// (0.0).equals(other: -0.0);                   // true
-    /// Float64.nan.equals(other: Float64.nan);      // false (!)
+    /// (3.14).equals(3.14);                  // true
+    /// (0.0).equals(-0.0);                   // true
+    /// Float64.nan.equals(Float64.nan);      // false (!)
     /// ```
     public func equals(other: {{TYPE_NAME}}) -> Bool {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
@@ -367,10 +367,10 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (1.0).compare(other: 2.0);              // .Less
-    /// (2.0).compare(other: 2.0);              // .Equal
-    /// (3.0).compare(other: 2.0);              // .Greater
-    /// (1.0).compare(other: Float64.infinity); // .Less
+    /// (1.0).compare(2.0);              // .Less
+    /// (2.0).compare(2.0);              // .Equal
+    /// (3.0).compare(2.0);              // .Greater
+    /// (1.0).compare(Float64.infinity); // .Less
     /// ```
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
         if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, other.raw)) { .Less }
@@ -414,7 +414,7 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (10.0).divide(other: 4.0);  // 2.5
+    /// (10.0).divide(4.0);  // 2.5
     /// 1.0 / 0.0;                  // inf
     /// 0.0 / 0.0;                  // nan
     /// ```
@@ -504,7 +504,7 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (3.0).hypot(other: 4.0);  // 5.0
+    /// (3.0).hypot(4.0);  // 5.0
     /// ```
     public func hypot(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         {{TYPE_NAME}}(raw: libm_hypot{{LIBM_SUFFIX}}(self.raw, other.raw))
@@ -559,9 +559,9 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (2.0).pow(exponent: 10.0);   // 1024.0
-    /// (2.0).pow(exponent: 0.5);    // sqrt(2)
-    /// (-2.0).pow(exponent: 0.5);   // nan
+    /// (2.0).pow(10.0);   // 1024.0
+    /// (2.0).pow(0.5);    // sqrt(2)
+    /// (-2.0).pow(0.5);   // nan
     /// ```
     public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         {{TYPE_NAME}}(raw: libm_pow{{LIBM_SUFFIX}}(self.raw, exponent.raw))
@@ -574,8 +574,8 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (2.0).powi(exponent: 10);   // 1024.0
-    /// (2.0).powi(exponent: -1);   // 0.5
+    /// (2.0).powi(10);   // 1024.0
+    /// (2.0).powi(-1);   // 0.5
     /// ```
     public func powi(exponent: Int64) -> {{TYPE_NAME}} {
         if exponent == 0 { return {{TYPE_NAME}}(floatLiteral: 1.0) };
@@ -625,10 +625,10 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (1.0).atan2(x: 1.0);    //  π/4   (Q1)
-    /// (1.0).atan2(x: -1.0);   //  3π/4  (Q2)
-    /// (-1.0).atan2(x: -1.0);  // -3π/4  (Q3)
-    /// (-1.0).atan2(x: 1.0);   // -π/4   (Q4)
+    /// (1.0).atan2(1.0);    //  π/4   (Q1)
+    /// (1.0).atan2(-1.0);   //  3π/4  (Q2)
+    /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
+    /// (-1.0).atan2(1.0);   // -π/4   (Q4)
     /// ```
     public func atan2(x: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan2{{LIBM_SUFFIX}}(self.raw, x.raw)) }
 
@@ -676,7 +676,7 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (2.0).fma(a: 3.0, b: 4.0);   // 10.0
+    /// (2.0).fma(3.0, 4.0);   // 10.0
     /// ```
     public func fma(a: {{TYPE_NAME}}, b: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_fma(self.raw, a.raw, b.raw))
@@ -716,9 +716,9 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (0.5).clamp(min: 0.0, max: 1.0);   // 0.5
-    /// (-0.5).clamp(min: 0.0, max: 1.0);  // 0.0
-    /// (1.5).clamp(min: 0.0, max: 1.0);   // 1.0
+    /// (0.5).clamp(0.0, 1.0);   // 0.5
+    /// (-0.5).clamp(0.0, 1.0);  // 0.0
+    /// (1.5).clamp(0.0, 1.0);   // 1.0
     /// ```
     public func clamp(min: {{TYPE_NAME}}, max: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         if self.isNaN { self }
@@ -733,10 +733,10 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (0.0).lerp(to: 10.0, t: 0.0);   //  0.0
-    /// (0.0).lerp(to: 10.0, t: 0.5);   //  5.0
-    /// (0.0).lerp(to: 10.0, t: 1.0);   // 10.0
-    /// (0.0).lerp(to: 10.0, t: 0.25);  //  2.5
+    /// (0.0).lerp(to: 10.0, 0.0);   //  0.0
+    /// (0.0).lerp(to: 10.0, 0.5);   //  5.0
+    /// (0.0).lerp(to: 10.0, 1.0);   // 10.0
+    /// (0.0).lerp(to: 10.0, 0.25);  //  2.5
     /// ```
     public func lerp(to other: {{TYPE_NAME}}, t: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         self.add(other.subtract(self).multiply(t))

@@ -130,7 +130,7 @@ func lastError() -> IoError {
 /// # Examples
 ///
 /// ```
-/// if fileExists(path: "/tmp/foo") {
+/// if fileExists("/tmp/foo") {
 ///     // ...
 /// }
 /// ```
@@ -149,8 +149,8 @@ public func fileExists(path: String) -> Bool {
 /// # Examples
 ///
 /// ```
-/// isDirectory(path: "/tmp");      // true
-/// isDirectory(path: "/etc/hosts"); // false
+/// isDirectory("/tmp");      // true
+/// isDirectory("/etc/hosts"); // false
 /// ```
 public func isDirectory(path: String) -> Bool {
     let mode = statMode(path);
@@ -223,7 +223,7 @@ func statMode(path: String) -> Optional[Int32] {
 /// # Examples
 ///
 /// ```
-/// match mkdir(path: "/tmp/foo") {
+/// match mkdir("/tmp/foo") {
 ///     .Ok(_)  => print("created"),
 ///     .Err(e) => print(e.message)
 /// }
@@ -255,7 +255,7 @@ public func mkdir(path: String) -> Result[(), IoError] {
 /// # Examples
 ///
 /// ```
-/// mkdirAll(path: "/tmp/foo/bar/baz");  // creates all three levels
+/// mkdirAll("/tmp/foo/bar/baz");  // creates all three levels
 /// ```
 public func mkdirAll(path: String) -> Result[(), IoError] {
     if fileExists(path) {
@@ -309,7 +309,7 @@ public func removeDir(path: String) -> Result[(), IoError] {
 /// # Examples
 ///
 /// ```
-/// for entry in listDir(path: "/tmp") {
+/// for entry in listDir("/tmp") {
 ///     print(entry);
 /// }
 /// ```
@@ -473,7 +473,7 @@ public func readlink(path: String) -> Result[String, IoError] {
 /// # Examples
 ///
 /// ```
-/// chmod(path: "/tmp/script.sh", mode: Int32(intLiteral: 0o755));
+/// chmod("/tmp/script.sh", Int32(intLiteral: 0o755));
 /// ```
 public func chmod(path: String, mode: Int32) -> Result[(), IoError] {
     let cpath = path.toCString();

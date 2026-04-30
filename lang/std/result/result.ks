@@ -23,7 +23,7 @@ import std.result.(Optional)
 ///
 /// ```
 /// func parseAndDouble(s: String) -> Int64 throws ParseError {
-///     let n = try Int64.parse(string: s).okOr(error: ParseError());
+///     let n = try Int64.parse(s).okOr(ParseError());
 ///     n * 2
 /// }
 ///
@@ -169,8 +169,8 @@ public enum Result[T, E]: Tryable {
     /// # Examples
     ///
     /// ```
-    /// Ok(2).map({ it * 2 });          // Ok(4)
-    /// Err("oops").map({ it * 2 });    // Err("oops")
+    /// Ok(2).map { it * 2 };          // Ok(4)
+    /// Err("oops").map { it * 2 };    // Err("oops")
     /// ```
     public func map[U](transform: (T) -> U) -> Result[U, E] {
         match self {
@@ -198,7 +198,7 @@ public enum Result[T, E]: Tryable {
     /// # Examples
     ///
     /// ```
-    /// parse(s).mapErr({ AppError.Parse(it) });
+    /// parse(s).mapErr { AppError.Parse(it) };
     /// ```
     public func mapErr[F](transform: (E) -> F) -> Result[T, F] {
         match self {

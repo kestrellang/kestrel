@@ -34,7 +34,7 @@ public struct Release: Cloneable {
 // ============================================================================
 
 func repoApi() -> String {
-    "https://api.github.com/repos/jkpdino/kestrel/releases"
+    "https://api.github.com/repos/kestrellang/kestrel/releases"
 }
 
 /// Fetches the latest release matching the given channel and platform.

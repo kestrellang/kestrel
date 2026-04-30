@@ -74,8 +74,8 @@ public struct Int8:
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
-    LeftShiftAssign[lang.i64],
-    RightShiftAssign[lang.i64],
+    LeftShiftAssign[Int64],
+    RightShiftAssign[Int64],
     ExpressibleByIntLiteral,
     Defaultable,
     FFISafe,
@@ -101,7 +101,7 @@ public struct Int8:
     public static var zero: Int8 { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: Int8 { 0 }
+    public static var one: Int8 { 1 }
 
     /// The smallest representable value.
     /// This is -2^7 (-128).
@@ -288,8 +288,8 @@ public struct Int8:
     /// # Examples
     ///
     /// ```
-    /// (42).equals(other: 42);  // true
-    /// 42 == 42;                // true
+    /// (42).equals(42);  // true
+    /// 42 == 42;          // true
     /// ```
     public func equals(other: Int8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
@@ -306,9 +306,9 @@ public struct Int8:
     /// # Examples
     ///
     /// ```
-    /// (1).compare(other: 2);   // .Less
-    /// (2).compare(other: 2);   // .Equal
-    /// (3).compare(other: 2);   // .Greater
+    /// (1).compare(2);   // .Less
+    /// (2).compare(2);   // .Equal
+    /// (3).compare(2);   // .Greater
     /// ```
     public func compare(other: Int8) -> Ordering {
         if Bool(boolLiteral: lang.i8_signed_lt(self.raw, other.raw)) { .Less }
@@ -345,7 +345,7 @@ public struct Int8:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[Int8]()))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int8]().size))
     }
 
     // ========================================================================
@@ -623,9 +623,9 @@ public struct Int8:
     /// # Examples
     ///
     /// ```
-    /// (5).clamp(min: 0, max: 10);    // 5
-    /// (-5).clamp(min: 0, max: 10);   // 0
-    /// (15).clamp(min: 0, max: 10);   // 10
+    /// (5).clamp(0, 10);    // 5
+    /// (-5).clamp(0, 10);   // 0
+    /// (15).clamp(0, 10);   // 10
     /// ```
     public func clamp(min: Int8, max: Int8) -> Int8 {
         if self < min { min }
@@ -651,12 +651,12 @@ public struct Int8:
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count))) }
+    public func shiftLeft(by count: Int64) -> Int8 { Int8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count.raw))) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: lang.i64) -> Int8 { Int8(raw: lang.i8_signed_shr(self.raw, lang.cast_i64_i8(count))) }
+    public func shiftRight(by count: Int64) -> Int8 { Int8(raw: lang.i8_signed_shr(self.raw, lang.cast_i64_i8(count.raw))) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.
@@ -664,7 +664,7 @@ public struct Int8:
         let bits: Int64 = 8;
         let c = count % bits;
         if c == 0 { self }
-        else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
+        else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
 
     /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
@@ -673,7 +673,7 @@ public struct Int8:
         let bits: Int64 = 8;
         let c = count % bits;
         if c == 0 { self }
-        else { self.shiftRight(by: c.raw).bitwiseOr(self.shiftLeft(by: (bits - c).raw)) }
+        else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
 
     // ========================================================================
@@ -697,9 +697,9 @@ public struct Int8:
     /// `self ^= other`
     public mutating func bitwiseXorAssign(other: Int8) { self = self.bitwiseXor(other) }
     /// `self <<= count`
-    public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
+    public mutating func shiftLeftAssign(by count: Int64) { self = self.shiftLeft(by: count) }
     /// `self >>= count`
-    public mutating func shiftRightAssign(by count: lang.i64) { self = self.shiftRight(by: count) }
+    public mutating func shiftRightAssign(by count: Int64) { self = self.shiftRight(by: count) }
 
     // ========================================================================
     // BYTE CONVERSION
@@ -735,7 +735,7 @@ public struct Int8:
         var i: Int64 = 0;
         while i < 1 {
             let shift = (1 - 1 - i) * 8;
-            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
         }
@@ -751,7 +751,7 @@ public struct Int8:
         var i: Int64 = 0;
         while i < 1 {
             let shift = i * 8;
-            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
         }
@@ -818,10 +818,10 @@ public struct Int8:
     /// # Examples
     ///
     /// ```
-    /// Int8.parse(string: "42");    // Some(42)
-    /// Int8.parse(string: "-7");    // Some(-7)
-    /// Int8.parse(string: "abc");   // None
-    /// Int8.parse(string: "");      // None
+    /// Int8.parse("42");    // Some(42)
+    /// Int8.parse("-7");    // Some(-7)
+    /// Int8.parse("abc");   // None
+    /// Int8.parse("");      // None
     /// ```
     public static func parse(string: String) -> Int8? {
         let len = string.byteCount;
@@ -899,9 +899,9 @@ public struct Int8:
     /// # Examples
     ///
     /// ```
-    /// Int8.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-    /// Int8.parse(string: "101010", radix: 2);  // Some(42)
-    /// Int8.parse(string: "z", radix: 36);      // Some(35)
+    /// Int8.parse("ff", 16);     // Some(255 if it fits, else None)
+    /// Int8.parse("101010", 2);  // Some(42)
+    /// Int8.parse("z", 36);      // Some(35)
     /// ```
     public static func parse(string: String, radix: Int64) -> Int8? {
         if radix < 2 or radix > 36 {
@@ -999,12 +999,12 @@ public struct Int8:
     ///
     /// ```
     /// (42).format();                                           // "42"
-    /// (255).format(options: .{radix: 16});                     // "ff"
-    /// (255).format(options: .{radix: 16, uppercase: true});    // "FF"
-    /// (255).format(options: .{radix: 16, alternate: true});    // "0xff"
-    /// (42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-    /// (42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-    /// (-42).format(options: .{sign: .Always});                 // "-42"
+    /// (255).format(.{radix: 16});                     // "ff"
+    /// (255).format(.{radix: 16, uppercase: true});    // "FF"
+    /// (255).format(.{radix: 16, alternate: true});    // "0xff"
+    /// (42).format(.{radix: 2, alternate: true});      // "0b101010"
+    /// (42).format(.{width: .Some(5), fill: '0'});     // "00042"
+    /// (-42).format(.{sign: .Always});                 // "-42"
     /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var n = self;

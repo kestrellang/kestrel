@@ -48,6 +48,9 @@ jobs:
       - name: Build kestrel compiler
         run: cargo build --release
 
+      - name: Build kestrel language server
+        run: cargo build --release -p kestrel-lsp
+
       - name: Bootstrap flock
         run: bash lang/flock/bootstrap.sh
 
@@ -68,6 +71,7 @@ jobs:
           mkdir -p "$STAGING/lib"
 
           cp target/release/kestrel "$STAGING/bin/"
+          cp target/release/kestrel-lsp "$STAGING/bin/"
           cp lang/flock/flock "$STAGING/bin/"
           cp -r lang/std "$STAGING/lib/std"
 

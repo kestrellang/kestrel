@@ -4,6 +4,6 @@ version = "0.1.0"
 description = "Lightweight string templating"
 author = "jkpdino"
 license = "MIT"
-repository = "https://github.com/jkpdino/kestrel"
+repository = "https://github.com/kestrellang/kestrel"
 
 [dependencies]

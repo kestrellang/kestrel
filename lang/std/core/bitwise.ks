@@ -54,17 +54,15 @@ public protocol BitwiseNot {
 
 /// Raw protocol backing the `<<` operator.
 ///
-/// `Other` defaults to the primitive `lang.i64` because protocol type defaults
-/// must be resolvable at parse time, before stdlib types like `Int64` are
-/// available. Conforming integer types narrow this to a more specific shift
-/// count where appropriate.
+/// `Other` defaults to `Int64` — the standard shift count type. Conforming
+/// types may narrow this to a different count where appropriate.
 ///
 /// # Errors
 ///
 /// Standard integer types panic on out-of-range shift counts (see the
 /// `shiftLeft` documentation on the integer types).
 @builtin(.ShiftLeftOperatorProtocol)
-public protocol LeftShift[Other = lang.i64] {
+public protocol LeftShift[Other = Int64] {
     type Output
 
     /// Returns `self << count`.
@@ -77,7 +75,7 @@ public protocol LeftShift[Other = lang.i64] {
 /// Behaviour for signed types is arithmetic shift (sign-preserving); unsigned
 /// types use logical shift. The `Other` default mirrors `LeftShift`.
 @builtin(.ShiftRightOperatorProtocol)
-public protocol RightShift[Other = lang.i64] {
+public protocol RightShift[Other = Int64] {
     type Output
 
     /// Returns `self >> count`.

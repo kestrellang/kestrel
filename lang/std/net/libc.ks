@@ -136,7 +136,7 @@ func libc_freeaddrinfo(res: RawPointer)
 /// # Examples
 ///
 /// ```
-/// let fd = socket(domain: AF_INET(), type_: SOCK_STREAM(), proto: IPPROTO_TCP());
+/// let fd = socket(AF_INET(), SOCK_STREAM(), IPPROTO_TCP());
 /// if fd < 0 { /* errno() */ }
 /// ```
 public func socket(domain: Int32, type_: Int32, proto: Int32) -> Int32 {

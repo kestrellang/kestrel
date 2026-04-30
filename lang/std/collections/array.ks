@@ -957,10 +957,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// let arr = [1, 2, 3];
-    /// arr.isValidIndex(index: 0);   // true
-    /// arr.isValidIndex(index: 2);   // true
-    /// arr.isValidIndex(index: 3);   // false
-    /// arr.isValidIndex(index: -1);  // false
+    /// arr.isValidIndex(0);   // true
+    /// arr.isValidIndex(2);   // true
+    /// arr.isValidIndex(3);   // false
+    /// arr.isValidIndex(-1);  // false
     /// ```
     public func isValidIndex(index: Int64) -> Bool {
         index >= 0 and index < self.len()
@@ -1234,7 +1234,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// var arr = [1, 2];
-    /// arr.appendFrom(iterable: 3..<6);  // [1, 2, 3, 4, 5]
+    /// arr.appendFrom(3..<6);  // [1, 2, 3, 4, 5]
     /// ```
     public mutating func appendFrom[I](iterable: I) where I: Iterable, I.Item = T {
         var iter = iterable.iter();
@@ -1248,7 +1248,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// O(n) in the number of elements after `index`. `index == count`
     /// behaves like `append`. Triggers COW and may reallocate. For bulk
     /// insertion at one location, prefer
-    /// `replaceSubrange(range: i..<i, with: ...)`.
+    /// `replaceSubrange(i..<i, with: ...)`.
     ///
     /// # Errors
     ///
@@ -1259,10 +1259,10 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// var arr = [1, 3];
-    /// arr.insert(element: 2, at: 1);  // [1, 2, 3]
-    /// arr.insert(element: 0, at: 0);  // [0, 1, 2, 3]
-    /// arr.insert(element: 4, at: 4);  // [0, 1, 2, 3, 4]  — append-equivalent
-    /// arr.insert(element: 9, at: 99); // PANIC
+    /// arr.insert(2, at: 1);  // [1, 2, 3]
+    /// arr.insert(0, at: 0);  // [0, 1, 2, 3]
+    /// arr.insert(4, at: 4);  // [0, 1, 2, 3, 4]  — append-equivalent
+    /// arr.insert(9, at: 99); // PANIC
     /// ```
     public mutating func insert(element: T, at index: Int64) {
         let myLen = self.len();
@@ -1393,8 +1393,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// var arr = [1, 2, 3, 4, 5];
-    /// arr.removeSubrange(range: 1..<4);  // arr is [1, 5]
-    /// arr.removeSubrange(range: 0..<0);  // no-op
+    /// arr.removeSubrange(1..<4);  // arr is [1, 5]
+    /// arr.removeSubrange(0..<0);  // no-op
     /// ```
     public mutating func removeSubrange(range: Range[Int64]) {
         let start = range.start;
@@ -1639,9 +1639,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// var arr = [1, 2, 3, 4, 5];
-    /// arr.replaceSubrange(range: 1..<4, with: [20, 30]);    // [1, 20, 30, 5]
-    /// arr.replaceSubrange(range: 1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
-    /// arr.replaceSubrange(range: 0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
+    /// arr.replaceSubrange(1..<4, with: [20, 30]);    // [1, 20, 30, 5]
+    /// arr.replaceSubrange(1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
+    /// arr.replaceSubrange(0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
     /// ```
     public mutating func replaceSubrange(range: Range[Int64], with replacement: Array[T]) {
         let start = range.start;
@@ -1793,7 +1793,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// var arr = Array[Int64]();
-    /// arr.reserveCapacity(minimumCapacity: 1000);
+    /// arr.reserveCapacity(1000);
     /// for i in 0..<1000 {
     ///         arr.append(i);  // no reallocations
     /// }
@@ -1914,7 +1914,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     ///
     /// ```
     /// for item in arr.iter() { ... }
-    /// let doubled = arr.iter().map({ (x) in x * 2 }).collect();
+    /// let doubled = arr.iter().map { (x) in x * 2 }.collect();
     /// ```
     public func iter() -> ArrayIterator[T] {
         ArrayIterator(ptr: self.ptr(), remaining: self.len())
@@ -2112,9 +2112,9 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].prefix(count: 3);  // Slice[1, 2, 3]
-    /// [1, 2].prefix(count: 0);           // empty Slice
-    /// [1, 2].prefix(count: 9);           // PANIC
+    /// [1, 2, 3, 4, 5].prefix(3);  // Slice[1, 2, 3]
+    /// [1, 2].prefix(0);           // empty Slice
+    /// [1, 2].prefix(9);           // PANIC
     /// ```
     public func prefix(count: Int64) -> Slice[T] {
         let myLen = self.len();
@@ -2136,8 +2136,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].suffix(count: 2);  // Slice[4, 5]
-    /// [1, 2].suffix(count: 0);           // empty Slice
+    /// [1, 2, 3, 4, 5].suffix(2);  // Slice[4, 5]
+    /// [1, 2].suffix(0);           // empty Slice
     /// ```
     public func suffix(count: Int64) -> Slice[T] {
         let myLen = self.len();
@@ -2643,9 +2643,9 @@ extend Array[T]: Equatable where T: Equatable {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].equals(other: [1, 2, 3]);  // true
-    /// [1, 2, 3].equals(other: [1, 2]);     // false
-    /// [1, 2, 3].equals(other: [3, 2, 1]);  // false
+    /// [1, 2, 3].equals([1, 2, 3]);  // true
+    /// [1, 2, 3].equals([1, 2]);     // false
+    /// [1, 2, 3].equals([3, 2, 1]);  // false
     /// ```
     public func equals(other: Array[T]) -> Bool {
         let selfCount = self.count;
@@ -2672,8 +2672,8 @@ extend Array[T]: Equatable where T: Equatable {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].contains(element: 2);  // true
-    /// [1, 2, 3].contains(element: 5);  // false
+    /// [1, 2, 3].contains(2);  // true
+    /// [1, 2, 3].contains(5);  // false
     /// ```
     public func contains(element: T) -> Bool {
         self.firstIndex(matching: { (x) in x.equals(element) }).isSome()
@@ -2776,16 +2776,16 @@ extend Array[T]: Equatable where T: Equatable {
     /// # Examples
     ///
     /// ```
-    /// [1, 0, 2, 0, 3].split(separator: 0);
+    /// [1, 0, 2, 0, 3].split(0);
     /// // [Slice[1], Slice[2], Slice[3]]
     ///
-    /// [0, 1, 0, 0, 2, 0].split(separator: 0);
+    /// [0, 1, 0, 0, 2, 0].split(0);
     /// // [Slice[], Slice[1], Slice[], Slice[2], Slice[]]
     ///
-    /// [1, 2, 3].split(separator: 0);
+    /// [1, 2, 3].split(0);
     /// // [Slice[1, 2, 3]] — separator not found
     ///
-    /// [].split(separator: 0);
+    /// [].split(0);
     /// // [Slice[]] — empty array yields one empty slice
     /// ```
     public func split(separator: T) -> Array[Slice[T]] {
@@ -2812,8 +2812,8 @@ extend Array[T]: Equatable where T: Equatable {
     ///
     /// ```
     /// var arr = [1, 2, 3, 2];
-    /// arr.remove(element: 2);  // true; arr is [1, 3, 2]
-    /// arr.remove(element: 5);  // false; arr unchanged
+    /// arr.remove(2);  // true; arr is [1, 3, 2]
+    /// arr.remove(5);  // false; arr unchanged
     /// ```
     public mutating func remove(element: T) -> Bool {
         if let .Some(idx) = self.firstIndex(matching: { (x) in x.equals(element) }) {
@@ -2834,7 +2834,7 @@ extend Array[T]: Equatable where T: Equatable {
     ///
     /// ```
     /// var arr = [1, 2, 3, 2, 4, 2];
-    /// arr.removeAll(element: 2);  // [1, 3, 4]
+    /// arr.removeAll(2);  // [1, 3, 4]
     /// ```
     public mutating func removeAll(element: T) {
         self.retain(matching: { (x) in x.equals(element) == false })
@@ -3062,8 +3062,8 @@ extend Array[T] where T: Comparable {
     ///
     /// ```
     /// let arr = [1, 2, 3, 4, 5];
-    /// arr.binarySearch(element: 3);  // Some(2)
-    /// arr.binarySearch(element: 6);  // None
+    /// arr.binarySearch(3);  // Some(2)
+    /// arr.binarySearch(6);  // None
     /// ```
     public func binarySearch(element: T) -> Int64? {
         var lo: Int64 = 0;
@@ -3274,10 +3274,10 @@ extend Array[T] where T: Formattable {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].joined(separator: ", ");  // "1, 2, 3"
-    /// [1, 2, 3].joined();                 // "123"
-    /// ["a", "b"].joined(separator: "-");  // "a-b"
-    /// [].joined(separator: ", ");         // ""
+    /// [1, 2, 3].joined(", ");  // "1, 2, 3"
+    /// [1, 2, 3].joined();       // "123"
+    /// ["a", "b"].joined("-");   // "a-b"
+    /// [].joined(", ");          // ""
     /// ```
     public func joined(separator: String = "") -> String {
         if self.count == 0 {

@@ -151,7 +151,7 @@ Every tool below is written in Kestrel:
 
 ```bash
 # Install the compiler
-cargo install --git https://github.com/jkpdino/kestrel
+cargo install --git https://github.com/kestrellang/kestrel
 
 # Run a program
 kestrel run file.ks
@@ -178,8 +178,9 @@ Kestrel ships with a language server (`kestrel-lsp`) and a VS Code extension.
 **Features:** diagnostics, go-to-definition, hover, completions, signature help, rename, code actions, document symbols, semantic highlighting, and inlay hints.
 
 ```bash
-# Install the language server
-cargo install --git https://github.com/jkpdino/kestrel kestrel-lsp
+# Installed by Jessup with the toolchain
+jessup install stable
+kestrel-lsp --version
 ```
 
 The [VS Code extension](editors/vscode) picks up `kestrel-lsp` from PATH automatically. You can also point it at a custom binary via the `kestrel.lsp.path` setting.
@@ -206,7 +207,7 @@ Requirements:
 - Rust 2024 edition (1.85+)
 
 ```bash
-git clone https://github.com/jkpdino/kestrel
+git clone https://github.com/kestrellang/kestrel
 cd kestrel
 cargo install --path .
 ```

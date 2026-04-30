@@ -74,8 +74,8 @@ public struct {{TYPE_NAME}}:
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
-    LeftShiftAssign[lang.i64],
-    RightShiftAssign[lang.i64],
+    LeftShiftAssign[Int64],
+    RightShiftAssign[Int64],
     ExpressibleByIntLiteral,
     Defaultable,
     FFISafe,
@@ -94,7 +94,7 @@ public struct {{TYPE_NAME}}:
     public static var zero: {{TYPE_NAME}} { 0 }
 
     /// The multiplicative identity, `1`.
-    public static var one: {{TYPE_NAME}} { 0 }
+    public static var one: {{TYPE_NAME}} { 1 }
 
     /// The smallest representable value.
     {{MIN_VALUE_DOC}}
@@ -231,8 +231,8 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (42).equals(other: 42);  // true
-    /// 42 == 42;                // true
+    /// (42).equals(42);  // true
+    /// 42 == 42;          // true
     /// ```
     public func equals(other: {{TYPE_NAME}}) -> Bool {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
@@ -249,9 +249,9 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (1).compare(other: 2);   // .Less
-    /// (2).compare(other: 2);   // .Equal
-    /// (3).compare(other: 2);   // .Greater
+    /// (1).compare(2);   // .Less
+    /// (2).compare(2);   // .Equal
+    /// (3).compare(2);   // .Greater
     /// ```
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
         if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.raw, other.raw)) { .Less }
@@ -288,7 +288,7 @@ public struct {{TYPE_NAME}}:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: lang.sizeof[{{TYPE_NAME}}]()))
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
     }
 
     // ========================================================================
@@ -438,9 +438,9 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (5).clamp(min: 0, max: 10);    // 5
-    /// (-5).clamp(min: 0, max: 10);   // 0
-    /// (15).clamp(min: 0, max: 10);   // 10
+    /// (5).clamp(0, 10);    // 5
+    /// (-5).clamp(0, 10);   // 0
+    /// (15).clamp(0, 10);   // 10
     /// ```
     public func clamp(min: {{TYPE_NAME}}, max: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         if self < min { min }
@@ -466,12 +466,12 @@ public struct {{TYPE_NAME}}:
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.raw, {{SHIFT_CAST}})) }
+    public func shiftLeft(by count: Int64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.raw, {{SHIFT_CAST}})) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: lang.i64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.raw, {{SHIFT_CAST}})) }
+    public func shiftRight(by count: Int64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.raw, {{SHIFT_CAST}})) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.
@@ -479,7 +479,7 @@ public struct {{TYPE_NAME}}:
         let bits: Int64 = {{BITS}};
         let c = count % bits;
         if c == 0 { self }
-        else { self.shiftLeft(by: c.raw).bitwiseOr(self.shiftRight(by: (bits - c).raw)) }
+        else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
 
     /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
@@ -488,7 +488,7 @@ public struct {{TYPE_NAME}}:
         let bits: Int64 = {{BITS}};
         let c = count % bits;
         if c == 0 { self }
-        else { self.shiftRight(by: c.raw).bitwiseOr(self.shiftLeft(by: (bits - c).raw)) }
+        else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
 
     // ========================================================================
@@ -512,9 +512,9 @@ public struct {{TYPE_NAME}}:
     /// `self ^= other`
     public mutating func bitwiseXorAssign(other: {{TYPE_NAME}}) { self = self.bitwiseXor(other) }
     /// `self <<= count`
-    public mutating func shiftLeftAssign(by count: lang.i64) { self = self.shiftLeft(by: count) }
+    public mutating func shiftLeftAssign(by count: Int64) { self = self.shiftLeft(by: count) }
     /// `self >>= count`
-    public mutating func shiftRightAssign(by count: lang.i64) { self = self.shiftRight(by: count) }
+    public mutating func shiftRightAssign(by count: Int64) { self = self.shiftRight(by: count) }
 
     // ========================================================================
     // BYTE CONVERSION

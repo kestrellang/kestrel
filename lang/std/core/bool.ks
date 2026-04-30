@@ -23,7 +23,7 @@ import std.memory.(Slice, Pointer)
 /// if alive { greet() }
 ///
 /// let votes = [true, false, true];
-/// let yesCount = votes.iter().filter({ |b| b }).count();   // 2
+/// let yesCount = votes.iter().filter { it }.count();   // 2
 /// ```
 ///
 /// # Representation

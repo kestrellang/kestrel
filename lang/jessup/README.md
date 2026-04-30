@@ -2,6 +2,9 @@
 
 Version manager for the Kestrel toolchain. Install, manage, and switch between compiler versions.
 
+Jessup-installed toolchains include `kestrel`, `flock`, `kestrel-lsp`, and the
+standard library.
+
 ## Installation
 
 Download the latest jessup binary from GitHub releases, or build from source:
@@ -41,4 +44,4 @@ jessup update
 
 ## How It Works
 
-Jessup downloads prebuilt Kestrel toolchains from GitHub releases and manages them in `~/.kestrel/toolchains/`. It supports channel-based versions (stable, nightly) that track the latest release in each channel.
+Jessup downloads prebuilt Kestrel toolchains from GitHub releases and manages them in `~/.jessup/toolchains/`. It supports channel-based versions (stable, nightly) that track the latest release in each channel. The active toolchain is exposed through symlinks in `~/.jessup/bin/`.

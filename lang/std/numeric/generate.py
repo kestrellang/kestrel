@@ -491,12 +491,12 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     ///
     /// ```
     /// (42).format();                                           // "42"
-    /// (255).format(options: .{{radix: 16}});                     // "ff"
-    /// (255).format(options: .{{radix: 16, uppercase: true}});    // "FF"
-    /// (255).format(options: .{{radix: 16, alternate: true}});    // "0xff"
-    /// (42).format(options: .{{radix: 2, alternate: true}});      // "0b101010"
-    /// (42).format(options: .{{width: .Some(5), fill: '0'}});     // "00042"
-    /// (-42).format(options: .{{sign: .Always}});                 // "-42"
+    /// (255).format(.{{radix: 16}});                     // "ff"
+    /// (255).format(.{{radix: 16, uppercase: true}});    // "FF"
+    /// (255).format(.{{radix: 16, alternate: true}});    // "0xff"
+    /// (42).format(.{{radix: 2, alternate: true}});      // "0b101010"
+    /// (42).format(.{{width: .Some(5), fill: '0'}});     // "00042"
+    /// (-42).format(.{{sign: .Always}});                 // "-42"
     /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {{
         var n = self;{sign_handling}
@@ -629,10 +629,10 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse(string: "42");    // Some(42)
-    /// {type_name}.parse(string: "-7");    // Some(-7)
-    /// {type_name}.parse(string: "abc");   // None
-    /// {type_name}.parse(string: "");      // None
+    /// {type_name}.parse("42");    // Some(42)
+    /// {type_name}.parse("-7");    // Some(-7)
+    /// {type_name}.parse("abc");   // None
+    /// {type_name}.parse("");      // None
     /// ```
     public static func parse(string: String) -> {type_name}? {{
         let len = string.byteCount;
@@ -718,9 +718,9 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-    /// {type_name}.parse(string: "101010", radix: 2);  // Some(42)
-    /// {type_name}.parse(string: "z", radix: 36);      // Some(35)
+    /// {type_name}.parse("ff", 16);     // Some(255 if it fits, else None)
+    /// {type_name}.parse("101010", 2);  // Some(42)
+    /// {type_name}.parse("z", 36);      // Some(35)
     /// ```
     public static func parse(string: String, radix: Int64) -> {type_name}? {{
         if radix < 2 or radix > 36 {{
@@ -810,9 +810,9 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse(string: "42");   // Some(42)
-    /// {type_name}.parse(string: "-1");   // None  (no sign for unsigned)
-    /// {type_name}.parse(string: "");     // None
+    /// {type_name}.parse("42");   // Some(42)
+    /// {type_name}.parse("-1");   // None  (no sign for unsigned)
+    /// {type_name}.parse("");     // None
     /// ```
     public static func parse(string: String) -> {type_name}? {{
         let len = string.byteCount;
@@ -889,8 +889,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-    /// {type_name}.parse(string: "101010", radix: 2);  // Some(42)
+    /// {type_name}.parse("ff", 16);     // Some(255 if it fits, else None)
+    /// {type_name}.parse("101010", 2);  // Some(42)
     /// ```
     public static func parse(string: String, radix: Int64) -> {type_name}? {{
         if radix < 2 or radix > 36 {{
@@ -1001,7 +1001,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         var i: Int64 = 0;
         while i < {bc} {{
             let shift = ({bc} - 1 - i) * 8;
-            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
         }}
@@ -1017,7 +1017,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         var i: Int64 = 0;
         while i < {bc} {{
             let shift = i * 8;
-            let byteVal = value.shiftRight(by: shift.raw).bitwiseAnd(mask);
+            let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
             result.append(UInt8(from: byteVal));
             i = i + 1
         }}
@@ -1154,10 +1154,10 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
 
     # Shift cast - need to cast count from i64 for smaller types
     if bits == 64:
-        shift_cast = "count"
+        shift_cast = "count.raw"
         shift_cast_i = "i.raw"
     else:
-        shift_cast = f"lang.cast_i64_i{bits}(count)"
+        shift_cast = f"lang.cast_i64_i{bits}(count.raw)"
         shift_cast_i = f"lang.cast_i64_i{bits}(i.raw)"
 
     # Type alias for platform defaults
@@ -1255,12 +1255,12 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     /// # Examples
     ///
     /// ```
-    /// __TYPE_NAME__.parse(string: "3.14");      // Some(3.14)
-    /// __TYPE_NAME__.parse(string: "-2.5e10");   // Some(-2.5e10)
-    /// __TYPE_NAME__.parse(string: "inf");       // Some(infinity)
-    /// __TYPE_NAME__.parse(string: "nan");       // Some(nan)
-    /// __TYPE_NAME__.parse(string: "abc");       // None
-    /// __TYPE_NAME__.parse(string: "");          // None
+    /// __TYPE_NAME__.parse("3.14");      // Some(3.14)
+    /// __TYPE_NAME__.parse("-2.5e10");   // Some(-2.5e10)
+    /// __TYPE_NAME__.parse("inf");       // Some(infinity)
+    /// __TYPE_NAME__.parse("nan");       // Some(nan)
+    /// __TYPE_NAME__.parse("abc");       // None
+    /// __TYPE_NAME__.parse("");          // None
     /// ```
     public static func parse(string: String) -> __TYPE_NAME__? {
         let len = string.byteCount;
@@ -1511,11 +1511,11 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     ///
     /// ```
     /// (3.14159).format();                                          // "3.14159"
-    /// (3.14159).format(options: .{precision: 2});                  // "3.14"
-    /// (1234.5).format(options: .{floatStyle: .Scientific});        // "1.2345e3"
-    /// (0.756).format(options: .{floatStyle: .Percent});            // "75.6%"
-    /// (3.14).format(options: .{width: 8, fill: '0'});              // "00003.14"
-    /// (3.14).format(options: .{sign: .Always});                    // "+3.14"
+    /// (3.14159).format(.{precision: 2});                  // "3.14"
+    /// (1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
+    /// (0.756).format(.{floatStyle: .Percent});            // "75.6%"
+    /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
+    /// (3.14).format(.{sign: .Always});                    // "+3.14"
     /// ```
     public func format(options: FormatOptions = FormatOptions.default()) -> String {
         var precision: Int64 = 6;

@@ -45,7 +45,7 @@ func libc_exit(code: Int32)
 /// # Examples
 ///
 /// ```
-/// let code = spawn(command: "ls -la");
+/// let code = spawn("ls -la");
 /// if code != 0 {
 ///     print("ls failed");
 /// }
@@ -68,7 +68,7 @@ public func spawn(command: String) -> Int32 {
 /// # Examples
 ///
 /// ```
-/// let branch = captureOutput(command: "git rev-parse --abbrev-ref HEAD");
+/// let branch = captureOutput("git rev-parse --abbrev-ref HEAD");
 /// // "main"
 /// ```
 public func captureOutput(command: String) -> String {
@@ -113,7 +113,7 @@ public func captureOutput(command: String) -> String {
 /// # Examples
 ///
 /// ```
-/// exit(code: 0);   // success — does not return
+/// exit(0);   // success — does not return
 /// ```
 public func exit(code: Int32) {
     libc_exit(code)

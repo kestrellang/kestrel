@@ -133,9 +133,9 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
 ///
 /// let a: Set = [1, 2, 3];
 /// let b: Set = [3, 4, 5];
-/// a.union(other: b);          // {1, 2, 3, 4, 5}
-/// a.intersection(other: b);   // {3}
-/// a.isSubset(of: b);          // false
+/// a.union(b);                  // {1, 2, 3, 4, 5}
+/// a.intersection(b);           // {3}
+/// a.isSubset(of: b);           // false
 /// ```
 ///
 /// # Set Literals
@@ -327,7 +327,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// `true` if `element` is a member of the set; O(1) average.
     ///
     /// Forwards to the dictionary's key lookup. For predicate-based
-    /// search use `contains(matching:)`.
+    /// search use `contains { ... }`.
     ///
     /// # Examples
     ///
@@ -396,7 +396,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// collapse silently.
     ///
     /// Sugar for "insert in a loop". For union with another `Set`,
-    /// prefer `formUnion(other:)` — it's the same semantically but
+    /// prefer `formUnion(...)` — it's the same semantically but
     /// reads more naturally.
     ///
     /// # Examples
@@ -415,7 +415,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// In-place union: adds every element of `other` to `self`.
     ///
-    /// Mutating mirror of `union(other:)`. For multi-source unions,
+    /// Mutating mirror of `union(...)`. For multi-source unions,
     /// chain calls or use `insert(contentsOf:)` over the elements.
     ///
     /// # Examples
@@ -423,7 +423,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// var a: Set = [1, 2];
     /// let b: Set = [2, 3];
-    /// a.formUnion(other: b);  // a == {1, 2, 3}
+    /// a.formUnion(b);  // a == {1, 2, 3}
     /// ```
     public mutating func formUnion(other: Set[T, H]) {
         var otherIter = other.iter();
@@ -474,13 +474,13 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// Two-pass implementation: collects elements to remove, then
     /// deletes each. Stable in iteration semantics (set is unordered
-    /// anyway). Mirror is `removeAll(matching:)`.
+    /// anyway). Mirror is `removeAll { ... }`.
     ///
     /// # Examples
     ///
     /// ```
     /// var set: Set = [1, 2, 3, 4, 5];
-    /// set.retain(matching: { (x) in x % 2 == 0 });  // {2, 4}
+    /// set.retain { (x) in x % 2 == 0 };  // {2, 4}
     /// ```
     public mutating func retain(matching predicate: (T) -> Bool) {
         var toRemove: Array[T] = [];
@@ -497,13 +497,13 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// Removes every element for which `predicate` is true.
     ///
-    /// Inverse of `retain(matching:)`. Same two-pass structure.
+    /// Inverse of `retain { ... }`. Same two-pass structure.
     ///
     /// # Examples
     ///
     /// ```
     /// var set: Set = [1, 2, 3, 4, 5];
-    /// set.removeAll(matching: { (x) in x % 2 == 0 });  // {1, 3, 5}
+    /// set.removeAll { (x) in x % 2 == 0 };  // {1, 3, 5}
     /// ```
     public mutating func removeAll(matching predicate: (T) -> Bool) {
         var toRemove: Array[T] = [];
@@ -521,7 +521,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// In-place intersection: removes every element of `self` that
     /// is **not** in `other`.
     ///
-    /// Mutating mirror of `intersection(other:)`. Iterates over
+    /// Mutating mirror of `intersection(...)`. Iterates over
     /// `self`, so the cost scales with `self.count`, not
     /// `other.count`.
     ///
@@ -530,7 +530,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// var a: Set = [1, 2, 3];
     /// let b: Set = [2, 3, 4];
-    /// a.formIntersection(other: b);  // a == {2, 3}
+    /// a.formIntersection(b);  // a == {2, 3}
     /// ```
     public mutating func formIntersection(other: Set[T, H]) {
         var toRemove: Array[T] = [];
@@ -548,7 +548,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// In-place difference: removes every element of `self` that **is**
     /// in `other`.
     ///
-    /// Mutating mirror of `difference(other:)`. The result is "self
+    /// Mutating mirror of `difference(...)`. The result is "self
     /// minus other".
     ///
     /// # Examples
@@ -556,7 +556,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// var a: Set = [1, 2, 3];
     /// let b: Set = [2, 3, 4];
-    /// a.formDifference(other: b);  // a == {1}
+    /// a.formDifference(b);  // a == {1}
     /// ```
     public mutating func formDifference(other: Set[T, H]) {
         var toRemove: Array[T] = [];
@@ -574,7 +574,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// In-place symmetric difference: keeps elements in exactly one
     /// of `self` or `other`.
     ///
-    /// Mutating mirror of `symmetricDifference(other:)`. Two passes:
+    /// Mutating mirror of `symmetricDifference(...)`. Two passes:
     /// removes shared elements, then inserts elements unique to
     /// `other`.
     ///
@@ -583,7 +583,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// var a: Set = [1, 2, 3];
     /// let b: Set = [2, 3, 4];
-    /// a.formSymmetricDifference(other: b);  // a == {1, 4}
+    /// a.formSymmetricDifference(b);  // a == {1, 4}
     /// ```
     public mutating func formSymmetricDifference(other: Set[T, H]) {
         var toRemove: Array[T] = [];
@@ -618,7 +618,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns a new set containing every element from `self` and
     /// `other`.
     ///
-    /// Non-mutating mirror of `formUnion(other:)`. Internally clones
+    /// Non-mutating mirror of `formUnion(...)`. Internally clones
     /// `self` (cheap COW) and adds `other` into the copy.
     ///
     /// # Examples
@@ -626,7 +626,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// let a: Set = [1, 2, 3];
     /// let b: Set = [3, 4, 5];
-    /// a.union(other: b);  // {1, 2, 3, 4, 5}
+    /// a.union(b);  // {1, 2, 3, 4, 5}
     /// ```
     public func union(other: Set[T, H]) -> Set[T, H] {
         var result = self.clone();
@@ -637,7 +637,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns a new set containing only elements present in both
     /// `self` and `other`.
     ///
-    /// Non-mutating mirror of `formIntersection(other:)`. For
+    /// Non-mutating mirror of `formIntersection(...)`. For
     /// efficiency, iterates over `self`; pass the smaller set as the
     /// receiver if it matters.
     ///
@@ -646,7 +646,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// let a: Set = [1, 2, 3];
     /// let b: Set = [2, 3, 4];
-    /// a.intersection(other: b);  // {2, 3}
+    /// a.intersection(b);  // {2, 3}
     /// ```
     public func intersection(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count;
@@ -663,7 +663,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns a new set of every element in `self` that is **not**
     /// in `other` — the set difference, "self minus other".
     ///
-    /// Non-mutating mirror of `formDifference(other:)`. Order of
+    /// Non-mutating mirror of `formDifference(...)`. Order of
     /// arguments matters: `a.difference(b)` is generally not equal
     /// to `b.difference(a)`.
     ///
@@ -672,8 +672,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// let a: Set = [1, 2, 3];
     /// let b: Set = [2, 3, 4];
-    /// a.difference(other: b);  // {1}
-    /// b.difference(other: a);  // {4}
+    /// a.difference(b);  // {1}
+    /// b.difference(a);  // {4}
     /// ```
     public func difference(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count;
@@ -690,8 +690,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns a new set of elements in exactly one of `self` or
     /// `other`.
     ///
-    /// Non-mutating mirror of `formSymmetricDifference(other:)`.
-    /// Equivalent to `union(other:) - intersection(other:)`. The
+    /// Non-mutating mirror of `formSymmetricDifference(...)`.
+    /// Equivalent to `union(...) - intersection(...)`. The
     /// operation is commutative — order of arguments doesn't change
     /// the result.
     ///
@@ -700,7 +700,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// ```
     /// let a: Set = [1, 2, 3];
     /// let b: Set = [2, 3, 4];
-    /// a.symmetricDifference(other: b);  // {1, 4}
+    /// a.symmetricDifference(b);  // {1, 4}
     /// ```
     public func symmetricDifference(other: Set[T, H]) -> Set[T, H] {
         let selfCount = self.count;
@@ -847,14 +847,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// `true` if any element satisfies `predicate`.
     ///
     /// Linear scan; short-circuits on the first match. `false` for
-    /// empty sets. The aliased shape `any(matching:)` exists for
+    /// empty sets. The aliased shape `any { ... }` exists for
     /// symmetry with `Array`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Set([1, 2, 3]).contains(matching: { (x) in x > 2 });  // true
-    /// Set([1, 2, 3]).contains(matching: { (x) in x > 5 });  // false
+    /// Set([1, 2, 3]).contains { (x) in x > 2 };  // true
+    /// Set([1, 2, 3]).contains { (x) in x > 5 };  // false
     /// ```
     public func contains(matching predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
@@ -876,8 +876,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// ```
     /// let set: Set = [1, 2, 3, 4, 5];
-    /// set.first(matching: { (x) in x > 3 });   // Some(4) or Some(5)
-    /// set.first(matching: { (x) in x > 99 });  // None
+    /// set.first { (x) in x > 3 };   // Some(4) or Some(5)
+    /// set.first { (x) in x > 99 };  // None
     /// ```
     public func first(matching predicate: (T) -> Bool) -> T? {
         var iter = self.iter();
@@ -893,14 +893,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// true for empty sets).
     ///
     /// Short-circuits on the first failure. Dual of
-    /// `any(matching:)`.
+    /// `any { ... }`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Set([2, 4, 6]).all(matching: { (x) in x % 2 == 0 });  // true
-    /// Set([1, 2, 4]).all(matching: { (x) in x % 2 == 0 });  // false
-    /// Set[Int64]().all(matching: { (x) in false });         // true (vacuous)
+    /// Set([2, 4, 6]).all { (x) in x % 2 == 0 };  // true
+    /// Set([1, 2, 4]).all { (x) in x % 2 == 0 };  // false
+    /// Set[Int64]().all { (x) in false };           // true (vacuous)
     /// ```
     public func all(matching predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
@@ -914,15 +914,15 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 
     /// `true` when at least one element satisfies `predicate`.
     ///
-    /// Alias for `contains(matching:)` — both names exist so
+    /// Alias for `contains { ... }` — both names exist so
     /// predicate-style code reads naturally regardless of context.
     /// Short-circuits.
     ///
     /// # Examples
     ///
     /// ```
-    /// Set([1, 2, 3]).any(matching: { (x) in x > 2 });  // true
-    /// Set[Int64]().any(matching: { (x) in true });     // false (empty)
+    /// Set([1, 2, 3]).any { (x) in x > 2 };  // true
+    /// Set[Int64]().any { (x) in true };     // false (empty)
     /// ```
     public func any(matching predicate: (T) -> Bool) -> Bool {
         self.contains(matching: predicate)
@@ -931,14 +931,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns the number of elements for which `predicate` is true.
     ///
     /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(matching:)`; for a yes/no on every element,
-    /// `all(matching:)`.
+    /// `any { ... }`; for a yes/no on every element,
+    /// `all { ... }`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Set([1, 2, 3, 4, 5]).countItems(matching: { (x) in x % 2 == 0 });  // 2
-    /// Set[Int64]().countItems(matching: { (x) in true });                // 0
+    /// Set([1, 2, 3, 4, 5]).countItems { (x) in x % 2 == 0 };  // 2
+    /// Set[Int64]().countItems { (x) in true };                // 0
     /// ```
     public func countItems(matching predicate: (T) -> Bool) -> Int64 {
         var count: Int64 = 0;
@@ -958,15 +958,15 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// Returns a new set containing only elements for which
     /// `predicate` is true.
     ///
-    /// Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+    /// Non-mutating mirror of `retain { ... }`. Allocates a fresh
     /// set; for in-place filtering use `retain` or
-    /// `removeAll(matching:)`.
+    /// `removeAll { ... }`.
     ///
     /// # Examples
     ///
     /// ```
     /// let set: Set = [1, 2, 3, 4, 5];
-    /// let evens = set.filter(matching: { (x) in x % 2 == 0 });  // {2, 4}
+    /// let evens = set.filter { (x) in x % 2 == 0 };  // {2, 4}
     /// ```
     public func filter(matching predicate: (T) -> Bool) -> Set[T, H] {
         var result = Set[T, H]();
@@ -984,17 +984,17 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// **Cardinality may shrink**: if `transform` maps two distinct
     /// elements to the same output, the result holds only one copy
     /// (sets are unique). For an `Optional`-aware variant that drops
-    /// `None`, use `compactMap(transform:)`.
+    /// `None`, use `compactMap(...)`.
     ///
     /// # Examples
     ///
     /// ```
     /// let set: Set = [1, 2, 3];
-    /// let doubled = set.map(transform: { (x) in x * 2 });
+    /// let doubled = set.map { (x) in x * 2 };
     /// // {2, 4, 6}
     ///
     /// let words: Set = ["Hello", "WORLD"];
-    /// let lower = words.map(transform: { (s) in s.lowercase() });
+    /// let lower = words.map { (s) in s.lowercase() };
     /// // {"hello", "world"} — even though both originals lowercase to distinct strings
     /// ```
     public func map[U](transform: (T) -> U) -> Set[U, H] where U: Hash {
@@ -1011,14 +1011,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// dropping any `None` results.
     ///
     /// Useful for parse-or-skip patterns. Same uniqueness caveat as
-    /// `map(transform:)` — collisions in the transformed values
+    /// `map(...)` — collisions in the transformed values
     /// collapse.
     ///
     /// # Examples
     ///
     /// ```
     /// let set: Set = ["1", "two", "3"];
-    /// let nums = set.compactMap(transform: { (s) in Int64.parse(s) });
+    /// let nums = set.compactMap { (s) in Int64.parse(s) };
     /// // {1, 3}  — "two" failed to parse
     /// ```
     public func compactMap[U](transform: (T) -> U?) -> Set[U, H] where U: Hash {
@@ -1043,7 +1043,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     ///
     /// ```
     /// let set: Set = [1, 2];
-    /// let expanded = set.flatMap(transform: { (x) in Set([x, x * 10]) });
+    /// let expanded = set.flatMap { (x) in Set([x, x * 10]) };
     /// // {1, 10, 2, 20}
     /// ```
     public func flatMap[U](transform: (T) -> Set[U, H]) -> Set[U, H] where U: Hash {
@@ -1191,8 +1191,8 @@ extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
     /// # Examples
     ///
     /// ```
-    /// Set([1, 2, 3]).equals(other: Set([3, 2, 1]));  // true
-    /// Set([1, 2]).equals(other: Set([1, 2, 3]));     // false
+    /// Set([1, 2, 3]).equals(Set([3, 2, 1]));  // true
+    /// Set([1, 2]).equals(Set([1, 2, 3]));     // false
     /// ```
     public func equals(other: Set[T, H]) -> Bool {
         if self.count != other.count {
