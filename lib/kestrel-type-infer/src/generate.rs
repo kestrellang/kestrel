@@ -16,6 +16,7 @@ use crate::constraint::{CallArg, Constraint, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
+use crate::unify;
 
 // ===== Entry point =====
 
@@ -482,13 +483,31 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             result_tv
         },
 
-        HirExpr::Loop { body, .. } => {
+        HirExpr::Loop { label, body, .. } => {
+            let break_tv = ctx.fresh();
+            ctx.loop_break_tys.push((label.clone(), break_tv));
             gen_block(ctx, hir, body);
-            // Loop type is Never (diverges) unless break provides a value
+            ctx.loop_break_tys.pop();
+            // If no break reached this loop, break_tv stays Unresolved
+            // and never-fallback defaults it to Never.
+            ctx.never_fallback_targets.insert(break_tv);
+            break_tv
+        },
+
+        HirExpr::Break { label, .. } => {
+            let unit_tv = ctx.tuple(vec![]);
+            if let Some((_lbl, break_tv)) = label
+                .as_ref()
+                .and_then(|l| ctx.loop_break_tys.iter().rev().find(|(k, _)| k.as_deref() == Some(l)))
+                .or_else(|| ctx.loop_break_tys.last())
+                .cloned()
+            {
+                let _ = unify::unify(ctx, unit_tv, break_tv);
+            }
             ctx.never()
         },
 
-        HirExpr::Break { .. } | HirExpr::Continue { .. } => ctx.never(),
+        HirExpr::Continue { .. } => ctx.never(),
 
         HirExpr::Return { value, span } => {
             if let Some(val) = value {

@@ -4,7 +4,7 @@
 module Main
 
 func test() -> lang.i64 {
-    loop {
+    loop { // ERROR: type mismatch
         break
     }
-} // ERROR
+}

@@ -590,4 +590,37 @@ mod tests {
             other => panic!("expected Integer literal, got {:?}", other),
         }
     }
+
+    #[test]
+    fn loop_break_resolves_to_unit() {
+        let resolver = NullResolver;
+        let world = make_world();
+        let qctx = world.query_context();
+        let mut ctx = make_ctx(&resolver, &qctx);
+
+        // Simulate: loop { break } — break unifies () with the loop's type var
+        let break_tv = ctx.fresh();
+        ctx.loop_break_tys.push((None, break_tv));
+        let unit_tv = ctx.tuple(vec![]);
+        assert!(unify(&mut ctx, unit_tv, break_tv).is_ok());
+        ctx.loop_break_tys.pop();
+
+        assert!(ctx.is_concrete(break_tv));
+        assert!(matches!(ctx.slot(break_tv), TySlot::Resolved(TyKind::Tuple(elems)) if elems.is_empty()));
+    }
+
+    #[test]
+    fn loop_no_break_stays_unresolved() {
+        let resolver = NullResolver;
+        let world = make_world();
+        let qctx = world.query_context();
+        let mut ctx = make_ctx(&resolver, &qctx);
+
+        // Simulate: loop {} (no break) — type var stays unresolved
+        let break_tv = ctx.fresh();
+        ctx.loop_break_tys.push((None, break_tv));
+        ctx.loop_break_tys.pop();
+
+        assert!(!ctx.is_concrete(break_tv));
+    }
 }
