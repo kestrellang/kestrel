@@ -1,8 +1,8 @@
 module Life
 
 import clutch.command.(Command)
-import clutch.arg.(Arg)
-import clutch.matches.(ArgMatches)
+import clutch.argument.(Argument)
+import clutch.matches.(ArgumentMatches)
 import clutch.os.(getArgv)
 
 struct Config {
@@ -17,7 +17,7 @@ struct Config {
         let cmd = buildCommand();
         let args = getArgv();
 
-        guard let .Ok(matches) = cmd.parse(tokens: args) else {
+        guard let .Ok(matches) = cmd.parse(from: args) else {
             return Config(
                 width: 80,
                 height: 60,
@@ -27,11 +27,11 @@ struct Config {
             )
         }
 
-        let width = clampParse(matches.getValue(name: "width"), min: 5, max: 2000, default: 80);
-        let height = clampParse(matches.getValue(name: "height"), min: 5, max: 2000, default: 60);
+        let width = clampParse(matches.value(for: "width"), min: 5, max: 2000, default: 80);
+        let height = clampParse(matches.value(for: "height"), min: 5, max: 2000, default: 60);
 
-        let headlessIters = if matches.hasFlag(name: "headless") {
-            clampParse(matches.getValue(name: "iters"), min: 1, max: 999999999, default: 1000)
+        let headlessIters = if matches.hasFlag("headless") {
+            clampParse(matches.value(for: "iters"), min: 1, max: 999999999, default: 1000)
         } else {
             0
         };
@@ -39,7 +39,7 @@ struct Config {
         let cellSize = if headlessIters > 0 {
             1
         } else {
-            clampParse(matches.getValue(name: "cell-size"), min: 1, max: 40, default: 0)
+            clampParse(matches.value(for: "cell-size"), min: 1, max: 40, default: 0)
         };
 
         let finalCell = if cellSize > 0 { cellSize } else { autoCellSize(width: width, height: height) };
@@ -66,38 +66,13 @@ func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
 }
 
 func buildCommand() -> Command {
-    var cmd = Command(name: "life");
-    cmd.setAbout(text: "Conway's Game of Life — an SDL example");
-
-    var width = Arg(name: "width");
-    width.short(flag: "W");
-    width.help(text: "Board width (5..2000)");
-    width.defaultsTo(value: "80");
-    cmd.addArg(arg: width);
-
-    var height = Arg(name: "height");
-    height.short(flag: "H");
-    height.help(text: "Board height (5..2000)");
-    height.defaultsTo(value: "60");
-    cmd.addArg(arg: height);
-
-    var cellSize = Arg(name: "cell-size");
-    cellSize.short(flag: "c");
-    cellSize.help(text: "Cell size in pixels (1..40, auto if omitted)");
-    cmd.addArg(arg: cellSize);
-
-    var headless = Arg(name: "headless");
-    headless.asFlag();
-    headless.help(text: "Run headless benchmark (no window)");
-    cmd.addArg(arg: headless);
-
-    var iters = Arg(name: "iters");
-    iters.short(flag: "n");
-    iters.help(text: "Number of generations for headless mode");
-    iters.defaultsTo(value: "1000");
-    cmd.addArg(arg: iters);
-
-    cmd
+    Command("life")
+        .about("Conway's Game of Life — an SDL example")
+        .argument(Argument("width").short("W").help("Board width (5..2000)").defaultsTo("80"))
+        .argument(Argument("height").short("H").help("Board height (5..2000)").defaultsTo("60"))
+        .argument(Argument("cell-size").short("c").help("Cell size in pixels (1..40, auto if omitted)"))
+        .argument(Argument("headless").toFlag().help("Run headless benchmark (no window)"))
+        .argument(Argument("iters").short("n").help("Number of generations for headless mode").defaultsTo("1000"))
 }
 
 func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default fallback: Int64) -> Int64 {

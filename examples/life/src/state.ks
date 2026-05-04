@@ -1,6 +1,6 @@
 module Life
 
-struct GameState {
+struct GameState: Cloneable {
     var grid: Grid
     var paused: Bool
     var running: Bool

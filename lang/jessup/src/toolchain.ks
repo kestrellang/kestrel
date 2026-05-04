@@ -155,6 +155,15 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         chmodLsp.append(lspBin);
         let _ = spawn(chmodLsp);
     }
+    var docBin = String();
+    docBin.append(tcDir);
+    docBin.append("/bin/kestrel-doc");
+    if fileExists(docBin) {
+        var chmodDoc = String();
+        chmodDoc.append("chmod +x ");
+        chmodDoc.append(docBin);
+        let _ = spawn(chmodDoc);
+    }
 
     var installedMsg = String();
     installedMsg.append("Installed ");
@@ -216,6 +225,11 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
     rmLsp.append(binPath);
     rmLsp.append("/kestrel-lsp");
     let _ = spawn(rmLsp);
+    var rmDoc = String();
+    rmDoc.append("rm -f ");
+    rmDoc.append(binPath);
+    rmDoc.append("/kestrel-doc");
+    let _ = spawn(rmDoc);
 
     var lnKestrel = String();
     lnKestrel.append("ln -s ");
@@ -242,6 +256,18 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
         lnLsp.append(binPath);
         lnLsp.append("/kestrel-lsp");
         let _ = spawn(lnLsp);
+    }
+    var docBin = String();
+    docBin.append(tcDir);
+    docBin.append("/bin/kestrel-doc");
+    if fileExists(docBin) {
+        var lnDoc = String();
+        lnDoc.append("ln -s ");
+        lnDoc.append(docBin);
+        lnDoc.append(" ");
+        lnDoc.append(binPath);
+        lnDoc.append("/kestrel-doc");
+        let _ = spawn(lnDoc);
     }
 
     // Update config with the channel name
@@ -361,6 +387,11 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
                 rmLsp.append(bp);
                 rmLsp.append("/kestrel-lsp");
                 let _ = spawn(rmLsp);
+                var rmDoc = String();
+                rmDoc.append("rm -f ");
+                rmDoc.append(bp);
+                rmDoc.append("/kestrel-doc");
+                let _ = spawn(rmDoc);
             },
             .Err(_) => {}
         }

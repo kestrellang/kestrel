@@ -15,32 +15,17 @@ Build CLI tools with a fluent API for defining commands, flags, and arguments.
 
 ```kestrel
 let app = Command("myapp")
-app.addArg(
-    Arg("verbose")
-        .short("v")
-        .asFlag()
-        .help("Enable verbose output")
-)
-app.addArg(
-    Arg("output")
-        .short("o")
-        .placeholder("FILE")
-        .help("Output file path")
-)
-app.addArg(
-    Arg("input")
-        .asPositional()
-        .isRequired()
-        .help("Input file")
-)
+    .argument(Argument("verbose").short("v").toFlag().help("Enable verbose output"))
+    .argument(Argument("output").short("o").placeholder("FILE").help("Output file path"))
+    .argument(Argument("input").toPositional().required().help("Input file"));
 
-match app.parse(args()) {
+match app.parse(from: args()) {
     .Ok(matches) => {
         if matches.hasFlag("verbose") {
             let _ = println("Verbose mode")
         }
-        let output = matches.getValue("output")
-        let input = matches.getValue("input")
+        let output = matches.value(for: "output")
+        let input = matches.value(for: "input")
     },
     .Err(e) => {
         let _ = eprintln(e.description())
@@ -51,8 +36,8 @@ match app.parse(args()) {
 ## Key Types
 
 - **Command** - a CLI command with arguments and subcommands
-- **Arg** - argument definition with flags, positional args, help text
-- **ArgMatches** - result of parsing, holds matched values
+- **Argument** - argument definition with flags, positional args, help text
+- **ArgumentMatches** - result of parsing, holds matched values
 - **ParseError** - parsing failure details
 
 ## Features

@@ -1,4 +1,8 @@
-// TOML emitter - converts Value.Object to TOML format
+/// Converts a quill `Value` tree into a TOML string.
+///
+/// The top-level value must be `.Obj` (TOML documents are always root
+/// tables). Sub-tables are emitted with `[section]` headers; non-table
+/// values are emitted as `key = value` lines.
 
 module quill.toml.emitter
 
@@ -9,8 +13,22 @@ import quill.error.(SerializeError, SerializeErrorKind)
 // PUBLIC API
 // ============================================================================
 
-/// Emits a Value as a TOML string.
-/// The value must be an Object at the top level.
+/// Converts a `Value` to a TOML string.
+///
+/// The root must be `.Obj`; any other variant produces a `SerializeError`.
+/// Sub-objects become `[section]` tables; nested objects within those become
+/// dotted section headers (e.g., `[package.dependencies]`).
+///
+/// # Examples
+///
+/// ```
+/// let v = Value.Obj([("name", Value.Str("hello")), ("version", Value.Str("1.0"))]);
+/// let s = try emitToml(v);  // "name = \"hello\"\nversion = \"1.0\"\n"
+/// ```
+///
+/// # Errors
+///
+/// Returns `.Err` if the root value is not `.Obj`.
 public func emitToml(value: Value) -> Result[String, SerializeError] {
     match value {
         .Obj(obj) => {
@@ -26,7 +44,10 @@ public func emitToml(value: Value) -> Result[String, SerializeError] {
 // TABLE EMITTER
 // ============================================================================
 
-/// Emits a table's contents. Non-table values first, then sub-tables with headers.
+/// Emits a table's key-value pairs, then its sub-tables with `[section]` headers.
+///
+/// Two-pass approach: scalar values first (so they appear before any section
+/// break), then nested objects with their `[prefix.key]` headers.
 func emitTable(obj: Dictionary[String, Value], mutating buf: String, prefix: String) {
     // First pass: emit non-table values as key = value
     for (key, val) in obj.iter() {
@@ -66,6 +87,7 @@ func emitTable(obj: Dictionary[String, Value], mutating buf: String, prefix: Str
 // VALUE EMITTER
 // ============================================================================
 
+/// Emits a single value in TOML inline form (right-hand side of `key = ...`).
 func emitTomlValue(value: Value, mutating buf: String) {
     match value {
         .Null => buf.append("\"\""),  // TOML has no null; emit empty string
@@ -91,7 +113,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
                 }
                 i = i + 1
             }
-            if hasDot == false {
+            if not hasDot {
                 buf.append(".0")
             }
         },
@@ -119,7 +141,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
 // STRING/KEY EMITTING
 // ============================================================================
 
-/// Emits a TOML key. Uses bare key if possible, quoted otherwise.
+/// Emits a TOML key — bare if it contains only `[A-Za-z0-9_-]`, quoted otherwise.
 func emitKey(key: String, mutating buf: String) {
     if isBareKey(key) {
         buf.append(key)
@@ -128,8 +150,7 @@ func emitKey(key: String, mutating buf: String) {
     }
 }
 
-/// Returns true if the string can be a bare TOML key.
-/// Bare keys may only contain A-Za-z0-9, '-', '_'.
+/// Returns `true` if the string is a valid bare TOML key (`[A-Za-z0-9_-]+`).
 func isBareKey(s: String) -> Bool {
     let len = s.byteCount;
     if len == 0 {
@@ -151,7 +172,7 @@ func isBareKey(s: String) -> Bool {
     true
 }
 
-/// Emits a quoted TOML string with escape sequences.
+/// Emits a basic quoted TOML string, escaping `"`, `\`, and control characters.
 func emitTomlString(s: String, mutating buf: String) {
     buf.append("\"");
     var i: Int64 = 0;

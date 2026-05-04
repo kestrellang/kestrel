@@ -54,17 +54,17 @@ fi
     "$LANG_DIR/quill/src/serialize.ks" \
     "$LANG_DIR/quill/src/format.ks" \
     "$LANG_DIR/quill/src/deserialize.ks" \
-    "$LANG_DIR/quill-toml/src/error.ks" \
-    "$LANG_DIR/quill-toml/src/parser.ks" \
-    "$LANG_DIR/quill-toml/src/emitter.ks" \
-    "$LANG_DIR/quill-toml/src/toml.ks" \
-    "$LANG_DIR/quill-json/src/error.ks" \
-    "$LANG_DIR/quill-json/src/parser.ks" \
-    "$LANG_DIR/quill-json/src/emitter.ks" \
-    "$LANG_DIR/quill-json/src/json.ks" \
-    "$LANG_DIR/clutch/src/error.ks" \
-    "$LANG_DIR/clutch/src/arg.ks" \
-    "$LANG_DIR/clutch/src/matches.ks" \
+    "$LANG_DIR/quill-toml/src/TomlParseError.ks" \
+    "$LANG_DIR/quill-toml/src/Parser.ks" \
+    "$LANG_DIR/quill-toml/src/Emitter.ks" \
+    "$LANG_DIR/quill-toml/src/Toml.ks" \
+    "$LANG_DIR/quill-json/src/JsonParseError.ks" \
+    "$LANG_DIR/quill-json/src/Parser.ks" \
+    "$LANG_DIR/quill-json/src/Emitter.ks" \
+    "$LANG_DIR/quill-json/src/Json.ks" \
+    "$LANG_DIR/clutch/src/ParseError.ks" \
+    "$LANG_DIR/clutch/src/Argument.ks" \
+    "$LANG_DIR/clutch/src/ArgumentMatches.ks" \
     "$LANG_DIR/clutch/src/parser.ks" \
     "$LANG_DIR/clutch/src/help.ks" \
     "$LANG_DIR/clutch/src/command.ks" \
@@ -76,13 +76,13 @@ fi
     "$LANG_DIR/http/src/cookie.ks" \
     "$LANG_DIR/http/src/headers.ks" \
     "$LANG_DIR/http/src/wire.ks" \
-    "$LANG_DIR/swoop/src/error.ks" \
-    "$LANG_DIR/swoop/src/response.ks" \
-    "$LANG_DIR/swoop/src/body.ks" \
-    "$LANG_DIR/swoop/src/url.ks" \
-    "$LANG_DIR/swoop/src/send.ks" \
-    "$LANG_DIR/swoop/src/swoop.ks" \
-    "$LANG_DIR/swoop/src/tls.ks" \
+    "$LANG_DIR/swoop/src/Error.ks" \
+    "$LANG_DIR/swoop/src/Response.ks" \
+    "$LANG_DIR/swoop/src/Body.ks" \
+    "$LANG_DIR/swoop/src/Url.ks" \
+    "$LANG_DIR/swoop/src/Send.ks" \
+    "$LANG_DIR/swoop/src/Swoop.ks" \
+    "$LANG_DIR/swoop/src/Tls.ks" \
     "$SCRIPT_DIR/src/error.ks" \
     "$SCRIPT_DIR/src/version.ks" \
     "$SCRIPT_DIR/src/dependency.ks" \

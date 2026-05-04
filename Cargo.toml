@@ -62,8 +62,9 @@ members = [
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
     "lib/kestrel-test-suite",
+    "external/triage",
 ]
-exclude = ["registry"]
+exclude = ["registry", "external/flock-registry"]
 
 # Workspace-wide lint configuration
 # Individual crates inherit these with [lints] workspace = true

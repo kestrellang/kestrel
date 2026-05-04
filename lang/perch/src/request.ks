@@ -1,4 +1,4 @@
-// HTTP request
+/// HTTP request model for Perch handlers and middleware.
 
 module perch.request
 
@@ -9,9 +9,26 @@ import http.cookie.(parseCookieHeader)
 
 /// A parsed HTTP request with route parameters and middleware state.
 ///
-/// Combines the raw HTTP request data with server-resolved state:
-/// - Path parameters from route matching (e.g. "/users/:id" -> param("id"))
-/// - Key-value store populated by middleware (e.g. auth sets "userId")
+/// Combines the raw HTTP data (method, path, headers, body) with
+/// server-resolved state: path parameters extracted during route matching
+/// and a string key-value store that middleware can populate (e.g. an
+/// auth middleware sets `"userId"`).
+///
+/// Requests are value types. The `withValue` and `withPathParams` methods
+/// return new copies — the original is unchanged.
+///
+/// # Examples
+///
+/// ```
+/// // Inside a handler:
+/// func handleUser(request: Request, ctx: Ctx) -> Response {
+///     let id = match request.param("id") {
+///         .Some(id) => id,
+///         .None => return Response.badRequest("Missing id")
+///     };
+///     Response.ok(text: "User " + id)
+/// }
+/// ```
 public struct Request: Cloneable {
     public var method: HttpMethod
     public var path: String
@@ -23,22 +40,51 @@ public struct Request: Cloneable {
     public var store: Dictionary[String, String]
 
     /// Returns the first value of a header by name (case-insensitive).
-    public func header(name: String) -> String? {
-        self.headers.value(forName: name)
-    }
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// match request.header("Authorization") {
+    ///     .Some(token) => println(token),
+    ///     .None => println("no auth header")
+    /// }
+    /// ```
+    public func header(name: String) -> String? = self.headers.value(forName: name)
 
-    /// Returns a path parameter by name, or None.
-    public func param(name: String) -> String? {
-        self.pathParams(name)
-    }
+    /// Returns a path parameter by name, or `None`.
+    ///
+    /// Path parameters are extracted during route matching from `:name`
+    /// segments in the route pattern.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Route pattern: "/users/:id"
+    /// // Request path:  "/users/42"
+    /// request.param("id")  // => .Some("42")
+    /// ```
+    public func param(name: String) -> String? = self.pathParams(name)
 
-    /// Returns a value from the middleware store, or None.
-    public func getValue(key: String) -> String? {
-        self.store(key)
-    }
+    /// Returns a value from the middleware store, or `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let userId = request.getValue(forKey: "userId");
+    /// ```
+    public func getValue(forKey key: String) -> String? = self.store(key)
 
-    /// Returns a new request with the given value added to the store.
-    public func withValue(key: String, value: String) -> Request {
+    /// Returns a new request with the given value added to the middleware store.
+    ///
+    /// The original request is unchanged — this creates a copy with the
+    /// new key-value pair inserted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let enriched = request.withValue(forKey: "userId", "42");
+    /// ```
+    public func withValue(forKey key: String, value: String) -> Request {
         var newStore = self.store.clone();
         let _ = newStore.insert(key, value);
         Request(
@@ -54,6 +100,8 @@ public struct Request: Cloneable {
     }
 
     /// Returns a new request with the given path parameters set.
+    ///
+    /// Called internally by the router after matching a route pattern.
     public func withPathParams(params: Dictionary[String, String]) -> Request {
         Request(
             method: self.method,
@@ -67,26 +115,52 @@ public struct Request: Cloneable {
         )
     }
 
-    /// Parses the query string and returns the value for a key, or None.
+    /// Parses the query string and returns the value for a key, or `None`.
+    ///
+    /// Re-parses the raw query string on every call. O(n) in the number of
+    /// query parameters. If you need multiple values, use `queryParams()`
+    /// once and search the result.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // URL: /search?q=kestrel&page=2
+    /// request.query("q")     // => .Some("kestrel")
+    /// request.query("page")  // => .Some("2")
+    /// request.query("sort")  // => .None
+    /// ```
     public func query(name: String) -> String? {
-        let params = parseQueryString(self.queryString);
-        var i: Int64 = 0;
-        while i < params.count {
-            let pair = params(unchecked: i);
-            if pair.0.equals(name) {
-                return .Some(pair.1)
+        for (key, value) in parseQueryString(self.queryString) {
+            if key.equals(name) {
+                return .Some(value)
             }
-            i = i + 1
         }
         .None
     }
 
-    /// Returns all parsed query parameters.
-    public func queryParams() -> Array[(String, String)] {
-        parseQueryString(self.queryString)
-    }
+    /// Returns all parsed query parameters as `(name, value)` pairs.
+    ///
+    /// Re-parses the raw query string on every call. O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // URL: /search?q=kestrel&page=2
+    /// let params = request.queryParams();
+    /// // => [("q", "kestrel"), ("page", "2")]
+    /// ```
+    public func queryParams() -> Array[(String, String)] = parseQueryString(self.queryString)
 
-    /// Returns all cookies from the Cookie header.
+    /// Returns all cookies from the `Cookie` request header.
+    ///
+    /// Re-parses the header on every call. O(n) in the number of cookies.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let all = request.cookies();
+    /// // => [("session", "abc123"), ("theme", "dark")]
+    /// ```
     public func cookies() -> Array[(String, String)] {
         match self.header("Cookie") {
             .Some(cookieHeader) => parseCookieHeader(cookieHeader),
@@ -94,22 +168,30 @@ public struct Request: Cloneable {
         }
     }
 
-    /// Returns a specific cookie value by name, or None.
+    /// Returns a specific cookie value by name, or `None`.
+    ///
+    /// Re-parses the `Cookie` header on every call. O(n). For multiple
+    /// lookups, call `cookies()` once and search the result.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// match request.cookie("session") {
+    ///     .Some(token) => println("session: " + token),
+    ///     .None => println("no session cookie")
+    /// }
+    /// ```
     public func cookie(name: String) -> String? {
-        let all = self.cookies();
-        var i: Int64 = 0;
-        while i < all.count {
-            let pair = all(unchecked: i);
-            if pair.0.equals(name) {
-                return .Some(pair.1)
+        for (key, value) in self.cookies() {
+            if key.equals(name) {
+                return .Some(value)
             }
-            i = i + 1
         }
         .None
     }
 
-    /// Returns the Content-Type header value, or None.
-    public func contentType() -> String? {
+    /// The `Content-Type` header value, or `None` if not present.
+    public var contentType: String? {
         self.header("Content-Type")
     }
 

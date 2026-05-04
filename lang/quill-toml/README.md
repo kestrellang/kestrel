@@ -30,4 +30,18 @@ let output = try toToml(value: mySerializableValue)
 ## Key Types
 
 - **Toml** - implements the quill `Format` protocol for TOML
+- **TomlParseError** - parsing failure with line number
 - Content type: `application/toml`
+
+## Functions
+
+- `toToml(value:)` - serialize any `Serialize` type to TOML
+
+## Features
+
+- Standard `[section]` tables
+- Bare and quoted keys
+- Integers, floats (with `inf`/`nan`), booleans
+- Inline arrays and inline tables
+- Comment stripping
+- Underscore separators in numbers

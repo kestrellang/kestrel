@@ -1,11 +1,12 @@
-// TLS stream using OpenSSL/LibreSSL
-//
-// Provides TlsStream, a TLS-encrypted TCP connection that implements
-// the Read and Write protocols. Uses OpenSSL 3.x (homebrew) or LibreSSL.
+/// TLS stream using OpenSSL/LibreSSL.
+///
+/// Provides `TlsStream`, a TLS-encrypted TCP connection that implements
+/// the `Readable` and `Writable` protocols. Uses OpenSSL 3.x or LibreSSL.
 
 module swoop.tls
 
 import std.io.error.(IoError)
+import http.wire.(stringToBytes)
 
 // ============================================================================
 // OPENSSL C BINDINGS
@@ -68,7 +69,16 @@ func SSL_CTRL_SET_TLSEXT_HOSTNAME() -> Int32 { 55 }
 // TLS STREAM
 // ============================================================================
 
-/// A TLS-encrypted TCP stream that implements Readable and Writable.
+/// A TLS-encrypted TCP stream that implements `Readable` and `Writable`.
+///
+/// Created via `TlsStream.connect(host, port)`. Cleans up the SSL
+/// context and closes the socket on `deinit`.
+///
+/// # Examples
+///
+/// ```
+/// var stream = try TlsStream.connect("example.com", 443);
+/// ```
 public struct TlsStream: Readable, Writable {
     private var ssl: lang.ptr[lang.i8]
     private var ctx: lang.ptr[lang.i8]
@@ -106,9 +116,7 @@ public struct TlsStream: Readable, Writable {
         .Ok(Int64(from: n))
     }
 
-    public mutating func flush() -> Result[(), IoError] {
-        .Ok(())
-    }
+    public mutating func flush() -> Result[(), IoError] = .Ok(())
 
     deinit {
         // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
@@ -161,13 +169,8 @@ extend TlsStream {
         // Attach socket fd
         let _ = libc_SSL_set_fd(ssl, fd.raw);
 
-        // Set SNI hostname
-        var hostBuf = Array[UInt8]();
-        var i: Int64 = 0;
-        while i < host.byteCount {
-            hostBuf.append(host.bytes(unchecked: i));
-            i = i + 1
-        }
+        // Set SNI hostname (null-terminated)
+        var hostBuf = stringToBytes(host);
         hostBuf.append(0);
         let _ = libc_SSL_ctrl(
             ssl,

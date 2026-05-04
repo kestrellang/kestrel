@@ -1,26 +1,23 @@
-// Swoop — HTTP client for Kestrel
-//
-// Swoop is an immutable config object. Every config method returns a new Swoop.
-// Verb methods (.fetch, .post, etc.) execute the request.
-//
-// Usage:
-//   // One-liner
-//   let res = try Swoop().fetch("http://api.example.com/users")
-//
-//   // With config
-//   let res = try Swoop()
-//       .header("Authorization", "Bearer token123")
-//       .header("Accept", "application/json")
-//       .fetch("http://api.example.com/users")
-//
-//   // Reusable client
-//   let api = Swoop()
-//       .baseUrl("http://api.example.com")
-//       .header("Authorization", "Bearer token123")
-//       .timeout(seconds: 30)
-//
-//   let users = try api.fetch("/users")
-//   let user  = try api.post("/users", body: .Text(payload))
+/// Swoop — immutable, fluent HTTP client for Kestrel.
+///
+/// Config methods (`.header`, `.baseUrl`, `.timeout`) return new
+/// `Swoop` instances; verb methods (`.fetch`, `.post`, etc.) execute
+/// requests. Supports HTTP and HTTPS (via OpenSSL).
+///
+/// # Examples
+///
+/// ```
+/// // One-liner
+/// let res = try Swoop().fetch("http://api.example.com/users");
+///
+/// // Reusable client with shared config
+/// let api = Swoop()
+///     .baseUrl("http://api.example.com")
+///     .header("Authorization", "Bearer token123");
+///
+/// let users = try api.fetch("/users");
+/// let user  = try api.post("/users", .Text(payload));
+/// ```
 
 module swoop.swoop
 
@@ -37,8 +34,19 @@ import swoop.tls.(TlsStream)
 // SWOOP
 // ============================================================================
 
-/// An immutable HTTP client configuration. Config methods return new instances;
-/// verb methods execute requests.
+/// An immutable HTTP client configuration.
+///
+/// Config methods return new instances; verb methods execute requests.
+/// All fields are private — configure via the fluent API.
+///
+/// # Examples
+///
+/// ```
+/// let api = Swoop()
+///     .baseUrl("https://api.example.com")
+///     .header("Accept", "application/json");
+/// let res = try api.fetch("/users");
+/// ```
 public struct Swoop: Cloneable {
     var _baseUrl: String
     var _headers: Headers
@@ -86,34 +94,22 @@ public struct Swoop: Cloneable {
     // ====================================================================
 
     /// Performs an HTTP GET request.
-    public func fetch(url: String) -> Result[Response, SwoopError] {
-        self.execute(HttpMethod.Get, url, null)
-    }
+    public func fetch(url: String) -> Result[Response, SwoopError] = self.execute(HttpMethod.Get, url, null)
 
     /// Performs an HTTP DELETE request.
-    public func delete(url: String) -> Result[Response, SwoopError] {
-        self.execute(HttpMethod.Delete, url, null)
-    }
+    public func delete(url: String) -> Result[Response, SwoopError] = self.execute(HttpMethod.Delete, url, null)
 
     /// Performs an HTTP HEAD request.
-    public func head(url: String) -> Result[Response, SwoopError] {
-        self.execute(HttpMethod.Head, url, null)
-    }
+    public func head(url: String) -> Result[Response, SwoopError] = self.execute(HttpMethod.Head, url, null)
 
     /// Performs an HTTP POST request with a body.
-    public func post(url: String, body: Body) -> Result[Response, SwoopError] {
-        self.execute(HttpMethod.Post, url, .Some(body))
-    }
+    public func post(url: String, body: Body) -> Result[Response, SwoopError] = self.execute(HttpMethod.Post, url, .Some(body))
 
     /// Performs an HTTP PUT request with a body.
-    public func put(url: String, body: Body) -> Result[Response, SwoopError] {
-        self.execute(HttpMethod.Put, url, .Some(body))
-    }
+    public func put(url: String, body: Body) -> Result[Response, SwoopError] = self.execute(HttpMethod.Put, url, .Some(body))
 
     /// Performs an HTTP PATCH request with a body.
-    public func patch(url: String, body: Body) -> Result[Response, SwoopError] {
-        self.execute(HttpMethod.Patch, url, .Some(body))
-    }
+    public func patch(url: String, body: Body) -> Result[Response, SwoopError] = self.execute(HttpMethod.Patch, url, .Some(body))
 
     // ====================================================================
     // EXECUTION

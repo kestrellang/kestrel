@@ -1,35 +1,39 @@
-// HTTP response wire serialization
+/// HTTP response wire serialization.
 
 module perch.send
 
 import perch.response.(Response)
+import http.wire.(stringToBytes)
 import std.io.error.(IoError)
 
-/// Serializes and sends an HTTP response over a socket fd.
+/// Serializes and sends an HTTP response over a socket file descriptor.
 ///
-/// Sends the status line, headers (including Content-Length and
-/// Connection: close), and body.
-public func sendResponse(response: Response, to fd: Int32) -> Result[(), IoError] {
+/// Builds the full HTTP/1.1 wire format — status line, headers
+/// (including Content-Length and Connection: close), and body — then
+/// writes it to the socket in a single pass.
+///
+/// # Errors
+///
+/// Returns `IoError` when the socket write fails (broken pipe, connection
+/// reset) or a partial write cannot be completed.
+///
+/// # Examples
+///
+/// ```
+/// let response = Response.ok(text: "hello");
+/// let _ = sendResponse(response, to: socketFd);
+/// ```
+public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result[(), IoError] {
     var resp = String(capacity: 256 + response.bodyContent.byteCount);
 
-    // Status line: HTTP/1.1 200 OK\r\n
     resp.append("HTTP/1.1 ");
     resp.append(response.status.code.format());
     resp.append(" ");
     resp.append(response.status.text());
     resp.append("\r\n");
 
-    var i: Int64 = 0;
-    while i < response.headers.entries.count {
-        let pair = response.headers.entries(unchecked: i);
-        resp.append(pair.0);
-        resp.append(": ");
-        resp.append(pair.1);
-        resp.append("\r\n");
-        i = i + 1
-    }
+    resp.append(response.headers.toWireFormat());
 
-    // Content-Length
     resp.append("Content-Length: ");
     resp.append(response.bodyContent.byteCount.format());
     resp.append("\r\n");
@@ -39,39 +43,32 @@ public func sendResponse(response: Response, to fd: Int32) -> Result[(), IoError
 
     resp.append("\r\n");
 
-    // Body
     resp.append(response.bodyContent);
 
-    // Send all bytes
-    sendAllBytes(fd, resp)
+    sendAllBytes(fileDescriptor, resp)
 }
 
-/// Sends all bytes of a string over a socket fd, retrying partial writes.
-func sendAllBytes(fd: Int32, s: String) -> Result[(), IoError] {
-    let len = s.byteCount;
-    if len == 0 {
+/// Writes all bytes of a string to a socket, retrying on partial writes.
+func sendAllBytes(fileDescriptor: Int32, content: String) -> Result[(), IoError] {
+    let length = content.byteCount;
+    if length == 0 {
         return .Ok(())
     }
 
-    var buf = Array[UInt8](capacity: len);
-    var i: Int64 = 0;
-    while i < len {
-        buf.append(s.bytes(unchecked: i));
-        i = i + 1
-    }
+    let buffer = stringToBytes(content);
 
     var sent: Int64 = 0;
-    while sent < len {
-        let ptr = buf.asPointer().offset(by: sent);
-        let remaining = len - sent;
-        let n = send(fd, ptr, remaining, 0);
-        if n < 0 {
+    while sent < length {
+        let ptr = buffer.asPointer().offset(by: sent);
+        let remaining = length - sent;
+        let bytesWritten = send(fileDescriptor, ptr, remaining, 0);
+        if bytesWritten < 0 {
             return .Err(IoError.last())
         }
-        if n == 0 {
+        if bytesWritten == 0 {
             return .Err(IoError(code: 32))
         }
-        sent = sent + n
+        sent = sent + bytesWritten
     }
     .Ok(())
 }

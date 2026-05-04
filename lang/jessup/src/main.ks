@@ -13,8 +13,8 @@ module jessup.main
 
 import clutch.os.(getArgv)
 import clutch.command.(Command)
-import clutch.arg.(Arg)
-import clutch.matches.(ArgMatches)
+import clutch.argument.(Argument)
+import clutch.matches.(ArgumentMatches)
 import clutch.error.(ParseError)
 import jessup.error.(JessupError)
 import jessup.toolchain.(installToolchain, setDefault, listToolchains, removeToolchain, showActive, updateToolchains, selfUpdate)
@@ -26,65 +26,34 @@ import jessup.toolchain.(installToolchain, setDefault, listToolchains, removeToo
 func main() {
     let argv = getArgv();
 
-    // Set up CLI
-    var cmd = Command(name: "jessup");
-    cmd.setAbout(text: "Kestrel version manager");
-    cmd.setVersion(ver: "0.1.0");
+    let cmd = Command("jessup")
+        .about("Kestrel version manager")
+        .version("0.1.0")
+        .subcommand(
+            Command("install")
+                .about("Install a toolchain (stable, nightly, or specific version)")
+                .argument(Argument("channel").toPositional().help("Channel or version to install (e.g., stable, nightly, 1.0.0)").required())
+        )
+        .subcommand(
+            Command("default")
+                .about("Set the default toolchain")
+                .argument(Argument("toolchain").toPositional().help("Toolchain name (e.g., stable-1.0.0, nightly-2026-03-02)").required())
+        )
+        .subcommand(Command("list").about("Show installed toolchains"))
+        .subcommand(Command("update").about("Update installed channels to latest"))
+        .subcommand(
+            Command("remove")
+                .about("Remove an installed toolchain")
+                .argument(Argument("toolchain").toPositional().help("Toolchain to remove").required())
+        )
+        .subcommand(Command("show").about("Show active toolchain and path"))
+        .subcommand(
+            Command("self")
+                .about("Manage jessup itself")
+                .subcommand(Command("update").about("Update jessup to the latest version"))
+        );
 
-    // install <version>
-    var installCmd = Command(name: "install");
-    installCmd.setAbout(text: "Install a toolchain (stable, nightly, or specific version)");
-    var installArg = Arg(name: "channel");
-    installArg.asPositional();
-    installArg.help(text: "Channel or version to install (e.g., stable, nightly, 1.0.0)");
-    installArg.isRequired();
-    installCmd.addArg(arg: installArg);
-    cmd.addSubcommand(sub: installCmd);
-
-    // default <version>
-    var defaultCmd = Command(name: "default");
-    defaultCmd.setAbout(text: "Set the default toolchain");
-    var defaultArg = Arg(name: "toolchain");
-    defaultArg.asPositional();
-    defaultArg.help(text: "Toolchain name (e.g., stable-1.0.0, nightly-2026-03-02)");
-    defaultArg.isRequired();
-    defaultCmd.addArg(arg: defaultArg);
-    cmd.addSubcommand(sub: defaultCmd);
-
-    // list
-    var listCmd = Command(name: "list");
-    listCmd.setAbout(text: "Show installed toolchains");
-    cmd.addSubcommand(sub: listCmd);
-
-    // update
-    var updateCmd = Command(name: "update");
-    updateCmd.setAbout(text: "Update installed channels to latest");
-    cmd.addSubcommand(sub: updateCmd);
-
-    // remove <version>
-    var removeCmd = Command(name: "remove");
-    removeCmd.setAbout(text: "Remove an installed toolchain");
-    var removeArg = Arg(name: "toolchain");
-    removeArg.asPositional();
-    removeArg.help(text: "Toolchain to remove");
-    removeArg.isRequired();
-    removeCmd.addArg(arg: removeArg);
-    cmd.addSubcommand(sub: removeCmd);
-
-    // show
-    var showCmd = Command(name: "show");
-    showCmd.setAbout(text: "Show active toolchain and path");
-    cmd.addSubcommand(sub: showCmd);
-
-    // self update
-    var selfCmd = Command(name: "self");
-    selfCmd.setAbout(text: "Manage jessup itself");
-    var selfUpdateCmd = Command(name: "update");
-    selfUpdateCmd.setAbout(text: "Update jessup to the latest version");
-    selfCmd.addSubcommand(sub: selfUpdateCmd);
-    cmd.addSubcommand(sub: selfCmd);
-
-    match cmd.parse(tokens: argv) {
+    match cmd.parse(from: argv) {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
@@ -119,12 +88,12 @@ func main() {
 // COMMAND HANDLERS
 // ============================================================================
 
-func handleInstall(matches matches: ArgMatches) {
+func handleInstall(matches matches: ArgumentMatches) {
     // Get channel from submatches
     var channel = "stable";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
-        match sub.getValue(name: "channel") {
+        match sub.value(for: "channel") {
             .Some(c) => channel = c,
             .None => {}
         }
@@ -149,11 +118,11 @@ func handleInstall(matches matches: ArgMatches) {
     }
 }
 
-func handleDefault(matches matches: ArgMatches) {
+func handleDefault(matches matches: ArgumentMatches) {
     var toolchainName = "";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
-        match sub.getValue(name: "toolchain") {
+        match sub.value(for: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
                 let _ = eprintln("error: toolchain name required");
@@ -197,11 +166,11 @@ func handleUpdate() {
     }
 }
 
-func handleRemove(matches matches: ArgMatches) {
+func handleRemove(matches matches: ArgumentMatches) {
     var toolchainName = "";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
-        match sub.getValue(name: "toolchain") {
+        match sub.value(for: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
                 let _ = eprintln("error: toolchain name required");
@@ -233,7 +202,7 @@ func handleShow() {
     }
 }
 
-func handleSelf(matches matches: ArgMatches) {
+func handleSelf(matches matches: ArgumentMatches) {
     // Check for "self update" subcommand
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);

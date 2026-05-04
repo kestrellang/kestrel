@@ -1,9 +1,20 @@
-// TOML parser - line-oriented, minimal subset for flock.toml
-//
-// Supported: bare keys, basic quoted strings, integers, floats, bools,
-//            arrays, inline tables, standard tables [section]
-// Not supported: datetime, array of tables [[section]],
-//                multiline strings, dotted keys, literal strings
+/// Line-oriented TOML parser for the quill framework.
+///
+/// Parses the subset of TOML used by `flock.toml` configuration files:
+/// bare keys, basic quoted strings, integers, floats, booleans, arrays,
+/// inline tables, and standard `[section]` tables.
+///
+/// Not supported: datetime, array of tables `[[...]]`, multiline strings,
+/// dotted keys, literal strings (`'...'`).
+///
+/// # Examples
+///
+/// ```
+/// import quill.toml.parser.(parseToml)
+///
+/// let v = try parseToml("name = \"hello\"\nversion = \"1.0\"");
+/// // v == Value.Obj([("name", Value.Str("hello")), ("version", Value.Str("1.0"))])
+/// ```
 
 module quill.toml.parser
 
@@ -14,13 +25,25 @@ import quill.toml.error.(TomlParseError)
 // TOML CURSOR
 // ============================================================================
 
-/// Tracks the current byte offset and source line while parsing TOML.
+/// Mutable cursor tracking the current byte position and line number in a
+/// TOML source string.
+///
+/// Unlike the JSON parser (which is character-oriented), this parser works
+/// line-by-line: `nextLine()` extracts one logical line at a time, handling
+/// `\n`, `\r\n`, and `\r` line endings.
+///
+/// # Representation
+///
+/// Four fields: `source` (the full input), `pos` (current byte offset),
+/// `len` (cached `source.byteCount`), and `line` (1-based line counter).
 struct TomlCursor {
     var source: String
     var pos: Int64
     var len: Int64
     var line: Int64
 
+    /// @name Default
+    /// Creates a cursor at the beginning of the given source string.
     init(source: String) {
         self.source = source;
         self.pos = 0;
@@ -28,11 +51,15 @@ struct TomlCursor {
         self.line = 1;
     }
 
+    /// Returns `true` when the cursor has reached or passed the end of input.
     func atEnd() -> Bool {
         self.pos >= self.len
     }
 
-    /// Returns the next logical line, recognizing `\n`, `\r\n`, and `\r`.
+    /// Extracts the next logical line and its 1-based line number.
+    ///
+    /// Recognizes `\n`, `\r\n`, and bare `\r` as line terminators. Returns
+    /// `.None` when the cursor is at end of input.
     mutating func nextLine() -> Optional[(String, Int64)] {
         if self.atEnd() {
             return .None
@@ -70,7 +97,23 @@ struct TomlCursor {
 // PUBLIC API
 // ============================================================================
 
-/// Parses a TOML string into a Value.Object.
+/// Parses a TOML document into a `Value.Obj`.
+///
+/// Processes the source line-by-line. Lines beginning with `[` are table
+/// headers; other non-empty, non-comment lines are key-value pairs inserted
+/// into the current table.
+///
+/// # Examples
+///
+/// ```
+/// let v = try parseToml("[package]\nname = \"hello\"");
+/// // v == Value.Obj([("package", Value.Obj([("name", Value.Str("hello"))]))])
+/// ```
+///
+/// # Errors
+///
+/// Returns `TomlParseError` for syntax violations, with a line number
+/// pointing at the problem line.
 public func parseToml(source: String) -> Result[Value, TomlParseError] {
     var root = Dictionary[String, Value]();
     var currentTable = "";
@@ -119,6 +162,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
 // KEY-VALUE PARSING
 // ============================================================================
 
+/// Splits a line on the first unquoted `=` and parses key + value.
 func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), TomlParseError] {
     let eqPos = match findUnquotedByte(line, 61) {
         .Some(p) => p,
@@ -135,7 +179,7 @@ func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), Toml
     .Ok((key, value))
 }
 
-/// Parses a TOML key — bare keys or basic quoted strings.
+/// Strips surrounding quotes from a key if present; returns bare keys unchanged.
 func parseKey(s: String) -> String {
     if s.byteCount >= 2 and s.starts(with: "\"") and s.ends(with: "\"") {
         return s.substringBytes(from: 1, to: s.byteCount - 1)
@@ -143,7 +187,10 @@ func parseKey(s: String) -> String {
     s
 }
 
-/// Finds an ASCII byte outside double-quoted strings.
+/// Finds the byte offset of `target` outside double-quoted regions.
+///
+/// Tracks quote/escape state so that the byte 34 (`"`) inside a quoted
+/// string is not confused with the target.
 func findUnquotedByte(s: String, target: UInt8) -> Optional[Int64] {
     let bytes = s.bytes;
     let len = s.byteCount;
@@ -158,8 +205,8 @@ func findUnquotedByte(s: String, target: UInt8) -> Optional[Int64] {
         } else if inQuote and b == 92 {
             escaped = true
         } else if b == 34 {
-            inQuote = inQuote == false
-        } else if inQuote == false and b == target {
+            inQuote = not inQuote
+        } else if not inQuote and b == target {
             return .Some(i)
         }
         i = i + 1
@@ -180,6 +227,7 @@ func stripInlineComment(s: String) -> String {
 // VALUE PARSING
 // ============================================================================
 
+/// Dispatches a trimmed value string to the appropriate sub-parser.
 func parseTomlValue(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
     if s.isEmpty {
         return .Err(TomlParseError("empty value", lineNum))
@@ -208,6 +256,7 @@ func parseTomlValue(s: String, lineNum: Int64) -> Result[Value, TomlParseError] 
     parseTomlNumber(s, lineNum)
 }
 
+/// Parses a basic quoted TOML string, processing escape sequences.
 func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError] {
     if s.byteCount < 2 or not s.ends(with: "\"") {
         return .Err(TomlParseError("unterminated string", lineNum))
@@ -249,6 +298,7 @@ func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError
     .Ok(result)
 }
 
+/// Parses a TOML number — dispatches to int or float based on `.`/`e`/`E`.
 func parseTomlNumber(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
     let isFloat = containsFloatMarker(s);
 
@@ -265,6 +315,7 @@ func parseTomlNumber(s: String, lineNum: Int64) -> Result[Value, TomlParseError]
     }
 }
 
+/// Returns `true` if the string contains `.`, `e`, or `E` (float indicators).
 func containsFloatMarker(s: String) -> Bool {
     let bytes = s.bytes;
     var i: Int64 = 0;
@@ -278,6 +329,7 @@ func containsFloatMarker(s: String) -> Bool {
     false
 }
 
+/// Parses a TOML inline array (`[value, ...]`).
 func parseTomlArray(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
     if not s.ends(with: "]") {
         return .Err(TomlParseError("unterminated array", lineNum))
@@ -347,8 +399,8 @@ func splitTomlItems(s: String) -> Array[String] {
         } else if inQuote and b == 92 {
             escaped = true
         } else if b == 34 {
-            inQuote = inQuote == false
-        } else if inQuote == false {
+            inQuote = not inQuote
+        } else if not inQuote {
             if b == 91 or b == 123 {
                 depth = depth + 1
             } else if b == 93 or b == 125 {
@@ -372,7 +424,7 @@ func splitTomlItems(s: String) -> Array[String] {
 // TABLE MANAGEMENT
 // ============================================================================
 
-/// Ensures a table exists in the root dictionary.
+/// Creates the named table in `root` if it doesn't already exist.
 func ensureTable(mutating root: Dictionary[String, Value], name: String) {
     match root(name) {
         .Some(_) => {},
@@ -380,7 +432,7 @@ func ensureTable(mutating root: Dictionary[String, Value], name: String) {
     }
 }
 
-/// Inserts a key-value pair into a named table.
+/// Inserts a key-value pair into the named sub-table within `root`.
 func insertIntoTable(mutating root: Dictionary[String, Value], table: String, key: String, value: Value) {
     match root(table) {
         .Some(existing) => {

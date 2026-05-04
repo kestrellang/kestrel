@@ -1,6 +1,5 @@
-// Perch web application
-//
-// Top-level entry point for building and running a web server.
+/// Perch web application — top-level entry point for building and
+/// running an HTTP server.
 
 module perch.app
 
@@ -13,11 +12,24 @@ import perch.parse.(parseHttpRequest)
 import perch.send.(sendResponse)
 import std.io.error.(IoError)
 
-/// A Perch web application parameterized by an app context type.
+/// A Perch web application parameterized by a context type `T`.
 ///
-/// The context holds app-wide state like database connections, config,
-/// caches — anything your handlers need. It's created once at startup
-/// and passed to every handler and middleware.
+/// The context holds app-wide state — database connections, config,
+/// caches — anything your handlers need. It is created once at startup
+/// and passed to every handler and middleware by value.
+///
+/// # Examples
+///
+/// ```
+/// struct Ctx {}
+///
+/// var app = App(Ctx());
+/// app.use(logger[Ctx]());
+/// app.onGet("/", { (req: Request, ctx: Ctx) in
+///     Response.ok(text: "Hello, world!")
+/// });
+/// let _ = app.listen(8080);
+/// ```
 public struct App[T] {
     var router: Router[T]
     var context: T
@@ -33,8 +45,8 @@ public struct App[T] {
     // ========================================================================
 
     /// Adds global middleware that runs on every request.
-    public mutating func use(mw: (Request, T) -> MiddlewareResult) {
-        self.router.use(mw)
+    public mutating func use(middleware: (Request, T) -> MiddlewareResult) {
+        self.router.use(middleware)
     }
 
     // ========================================================================
@@ -66,6 +78,16 @@ public struct App[T] {
         self.router.onPatch(path, handler)
     }
 
+    /// Registers a HEAD route.
+    public mutating func onHead(path: String, handler: (Request, T) -> Response) {
+        self.router.onHead(path, handler)
+    }
+
+    /// Registers an OPTIONS route.
+    public mutating func onOptions(path: String, handler: (Request, T) -> Response) {
+        self.router.onOptions(path, handler)
+    }
+
     /// Adds a route group with shared prefix and middleware.
     public mutating func addGroup(group: GroupBuilder[T]) {
         self.router.addGroup(group)
@@ -77,8 +99,14 @@ public struct App[T] {
 
     /// Starts the server, listening on the given port.
     ///
-    /// This blocks forever, accepting connections and dispatching requests.
-    /// Each connection is handled synchronously with Connection: close.
+    /// Blocks forever, accepting connections and dispatching requests
+    /// one at a time. Each connection is closed after the response is
+    /// sent (`Connection: close`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `IoError` if the TCP bind or accept fails (e.g. port
+    /// already in use, permission denied).
     public func listen(port: UInt16) -> Result[(), IoError] {
         var listener = try TcpListener.bind(port);
         let _ = println("Perch listening on port " + Int64(from: port).format());
@@ -104,10 +132,13 @@ public struct App[T] {
     // ========================================================================
 
     /// Dispatches a request through the middleware pipeline and route handler.
+    ///
+    /// Execution order: global middleware → group middleware → route
+    /// middleware → handler. The first middleware that returns `.Respond`
+    /// short-circuits the chain. Returns 404 if no route matches.
     func dispatch(request: Request) -> Response {
         var req = request;
 
-        // 1. Run global middleware
         for mw in self.router.globalMiddleware {
             match mw(req, self.context) {
                 .Continue(enriched) => { req = enriched },
@@ -115,34 +146,26 @@ public struct App[T] {
             }
         }
 
-        // 2. Find matching route
-        match self.router.findRoute(req.method, req.segments) {
-            .Some(matchResult) => {
-                // Set path params on request
-                req = req.withPathParams(matchResult.params);
+        guard let .Some(matchResult) = self.router.findRoute(req.method, req.segments) else {
+            return Response.notFound();
+        }
 
-                // Run group middleware
-                for mw in matchResult.groupMiddleware {
-                    match mw(req, self.context) {
-                        .Continue(enriched) => { req = enriched },
-                        .Respond(response) => { return response }
-                    }
-                }
+        req = req.withPathParams(matchResult.params);
 
-                // Run route middleware
-                for mw in matchResult.routeMiddleware {
-                    match mw(req, self.context) {
-                        .Continue(enriched) => { req = enriched },
-                        .Respond(response) => { return response }
-                    }
-                }
-
-                // Run handler
-                (matchResult.handler)(req, self.context)
-            },
-            .None => {
-                Response.notFound()
+        for mw in matchResult.groupMiddleware {
+            match mw(req, self.context) {
+                .Continue(enriched) => { req = enriched },
+                .Respond(response) => { return response }
             }
         }
+
+        for mw in matchResult.routeMiddleware {
+            match mw(req, self.context) {
+                .Continue(enriched) => { req = enriched },
+                .Respond(response) => { return response }
+            }
+        }
+
+        (matchResult.handler)(req, self.context)
     }
 }

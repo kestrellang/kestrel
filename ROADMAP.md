@@ -679,6 +679,7 @@ Bugfixes:
 - some patterns
 - and in guard
 - normal guard
+- Self constructors
 
 ## Version 0.17: Derives, Attributes & Sugar
 

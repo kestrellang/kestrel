@@ -218,6 +218,18 @@ type Handler = (Int64) -> Bool;
 type Pair[T] = (T, T);
 ```
 
+### String Interpolation
+
+```kestrel
+let greeting = "Hello, \(name)!";
+let info = "\(name) is \(age) years old";
+let padded = "Value: \(age:>5)";       // right-align, width 5
+let hex = "Code: \(code:08x)";         // zero-pad, width 8, hex
+let debug = "\(value:?)";              // debug format
+```
+
+Format specifiers: `>` right-align, `<` left-align, `^` center, `0` zero-pad, `x`/`X` hex, `b` binary, `o` octal, `.n` precision. Raw strings (`"""..."""`) do **not** support interpolation.
+
 ## Protocols
 
 ```kestrel
@@ -325,10 +337,42 @@ struct Connection: not Copyable { deinit { self.close(); } }         // RAII
 
 ## Style
 
-- **Naming**: `PascalCase` types/protocols/enums; `camelCase` functions/methods/variables; `SCREAMING_SNAKE_CASE` constants.
+- **Naming**: `PascalCase` types/protocols/enums; `camelCase` functions/methods/variables; `SCREAMING_SNAKE_CASE` constants. No abbreviations in public APIs — `count`, `pointer`, `address`, not `cnt`, `ptr`, `addr`.
 - **Mutability**: prefer `let`; `var` only when the binding mutates.
 - **Integers**: use type annotations (`let x: Int32 = 42`) not constructors (`Int32(intLiteral: 42)`).
 - **Self**: `self` = borrowing; `mutating self` = modify fields; `consuming self` = take ownership.
+
+## Idioms
+
+- **Mutating = verb, non-mutating = past participle.**
+  ```kestrel
+  sort() / sorted()       reverse() / reversed()
+  trim() / trimmed()      formUnion(with:) / union(with:)
+  ```
+- **`to*` converts (allocates), `as*` views (no copy).**
+  ```kestrel
+  toArray()       // new value
+  asSlice()       // cheap reinterpretation
+  ```
+- **Prefer enums over booleans** at call sites.
+  ```kestrel
+  sort(order: .ascending)     // good
+  sort(ascending: true)       // bad — opaque
+  ```
+- **Properties = state, methods = actions.** `count`, `isEmpty`, `capacity` are properties everywhere. `collect()`, `fold()`, `iter()` are methods.
+- **Closure labels are standardized:** predicates `matching:`, key extractors `byKey:`, combining `combining:`, mapping `mapping:`.
+  ```kestrel
+  filter(matching: { it > 0 })
+  sort(byKey: { it.name })
+  fold(from: 0, combining: { a + b })
+  ```
+- **Labels are prepositions** — `with:`, `from:`, `by:`, `of:`, `at:`. Not bare nouns like `predicate:` or `action:`.
+- **Prefer `for` over `while` for iteration.** Use `for elem in collection`, `for i in 0..<n`.
+- **Avoid indexing strings.** Use views and iterators; prefer utf8 operations when possible.
+- **Prefer early returns.** Use `guard` for preconditions instead of deep nesting.
+  ```kestrel
+  guard x > 0 else { return; }
+  ```
 
 ## Label Rules Summary
 

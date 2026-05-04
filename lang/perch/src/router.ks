@@ -1,4 +1,4 @@
-// HTTP router with path parameters and route groups
+/// HTTP router with path-parameter extraction and route groups.
 
 module perch.router
 
@@ -12,6 +12,10 @@ import perch.response.(Response)
 // ============================================================================
 
 /// A route maps an HTTP method + path pattern to middleware and a handler.
+///
+/// Path patterns support `:name` segments for parameter extraction.
+/// For example, `"/users/:id"` matches `"/users/42"` and binds
+/// `id` → `"42"` in the request's path params.
 public struct Route[T]: Cloneable {
     var method: HttpMethod
     var pattern: String
@@ -56,6 +60,16 @@ public struct RouteGroup[T]: Cloneable {
 // ============================================================================
 
 /// Builder for creating a route group with shared prefix and middleware.
+///
+/// # Examples
+///
+/// ```
+/// var api = GroupBuilder[Ctx]("/api");
+/// api.use(requireAuth[Ctx]());
+/// api.onGet("/users", listUsers);
+/// api.onGet("/users/:id", getUser);
+/// app.addGroup(api);
+/// ```
 public struct GroupBuilder[T]: Cloneable {
     var prefix: String
     var middleware: Array[(Request, T) -> MiddlewareResult]
@@ -69,8 +83,8 @@ public struct GroupBuilder[T]: Cloneable {
     }
 
     /// Adds middleware to this group.
-    public mutating func use(mw: (Request, T) -> MiddlewareResult) {
-        self.middleware.append(mw)
+    public mutating func use(middleware: (Request, T) -> MiddlewareResult) {
+        self.middleware.append(middleware)
     }
 
     /// Registers a GET route in this group.
@@ -138,6 +152,32 @@ public struct GroupBuilder[T]: Cloneable {
         ))
     }
 
+    /// Registers a HEAD route in this group.
+    public mutating func onHead(path: String, handler: (Request, T) -> Response) {
+        let fullPath = self.prefix + path;
+        let segments = splitPathSegments(fullPath);
+        self.routes.append(Route[T](
+            method: HttpMethod.Head,
+            pattern: fullPath,
+            patternSegments: segments,
+            middleware: Array[(Request, T) -> MiddlewareResult](),
+            handler: handler
+        ))
+    }
+
+    /// Registers an OPTIONS route in this group.
+    public mutating func onOptions(path: String, handler: (Request, T) -> Response) {
+        let fullPath = self.prefix + path;
+        let segments = splitPathSegments(fullPath);
+        self.routes.append(Route[T](
+            method: HttpMethod.Options,
+            pattern: fullPath,
+            patternSegments: segments,
+            middleware: Array[(Request, T) -> MiddlewareResult](),
+            handler: handler
+        ))
+    }
+
     public func clone() -> GroupBuilder[T] {
         var gb = GroupBuilder[T](self.prefix.clone());
         gb.middleware = self.middleware.clone();
@@ -172,6 +212,10 @@ struct MatchResult[T]: Cloneable {
 // ============================================================================
 
 /// The main router holding global middleware, route groups, and standalone routes.
+///
+/// Route matching checks groups first (in registration order), then
+/// standalone routes. The first match wins — later routes for the same
+/// method and pattern are shadowed.
 public struct Router[T]: Cloneable {
     public var globalMiddleware: Array[(Request, T) -> MiddlewareResult]
     var groups: Array[RouteGroup[T]]
@@ -185,8 +229,8 @@ public struct Router[T]: Cloneable {
     }
 
     /// Adds global middleware that runs on every request.
-    public mutating func use(mw: (Request, T) -> MiddlewareResult) {
-        self.globalMiddleware.append(mw)
+    public mutating func use(middleware: (Request, T) -> MiddlewareResult) {
+        self.globalMiddleware.append(middleware)
     }
 
     /// Registers a GET route.
@@ -242,6 +286,30 @@ public struct Router[T]: Cloneable {
         let segments = splitPathSegments(path);
         self.routes.append(Route[T](
             method: HttpMethod.Patch,
+            pattern: path,
+            patternSegments: segments,
+            middleware: Array[(Request, T) -> MiddlewareResult](),
+            handler: handler
+        ))
+    }
+
+    /// Registers a HEAD route.
+    public mutating func onHead(path: String, handler: (Request, T) -> Response) {
+        let segments = splitPathSegments(path);
+        self.routes.append(Route[T](
+            method: HttpMethod.Head,
+            pattern: path,
+            patternSegments: segments,
+            middleware: Array[(Request, T) -> MiddlewareResult](),
+            handler: handler
+        ))
+    }
+
+    /// Registers an OPTIONS route.
+    public mutating func onOptions(path: String, handler: (Request, T) -> Response) {
+        let segments = splitPathSegments(path);
+        self.routes.append(Route[T](
+            method: HttpMethod.Options,
             pattern: path,
             patternSegments: segments,
             middleware: Array[(Request, T) -> MiddlewareResult](),
@@ -314,15 +382,18 @@ public struct Router[T]: Cloneable {
 // PATH MATCHING
 // ============================================================================
 
-/// Matches request segments against a pattern. Returns path params if matched.
+/// Matches request path segments against a route pattern.
+///
+/// Returns a dictionary of extracted path parameters if the segments
+/// match, or `None` otherwise. A `:name` segment matches any value
+/// and binds it. Literal segments must match exactly.
 func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -> Dictionary[String, String]? {
     if requestSegments.count != patternSegments.count {
         return .None
     }
 
     var params = Dictionary[String, String]();
-    var i: Int64 = 0;
-    while i < patternSegments.count {
+    for i in 0..<patternSegments.count {
         let pattern = patternSegments(unchecked: i);
         let actual = requestSegments(unchecked: i);
 
@@ -332,15 +403,14 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
         } else if not pattern.equals(actual) {
             return .None
         }
-        i = i + 1
     }
 
     .Some(params)
 }
 
-/// Returns true if two HTTP methods match.
-func methodMatches(a: HttpMethod, b: HttpMethod) -> Bool {
-    a.toString().equals(b.toString())
+/// Returns true if two HTTP methods are the same.
+func methodMatches(expected: HttpMethod, actual: HttpMethod) -> Bool {
+    expected.toString().equals(actual.toString())
 }
 
 /// Splits a path into non-empty segments.

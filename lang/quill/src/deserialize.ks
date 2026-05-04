@@ -1,4 +1,20 @@
-// Quill Deserialize protocol and built-in conformances
+/// Deserialize protocol and built-in conformances for constructing
+/// user types from `Value` trees.
+///
+/// Conform your types to `Deserialize` so they can be decoded from
+/// any `Format` implementation (JSON, TOML, etc.) without coupling
+/// to a specific wire format. Helper functions (`findKey`,
+/// `extractString`, etc.) simplify object field extraction.
+///
+/// # Examples
+///
+/// ```
+/// let v = Value.Int(42);
+/// let n = try Int64.fromValue(v);    // Ok(42)
+///
+/// let v2 = Value.Str("hello");
+/// let s = try String.fromValue(v2);  // Ok("hello")
+/// ```
 
 module quill.deserialize
 
@@ -9,7 +25,28 @@ import quill.error.(DeserializeError, DeserializeErrorKind)
 // DESERIALIZE PROTOCOL
 // ============================================================================
 
-/// A type that can be constructed from a Value during deserialization.
+/// A type that can be constructed from a `Value` during
+/// deserialization.
+///
+/// The conversion is fallible — `fromValue` returns a `Result` so
+/// implementations can report type mismatches, missing keys, or
+/// invalid data without panicking.
+///
+/// # Examples
+///
+/// ```
+/// // Built-in conformance:
+/// let v = Value.Str("hello");
+/// let s = try String.fromValue(v);  // Ok("hello")
+///
+/// // Custom type:
+/// // extend MyStruct: Deserialize {
+/// //     public static func fromValue(value: Value) -> Result[MyStruct, DeserializeError] {
+/// //         let name = try extractString(from: value, key: "name");
+/// //         .Ok(MyStruct(name))
+/// //     }
+/// // }
+/// ```
 public protocol Deserialize {
     static func fromValue(value: Value) -> Result[Self, DeserializeError]
 }
@@ -18,6 +55,7 @@ public protocol Deserialize {
 // BUILT-IN CONFORMANCES
 // ============================================================================
 
+/// Deserializes from `.Boolean`; rejects all other variants.
 extend Bool: Deserialize {
     public static func fromValue(value: Value) -> Result[Bool, DeserializeError] {
         match value {
@@ -27,6 +65,7 @@ extend Bool: Deserialize {
     }
 }
 
+/// Deserializes from `.Int`; rejects all other variants.
 extend Int64: Deserialize {
     public static func fromValue(value: Value) -> Result[Int64, DeserializeError] {
         match value {
@@ -36,6 +75,7 @@ extend Int64: Deserialize {
     }
 }
 
+/// Deserializes from `.Float`, or widens `.Int` to `Float64`.
 extend Float64: Deserialize {
     public static func fromValue(value: Value) -> Result[Float64, DeserializeError] {
         match value {
@@ -46,6 +86,7 @@ extend Float64: Deserialize {
     }
 }
 
+/// Deserializes from `.Str`; rejects all other variants.
 extend String: Deserialize {
     public static func fromValue(value: Value) -> Result[String, DeserializeError] {
         match value {
@@ -55,6 +96,8 @@ extend String: Deserialize {
     }
 }
 
+/// Deserializes `.Null` as `.None`; all other variants are forwarded
+/// to the inner type's `fromValue` and wrapped in `.Some`.
 extend Optional[T]: Deserialize where T: Deserialize {
     public static func fromValue(value: Value) -> Result[Optional[T], DeserializeError] {
         match value {
@@ -67,6 +110,7 @@ extend Optional[T]: Deserialize where T: Deserialize {
     }
 }
 
+/// Deserializes from `.Arr`, decoding each element via `T.fromValue`.
 extend Array[T]: Deserialize where T: Deserialize {
     public static func fromValue(value: Value) -> Result[Array[T], DeserializeError] {
         match value {
@@ -85,6 +129,7 @@ extend Array[T]: Deserialize where T: Deserialize {
     }
 }
 
+/// Identity — a `Value` always deserializes to itself.
 extend Value: Deserialize {
     public static func fromValue(value: Value) -> Result[Value, DeserializeError] {
         .Ok(value)
@@ -95,8 +140,17 @@ extend Value: Deserialize {
 // HELPER FUNCTIONS
 // ============================================================================
 
-/// Looks up a required key in an Object value.
-/// Returns the value or an error if the key is missing or value is not an Object.
+/// Looks up a required key in an `.Obj` value.
+///
+/// Returns the value at `key`, or an error if the key is missing or
+/// the value is not an object.
+///
+/// # Examples
+///
+/// ```
+/// let obj = Value.Obj(["name": Value.Str("Alice")]);
+/// let v = try findKey(from: obj, key: "name");  // Ok(.Str("Alice"))
+/// ```
 public func findKey(from value: Value, key: String) -> Result[Value, DeserializeError] {
     match value {
         .Obj(obj) => {
@@ -109,8 +163,18 @@ public func findKey(from value: Value, key: String) -> Result[Value, Deserialize
     }
 }
 
-/// Looks up an optional key in an Object value.
-/// Returns Some(value) if the key exists, None if missing, or an error if not an Object.
+/// Looks up an optional key in an `.Obj` value.
+///
+/// Returns `Some(value)` if the key exists, `None` if missing, or an
+/// error if the value is not an object.
+///
+/// # Examples
+///
+/// ```
+/// let obj = Value.Obj(["a": Value.Int(1)]);
+/// let v = try findKeyOpt(from: obj, key: "a");  // Ok(Some(.Int(1)))
+/// let m = try findKeyOpt(from: obj, key: "b");  // Ok(None)
+/// ```
 public func findKeyOpt(from value: Value, key: String) -> Result[Optional[Value], DeserializeError] {
     match value {
         .Obj(obj) => .Ok(obj(key)),
@@ -118,7 +182,16 @@ public func findKeyOpt(from value: Value, key: String) -> Result[Optional[Value]
     }
 }
 
-/// Extracts a string from an Object by key.
+/// Extracts a `String` from an `.Obj` by key.
+///
+/// Combines `findKey` with a `.Str` type check in one step.
+///
+/// # Examples
+///
+/// ```
+/// let obj = Value.Obj(["name": Value.Str("Alice")]);
+/// let s = try extractString(from: obj, key: "name");  // Ok("Alice")
+/// ```
 public func extractString(from value: Value, key: String) -> Result[String, DeserializeError] {
     let v = try findKey(from: value, key);
     match v {
@@ -127,7 +200,16 @@ public func extractString(from value: Value, key: String) -> Result[String, Dese
     }
 }
 
-/// Extracts an integer from an Object by key.
+/// Extracts an `Int64` from an `.Obj` by key.
+///
+/// Combines `findKey` with an `.Int` type check in one step.
+///
+/// # Examples
+///
+/// ```
+/// let obj = Value.Obj(["age": Value.Int(30)]);
+/// let n = try extractInt(from: obj, key: "age");  // Ok(30)
+/// ```
 public func extractInt(from value: Value, key: String) -> Result[Int64, DeserializeError] {
     let v = try findKey(from: value, key);
     match v {
@@ -136,7 +218,17 @@ public func extractInt(from value: Value, key: String) -> Result[Int64, Deserial
     }
 }
 
-/// Extracts a float from an Object by key.
+/// Extracts a `Float64` from an `.Obj` by key.
+///
+/// Combines `findKey` with a `.Float` type check. Also accepts `.Int`
+/// values, widening them to `Float64`.
+///
+/// # Examples
+///
+/// ```
+/// let obj = Value.Obj(["pi": Value.Float(3.14)]);
+/// let f = try extractFloat(from: obj, key: "pi");  // Ok(3.14)
+/// ```
 public func extractFloat(from value: Value, key: String) -> Result[Float64, DeserializeError] {
     let v = try findKey(from: value, key);
     match v {
@@ -146,7 +238,16 @@ public func extractFloat(from value: Value, key: String) -> Result[Float64, Dese
     }
 }
 
-/// Extracts a boolean from an Object by key.
+/// Extracts a `Bool` from an `.Obj` by key.
+///
+/// Combines `findKey` with a `.Boolean` type check in one step.
+///
+/// # Examples
+///
+/// ```
+/// let obj = Value.Obj(["active": Value.Boolean(true)]);
+/// let b = try extractBool(from: obj, key: "active");  // Ok(true)
+/// ```
 public func extractBool(from value: Value, key: String) -> Result[Bool, DeserializeError] {
     let v = try findKey(from: value, key);
     match v {

@@ -1,4 +1,18 @@
-// JSON parser - recursive descent over a Char cursor.
+/// Recursive-descent JSON parser.
+///
+/// Converts a JSON string into a quill `Value` tree. The parser operates
+/// in a single pass with no backtracking, indexed by byte offset for O(1)
+/// slicing. String contents are decoded to UTF-8 `Char` only when escape
+/// processing is needed; runs of unescaped bytes are copied verbatim.
+///
+/// # Examples
+///
+/// ```
+/// import quill.json.parser.(parseJson)
+///
+/// let v = try parseJson("{\"a\": [1, true, null]}");
+/// // v == Value.Obj([("a", Value.Arr([Value.Int(1), Value.Boolean(true), Value.Null]))])
+/// ```
 
 module quill.json.parser
 
@@ -10,36 +24,45 @@ import std.text.(decodeUtf8)
 // JSON CURSOR
 // ============================================================================
 
-/// Tracks position in the JSON source string during parsing.
+/// Mutable cursor tracking the current byte position in a JSON source string.
 ///
-/// Indexes by *byte* offset (so substring slicing is O(1)) but exposes
-/// `Char` for predicates — JSON's grammar is ASCII-only at structural
-/// positions, but string contents and \uXXXX escapes are full Unicode.
+/// Indexes by byte offset so that substring extraction is O(1). Exposes
+/// `Char` through `peekChar()` and `advanceChar()` for structural dispatch
+/// — JSON's grammar tokens are ASCII, but string contents and `\uXXXX`
+/// escapes require full Unicode decoding.
+///
+/// # Representation
+///
+/// Three fields: `source` (the full input string, retained for slicing),
+/// `pos` (current byte offset), and `len` (cached `source.byteCount`).
 struct JsonCursor: Cloneable {
     var source: String
     var pos: Int64
     var len: Int64
 
+    /// @name Default
+    /// Creates a cursor at the beginning of the given source string.
     init(source: String) {
         self.source = source;
         self.pos = 0;
         self.len = source.byteCount;
     }
 
+    /// Returns a deep copy of the cursor (clones the source string).
     func clone() -> JsonCursor {
         JsonCursor(self.source.clone())
     }
 
+    /// Returns `true` when the cursor has reached or passed the end of input.
     func atEnd() -> Bool {
         self.pos >= self.len
     }
 
-    /// Returns the current code point and the number of bytes it consumes,
-    /// or `.None` at end of input. Does **not** advance.
-    //
-    // Decodes UTF-8 directly from the source's byte buffer at `self.pos`.
-    // Slicing with `substringBytes` here would copy O(len - pos) bytes per
-    // call, making a parse run O(N²) on inputs of any size.
+    /// Returns the current code point and its byte width, or `.None` at end
+    /// of input. Does **not** advance the cursor.
+    ///
+    /// Decodes UTF-8 directly from the source byte buffer at `self.pos`,
+    /// avoiding the O(N) copy that `substringBytes` would incur.
     func peekChar() -> Optional[(Char, Int64)] {
         if self.pos >= self.len {
             return .None
@@ -50,7 +73,9 @@ struct JsonCursor: Cloneable {
         }
     }
 
-    /// Returns the next code point and advances past it.
+    /// Decodes the next code point, advances past it, and returns it.
+    ///
+    /// Returns an error if the cursor is already at end of input.
     mutating func advanceChar() -> Result[Char, JsonParseError] {
         match self.peekChar() {
             .Some(pair) => {
@@ -73,7 +98,7 @@ struct JsonCursor: Cloneable {
         }
     }
 
-    /// Expects and consumes a specific code point.
+    /// Advances one code point and returns an error if it doesn't match `c`.
     mutating func expect(c: Char) -> Result[(), JsonParseError] {
         let actual = try self.advanceChar();
         if actual == c {
@@ -87,11 +112,10 @@ struct JsonCursor: Cloneable {
         }
     }
 
-    /// Expects and consumes a specific string literal.
-    //
-    // Compares bytes directly at the cursor offset; the previous implementation
-    // sliced `source.substringBytes(from: pos, to: len)` first, copying the
-    // entire tail of the input on every call.
+    /// Advances past the exact bytes of `expected`, or errors if they don't match.
+    ///
+    /// Compares bytes directly at the cursor offset without copying the tail
+    /// of the source string.
     mutating func expectStr(expected: String) -> Result[(), JsonParseError] {
         let startPos = self.pos;
         let expectedLen = expected.byteCount;
@@ -116,13 +140,29 @@ struct JsonCursor: Cloneable {
 // PUBLIC API
 // ============================================================================
 
-/// Parses a JSON string into a Value.
+/// Parses a complete JSON document into a `Value`.
+///
+/// Accepts any single JSON value (object, array, string, number, boolean,
+/// or null). Leading and trailing whitespace is skipped; trailing
+/// non-whitespace after the value produces an error.
+///
+/// # Examples
+///
+/// ```
+/// let v = try parseJson("[1, 2, 3]");
+/// // v == Value.Arr([Value.Int(1), Value.Int(2), Value.Int(3)])
+/// ```
+///
+/// # Errors
+///
+/// Returns `JsonParseError` for any syntax violation, with a byte offset
+/// pointing at the problem character.
 public func parseJson(source: String) -> Result[Value, JsonParseError] {
     var cursor = JsonCursor(source);
     cursor.skipWhitespace();
     let value = try parseValue(cursor);
     cursor.skipWhitespace();
-    if cursor.atEnd() == false {
+    if not cursor.atEnd() {
         return .Err(JsonParseError("unexpected trailing content", cursor.pos))
     }
     .Ok(value)
@@ -132,6 +172,7 @@ public func parseJson(source: String) -> Result[Value, JsonParseError] {
 // INTERNAL PARSERS
 // ============================================================================
 
+/// Dispatches to the appropriate sub-parser based on the next character.
 func parseValue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     match cursor.peekChar() {
         .Some(pair) => {
@@ -160,21 +201,25 @@ func parseValue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     }
 }
 
+/// Consumes the literal `null`.
 func parseNull(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     try cursor.expectStr("null");
     .Ok(Value.Null)
 }
 
+/// Consumes the literal `true`.
 func parseTrue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     try cursor.expectStr("true");
     .Ok(Value.Boolean(true))
 }
 
+/// Consumes the literal `false`.
 func parseFalse(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     try cursor.expectStr("false");
     .Ok(Value.Boolean(false))
 }
 
+/// Parses a JSON number (integer or float) per RFC 8259 §6.
 func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     let start = cursor.pos;
     var isFloat = false;
@@ -222,7 +267,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                     break
                 }
             }
-            if hasDigit == false {
+            if not hasDigit {
                 return .Err(JsonParseError("expected digit after '.'", cursor.pos))
             }
         }
@@ -249,7 +294,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                     break
                 }
             }
-            if hasDigit == false {
+            if not hasDigit {
                 return .Err(JsonParseError("expected digit in exponent", cursor.pos))
             }
         }
@@ -270,21 +315,18 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     }
 }
 
+/// Parses a JSON string and wraps it in `Value.Str`.
 func parseJsonString(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     let s = try parseRawString(cursor);
     .Ok(Value.Str(s))
 }
 
-/// Parses a JSON string literal (without wrapping in `Value`).
-//
-// Scans the source byte-by-byte for runs that are neither `"` (0x22) nor
-// `\` (0x5C) and copies those runs into `result` as raw bytes. The previous
-// implementation called `advanceChar` (decode UTF-8) + `appendChar` (re-encode
-// UTF-8) for every character, which was the dominant per-char cost on
-// string-heavy JSON. Bytes are already valid UTF-8 in the source, so direct
-// passthrough preserves the encoding without re-encoding work. Escape
-// sequences fall back to the slow path because `\uXXXX` may decode to a
-// multi-byte code point.
+/// Parses a JSON string literal and returns the unescaped content.
+///
+/// Uses a fast path that copies runs of non-escape bytes verbatim (no
+/// UTF-8 decode/re-encode overhead). Falls back to per-character decoding
+/// only for `\` escape sequences, where `\uXXXX` may produce multi-byte
+/// code points.
 func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseError] {
     try cursor.expect('"');
     var result = String();
@@ -380,6 +422,7 @@ func hexDigitValue(c: Char) -> Int64 {
     0 - 1
 }
 
+/// Parses a JSON array (`[value, ...]`).
 func parseArray(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     try cursor.expect('[');
     cursor.skipWhitespace();
@@ -425,6 +468,7 @@ func parseArray(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     .Err(JsonParseError("unexpected end of input in array", cursor.pos))
 }
 
+/// Parses a JSON object (`{"key": value, ...}`).
 func parseObject(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     try cursor.expect('{');
     cursor.skipWhitespace();
