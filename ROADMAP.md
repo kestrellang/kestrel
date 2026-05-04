@@ -676,6 +676,9 @@ Bugfixes:
 - Computed properties allowed in protocol extensions
 - Name collisions between methods and computed properties
 - Keywords as labels
+- some patterns
+- and in guard
+- normal guard
 
 ## Version 0.17: Derives, Attributes & Sugar
 

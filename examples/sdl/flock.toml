@@ -1,7 +1,7 @@
 [package]
-name = "sdl_pong"
+name = "sdl"
 version = "0.1.0"
-description = "SDL2 pong game"
+description = "SDL2 bindings for Kestrel"
 
 [build]
 c-sources = ["sdl_helpers.c"]

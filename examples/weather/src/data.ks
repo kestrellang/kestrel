@@ -162,3 +162,76 @@ public func formatDateLabel(dateStr: String, idx: Int64) -> String {
     };
     dateStr
 }
+
+// ============================================================================
+// EXTENDED WEATHER HELPERS
+// ============================================================================
+
+public func getStringFromArray(arr: Array[Value], idx: Int64) -> String {
+    if idx < arr.count {
+        getString(arr(unchecked: idx))
+    } else {
+        ""
+    }
+}
+
+public func parseHourFromIso(isoStr: String) -> Int64 {
+    if isoStr.byteCount < 13 { return 0 };
+    let hourStr = isoStr.substringBytes(from: 11, to: 13);
+    match Int64.parse(hourStr) {
+        .Some(n) => n,
+        .None => 0
+    }
+}
+
+public func formatHourLabel(timeStr: String, idx: Int64) -> String {
+    if idx == 0 { return "Now" };
+    let hour = parseHourFromIso(timeStr);
+    if hour == 0 { return "12a" };
+    if hour < 12 { return hour.format() + "a" };
+    if hour == 12 { return "12p" };
+    (hour - 12).format() + "p"
+}
+
+public func formatSunTime(isoStr: String) -> String {
+    if isoStr.byteCount < 16 { return "" };
+    let hourStr = isoStr.substringBytes(from: 11, to: 13);
+    let minStr = isoStr.substringBytes(from: 14, to: 16);
+    let hour = match Int64.parse(hourStr) {
+        .Some(n) => n,
+        .None => return ""
+    };
+    var s = String();
+    if hour == 0 {
+        s.append("12")
+    } else if hour <= 12 {
+        s.append(hour.format())
+    } else {
+        s.append((hour - 12).format())
+    };
+    s.append(":");
+    s.append(minStr);
+    if hour < 12 { s.append(" AM") } else { s.append(" PM") };
+    s
+}
+
+public func uvDescription(idx: Int64) -> String {
+    if idx <= 2 { return "Low" };
+    if idx <= 5 { return "Moderate" };
+    if idx <= 7 { return "High" };
+    if idx <= 10 { return "Very High" };
+    "Extreme"
+}
+
+public func pressureDescription(hpa: Float64) -> String {
+    if hpa < 1000.0 { return "Low" };
+    if hpa <= 1020.0 { return "Normal" };
+    "High"
+}
+
+public func feelsLikeNote(feelsLike: Float64, actual: Float64) -> String {
+    let diff = feelsLike - actual;
+    if diff < -3.0 { return "Wind is making it feel cooler" };
+    if diff > 3.0 { return "Humidity is making it feel warmer" };
+    "Similar to the actual temperature"
+}

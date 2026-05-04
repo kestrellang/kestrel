@@ -62,8 +62,8 @@ fn compile_return(
         ctx.module,
     );
 
-    // Unit return — empty tuple is the canonical unit value.
-    if ret_ty.is_unit() {
+    // Unit/Never return — both compile to void in the Cranelift signature.
+    if ret_ty.is_unit() || matches!(ret_ty, MirTy::Never) {
         if state.is_main {
             let zero = builder.ins().iconst(ir::types::I64, 0);
             builder.ins().return_(&[zero]);

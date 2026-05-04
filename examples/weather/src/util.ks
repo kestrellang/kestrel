@@ -11,7 +11,7 @@ public func urlEncode(s: String) -> String {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 32 {
             out.appendByte(43)  // space -> +
         } else if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 45 or b == 95 or b == 46 {
@@ -34,12 +34,12 @@ public func urlDecode(s: String) -> String {
     var i: Int64 = 0;
     let len = s.byteCount;
     while i < len {
-        let b = s.byteAtUnchecked(i);
+        let b = s.bytes(unchecked: i);
         if b == 43 {
             out.appendByte(32)  // + -> space
         } else if b == 37 and i + 2 < len {
-            let hi = hexVal(s.byteAtUnchecked(i + 1));
-            let lo = hexVal(s.byteAtUnchecked(i + 2));
+            let hi = hexVal(s.bytes(unchecked: i + 1));
+            let lo = hexVal(s.bytes(unchecked: i + 2));
             out.appendByte(hi * 16 + lo);
             i = i + 2
         } else {
@@ -73,17 +73,17 @@ public func parseFormValue(body: String, key: String) -> String {
         var matched = true;
         var ki: Int64 = 0;
         while ki < keyLen {
-            if body.byteAtUnchecked(pos + ki) != keyEq.byteAtUnchecked(ki) {
+            if body.bytes(unchecked: pos + ki) != keyEq.bytes(unchecked: ki) {
                 matched = false;
                 break
             };
             ki = ki + 1
         }
-        if matched and (pos == 0 or body.byteAtUnchecked(pos - 1) == 38) {
+        if matched and (pos == 0 or body.bytes(unchecked: pos - 1) == 38) {
             // Found it — extract value until & or end
             let valStart = pos + keyLen;
             var valEnd = valStart;
-            while valEnd < bodyLen and body.byteAtUnchecked(valEnd) != 38 {
+            while valEnd < bodyLen and body.bytes(unchecked: valEnd) != 38 {
                 valEnd = valEnd + 1
             }
             return urlDecode(body.substringBytes(from: valStart, to: valEnd))

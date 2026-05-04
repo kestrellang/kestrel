@@ -2,7 +2,6 @@
 name = "pong"
 version = "0.1.0"
 description = "Terminal pong game"
-source = "."
 
 [dependencies]
 games = { path = "../games" }

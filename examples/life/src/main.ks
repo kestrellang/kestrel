@@ -6,9 +6,9 @@
 // previous generation.
 //
 // Usage:
-//   life [width] [height] [cellPx]
+//   life --width 80 --height 60 --cell-size 10
 //     interactive SDL window. Bounds: 5..2000 board, 1..40 cellPx.
-//   life --headless ITERS [width] [height]
+//   life --headless --iters 1000 --width 80 --height 60
 //     no window; runs ITERS generations from a randomized board, prints
 //     wall time and gens/sec, exits. Useful for benchmarking the solver.
 //
@@ -23,12 +23,10 @@
 module Life
 
 import Sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
-
-@extern(.C, mangleName: "Kestrel_Argc")
-func cliArgc() -> Int32
-
-@extern(.C, mangleName: "Kestrel_GetArg")
-func cliGetArg(idx: Int32) -> CString
+import clutch.command.(Command)
+import clutch.arg.(Arg)
+import clutch.matches.(ArgMatches)
+import clutch.os.(getArgv)
 
 @extern(.C, mangleName: "Kestrel_GetTicks")
 func sdlGetTicks() -> UInt32
@@ -45,14 +43,6 @@ struct Config {
     var headlessIters: Int64
 }
 
-// Reads argv slot `idx` into a String, returning the empty string if missing
-// or null. Centralises the CString → String dance so the parser body stays
-// readable.
-func argString(idx: Int32) -> String {
-    let cstr = cliGetArg(idx);
-    if cstr.isNull { "" } else { String(from: cstr) }
-}
-
 // Picks the largest cell size (in px) that keeps the board inside ~800x600,
 // clamped to [2, 40]. Smaller boards stay readable, bigger ones still fit.
 func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
@@ -64,90 +54,177 @@ func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
     c
 }
 
-// Reads CLI args. Two layouts:
-//   life [width] [height] [cellPx]
-//   life --headless ITERS [width] [height]
-// Out-of-range or unparseable values are silently ignored so the binary
-// still launches. `cellPx` is auto-fitted unless the user overrides it.
+func buildCommand() -> Command {
+    var cmd = Command(name: "life");
+    cmd.setAbout(text: "Conway's Game of Life — an SDL example");
+
+    var width = Arg(name: "width");
+    width.short(flag: "W");
+    width.help(text: "Board width (5..2000)");
+    width.defaultsTo(value: "80");
+    cmd.addArg(arg: width);
+
+    var height = Arg(name: "height");
+    height.short(flag: "H");
+    height.help(text: "Board height (5..2000)");
+    height.defaultsTo(value: "60");
+    cmd.addArg(arg: height);
+
+    var cellSize = Arg(name: "cell-size");
+    cellSize.short(flag: "c");
+    cellSize.help(text: "Cell size in pixels (1..40, auto if omitted)");
+    cmd.addArg(arg: cellSize);
+
+    var headless = Arg(name: "headless");
+    headless.asFlag();
+    headless.help(text: "Run headless benchmark (no window)");
+    cmd.addArg(arg: headless);
+
+    var iters = Arg(name: "iters");
+    iters.short(flag: "n");
+    iters.help(text: "Number of generations for headless mode");
+    iters.defaultsTo(value: "1000");
+    cmd.addArg(arg: iters);
+
+    cmd
+}
+
+func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default fallback: Int64) -> Int64 {
+    guard let .Some(s) = value else {
+        return fallback;
+    }
+
+    guard let .Some(n) = Int64.parse(s) else {
+        return fallback;
+    }
+
+    if n < lo or n > hi {
+        return fallback
+    }
+
+    return n;
+}
+
 func parseConfig() -> Config {
-    var width: Int64 = 80;
-    var height: Int64 = 60;
-    var cellOverride: Int64 = 0;
-    var headlessIters: Int64 = 0;
-    let argc = cliArgc();
+    let cmd = buildCommand();
+    let args = getArgv();
 
-    // Detect headless mode: argv[1] == "--headless", argv[2] == iterations.
-    // Width/height shift to argv[3]/argv[4] in that case.
-    var posStart: Int32 = 1;
-    if argc >= 3 and argString(1).equals("--headless") {
-        if let .Some(n) = Int64.parse(argString(2)) {
-            if n > 0 {
-                headlessIters = n;
-            }
-        }
-        posStart = 3;
+    guard let .Ok(matches) = cmd.parse(tokens: args) else {
+        return Config(
+            width: 80,
+            height: 60,
+            cellSize: autoCellSize(width: 80, height: 60),
+            stepDelayMs: 80,
+            headlessIters: 0
+        )
     }
 
-    if argc >= posStart + 1 {
-        if let .Some(w) = Int64.parse(argString(posStart)) {
-            if w >= 5 and w <= 2000 {
-                width = w;
-            }
-        }
-    }
-    if argc >= posStart + 2 {
-        if let .Some(h) = Int64.parse(argString(posStart + 1)) {
-            if h >= 5 and h <= 2000 {
-                height = h;
-            }
-        }
-    }
-    // cellPx only applies in interactive mode.
-    if headlessIters == 0 and argc >= posStart + 3 {
-        if let .Some(c) = Int64.parse(argString(posStart + 2)) {
-            if c >= 1 and c <= 40 {
-                cellOverride = c;
-            }
-        }
-    }
-    let cellSize = if cellOverride > 0 {
-        cellOverride
+    let width = clampParse(matches.getValue(name: "width"), min: 5, max: 2000, default: 80);
+    let height = clampParse(matches.getValue(name: "height"), min: 5, max: 2000, default: 60);
+
+    let headlessIters = if matches.hasFlag(name: "headless") {
+        clampParse(matches.getValue(name: "iters"), min: 1, max: 999999999, default: 1000)
     } else {
-        autoCellSize(width: width, height: height)
+        0
     };
+
+    let cellSize = if headlessIters > 0 {
+        1
+    } else {
+        clampParse(matches.getValue(name: "cell-size"), min: 1, max: 40, default: 0)
+    };
+
+    let finalCell = if cellSize > 0 { cellSize } else { autoCellSize(width: width, height: height) };
+
     Config(
         width: width,
         height: height,
-        cellSize: cellSize,
+        cellSize: finalCell,
         stepDelayMs: 80,
         headlessIters: headlessIters
     )
 }
 
+struct GameState {
+    var grid: Grid
+    var paused: Bool
+    var running: Bool
+    var selectedPattern: Pattern
+    var seedCounter: UInt64
+    var fps: Int64
+}
+
+protocol GameRenderer {
+    mutating func render(state: GameState)
+}
+
+func renderGrid(grid: Grid, renderer: Renderer, cellSize cell: Int64) {
+    renderer.setColor(Color.green());
+    let gutter = if cell >= 4 { 1 } else { 0 };
+    var y: Int64 = 0;
+    while y < grid.height {
+        var x: Int64 = 0;
+        while x < grid.width {
+            if grid.cellAt(x: x, y: y) {
+                let rect = Rectangle(
+                    x: x * cell,
+                    y: y * cell,
+                    width: cell - gutter,
+                    height: cell - gutter
+                );
+                renderer.fillRect(rect);
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+struct HeadlessRenderer: GameRenderer {
+    init(config cfg: Config) {}
+
+    mutating func render(state: GameState) {}
+}
+
+enum Pattern: Formattable {
+    case Glider
+    case Blinker
+    case Lwss
+    case Pulsar
+    case GosperGun
+
+    func format(options: FormatOptions = FormatOptions.default()) -> String {
+        match self {
+            .Glider => "GLIDER",
+            .Blinker => "BLINKER",
+            .Lwss => "LWSS",
+            .Pulsar => "PULSAR",
+            .GosperGun => "GOSPER GUN"
+        }
+    }
+}
+
 struct Grid {
     var width: Int64
     var height: Int64
-    var cellSize: Int64
     var cells: Array[Bool]
     var next: Array[Bool]
 
-    init(width w: Int64, height h: Int64, cellSize c: Int64) {
+    init(width w: Int64, height h: Int64) {
         let n = w * h;
         self.width = w;
         self.height = h;
-        self.cellSize = c;
         self.cells = Array[Bool](repeating: false, count: n);
         self.next = Array[Bool](repeating: false, count: n);
     }
 
     // Toroidal wrap so a glider that walks off one edge re-enters from the
-    // opposite side. The double-modulo handles negative inputs from the
-    // neighbour scan.
+    // opposite side.
     func index(x x: Int64, y y: Int64) -> Int64 {
         let w = self.width;
         let h = self.height;
-        let xx = (x.modulo(w) + w).modulo(w);
-        let yy = (y.modulo(h) + h).modulo(h);
+        let xx = (x % w + w) % w;
+        let yy = (y % h + h) % h;
         yy * w + xx
     }
 
@@ -177,38 +254,27 @@ struct Grid {
     }
 
     mutating func step() {
-        var y: Int64 = 0;
-        while y < self.height {
-            var x: Int64 = 0;
-            while x < self.width {
+        for y in 0..<self.height {
+            for x in 0..<self.width {
                 let alive = self.cellAt(x: x, y: y);
                 let n = self.neighborCount(x: x, y: y);
                 // B3/S23: birth on exactly 3 live neighbours; an already-live
                 // cell survives with 2 or 3.
                 let nextAlive = if alive { n == 2 or n == 3 } else { n == 3 };
                 self.next(self.index(x: x, y: y)) = nextAlive;
-                x = x + 1;
             }
-            y = y + 1;
         }
-        // Swap buffers so the next read sees the new generation. The old
-        // `cells` array becomes the scratch buffer for the following step.
         let tmp = self.cells;
         self.cells = self.next;
         self.next = tmp;
     }
 
     mutating func clear() {
-        var i: Int64 = 0;
-        while i < self.cells.count {
+        for i in 0..<self.cells.count {
             self.cells(i) = false;
-            i = i + 1;
         }
     }
 
-    // ~30% density gives a busy field that takes a while to settle but
-    // doesn't immediately collapse to overpopulation. The rng is owned
-    // locally so we don't depend on `mutating`-mode argument plumbing.
     mutating func randomize(seed seed: UInt64) {
         var rng = Lcg64(seed: seed);
         var i: Int64 = 0;
@@ -219,10 +285,6 @@ struct Grid {
     }
 
     // === Patterns ===
-    //
-    // Each `stamp*` method draws the pattern centred at `(cx, cy)`. Bounds
-    // wrap toroidally via `setCell`, so it doesn't matter if the click was
-    // close to the edge.
 
     mutating func stampGlider(centerX cx: Int64, centerY cy: Int64) {
         let x = cx - 1; let y = cy - 1;
@@ -234,14 +296,12 @@ struct Grid {
     }
 
     mutating func stampBlinker(centerX cx: Int64, centerY cy: Int64) {
-        // 3x1 horizontal — period-2 oscillator.
         self.setCell(x: cx - 1, y: cy, alive: true);
         self.setCell(x: cx,     y: cy, alive: true);
         self.setCell(x: cx + 1, y: cy, alive: true);
     }
 
     mutating func stampLwss(centerX cx: Int64, centerY cy: Int64) {
-        // Light-Weight Spaceship, 5x4. Travels left-to-right.
         let x = cx - 2; let y = cy - 2;
         self.setCell(x: x + 1, y: y + 0, alive: true);
         self.setCell(x: x + 4, y: y + 0, alive: true);
@@ -255,18 +315,13 @@ struct Grid {
     }
 
     mutating func stampPulsar(centerX cx: Int64, centerY cy: Int64) {
-        // 13x13 period-3 oscillator. Built from four mirrored arms; we
-        // unroll all 48 lit cells rather than trying to share code with
-        // arithmetic loops.
         let x = cx - 6; let y = cy - 6;
-        // top horizontals
         self.setCell(x: x + 2, y: y + 0, alive: true);
         self.setCell(x: x + 3, y: y + 0, alive: true);
         self.setCell(x: x + 4, y: y + 0, alive: true);
         self.setCell(x: x + 8, y: y + 0, alive: true);
         self.setCell(x: x + 9, y: y + 0, alive: true);
         self.setCell(x: x + 10, y: y + 0, alive: true);
-        // upper sides
         self.setCell(x: x + 0, y: y + 2, alive: true);
         self.setCell(x: x + 5, y: y + 2, alive: true);
         self.setCell(x: x + 7, y: y + 2, alive: true);
@@ -279,7 +334,6 @@ struct Grid {
         self.setCell(x: x + 5, y: y + 4, alive: true);
         self.setCell(x: x + 7, y: y + 4, alive: true);
         self.setCell(x: x + 12, y: y + 4, alive: true);
-        // middle horizontals
         self.setCell(x: x + 2, y: y + 5, alive: true);
         self.setCell(x: x + 3, y: y + 5, alive: true);
         self.setCell(x: x + 4, y: y + 5, alive: true);
@@ -292,7 +346,6 @@ struct Grid {
         self.setCell(x: x + 8, y: y + 7, alive: true);
         self.setCell(x: x + 9, y: y + 7, alive: true);
         self.setCell(x: x + 10, y: y + 7, alive: true);
-        // lower sides
         self.setCell(x: x + 0, y: y + 8, alive: true);
         self.setCell(x: x + 5, y: y + 8, alive: true);
         self.setCell(x: x + 7, y: y + 8, alive: true);
@@ -305,7 +358,6 @@ struct Grid {
         self.setCell(x: x + 5, y: y + 10, alive: true);
         self.setCell(x: x + 7, y: y + 10, alive: true);
         self.setCell(x: x + 12, y: y + 10, alive: true);
-        // bottom horizontals
         self.setCell(x: x + 2, y: y + 12, alive: true);
         self.setCell(x: x + 3, y: y + 12, alive: true);
         self.setCell(x: x + 4, y: y + 12, alive: true);
@@ -315,14 +367,11 @@ struct Grid {
     }
 
     mutating func stampGosperGun(centerX cx: Int64, centerY cy: Int64) {
-        // Gosper glider gun: 36x9. Emits a glider every 30 generations.
         let x = cx - 18; let y = cy - 4;
-        // Left block
         self.setCell(x: x + 0, y: y + 4, alive: true);
         self.setCell(x: x + 1, y: y + 4, alive: true);
         self.setCell(x: x + 0, y: y + 5, alive: true);
         self.setCell(x: x + 1, y: y + 5, alive: true);
-        // Left arm
         self.setCell(x: x + 10, y: y + 4, alive: true);
         self.setCell(x: x + 10, y: y + 5, alive: true);
         self.setCell(x: x + 10, y: y + 6, alive: true);
@@ -339,7 +388,6 @@ struct Grid {
         self.setCell(x: x + 16, y: y + 5, alive: true);
         self.setCell(x: x + 16, y: y + 6, alive: true);
         self.setCell(x: x + 17, y: y + 5, alive: true);
-        // Right arm
         self.setCell(x: x + 20, y: y + 2, alive: true);
         self.setCell(x: x + 20, y: y + 3, alive: true);
         self.setCell(x: x + 20, y: y + 4, alive: true);
@@ -352,92 +400,131 @@ struct Grid {
         self.setCell(x: x + 24, y: y + 1, alive: true);
         self.setCell(x: x + 24, y: y + 5, alive: true);
         self.setCell(x: x + 24, y: y + 6, alive: true);
-        // Right block
         self.setCell(x: x + 34, y: y + 2, alive: true);
         self.setCell(x: x + 34, y: y + 3, alive: true);
         self.setCell(x: x + 35, y: y + 2, alive: true);
         self.setCell(x: x + 35, y: y + 3, alive: true);
     }
 
-    mutating func stamp(kind kind: Int64, centerX cx: Int64, centerY cy: Int64) {
-        if kind == 0 {
-            self.stampGlider(centerX: cx, centerY: cy);
-        } else if kind == 1 {
-            self.stampBlinker(centerX: cx, centerY: cy);
-        } else if kind == 2 {
-            self.stampLwss(centerX: cx, centerY: cy);
-        } else if kind == 3 {
-            self.stampPulsar(centerX: cx, centerY: cy);
-        } else if kind == 4 {
-            self.stampGosperGun(centerX: cx, centerY: cy);
+    mutating func stamp(pattern pattern: Pattern, centerX cx: Int64, centerY cy: Int64) {
+        match pattern {
+            .Glider => self.stampGlider(centerX: cx, centerY: cy),
+            .Blinker => self.stampBlinker(centerX: cx, centerY: cy),
+            .Lwss => self.stampLwss(centerX: cx, centerY: cy),
+            .Pulsar => self.stampPulsar(centerX: cx, centerY: cy),
+            .GosperGun => self.stampGosperGun(centerX: cx, centerY: cy)
         }
     }
 
-    func render(renderer: Renderer) {
-        let cell = self.cellSize;
-        // Set the cell color once so the inner loop only issues fillRect
-        // calls. With dense boards (e.g. 200x150) this halves the SDL
-        // syscalls per frame.
-        renderer.setColor(Color.green());
-        // Drop the 1px gutter once cells get small — it eats the cell.
-        let gutter = if cell >= 4 { 1 } else { 0 };
-        var y: Int64 = 0;
-        while y < self.height {
-            var x: Int64 = 0;
-            while x < self.width {
-                if self.cellAt(x: x, y: y) {
-                    let rect = Rectangle(
-                        x: x * cell,
-                        y: y * cell,
-                        width: cell - gutter,
-                        height: cell - gutter
-                    );
-                    renderer.fillRect(rect);
-                }
-                x = x + 1;
-            }
-            y = y + 1;
-        }
-    }
 }
 
-func patternName(kind kind: Int64) -> String {
-    if kind == 0 {
-        "GLIDER"
-    } else if kind == 1 {
-        "BLINKER"
-    } else if kind == 2 {
-        "LWSS"
-    } else if kind == 3 {
-        "PULSAR"
-    } else {
-        "GOSPER GUN"
-    }
-}
-
-// Headless mode: no window, no SDL. Times N generations on a randomized
-// board and prints `gens / ms / gens-per-sec`. Exits 0.
 func runHeadless(cfg: Config) -> Int32 {
-    var grid = Grid(width: cfg.width, height: cfg.height, cellSize: 1);
-    grid.randomize(seed: 12648430);
+    var state = GameState(
+        grid: Grid(width: cfg.width, height: cfg.height),
+        paused: false,
+        running: true,
+        selectedPattern: .Glider,
+        seedCounter: 12648430,
+        fps: 0
+    );
+    state.grid.randomize(seed: state.seedCounter);
+    let renderer = HeadlessRenderer(config: cfg);
 
     let start = monotonicMs();
     var i: Int64 = 0;
     while i < cfg.headlessIters {
-        grid.step();
+        state.grid.step();
+        renderer.render(state);
         i = i + 1;
     }
     let elapsedMs = monotonicMs() - start;
-    // Avoid divide-by-zero on instant runs.
     let denom = if elapsedMs > 0 { elapsedMs } else { 1 };
     let gensPerSec = cfg.headlessIters * 1000 / denom;
 
-    let _ = std.io.stdio.println(
-        cfg.width.format() + "x" + cfg.height.format() +
-        "  gens=" + cfg.headlessIters.format() +
-        "  elapsed_ms=" + elapsedMs.format() +
-        "  gens_per_sec=" + gensPerSec.format()
+    println("\(cfg.width)x\(cfg.height)  gens=\(cfg.headlessIters)  elapsed_ms=\(elapsedMs)  gens_per_sec=\(gensPerSec)");
+    0
+}
+
+func runInteractive(cfg: Config) -> Int32 {
+    let windowW = cfg.width * cfg.cellSize;
+    let windowH = cfg.height * cfg.cellSize;
+    var app = SDLApp(title: "Game of Life", width: windowW, height: windowH);
+    let cellSize = cfg.cellSize;
+    var state = GameState(
+        grid: Grid(width: cfg.width, height: cfg.height),
+        paused: false,
+        running: true,
+        selectedPattern: .Glider,
+        seedCounter: 12648430,
+        fps: 0
     );
+    state.grid.randomize(seed: state.seedCounter);
+
+    var frameCount: Int64 = 0;
+    var fpsLast: UInt32 = sdlGetTicks();
+
+    let simStepMs = UInt32(from: cfg.stepDelayMs);
+    var simLast: UInt32 = sdlGetTicks();
+
+    while state.running {
+        while let .Some(event) = app.pollEvent() {
+            match event {
+                .Quit => { state.running = false },
+                .KeyDown(key) => {
+                    match key {
+                        .Space => { state.paused = not state.paused },
+                        .R => {
+                            state.seedCounter = state.seedCounter + 1;
+                            state.grid.randomize(seed: state.seedCounter);
+                            state.paused = false;
+                        },
+                        .C => {
+                            state.grid.clear();
+                            state.paused = true;
+                        },
+                        .Digit1 => { state.selectedPattern = .Glider },
+                        .Digit2 => { state.selectedPattern = .Blinker },
+                        .Digit3 => { state.selectedPattern = .Lwss },
+                        .Digit4 => { state.selectedPattern = .Pulsar },
+                        .Digit5 => { state.selectedPattern = .GosperGun },
+                        .Escape => { state.running = false },
+                        _ => {}
+                    }
+                },
+                .KeyUp(_) => {},
+                .MouseDown(px, py) => {
+                    let gx = px / cfg.cellSize;
+                    let gy = py / cfg.cellSize;
+                    state.grid.stamp(pattern: state.selectedPattern, centerX: gx, centerY: gy);
+                }
+            }
+        }
+
+        let now = sdlGetTicks();
+        if not state.paused and (now - simLast) >= simStepMs {
+            state.grid.step();
+            simLast = now;
+        }
+
+        frameCount = frameCount + 1;
+        let elapsed = Int64(from: now - fpsLast);
+        if elapsed >= 500 {
+            state.fps = frameCount * 1000 / elapsed;
+            frameCount = 0;
+            fpsLast = now;
+        }
+
+        let grid = state.grid;
+        let patternText = "PATTERN: " + state.selectedPattern.format();
+        let fpsText = "FPS: " + state.fps.format();
+        app.render { (renderer) in
+            renderer.clear(Color.black());
+            renderGrid(grid, renderer, cellSize: cellSize);
+            renderer.drawText(patternText, 8, 8, 2);
+            renderer.drawText(fpsText, 8, 28, 2);
+        };
+    }
+
     0
 }
 
@@ -446,91 +533,5 @@ func main() -> Int32 {
     if cfg.headlessIters > 0 {
         return runHeadless(cfg);
     }
-    let windowW = cfg.width * cfg.cellSize;
-    let windowH = cfg.height * cfg.cellSize;
-    var app = SDLApp(title: "Game of Life", width: windowW, height: windowH);
-    var grid = Grid(width: cfg.width, height: cfg.height, cellSize: cfg.cellSize);
-    var paused = false;
-    var running = true;
-    // 0..4 — see `patternName` for the labels.
-    var selectedPattern: Int64 = 0;
-    // Bumped each time we reseed so successive R-presses give a different
-    // pattern instead of replaying the same starting field.
-    var seedCounter: UInt64 = 12648430;
-
-    grid.randomize(seed: seedCounter);
-
-    // FPS sampling: count frames between ticks, refresh the displayed value
-    // once per ~500ms so it doesn't flicker.
-    var frameCount: Int64 = 0;
-    var fpsLast: UInt32 = sdlGetTicks();
-    var displayedFps: Int64 = 0;
-
-    // Sim is paced independently of render: render runs vsync-capped (so the
-    // FPS counter is meaningful), the simulation only advances when at least
-    // `stepDelayMs` has elapsed since the last generation. Without this, a
-    // 30k-cell board at vsync would step 60+ generations/sec — too fast to
-    // watch.
-    let simStepMs = UInt32(from: cfg.stepDelayMs);
-    var simLast: UInt32 = sdlGetTicks();
-
-    while running {
-        while let .Some(event) = app.pollEvent() {
-            match event {
-                .Quit => { running = false },
-                .KeyDown(key) => {
-                    match key {
-                        .Space => { paused = not paused },
-                        .R => {
-                            seedCounter = seedCounter + 1;
-                            grid.randomize(seed: seedCounter);
-                            paused = false;
-                        },
-                        .C => {
-                            grid.clear();
-                            paused = true;
-                        },
-                        .Digit1 => { selectedPattern = 0 },
-                        .Digit2 => { selectedPattern = 1 },
-                        .Digit3 => { selectedPattern = 2 },
-                        .Digit4 => { selectedPattern = 3 },
-                        .Digit5 => { selectedPattern = 4 },
-                        .Escape => { running = false },
-                        _ => {}
-                    }
-                },
-                .KeyUp(_) => {},
-                .MouseDown(px, py) => {
-                    let gx = px / cfg.cellSize;
-                    let gy = py / cfg.cellSize;
-                    grid.stamp(kind: selectedPattern, centerX: gx, centerY: gy);
-                }
-            }
-        }
-
-        let now = sdlGetTicks();
-        if not paused and (now - simLast) >= simStepMs {
-            grid.step();
-            simLast = now;
-        }
-
-        // Refresh the FPS readout every ~500ms.
-        frameCount = frameCount + 1;
-        let elapsed = Int64(from: now - fpsLast);
-        if elapsed >= 500 {
-            displayedFps = frameCount * 1000 / elapsed;
-            frameCount = 0;
-            fpsLast = now;
-        }
-
-        app.render { (renderer) in
-            renderer.clear(Color.black());
-            grid.render(renderer);
-            // HUD: current pattern in the top-left, FPS just below.
-            renderer.drawText("PATTERN: " + patternName(kind: selectedPattern), 8, 8, 2);
-            renderer.drawText("FPS: " + displayedFps.format(), 8, 28, 2);
-        };
-    }
-
-    0
+    runInteractive(cfg)
 }

@@ -75,7 +75,7 @@ func handleWeather(req: Request, ctx: Ctx) -> Response {
     url.append(lat);
     url.append("&longitude=");
     url.append(lon);
-    url.append("""&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&forecast_days=7""");
+    url.append("""&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m,apparent_temperature,surface_pressure,uv_index&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset&hourly=temperature_2m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&forecast_days=7&timezone=auto""");
 
     match Swoop().fetch(url) {
         .Ok(res) => {

@@ -193,6 +193,7 @@ pub fn compile_and_link(
     link::link_executable(
         &temp_object.path,
         output_path,
+        target,
         &options.libraries,
         &options.library_paths,
         &options.frameworks,

@@ -4,13 +4,16 @@
 //! library paths, libraries, and macOS frameworks.
 
 use crate::error::CodegenError;
+use kestrel_codegen::target::TargetConfig;
 use std::path::Path;
 use std::process::Command;
+use target_lexicon::OperatingSystem;
 
 /// Link an object file into an executable.
 pub fn link_executable(
     object_path: &Path,
     output_path: &Path,
+    target: &TargetConfig,
     libraries: &[String],
     library_paths: &[String],
     frameworks: &[String],
@@ -41,6 +44,11 @@ pub fn link_executable(
     for framework in frameworks {
         cmd.arg("-framework");
         cmd.arg(framework);
+    }
+
+    // Linux requires explicit -lm for math functions (on macOS they're in libSystem)
+    if !matches!(target.triple.operating_system, OperatingSystem::Darwin) {
+        cmd.arg("-lm");
     }
 
     let output = cmd

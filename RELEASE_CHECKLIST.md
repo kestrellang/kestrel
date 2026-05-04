@@ -5,13 +5,12 @@
 - [x] Write naming guide
 - [ ] Add custom written docs
 - [x] Move to github org
-- [ ] Write blog post
+- [x] Write blog post
 - [ ] Play with extension
-- [ ] Create claude code plugin
-- [ ] Create skill
+- [x] Create claude code plugin
+- [x] Create skill
 - [x] Move site to separate repo
 - [x] Move registry to separate repo
 - [x] Move plugin to separate repo
 - [x] Move triage to separate repo
 - [ ] Verify installation end-to-end
-- [ ] Build the playground
