@@ -22,67 +22,37 @@
 
 module Life
 
-import Sdl.(Key, Event)
-
-func handleEvent(event: Event, mutating state s: GameState, config cfg: Config) {
-    match event {
-        .Quit => { s.running = false },
-        .KeyDown(key) => {
-            match key {
-                .Space => { s.paused = not s.paused },
-                .R => {
-                    s.seedCounter = s.seedCounter + 1;
-                    s.grid.randomize(seed: s.seedCounter);
-                    s.paused = false;
-                },
-                .C => {
-                    s.grid.clear();
-                    s.paused = true;
-                },
-                .Digit1 => { s.selectedPattern = .Glider },
-                .Digit2 => { s.selectedPattern = .Blinker },
-                .Digit3 => { s.selectedPattern = .Lwss },
-                .Digit4 => { s.selectedPattern = .Pulsar },
-                .Digit5 => { s.selectedPattern = .GosperGun },
-                .Escape => { s.running = false },
-                _ => {}
-            }
-        },
-        .KeyUp(_) => {},
-        .MouseDown(px, py) => {
-            let gx = px / cfg.cellSize;
-            let gy = py / cfg.cellSize;
-            s.selectedPattern.stamp(on: s.grid, centerX: gx, centerY: gy);
-        }
-    }
-}
+import Sdl.(Event)
 
 func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Config) where I: InputManager, R: GameRenderer {
-    var state = GameState(
-        grid: Grid(width: cfg.width, height: cfg.height),
-        paused: false,
-        running: true,
-        selectedPattern: .Glider,
-        seedCounter: 12648430,
-        fps: 0,
-        stepDelayMs: cfg.stepDelayMs,
-        generation: 0,
-        frameCount: 0,
-        lastFpsMs: 0
-    );
-    state.grid.randomize(seed: state.seedCounter);
+    var state = GameState(fromConfig: cfg);
 
     var timer = Timer.start();
+    var simAccum: Int64 = 0;
 
     while state.running {
         while let .Some(event) = i.getEvent() {
-            handleEvent(event, state: state, config: cfg);
+            match event {
+                .Quit => { state.running = false },
+                .KeyDown(.Space) => { state.paused = not state.paused },
+                .KeyDown(.R) => { state.randomize() },
+                .KeyDown(.C) => { state.clear() },
+                .KeyDown(.Digit1) => { state.selectedPattern = .Glider },
+                .KeyDown(.Digit2) => { state.selectedPattern = .Blinker },
+                .KeyDown(.Digit3) => { state.selectedPattern = .Lwss },
+                .KeyDown(.Digit4) => { state.selectedPattern = .Pulsar },
+                .KeyDown(.Digit5) => { state.selectedPattern = .GosperGun },
+                .KeyDown(.Escape) => { state.running = false },
+                .MouseDown(px, py) => { state.stamp(px, py, cfg.cellSize) },
+                _ => {}
+            }
         }
 
-        let dt = timer.tick();
-        if not state.paused and (state.stepDelayMs == 0 or dt >= state.stepDelayMs) {
+        simAccum = simAccum + timer.tick();
+        if not state.paused and (state.stepDelayMs == 0 or simAccum >= state.stepDelayMs) {
             state.grid.step();
             state.generation = state.generation + 1;
+            simAccum = 0;
         }
 
         state.updateFps(timer.elapsed());

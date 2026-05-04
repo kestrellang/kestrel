@@ -48,26 +48,26 @@ module Test
             if lmNone.isSome() { return 12 }
 
             // all(satisfy:)
-            let allPos = arr.all(satisfying: { (x) in x > 0 });
+            let allPos = arr.all(matching: { (x) in x > 0 });
             if allPos == false { return 13 }
 
-            let allBig = arr.all(satisfying: { (x) in x > 3 });
+            let allBig = arr.all(matching: { (x) in x > 3 });
             if allBig { return 14 }
 
-            // all(satisfy:) on empty array - vacuous truth
+            // all(matching:) on empty array - vacuous truth
             let empty = std.collections.Array[std.numeric.Int64]();
-            let allEmpty = empty.all(satisfying: { (x) in false });
+            let allEmpty = empty.all(matching: { (x) in false });
             if allEmpty == false { return 15 }
 
-            // any(satisfy:)
-            let anyBig = arr.any(satisfying: { (x) in x > 4 });
+            // any(matching:)
+            let anyBig = arr.any(matching: { (x) in x > 4 });
             if anyBig == false { return 16 }
 
-            let anyHuge = arr.any(satisfying: { (x) in x > 10 });
+            let anyHuge = arr.any(matching: { (x) in x > 10 });
             if anyHuge { return 17 }
 
-            // any(satisfy:) on empty array
-            let anyEmpty = empty.any(satisfying: { (x) in true });
+            // any(matching:) on empty array
+            let anyEmpty = empty.any(matching: { (x) in true });
             if anyEmpty { return 18 }
 
             // countWhere(predicate:) - positional single-name param

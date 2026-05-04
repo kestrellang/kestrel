@@ -235,6 +235,7 @@ public enum FloatStyle: Equatable, Matchable {
 /// A flat record of independent fields — no validation across them. Each
 /// formatter is responsible for ignoring fields outside its domain and
 /// applying its own defaults when an option is absent.
+@builtin(.FormatOptions)
 public struct FormatOptions: Equatable {
     /// Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.
     public var width: Int64?

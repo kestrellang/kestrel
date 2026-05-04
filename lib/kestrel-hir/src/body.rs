@@ -99,6 +99,9 @@ pub enum SugarKind {
     /// `ProtocolCall(lhs, AddAssign, "addAssign", [rhs])`, or `HirExpr::Error`
     /// if the AST-level place check rejected the LHS at desugar time.
     CompoundAssign,
+    /// `"hello \(name)!"` — `inner` is the Block containing the
+    /// DefaultStringInterpolation init/append/build sequence.
+    StringInterpolation,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).

@@ -18,13 +18,13 @@ module Test
             if doubled(unchecked: 4) != 10 { return 3 }
 
             // Test filter
-            let evens = arr.iter().filter({ (x) in x % 2 == 0 }).collect();
+            let evens = arr.iter().filter(matching: { (x) in x % 2 == 0 }).collect();
             if evens.count != 2 { return 4 }
             if evens(unchecked: 0) != 2 { return 5 }
             if evens(unchecked: 1) != 4 { return 6 }
 
             // Test map + filter chain
-            let result = arr.iter().filter({ (x) in x > 2 }).map({ (x) in x * 10 }).collect();
+            let result = arr.iter().filter(matching: { (x) in x > 2 }).map({ (x) in x * 10 }).collect();
             if result.count != 3 { return 7 }
             if result(unchecked: 0) != 30 { return 8 }
 

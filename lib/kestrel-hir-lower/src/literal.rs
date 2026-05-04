@@ -75,14 +75,20 @@ pub fn decode_string(
                     escape_start,
                     content_start + j,
                 ),
-                // `\(` is interpolation. The parser only converts top-level
-                // string expressions to `InterpolatedString`; strings nested
-                // inside calls etc. stay as plain `String` and reach this
-                // decoder with `\(` intact. Treat it as a recognized escape
-                // (passthrough) so we don't fire spurious E700.
+                // `\(` is interpolation syntax — the AST builder should have
+                // rerouted this string to InterpolatedString before it
+                // reached literal decoding. If we get here, treat as invalid.
                 '(' => {
-                    result.push('\\');
-                    result.push('(');
+                    let paren_len = '('.len_utf8();
+                    errors.push(EscapeError {
+                        span: Span::new(
+                            file_id,
+                            escape_start..content_start + j + paren_len,
+                        ),
+                        kind: EscapeErrorKind::InvalidEscape {
+                            sequence: "\\(".to_string(),
+                        },
+                    });
                 },
                 other => {
                     let other_len = other.len_utf8();

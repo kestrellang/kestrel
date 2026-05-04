@@ -17,15 +17,15 @@ module Test
             if r.contains(6) { return 5 }
 
             // isEmpty - non-empty range
-            if r.isEmpty() { return 6 }
+            if r.isEmpty { return 6 }
 
             // isEmpty - single element range (start == end)
             let singleRange = std.core.ClosedRange[std.numeric.Int64](5, 5);
-            if singleRange.isEmpty() { return 7 }
+            if singleRange.isEmpty { return 7 }
 
             // isEmpty - empty range (start > end)
             let emptyRange = std.core.ClosedRange[std.numeric.Int64](8, 2);
-            if emptyRange.isEmpty() == false { return 8 }
+            if emptyRange.isEmpty == false { return 8 }
 
             // equals
             let r2 = std.core.ClosedRange[std.numeric.Int64](2, 5);

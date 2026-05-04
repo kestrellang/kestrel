@@ -236,6 +236,7 @@ pub enum Builtin {
     DefaultStringInterpolationAppendLiteral,
     DefaultStringInterpolationAppendInterpolation,
     DefaultStringInterpolationBuild,
+    FormatOptions,
     FormattableProtocol,
     FormattableFormatMethod,
 }
@@ -418,6 +419,7 @@ impl Builtin {
                 "DefaultStringInterpolationAppendInterpolation"
             },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatMethod => "FormattableFormat",
         }
@@ -596,6 +598,7 @@ impl Builtin {
                 Some(Self::DefaultStringInterpolationAppendInterpolation)
             },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormat" => Some(Self::FormattableFormatMethod),
 
@@ -759,7 +762,7 @@ impl Builtin {
             Self::ArrayStruct | Self::SliceStruct => BuiltinKind::Struct,
 
             // String interpolation
-            Self::DefaultStringInterpolation => BuiltinKind::Struct,
+            Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,
             Self::DefaultStringInterpolationInit
             | Self::DefaultStringInterpolationAppendLiteral
             | Self::DefaultStringInterpolationAppendInterpolation

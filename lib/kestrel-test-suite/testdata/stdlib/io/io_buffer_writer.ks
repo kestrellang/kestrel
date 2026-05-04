@@ -8,8 +8,8 @@ module Test
             var buf = std.io.write.Buffer();
 
             // Initially empty
-            if buf.isEmpty() == false { return 1 }
-            if buf.count() != 0 { return 2 }
+            if buf.isEmpty == false { return 1 }
+            if buf.count != 0 { return 2 }
 
             // Write some bytes
             let byte72: std.numeric.UInt8 = 72;   // 'H'
@@ -30,8 +30,8 @@ module Test
             }
 
             // Check count
-            if buf.count() != 5 { return 5 }
-            if buf.isEmpty() { return 6 }
+            if buf.count != 5 { return 5 }
+            if buf.isEmpty { return 6 }
 
             // Check toString
             let s = buf.toString();
@@ -64,18 +64,18 @@ module Test
                 .Ok(n) => if n != 1 { return 13 },
                 .Err(_) => return 14
             }
-            if buf.count() != 6 { return 15 }
+            if buf.count != 6 { return 15 }
             if buf.toString().equals("Hello!") == false { return 16 }
 
             // Test clear
             buf.clear();
-            if buf.count() != 0 { return 17 }
-            if buf.isEmpty() == false { return 18 }
+            if buf.count != 0 { return 17 }
+            if buf.isEmpty == false { return 18 }
 
             // Test init with capacity
             var buf2 = std.io.write.Buffer( 64);
-            if buf2.isEmpty() == false { return 19 }
-            if buf2.count() != 0 { return 20 }
+            if buf2.isEmpty == false { return 19 }
+            if buf2.count != 0 { return 20 }
 
             0
         }

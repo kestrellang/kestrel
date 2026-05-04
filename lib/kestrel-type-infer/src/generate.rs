@@ -678,6 +678,21 @@ fn mark_sugar_primary(
             // AST place check rejected the LHS at desugar time).
             ctx.poison_protocol_call_recv_on_failure.insert(inner);
         },
+        SugarKind::StringInterpolation => {
+            // inner is Block { stmts: [Let($dsi, init_call), ...], tail_expr: build_call }.
+            // If the DSI init fails (stdlib missing), poison so append/build errors absorb.
+            let HirExpr::Block { body, .. } = &hir.exprs[inner] else {
+                return;
+            };
+            if let Some(first_stmt) = body.stmts.first()
+                && let HirStmt::Let {
+                    value: Some(init_call),
+                    ..
+                } = &hir.stmts[*first_stmt]
+            {
+                ctx.poison_protocol_call_recv_on_failure.insert(*init_call);
+            }
+        },
     }
 }
 

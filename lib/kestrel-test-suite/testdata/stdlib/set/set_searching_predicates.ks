@@ -26,24 +26,24 @@ module Test
             let notFound = s.first(matching: { (x) in x > 100 });
             if notFound.isSome() { return 5 }
 
-            // Test all(satisfy:) - true
-            if s.all(satisfying: { (x) in x > 0 }) == false { return 6 }
+            // Test all(matching:) - true
+            if s.all(matching: { (x) in x > 0 }) == false { return 6 }
 
-            // Test all(satisfy:) - false
-            if s.all(satisfying: { (x) in x > 2 }) { return 7 }
+            // Test all(matching:) - false
+            if s.all(matching: { (x) in x > 2 }) { return 7 }
 
-            // Test all(satisfy:) - empty set (vacuous truth)
+            // Test all(matching:) - empty set (vacuous truth)
             let empty = std.collections.Set[std.numeric.Int64]();
-            if empty.all(satisfying: { (x) in false }) == false { return 8 }
+            if empty.all(matching: { (x) in false }) == false { return 8 }
 
-            // Test any(satisfy:) - true
-            if s.any(satisfying: { (x) in x == 3 }) == false { return 9 }
+            // Test any(matching:) - true
+            if s.any(matching: { (x) in x == 3 }) == false { return 9 }
 
-            // Test any(satisfy:) - false
-            if s.any(satisfying: { (x) in x > 100 }) { return 10 }
+            // Test any(matching:) - false
+            if s.any(matching: { (x) in x > 100 }) { return 10 }
 
-            // Test any(satisfy:) - empty set
-            if empty.any(satisfying: { (x) in true }) { return 11 }
+            // Test any(matching:) - empty set
+            if empty.any(matching: { (x) in true }) { return 11 }
 
             // Test countWhere(predicate:)
             let evenCount = s.countItems(matching: { (x) in x % 2 == 0 });

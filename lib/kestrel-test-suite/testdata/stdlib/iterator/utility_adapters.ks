@@ -15,13 +15,13 @@ module Test
             if everyOther(unchecked: 1) != 2 { return 2 }
 
             // Test scan (running sum)
-            let running: std.collections.Array[std.numeric.Int64] = arr.iter().scan(0, { (acc, x) in acc + x }).collect();
+            let running: std.collections.Array[std.numeric.Int64] = arr.iter().scan(from: 0, combining: { (acc, x) in acc + x }).collect();
             if running.count != 3 { return 3 }
             if running(unchecked: 0) != 1 { return 4 }
             if running(unchecked: 2) != 6 { return 5 }
 
             // Test position
-            let pos = arr.iter().position({ (x) in x == 2 });
+            let pos = arr.iter().position(matching: { (x) in x == 2 });
             if pos.isNone() { return 6 }
             if pos.unwrap() != 1 { return 7 }
 

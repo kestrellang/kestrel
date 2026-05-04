@@ -18,7 +18,7 @@ module Test
             if upper(unchecked: 0).equals('H') == false { return 5 }
 
             // iter() with filter
-            let vowels = s.iter().filter({ (c) in
+            let vowels = s.iter().filter(matching: { (c) in
                 c.equals('a') or c.equals('e') or c.equals('i') or c.equals('o') or c.equals('u')
             }).collect();
             if vowels.count != 2 { return 6 }

@@ -22,7 +22,7 @@ module Test
             var cursor = std.io.read.Cursor(data: data);
 
             // Initial position should be 0
-            if cursor.position() != 0 { return 1 }
+            if cursor.position != 0 { return 1 }
 
             // Read first 3 bytes
             var buf = std.collections.Array[std.numeric.UInt8]();
@@ -42,7 +42,7 @@ module Test
             if buf(unchecked: 2) != byte30 { return 6 }
 
             // Position should be 3
-            if cursor.position() != 3 { return 7 }
+            if cursor.position != 3 { return 7 }
 
             // Read remaining 2 bytes (request 5 but only 2 available)
             var buf2 = std.collections.Array[std.numeric.UInt8]();
@@ -61,7 +61,7 @@ module Test
             if buf2(unchecked: 1) != byte50 { return 11 }
 
             // Position should be 5
-            if cursor.position() != 5 { return 12 }
+            if cursor.position != 5 { return 12 }
 
             // Read at EOF should return 0
             let result3 = cursor.read(into: slice);
@@ -72,7 +72,7 @@ module Test
 
             // Test setPosition
             cursor.setPosition(to: 1);
-            if cursor.position() != 1 { return 15 }
+            if cursor.position != 1 { return 15 }
 
             // Read after setPosition
             var buf3 = std.collections.Array[std.numeric.UInt8]();
@@ -89,11 +89,11 @@ module Test
 
             // setPosition clamps negative to 0
             cursor.setPosition(to: -5);
-            if cursor.position() != 0 { return 20 }
+            if cursor.position != 0 { return 20 }
 
             // setPosition clamps beyond end to data count
             cursor.setPosition(to: 100);
-            if cursor.position() != 5 { return 21 }
+            if cursor.position != 5 { return 21 }
 
             0
         }
