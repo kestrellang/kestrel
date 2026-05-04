@@ -15,25 +15,25 @@ module Test
             let _ = b.insert(2, 20);
             let _ = b.insert(3, 30);
 
-            if a.equals(b) == false { return 1 }
+            if a.isEqual(to: b) == false { return 1 }
 
             // equals - different values
             var c = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = c.insert(1, 10);
             let _ = c.insert(2, 99);
             let _ = c.insert(3, 30);
-            if a.equals(c) { return 2 }
+            if a.isEqual(to: c) { return 2 }
 
             // equals - different count
             var d = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = d.insert(1, 10);
             let _ = d.insert(2, 20);
-            if a.equals(d) { return 3 }
+            if a.isEqual(to: d) { return 3 }
 
             // equals - empty dictionaries
             let e1 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let e2 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            if e1.equals(e2) == false { return 4 }
+            if e1.isEqual(to: e2) == false { return 4 }
 
             // containsValue(value:) - value exists
             if a.containsValue(20) == false { return 5 }

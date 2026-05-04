@@ -22,7 +22,7 @@ module Test
                 .Err(_) => return 3
             }
             if buf2.count != 5 { return 4 }
-            if buf2.toString().equals("Hello") == false { return 5 }
+            if buf2.toString().isEqual(to: "Hello") == false { return 5 }
 
             // Test writeLine using Buffer
             var buf3 = std.io.write.Buffer();
@@ -69,7 +69,7 @@ module Test
             let _ = std.io.write.writeString( buf6, "Hello");
             let _ = std.io.write.writeString( buf6, " ");
             let _ = std.io.write.writeString( buf6, "World");
-            if buf6.toString().equals("Hello World") == false { return 15 }
+            if buf6.toString().isEqual(to: "Hello World") == false { return 15 }
 
             0
         }

@@ -17,13 +17,13 @@ module Test
             let i64val: std.numeric.Int64 = 42;
             let f32fromI64 = std.numeric.Float32(from: i64val);
             let fortyTwoF: std.numeric.Float32 = 42.0;
-            if f32fromI64.equals(fortyTwoF) == false { return 2 }
+            if f32fromI64.isEqual(to: fortyTwoF) == false { return 2 }
 
             // init(from: Int64) with negative
             let negI64: std.numeric.Int64 = -100;
             let f32fromNeg = std.numeric.Float32(from: negI64);
             let negHundredF: std.numeric.Float32 = -100.0;
-            if f32fromNeg.equals(negHundredF) == false { return 3 }
+            if f32fromNeg.isEqual(to: negHundredF) == false { return 3 }
 
             // toInt64 — normal case
             let f32val: std.numeric.Float32 = 3.7;
@@ -52,7 +52,7 @@ module Test
             let asF64 = small.toFloat64();
             // 1.5 is exactly representable in both Float32 and Float64
             let onePointFiveF64: std.numeric.Float64 = 1.5;
-            if asF64.equals(onePointFiveF64) == false { return 10 }
+            if asF64.isEqual(to: onePointFiveF64) == false { return 10 }
 
             // parse — valid float
             let parsed = std.numeric.Float32.parse("3.14");
@@ -67,13 +67,13 @@ module Test
             if parsedNeg.isNone() { return 13 }
             let parsedNegVal = parsedNeg.unwrap();
             let negTwoPointFive: std.numeric.Float32 = -2.5;
-            if parsedNegVal.equals(negTwoPointFive) == false { return 14 }
+            if parsedNegVal.isEqual(to: negTwoPointFive) == false { return 14 }
 
             // parse — scientific notation
             let parsedSci = std.numeric.Float32.parse("1.5e2");
             if parsedSci.isNone() { return 15 }
             let oneHundredFifty: std.numeric.Float32 = 150.0;
-            if parsedSci.unwrap().equals(oneHundredFifty) == false { return 16 }
+            if parsedSci.unwrap().isEqual(to: oneHundredFifty) == false { return 16 }
 
             // parse — "nan"
             let parsedNan = std.numeric.Float32.parse("nan");
@@ -97,7 +97,7 @@ module Test
             let parsedInt = std.numeric.Float32.parse("42");
             if parsedInt.isNone() { return 23 }
             let parsedFortyTwo: std.numeric.Float32 = 42.0;
-            if parsedInt.unwrap().equals(parsedFortyTwo) == false { return 24 }
+            if parsedInt.unwrap().isEqual(to: parsedFortyTwo) == false { return 24 }
 
             0
         }

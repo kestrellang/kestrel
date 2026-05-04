@@ -12,7 +12,7 @@ module Test
             if c.value() != cp { return 1 }
 
             // Should behave identically to a char literal 'A'
-            if c.equals('A') == false { return 2 }
+            if c.isEqual(to: 'A') == false { return 2 }
 
             // Try a non-ASCII code point: U+00E9 = 233 (e-acute)
             let cp2 = 233;
@@ -22,13 +22,13 @@ module Test
             // ASCII '0' = 48
             let cp3 = 48;
             let c3 = std.text.Char(cp3);
-            if c3.equals('0') == false { return 4 }
+            if c3.isEqual(to: '0') == false { return 4 }
             if c3.value() != cp3 { return 5 }
 
             // Null character = 0
             let cp4 = 0;
             let c4 = std.text.Char(cp4);
-            if c4.equals('\0') == false { return 6 }
+            if c4.isEqual(to: '\0') == false { return 6 }
             if c4.value() != cp4 { return 7 }
 
             0

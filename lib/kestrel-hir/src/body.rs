@@ -578,14 +578,14 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     (
         BinaryOp::Eq,
         Builtin::EqualsOperatorProtocol,
-        "equals",
-        None,
+        "isEqual",
+        Some("to"),
     ),
     (
         BinaryOp::Ne,
         Builtin::NotEqualsOperatorProtocol,
-        "notEquals",
-        None,
+        "isNotEqual",
+        Some("to"),
     ),
     (
         BinaryOp::Lt,

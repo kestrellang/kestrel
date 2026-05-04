@@ -19,8 +19,8 @@ module Test
             let mixed: std.text.String = "HeLLo";
             let lower = mixed.lowercased();
             let upper = mixed.uppercased();
-            if lower.equals("hello") == false { return 3 }
-            if upper.equals("HELLO") == false { return 4 }
+            if lower.isEqual(to: "hello") == false { return 3 }
+            if upper.isEqual(to: "HELLO") == false { return 4 }
 
             0
         }

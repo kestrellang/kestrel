@@ -11,7 +11,7 @@ struct Number: Prelude.AddOperatorProtocol, Prelude.SubtractOperatorProtocol, Pr
     func subtract(rhs: Number) -> Number {
         Number(value: lang.i64_sub(self.value, rhs.value))
     }
-    func equals(rhs: Number) -> lang.i1 {
+    func isEqual(to rhs: Number) -> lang.i1 {
         lang.i64_eq(self.value, rhs.value)
     }
 }

@@ -333,7 +333,7 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
     /// Err("x")    == Err("x");     // true
     /// Ok(1)       == Err("x");     // false
     /// ```
-    public func equals(other: Result[T, E]) -> Bool {
+    public func isEqual(to other: Result[T, E]) -> Bool {
         match (self, other) {
             (.Ok(a), .Ok(b)) => a == b,
             (.Err(a), .Err(b)) => a == b,

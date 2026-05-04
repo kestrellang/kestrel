@@ -289,14 +289,14 @@ public struct UInt8:
     /// # Examples
     ///
     /// ```
-    /// (42).equals(42);  // true
-    /// 42 == 42;          // true
+    /// (42).isEqual(to: 42);  // true
+    /// 42 == 42;               // true
     /// ```
-    public func equals(other: UInt8) -> Bool {
+    public func isEqual(to other: UInt8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
     }
 
-    /// Pattern-matching hook for `Matchable`. Identical to `equals`.
+    /// Pattern-matching hook for `Matchable`. Identical to `isEqual`.
     public func matches(other: UInt8) -> Bool {
         Bool(boolLiteral: lang.i8_eq(self.raw, other.raw))
     }

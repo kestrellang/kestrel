@@ -442,8 +442,8 @@ extend Iterator {
     ///     .inspect { print("after filter: \{it}") }
     ///     .collect();
     /// ```
-    public func inspect(inspecting inspector: (Item) -> ()) -> InspectIterator[Self] {
-        InspectIterator(inner: self, inspecting: inspector)
+    public func inspect(inspector: (Item) -> ()) -> InspectIterator[Self] {
+        InspectIterator(inner: self, inspector: inspector)
     }
 
     /// Yields every `n`-th element, starting at the first. `n == 0` is
@@ -767,15 +767,14 @@ extend Iterator {
     }
 
     /// Index of the first element matching `predicate`, or `None`.
-    /// Mirror of `find` for positions.
     ///
     /// # Examples
     ///
     /// ```
-    /// ["a", "b", "c"].iter().position { it == "b" };   // Some(1)
-    /// [1, 2, 3].iter().position { it > 10 };           // None
+    /// ["a", "b", "c"].iter().firstIndex(matching: { it == "b" });   // Some(1)
+    /// [1, 2, 3].iter().firstIndex(matching: { it > 10 });           // None
     /// ```
-    public mutating func position(matching predicate: (Item) -> Bool) -> Int64? {
+    public mutating func firstIndex(matching predicate: (Item) -> Bool) -> Int64? {
         var index = 0;
         while let .Some(item) = self.next() {
             if predicate(item) {
@@ -843,7 +842,7 @@ extend Iterator where Item: Equatable {
     /// [1, 2, 3].iter().contains(5);   // false
     /// ```
     public mutating func contains(element: Item) -> Bool {
-        self.any(matching: { (item) in item.equals(element) })
+        self.any(matching: { (item) in item.isEqual(to: element) })
     }
 }
 

@@ -22,7 +22,7 @@ import std.core.(ExpressibleByArrayLiteral)
 /// `Set[T]` is implemented on top of `Dictionary[T, Unit]` — only the
 /// keys carry information, so the value slot needs a type that
 /// instances can be cheaply produced and compared. `Unit` provides
-/// that: every instance equals every other, and `clone()` returns a
+/// that: every instance is equal to every other, and `clone()` returns a
 /// fresh one without copying anything meaningful. Internal-only;
 /// users never see this type.
 ///
@@ -37,7 +37,7 @@ struct Unit: Equatable, Cloneable {
 
     /// All `Unit` instances compare equal — there's only one
     /// inhabitant.
-    func equals(other: Unit) -> Bool { true }
+    func isEqual(to other: Unit) -> Bool { true }
     /// Returns a fresh `Unit`. Trivial since the type carries no
     /// data.
     func clone() -> Unit { Unit() }
@@ -1191,10 +1191,10 @@ extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
     /// # Examples
     ///
     /// ```
-    /// Set([1, 2, 3]).equals(Set([3, 2, 1]));  // true
-    /// Set([1, 2]).equals(Set([1, 2, 3]));     // false
+    /// Set([1, 2, 3]).isEqual(to: Set([3, 2, 1]));  // true
+    /// Set([1, 2]).isEqual(to: Set([1, 2, 3]));     // false
     /// ```
-    public func equals(other: Set[T, H]) -> Bool {
+    public func isEqual(to other: Set[T, H]) -> Bool {
         if self.count != other.count {
             return false
         }

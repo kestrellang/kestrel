@@ -489,9 +489,6 @@ public struct GraphemesIterator: Iterator {
 
     private var charsIter: CharsIterator
     private var pendingChar: Char?
-    private var prevProp: GraphemeBreakProperty
-    private var prevPrevWasRI: Bool
-    private var started: Bool
 
     /// @name From Chars
     /// Wraps a `CharsIterator` to produce graphemes via UAX #29 segmentation.
@@ -500,9 +497,6 @@ public struct GraphemesIterator: Iterator {
     public init(charsIter: CharsIterator) {
         self.charsIter = charsIter;
         self.pendingChar = .None;
-        self.prevProp = GraphemeBreakProperty.Other;
-        self.prevPrevWasRI = false;
-        self.started = false;
     }
 
     /// Returns the next grapheme cluster, or `None` when the source is exhausted.
@@ -1046,7 +1040,7 @@ public struct ByteIndex: Equatable, Comparable {
     }
 
     /// Returns true if the two indices wrap the same byte offset.
-    public func equals(other: ByteIndex) -> Bool {
+    public func isEqual(to other: ByteIndex) -> Bool {
         self.value == other.value
     }
 
@@ -1077,7 +1071,7 @@ public struct CharIndex: Equatable {
     }
 
     /// Returns true if the two indices point at the same byte offset.
-    public func equals(other: CharIndex) -> Bool {
+    public func isEqual(to other: CharIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }
 }
@@ -1102,7 +1096,7 @@ public struct GraphemeIndex: Equatable {
     }
 
     /// Returns true if the two indices point at the same byte offset.
-    public func equals(other: GraphemeIndex) -> Bool {
+    public func isEqual(to other: GraphemeIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }
 }
@@ -1236,6 +1230,20 @@ extend ClosedRange[Int64]: BytesIndex {
     public func readBytesUnchecked(from view: BytesView) -> BytesView {
         let endExclusive = self.end + 1;
         view._subView(startByte: self.start, endByte: endExclusive)
+    }
+}
+
+extend ClosedRange[Int64]: BytesClampable {
+    type BytesClampedYield = BytesView
+
+    public func readBytesClamped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        var start = self.start;
+        var end = self.end + 1;
+        if start < 0 { start = 0 }
+        if end > len { end = len }
+        if start > end { start = end }
+        view._subView(startByte: start, endByte: end)
     }
 }
 
@@ -1414,6 +1422,22 @@ extend ClosedRange[Int64]: CharsIndex {
     }
 }
 
+extend ClosedRange[Int64]: CharsClampable {
+    type CharsClampedYield = CharsView
+
+    public func readCharsClamped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end + 1;
+        if s < 0 { s = 0 }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 /// Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.
 public protocol CharsSubstringIndex {
     func readCharsSubstring(from view: CharsView) -> String
@@ -1581,6 +1605,22 @@ extend ClosedRange[Int64]: GraphemesIndex {
             return .None
         }
         .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend ClosedRange[Int64]: GraphemesClampable {
+    type GraphemesClampedYield = GraphemesView
+
+    public func readGraphemesClamped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end + 1;
+        if s < 0 { s = 0 }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
     }
 }
 
@@ -1752,6 +1792,22 @@ extend ClosedRange[Int64]: LinesIndex {
             return .None
         }
         .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend ClosedRange[Int64]: LinesClampable {
+    type LinesClampedYield = LinesView
+
+    public func readLinesClamped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end + 1;
+        if s < 0 { s = 0 }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
     }
 }
 

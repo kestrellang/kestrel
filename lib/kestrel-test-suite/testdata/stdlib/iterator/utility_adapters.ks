@@ -20,8 +20,8 @@ module Test
             if running(unchecked: 0) != 1 { return 4 }
             if running(unchecked: 2) != 6 { return 5 }
 
-            // Test position
-            let pos = arr.iter().position(matching: { (x) in x == 2 });
+            // Test firstIndex
+            let pos = arr.iter().firstIndex(matching: { (x) in x == 2 });
             if pos.isNone() { return 6 }
             if pos.unwrap() != 1 { return 7 }
 

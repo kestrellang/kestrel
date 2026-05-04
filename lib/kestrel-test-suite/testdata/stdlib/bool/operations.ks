@@ -20,8 +20,8 @@ module Test
             if f.logicalNot() == false { return 6 }
 
             // Test equals
-            if t.equals(t) == false { return 7 }
-            if t.equals(f) { return 8 }
+            if t.isEqual(to: t) == false { return 7 }
+            if t.isEqual(to: f) { return 8 }
 
             0
         }

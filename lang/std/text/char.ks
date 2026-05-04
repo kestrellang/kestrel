@@ -420,14 +420,14 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'a'.equals('a');  // true
-    /// 'a'.equals('A');  // false
+    /// 'a'.isEqual(to: 'a');  // true
+    /// 'a'.isEqual(to: 'A');  // false
     /// ```
-    public func equals(other: Char) -> Bool {
+    public func isEqual(to other: Char) -> Bool {
         self._value == other._value
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     public func matches(other: Char) -> Bool {
         self._value == other._value
     }
@@ -567,18 +567,13 @@ public struct Grapheme: Equatable, Cloneable {
 
     /// Returns a deep copy of this grapheme.
     public func clone() -> Grapheme {
-        if let .Some(r) = self._rest {
-            var copy = Array[Char]();
-            copy.append(self._first);
-            let rn = r.count;
-            var i: Int64 = 0;
-            while i < rn {
-                copy.append(r(unchecked: i));
-                i = i + 1
+        match self._rest {
+            .None => Grapheme(char: self._first),
+            .Some(r) => {
+                var g = Grapheme(char: self._first);
+                g._rest = .Some(r.clone());
+                g
             }
-            Grapheme(chars: copy)
-        } else {
-            Grapheme(char: self._first)
         }
     }
 
@@ -667,10 +662,10 @@ public struct Grapheme: Equatable, Cloneable {
     /// ```
     /// let a = Grapheme(char: 'a');
     /// let b = Grapheme(char: 'a');
-    /// a.equals(b);  // true
+    /// a.isEqual(to: b);  // true
     /// ```
-    public func equals(other: Grapheme) -> Bool {
-        if self._first.equals(other._first) == false {
+    public func isEqual(to other: Grapheme) -> Bool {
+        if self._first.isEqual(to: other._first) == false {
             return false
         }
         match (self._rest, other._rest) {
@@ -682,7 +677,7 @@ public struct Grapheme: Equatable, Cloneable {
                 }
                 var i: Int64 = 0;
                 while i < an {
-                    if a(unchecked: i).equals(b(unchecked: i)) == false {
+                    if a(unchecked: i).isEqual(to: b(unchecked: i)) == false {
                         return false
                     }
                     i = i + 1

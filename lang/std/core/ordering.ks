@@ -39,7 +39,7 @@ public enum Ordering: Equatable, Formattable {
     case Greater
 
     /// Equality on the orderings themselves: same variant ⇒ equal.
-    public func equals(other: Ordering) -> Bool {
+    public func isEqual(to other: Ordering) -> Bool {
         match (self, other) {
             (.Less, .Less) => true,
             (.Equal, .Equal) => true,
@@ -48,9 +48,9 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Inverse of `equals`.
-    public func notEquals(other: Ordering) -> Bool {
-        if self.equals(other) { false } else { true }
+    /// Inverse of `isEqual`.
+    public func isNotEqual(to other: Ordering) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
     }
 
     /// Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting

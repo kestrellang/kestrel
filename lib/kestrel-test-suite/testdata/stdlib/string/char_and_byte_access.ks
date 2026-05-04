@@ -9,12 +9,12 @@ module Test
             // Test first()
             let f = s.first();
             if f.isNone() { return 1 }
-            if f.unwrap().equals('h') == false { return 2 }
+            if f.unwrap().isEqual(to: 'h') == false { return 2 }
 
             // Test last()
             let l = s.last();
             if l.isNone() { return 3 }
-            if l.unwrap().equals('o') == false { return 4 }
+            if l.unwrap().isEqual(to: 'o') == false { return 4 }
 
             // Test first() and last() on empty string
             let empty = std.text.String();
@@ -23,14 +23,14 @@ module Test
 
             // Test chars()(i)
             let c0 = s.chars(0);
-            if c0.equals('h') == false { return 7 }
+            if c0.isEqual(to: 'h') == false { return 7 }
             let c4 = s.chars(4);
-            if c4.equals('o') == false { return 8 }
+            if c4.isEqual(to: 'o') == false { return 8 }
 
             // Test chars()(checked: i)
             let checked = s.chars(checked: 2);
             if checked.isNone() { return 9 }
-            if checked.unwrap().equals('l') == false { return 10 }
+            if checked.unwrap().isEqual(to: 'l') == false { return 10 }
 
             // Test chars()(checked: i) out of bounds
             let oob = s.chars(checked: 100);

@@ -29,10 +29,10 @@ module Test
 
             // equals
             let r2 = std.core.ClosedRange[std.numeric.Int64](2, 5);
-            if r.equals(r2) == false { return 9 }
+            if r.isEqual(to: r2) == false { return 9 }
 
             let r3 = std.core.ClosedRange[std.numeric.Int64](2, 6);
-            if r.equals(r3) { return 10 }
+            if r.isEqual(to: r3) { return 10 }
 
             // iter - iterate and sum 2+3+4+5 = 14
             var sum: std.numeric.Int64 = 0;

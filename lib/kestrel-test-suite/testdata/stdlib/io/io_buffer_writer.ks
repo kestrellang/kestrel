@@ -35,7 +35,7 @@ module Test
 
             // Check toString
             let s = buf.toString();
-            if s.equals("Hello") == false { return 7 }
+            if s.isEqual(to: "Hello") == false { return 7 }
 
             // Check toArray
             let arr = buf.toArray();
@@ -65,7 +65,7 @@ module Test
                 .Err(_) => return 14
             }
             if buf.count != 6 { return 15 }
-            if buf.toString().equals("Hello!") == false { return 16 }
+            if buf.toString().isEqual(to: "Hello!") == false { return 16 }
 
             // Test clear
             buf.clear();

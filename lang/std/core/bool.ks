@@ -59,11 +59,11 @@ public struct Bool:
     // ========================================================================
 
     /// Returns `true` if both bits agree. Drives `==` for `Bool`.
-    public func equals(other: Bool) -> Bool {
+    public func isEqual(to other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
 
-    /// Pattern-match form of `equals`: `case true =>` and `case false =>`
+    /// Pattern-match form of `isEqual`: `case true =>` and `case false =>`
     /// dispatch through here.
     public func matches(other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))

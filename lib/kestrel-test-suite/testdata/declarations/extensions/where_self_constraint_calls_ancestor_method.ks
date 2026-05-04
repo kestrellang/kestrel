@@ -8,7 +8,7 @@
 module Test
 
 protocol Equatable {
-    func equals(other: Self)
+    func isEqual(to other: Self)
 }
 
 protocol Comparable: Equatable {
@@ -22,6 +22,6 @@ protocol Container {
 extend Container where Self: Comparable {
     func checkBoth() {
         self.compare(self);  // from Comparable — always worked
-        self.equals(self);   // from Equatable (parent of Comparable) — was broken
+        self.isEqual(to: self);   // from Equatable (parent of Comparable) — was broken
     }
 }

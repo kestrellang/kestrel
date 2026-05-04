@@ -9,12 +9,12 @@ module Test
             let val: std.numeric.UInt16 = 258;
             let swapped = val.byteSwapped;
             let lit513: std.numeric.UInt16 = 513;
-            if swapped.equals(lit513) == false { return 1 }
+            if swapped.isEqual(to: lit513) == false { return 1 }
 
             // byteSwapped — 1 as u16 (0x0001) -> 0x0100 (256)
             let one: std.numeric.UInt16 = 1;
             let lit256: std.numeric.UInt16 = 256;
-            if one.byteSwapped.equals(lit256) == false { return 2 }
+            if one.byteSwapped.isEqual(to: lit256) == false { return 2 }
 
             // leadingZeros — relative to 16-bit width
             if one.leadingZeros != 15 { return 3 }
@@ -28,42 +28,42 @@ module Test
             // rotateLeft — 16-bit rotation
             // rotateLeft(1, by: 1) = 2
             let rotTwo: std.numeric.UInt16 = 2;
-            if one.rotateLeft(by: 1).equals(rotTwo) == false { return 6 }
+            if one.rotateLeft(by: 1).isEqual(to: rotTwo) == false { return 6 }
             // rotateLeft(32768, by: 1) = 1 (wraps around from bit 15 to bit 0)
-            if v32768.rotateLeft(by: 1).equals(one) == false { return 7 }
+            if v32768.rotateLeft(by: 1).isEqual(to: one) == false { return 7 }
 
             // rotateRight — 16-bit rotation
             // rotateRight(2, by: 1) = 1
             let two: std.numeric.UInt16 = 2;
-            if two.rotateRight(by: 1).equals(one) == false { return 8 }
+            if two.rotateRight(by: 1).isEqual(to: one) == false { return 8 }
             // rotateRight(1, by: 1) = 32768 (wraps around from bit 0 to bit 15)
-            if one.rotateRight(by: 1).equals(v32768) == false { return 9 }
+            if one.rotateRight(by: 1).isEqual(to: v32768) == false { return 9 }
 
             // rotateLeft and rotateRight are inverses
             let testVal: std.numeric.UInt16 = 1234;
-            if testVal.rotateLeft(by: 5).rotateRight(by: 5).equals(testVal) == false { return 10 }
+            if testVal.rotateLeft(by: 5).rotateRight(by: 5).isEqual(to: testVal) == false { return 10 }
 
             // init(from:) — from Int64
             let fromI64Val: std.numeric.Int64 = 50000;
             let fromI64 = std.numeric.UInt16(from: fromI64Val);
             let lit50000: std.numeric.UInt16 = 50000;
-            if fromI64.equals(lit50000) == false { return 11 }
+            if fromI64.isEqual(to: lit50000) == false { return 11 }
 
             // init(from:) — from UInt8
             let fromU8Val: std.numeric.UInt8 = 200;
             let fromU8 = std.numeric.UInt16(from: fromU8Val);
             let lit200: std.numeric.UInt16 = 200;
-            if fromU8.equals(lit200) == false { return 12 }
+            if fromU8.isEqual(to: lit200) == false { return 12 }
 
             // parse — valid value
             let parsed = std.numeric.UInt16.parse( "65535");
             if parsed.isNone() { return 13 }
-            if parsed.unwrap().equals(std.numeric.UInt16.maxValue) == false { return 14 }
+            if parsed.unwrap().isEqual(to: std.numeric.UInt16.maxValue) == false { return 14 }
 
             // parse — zero
             let parsedZero = std.numeric.UInt16.parse( "0");
             if parsedZero.isNone() { return 15 }
-            if parsedZero.unwrap().equals(std.numeric.UInt16.zero) == false { return 16 }
+            if parsedZero.unwrap().isEqual(to: std.numeric.UInt16.zero) == false { return 16 }
 
             // parse — out of range (65536 > 65535)
             let parsedOver = std.numeric.UInt16.parse( "65536");

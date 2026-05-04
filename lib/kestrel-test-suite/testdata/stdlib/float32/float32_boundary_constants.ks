@@ -17,7 +17,7 @@ module Test
             if minVal.isFinite == false { return 4 }
             if minVal.isNegative == false { return 5 }
             // minValue should be the negation of maxValue
-            if minVal.negate().equals(maxVal) == false { return 6 }
+            if minVal.negate().isEqual(to: maxVal) == false { return 6 }
 
             // minPositive — 1.17549435e-38 (smallest normal)
             let minPos = std.numeric.Float32.minPositive;
@@ -36,7 +36,7 @@ module Test
             // 1.0 + epsilon should not equal 1.0
             let one: std.numeric.Float32 = 1.0;
             let onePlusEps = one.add(eps);
-            if onePlusEps.equals(one) { return 12 }
+            if onePlusEps.isEqual(to: one) { return 12 }
 
             // Classification near subnormal boundary
             // minPositive itself is normal

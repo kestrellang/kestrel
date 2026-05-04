@@ -9,11 +9,11 @@ module Test
 
             // Format Some
             let someStr = some.format();
-            if someStr.equals("Some(42)") == false { return 1 }
+            if someStr.isEqual(to: "Some(42)") == false { return 1 }
 
             // Format None
             let noneStr = none.format();
-            if noneStr.equals("None") == false { return 2 }
+            if noneStr.isEqual(to: "None") == false { return 2 }
 
             0
         }

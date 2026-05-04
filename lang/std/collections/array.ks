@@ -2643,11 +2643,11 @@ extend Array[T]: Equatable where T: Equatable {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].equals([1, 2, 3]);  // true
-    /// [1, 2, 3].equals([1, 2]);     // false
-    /// [1, 2, 3].equals([3, 2, 1]);  // false
+    /// [1, 2, 3].isEqual(to: [1, 2, 3]);  // true
+    /// [1, 2, 3].isEqual(to: [1, 2]);     // false
+    /// [1, 2, 3].isEqual(to: [3, 2, 1]);  // false
     /// ```
-    public func equals(other: Array[T]) -> Bool {
+    public func isEqual(to other: Array[T]) -> Bool {
         let selfCount = self.count;
         let otherCount = other.count;
         if selfCount != otherCount {
@@ -2656,7 +2656,7 @@ extend Array[T]: Equatable where T: Equatable {
         var i: Int64 = 0;
         var equal: Bool = true;
         while i < selfCount and equal {
-            if self(unchecked: i).equals(other(unchecked: i)) == false {
+            if self(unchecked: i).isEqual(to: other(unchecked: i)) == false {
                 equal = false
             }
             i = i + 1
@@ -2676,13 +2676,13 @@ extend Array[T]: Equatable where T: Equatable {
     /// [1, 2, 3].contains(5);  // false
     /// ```
     public func contains(element: T) -> Bool {
-        self.firstIndex(matching: { (x) in x.equals(element) }).isSome()
+        self.firstIndex(matching: { (x) in x.isEqual(to: element) }).isSome()
     }
 
     /// Returns the index of the first element equal to `element`, or
     /// `None`.
     ///
-    /// Wraps `firstIndex(matching:)` with `equals(element)`. The mirror
+    /// Wraps `firstIndex(matching:)` with `isEqual(to: element)`. The mirror
     /// is `lastIndex(of:)`.
     ///
     /// # Examples
@@ -2692,13 +2692,13 @@ extend Array[T]: Equatable where T: Equatable {
     /// [1, 2, 3].firstIndex(of: 5);     // None
     /// ```
     public func firstIndex(of element: T) -> Int64? {
-        self.firstIndex(matching: { (x) in x.equals(element) })
+        self.firstIndex(matching: { (x) in x.isEqual(to: element) })
     }
 
     /// Returns the index of the last element equal to `element`, or
     /// `None`.
     ///
-    /// Wraps `lastIndex(matching:)` with `equals(element)`. The mirror
+    /// Wraps `lastIndex(matching:)` with `isEqual(to: element)`. The mirror
     /// is `firstIndex(of:)`.
     ///
     /// # Examples
@@ -2708,7 +2708,7 @@ extend Array[T]: Equatable where T: Equatable {
     /// [1, 2, 3].lastIndex(of: 5);     // None
     /// ```
     public func lastIndex(of element: T) -> Int64? {
-        self.lastIndex(matching: { (x) in x.equals(element) })
+        self.lastIndex(matching: { (x) in x.isEqual(to: element) })
     }
 
     /// `true` if the array's leading elements match `prefix` exactly.
@@ -2731,7 +2731,7 @@ extend Array[T]: Equatable where T: Equatable {
             return false
         }
         for i in 0..<prefixLen {
-            if self(unchecked: i).equals(prefix(unchecked: i)) == false {
+            if self(unchecked: i).isEqual(to: prefix(unchecked: i)) == false {
                 return false
             }
         }
@@ -2758,7 +2758,7 @@ extend Array[T]: Equatable where T: Equatable {
         }
         let offset = myLen - suffixLen;
         for i in 0..<suffixLen {
-            if self(unchecked: offset + i).equals(suffix(unchecked: i)) == false {
+            if self(unchecked: offset + i).isEqual(to: suffix(unchecked: i)) == false {
                 return false
             }
         }
@@ -2793,7 +2793,7 @@ extend Array[T]: Equatable where T: Equatable {
         let myLen = self.count;
         var start: Int64 = 0;
         for i in 0..<myLen {
-            if self(unchecked: i).equals(separator) {
+            if self(unchecked: i).isEqual(to: separator) {
                 result.append( Slice(pointer: self.asPointer().offset(by: start), count: i - start));
                 start = i + 1
             }
@@ -2816,7 +2816,7 @@ extend Array[T]: Equatable where T: Equatable {
     /// arr.remove(5);  // false; arr unchanged
     /// ```
     public mutating func remove(element: T) -> Bool {
-        if let .Some(idx) = self.firstIndex(matching: { (x) in x.equals(element) }) {
+        if let .Some(idx) = self.firstIndex(matching: { (x) in x.isEqual(to: element) }) {
             let _ = self.remove(at: idx);
             true
         } else {
@@ -2837,7 +2837,7 @@ extend Array[T]: Equatable where T: Equatable {
     /// arr.removeAll(2);  // [1, 3, 4]
     /// ```
     public mutating func removeAll(element: T) {
-        self.retain(matching: { (x) in x.equals(element) == false })
+        self.retain(matching: { (x) in x.isEqual(to: element) == false })
     }
 
     /// Removes runs of consecutive equal elements, in place.
@@ -2863,7 +2863,7 @@ extend Array[T]: Equatable where T: Equatable {
         for readIdx in 1..<s.len {
             let current = s.ptr.offset(by: readIdx).read();
             let previous = s.ptr.offset(by: writeIdx - 1).read();
-            if current.equals(previous) == false {
+            if current.isEqual(to: previous) == false {
                 if writeIdx != readIdx {
                     s.ptr.offset(by: writeIdx).write(current)
                 }
@@ -3110,7 +3110,7 @@ extend Array[T] where T: Hash {
             let element = self(unchecked: i);
             var found = false;
             for j in 0..<result.count {
-                if result(unchecked: j).equals(element) {
+                if result(unchecked: j).isEqual(to: element) {
                     found = true
                 }
             }

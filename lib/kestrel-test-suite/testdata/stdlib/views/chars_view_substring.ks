@@ -8,24 +8,24 @@ module Test
 
             // ---- chars(Range) - default subscript with range yields CharsView ----
             let sub = s.chars(std.core.Range[std.numeric.Int64](0, 5));
-            if sub.toString().equals("hello") == false { return 1 }
+            if sub.toString().isEqual(to: "hello") == false { return 1 }
 
             let sub2 = s.chars(std.core.Range[std.numeric.Int64](6, 11));
-            if sub2.toString().equals("world") == false { return 2 }
+            if sub2.toString().isEqual(to: "world") == false { return 2 }
 
             // ---- chars.substring convenience (Range) ----
-            if s.chars.substring(std.core.Range[std.numeric.Int64](0, 5)).equals("hello") == false { return 3 }
+            if s.chars.substring(std.core.Range[std.numeric.Int64](0, 5)).isEqual(to: "hello") == false { return 3 }
 
             // ---- s.substring (defaults to chars, Range) ----
-            if s.substring(std.core.Range[std.numeric.Int64](0, 5)).equals("hello") == false { return 4 }
+            if s.substring(std.core.Range[std.numeric.Int64](0, 5)).isEqual(to: "hello") == false { return 4 }
 
             // ---- s.substring with ClosedRange ----
-            if s.substring(std.core.ClosedRange[std.numeric.Int64](6, 10)).equals("world") == false { return 10 }
+            if s.substring(std.core.ClosedRange[std.numeric.Int64](6, 10)).isEqual(to: "world") == false { return 10 }
 
             // ---- chars(checked: Range) ----
             let checked = s.chars(checked: std.core.Range[std.numeric.Int64](0, 5));
             if checked.isNone() { return 5 }
-            if checked.unwrap().toString().equals("hello") == false { return 6 }
+            if checked.unwrap().toString().isEqual(to: "hello") == false { return 6 }
 
             // Out of bounds returns None
             let oob = s.chars(checked: std.core.Range[std.numeric.Int64](0, 100));

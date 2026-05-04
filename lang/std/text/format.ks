@@ -41,16 +41,16 @@ public enum Alignment: Equatable, Matchable {
     /// Returns true if both cases are the same variant.
     ///
     /// Equality is structural — there are no payloads. Used by the
-    /// `Equatable` conformance so `FormatOptions.equals` can fall through
+    /// `Equatable` conformance so `FormatOptions.isEqual` can fall through
     /// without payload comparisons.
     ///
     /// # Examples
     ///
     /// ```
-    /// Alignment.Left.equals(.Left);    // true
-    /// Alignment.Left.equals(.Center);  // false
+    /// Alignment.Left.isEqual(to: .Left);    // true
+    /// Alignment.Left.isEqual(to: .Center);  // false
     /// ```
-    public func equals(other: Alignment) -> Bool {
+    public func isEqual(to other: Alignment) -> Bool {
         match (self, other) {
             (.Left, .Left) => true,
             (.Right, .Right) => true,
@@ -59,7 +59,7 @@ public enum Alignment: Equatable, Matchable {
         }
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     ///
     /// Lets `Alignment` appear in `match` patterns against another value.
     ///
@@ -69,7 +69,7 @@ public enum Alignment: Equatable, Matchable {
     /// Alignment.Right.matches(.Right);  // true
     /// ```
     public func matches(other: Alignment) -> Bool {
-        self.equals(other)
+        self.isEqual(to: other)
     }
 }
 
@@ -102,15 +102,15 @@ public enum Sign: Equatable, Matchable {
     /// Returns true if both cases are the same variant.
     ///
     /// Used by `Equatable` to lift case identity into a `Bool` for
-    /// composite comparisons (see `FormatOptions.equals`).
+    /// composite comparisons (see `FormatOptions.isEqual`).
     ///
     /// # Examples
     ///
     /// ```
-    /// Sign.Always.equals(.Always);     // true
-    /// Sign.Negative.equals(.Always);   // false
+    /// Sign.Always.isEqual(to: .Always);     // true
+    /// Sign.Negative.isEqual(to: .Always);   // false
     /// ```
-    public func equals(other: Sign) -> Bool {
+    public func isEqual(to other: Sign) -> Bool {
         match (self, other) {
             (.Negative, .Negative) => true,
             (.Always, .Always) => true,
@@ -119,7 +119,7 @@ public enum Sign: Equatable, Matchable {
         }
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     ///
     /// # Examples
     ///
@@ -127,7 +127,7 @@ public enum Sign: Equatable, Matchable {
     /// Sign.Space.matches(.Space);  // true
     /// ```
     public func matches(other: Sign) -> Bool {
-        self.equals(other)
+        self.isEqual(to: other)
     }
 }
 
@@ -170,10 +170,10 @@ public enum FloatStyle: Equatable, Matchable {
     /// # Examples
     ///
     /// ```
-    /// FloatStyle.Fixed.equals(.Fixed);       // true
-    /// FloatStyle.Fixed.equals(.Scientific);  // false
+    /// FloatStyle.Fixed.isEqual(to: .Fixed);       // true
+    /// FloatStyle.Fixed.isEqual(to: .Scientific);  // false
     /// ```
-    public func equals(other: FloatStyle) -> Bool {
+    public func isEqual(to other: FloatStyle) -> Bool {
         match (self, other) {
             (.Auto, .Auto) => true,
             (.Fixed, .Fixed) => true,
@@ -184,7 +184,7 @@ public enum FloatStyle: Equatable, Matchable {
         }
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     ///
     /// # Examples
     ///
@@ -192,7 +192,7 @@ public enum FloatStyle: Equatable, Matchable {
     /// FloatStyle.Auto.matches(.Auto);  // true
     /// ```
     public func matches(other: FloatStyle) -> Bool {
-        self.equals(other)
+        self.isEqual(to: other)
     }
 }
 
@@ -322,18 +322,18 @@ public struct FormatOptions: Equatable {
     /// ```
     /// let a = FormatOptions();
     /// let b = FormatOptions();
-    /// a.equals(b);  // true
+    /// a.isEqual(to: b);  // true
     /// var c = FormatOptions();
     /// c.alternate = true;
-    /// a.equals(c);  // false
+    /// a.isEqual(to: c);  // false
     /// ```
-    public func equals(other: FormatOptions) -> Bool {
-        if self.alignment.equals(other.alignment) == false { return false }
+    public func isEqual(to other: FormatOptions) -> Bool {
+        if self.alignment.isEqual(to: other.alignment) == false { return false }
         if self.radix != other.radix { return false }
         if self.uppercase != other.uppercase { return false }
-        if self.sign.equals(other.sign) == false { return false }
+        if self.sign.isEqual(to: other.sign) == false { return false }
         if self.alternate != other.alternate { return false }
-        if self.floatStyle.equals(other.floatStyle) == false { return false }
+        if self.floatStyle.isEqual(to: other.floatStyle) == false { return false }
         if self.debug != other.debug { return false }
         true
     }

@@ -231,14 +231,14 @@ public struct {{TYPE_NAME}}:
     /// # Examples
     ///
     /// ```
-    /// (42).equals(42);  // true
-    /// 42 == 42;          // true
+    /// (42).isEqual(to: 42);  // true
+    /// 42 == 42;               // true
     /// ```
-    public func equals(other: {{TYPE_NAME}}) -> Bool {
+    public func isEqual(to other: {{TYPE_NAME}}) -> Bool {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
     }
 
-    /// Pattern-matching hook for `Matchable`. Identical to `equals`.
+    /// Pattern-matching hook for `Matchable`. Identical to `isEqual`.
     public func matches(other: {{TYPE_NAME}}) -> Bool {
         Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
     }

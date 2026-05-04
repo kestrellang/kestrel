@@ -11,7 +11,7 @@ import std.numeric.(UInt64, Int64)
 /// Protocol for types whose values can be compared for equality.
 ///
 /// `Equatable` is the semantic counterpart to the raw `Equal[Self]`
-/// operator protocol: conformers implement `equals` returning `Bool`, and a
+/// operator protocol: conformers implement `isEqual` returning `Bool`, and a
 /// blanket extension below derives both `==` and `!=`. Most types should
 /// reach for `Equatable` rather than `Equal` directly — the `Bool`
 /// associated-type binding is wired up automatically.
@@ -22,7 +22,7 @@ import std.numeric.(UInt64, Int64)
 /// public struct Point: Equatable {
 ///     public var x: Int64
 ///     public var y: Int64
-///     public func equals(other: Point) -> Bool {
+///     public func isEqual(to other: Point) -> Bool {
 ///         self.x == other.x and self.y == other.y
 ///     }
 /// }
@@ -33,7 +33,7 @@ public protocol Equatable {
     /// Returns `true` iff `self` and `other` are considered equal. Should
     /// be reflexive, symmetric, and transitive — `Hash` requires equal
     /// values to hash equal, so don't drift from those laws.
-    func equals(other: Self) -> Bool
+    func isEqual(to other: Self) -> Bool
 }
 
 /// Protocol enabling `match` against custom types via the `case` pattern.
@@ -99,15 +99,15 @@ public protocol ArrayMatchable {
 }
 
 /// Blanket extension giving every `Equatable` type the `==` and `!=`
-/// operators with `Bool` results. Implements `notEquals` in terms of
-/// `equals` so conformers only need to write the equality method.
+/// operators with `Bool` results. Implements `isNotEqual` in terms of
+/// `isEqual` so conformers only need to write the equality method.
 extend Equatable: Equal[Self], NotEqual[Self] {
     type Equal.Output = Bool
     type NotEqual.Output = Bool
 
-    /// Default `!=` derived from `equals`.
-    public func notEquals(other: Self) -> Bool {
-        if self.equals(other) { false } else { true }
+    /// Default `!=` derived from `isEqual`.
+    public func isNotEqual(to other: Self) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
     }
 }
 
@@ -125,7 +125,7 @@ extend Equatable: Equal[Self], NotEqual[Self] {
 /// public struct Version: Comparable {
 ///     public var major: Int64
 ///     public var minor: Int64
-///     public func equals(other: Version) -> Bool {
+///     public func isEqual(to other: Version) -> Bool {
 ///         self.major == other.major and self.minor == other.minor
 ///     }
 ///     public func compare(other: Version) -> Ordering {
@@ -173,7 +173,7 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
 
     /// `!=` derived from `compare`. Shadows the `Equatable` default with
     /// a single dispatch.
-    public func notEquals(other: Self) -> Bool {
+    public func isNotEqual(to other: Self) -> Bool {
         self.compare(other) != Ordering.Equal
     }
 }
@@ -213,7 +213,7 @@ extend Comparable: RangeMatchable[Self] {
 /// ```
 /// public struct Tag: Hash {
 ///     public var name: String
-///     public func equals(other: Tag) -> Bool { self.name == other.name }
+///     public func isEqual(to other: Tag) -> Bool { self.name == other.name }
 ///     public func hash[H](mutating into hasher: H) where H: Hasher {
 ///         self.name.hash(into: hasher)
 ///     }
@@ -221,7 +221,7 @@ extend Comparable: RangeMatchable[Self] {
 /// ```
 public protocol Hash: Equatable {
     /// Feeds this value's bytes into `hasher`. Must be deterministic
-    /// across calls and consistent with `equals`.
+    /// across calls and consistent with `isEqual`.
     func hash[H](mutating into hasher: H) where H: Hasher
 }
 

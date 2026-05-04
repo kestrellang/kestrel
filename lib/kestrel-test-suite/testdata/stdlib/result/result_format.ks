@@ -9,11 +9,11 @@ module Test
 
             // Format Ok
             let okStr = ok.format();
-            if okStr.equals("Ok(42)") == false { return 1 }
+            if okStr.isEqual(to: "Ok(42)") == false { return 1 }
 
             // Format Err
             let errStr = err.format();
-            if errStr.equals("Err(99)") == false { return 2 }
+            if errStr.isEqual(to: "Err(99)") == false { return 2 }
 
             0
         }

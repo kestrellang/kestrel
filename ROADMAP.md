@@ -680,6 +680,7 @@ Bugfixes:
 - and in guard
 - normal guard
 - Self constructors
+- ..n and n.. ranges
 
 ## Version 0.17: Derives, Attributes & Sugar
 

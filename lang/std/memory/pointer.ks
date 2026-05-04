@@ -81,7 +81,7 @@ public struct RawPointer: Equatable, FFISafe, Hash {
 
     /// Address-based equality. Two `RawPointer`s pointing into different
     /// allocations are equal iff their addresses coincide.
-    public func equals(other: RawPointer) -> Bool {
+    public func isEqual(to other: RawPointer) -> Bool {
         self.address == other.address
     }
 
@@ -215,7 +215,7 @@ public struct Pointer[T]: Equatable, Hash {
     }
 
     /// Address-based equality.
-    public func equals(other: Pointer[T]) -> Bool {
+    public func isEqual(to other: Pointer[T]) -> Bool {
         self.address == other.address
     }
 
@@ -366,7 +366,7 @@ public struct Slice[T]: Equatable {
     /// Length-only equality (TODO: deepen to element-wise once an
     /// iterator-based comparison is wired up). Not a true structural
     /// equality yet — handle with care in tests.
-    public func equals(other: Slice[T]) -> Bool {
+    public func isEqual(to other: Slice[T]) -> Bool {
         if self.len != other.len {
             return false
         }

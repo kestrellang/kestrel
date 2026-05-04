@@ -13,38 +13,38 @@ module Test
             let hasLower = s.contains(matching: { (c) in c.isLowercase() });
             if hasLower == false { return 2 }
 
-            // ---- find(matching:) ----
-            let spacePos = s.find(matching: { (c) in c.equals(' ') });
+            // ---- firstIndex(matching:) ----
+            let spacePos = s.firstIndex(matching: { (c) in c.isEqual(to: ' ') });
             if spacePos.isNone() { return 3 }
             if spacePos.unwrap() != 5 { return 4 }
 
-            // find(matching:) no match
-            let noMatch = s.find(matching: { (c) in c.isDigit() });
+            // firstIndex(matching:) no match
+            let noMatch = s.firstIndex(matching: { (c) in c.isDigit() });
             if noMatch.isSome() { return 5 }
 
-            // ---- reverseFind() ----
-            let lastHello = s.reverseFind("hello");
+            // ---- lastIndex(of:) ----
+            let lastHello = s.lastIndex(of: "hello");
             if lastHello.isNone() { return 6 }
             if lastHello.unwrap() != 12 { return 7 }
 
-            // reverseFind first occurrence
-            let firstWorld = s.reverseFind("world");
+            // lastIndex(of:) first occurrence
+            let firstWorld = s.lastIndex(of:"world");
             if firstWorld.isNone() { return 8 }
             if firstWorld.unwrap() != 6 { return 9 }
 
-            // reverseFind no match
-            let noRev = s.reverseFind("xyz");
+            // lastIndex(of:) no match
+            let noRev = s.lastIndex(of:"xyz");
             if noRev.isSome() { return 10 }
 
-            // reverseFind empty string
-            let emptyRev = s.reverseFind("");
+            // lastIndex(of:) empty string
+            let emptyRev = s.lastIndex(of:"");
             if emptyRev.isNone() { return 11 }
             // Should return length of string
             if emptyRev.unwrap() != 17 { return 12 }
 
             // ---- substringBytes(from:to:) ----
             let sub = s.substringBytes(from: 6, to: 11);
-            if sub.equals("world") == false { return 13 }
+            if sub.isEqual(to: "world") == false { return 13 }
 
             // substringBytes with invalid range
             let badSub = s.substringBytes(from: 10, to: 5);
@@ -52,7 +52,7 @@ module Test
 
             // substringBytes from start
             let prefix = s.substringBytes(from: 0, to: 5);
-            if prefix.equals("hello") == false { return 15 }
+            if prefix.isEqual(to: "hello") == false { return 15 }
 
             0
         }

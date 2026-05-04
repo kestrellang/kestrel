@@ -12,8 +12,8 @@ module Test
             // ---- chars.iter() ----
             let charArr = s.chars.iter().collect();
             if charArr.count != 5 { return 2 }
-            if charArr(unchecked: 0).equals('h') == false { return 3 }
-            if charArr(unchecked: 4).equals('o') == false { return 4 }
+            if charArr(unchecked: 0).isEqual(to: 'h') == false { return 3 }
+            if charArr(unchecked: 4).isEqual(to: 'o') == false { return 4 }
 
             // Empty string
             let empty = std.text.String();

@@ -7,7 +7,7 @@ public enum LocalOrdering: std.core.Equatable {
     case Less
     case Equal
 
-    public func equals(other: LocalOrdering) -> std.core.Bool {
+    public func isEqual(to other: LocalOrdering) -> std.core.Bool {
         true
     }
 }

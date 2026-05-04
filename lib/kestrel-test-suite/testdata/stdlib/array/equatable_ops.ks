@@ -14,14 +14,14 @@ module Test
             d.append(3); d.append(2); d.append(1);
 
             // equals(other:) - positional single-name param
-            if a.equals(b) == false { return 1 }
-            if a.equals(c) { return 2 }
-            if a.equals(d) { return 3 }
+            if a.isEqual(to: b) == false { return 1 }
+            if a.isEqual(to: c) { return 2 }
+            if a.isEqual(to: d) { return 3 }
 
             // empty arrays are equal
             let e1 = std.collections.Array[std.numeric.Int64]();
             let e2 = std.collections.Array[std.numeric.Int64]();
-            if e1.equals(e2) == false { return 4 }
+            if e1.isEqual(to: e2) == false { return 4 }
 
             // contains(element:) - positional single-name param
             if a.contains(2) == false { return 5 }

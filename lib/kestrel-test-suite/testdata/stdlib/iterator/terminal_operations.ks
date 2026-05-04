@@ -28,7 +28,7 @@ module Test
             if arr.iter().all(matching: { (x) in x % 2 == 0 }) { return 7 }
 
             // Test position
-            let found = arr.iter().position(matching: { (x) in x > 3 });
+            let found = arr.iter().firstIndex(matching: { (x) in x > 3 });
             if found.isNone() { return 8 }
             if found.unwrap() != 3 { return 9 }
 

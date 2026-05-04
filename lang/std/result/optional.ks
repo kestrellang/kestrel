@@ -472,12 +472,12 @@ public enum Optional[T] {
     ///
     /// ```
     /// var opt = Some(42);
-    /// opt.takeIf { it > 0 };    // Some(42); opt is now None
+    /// opt.take(matching: { it > 0 });    // Some(42); opt is now None
     ///
     /// var opt2 = Some(42);
-    /// opt2.takeIf { it < 0 };   // None;     opt2 is still Some(42)
+    /// opt2.take(matching: { it < 0 });   // None;     opt2 is still Some(42)
     /// ```
-    public mutating func takeIf(predicate: (T) -> Bool) -> Optional[T] {
+    public mutating func take(matching predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
                 if predicate(value) {
@@ -520,7 +520,7 @@ public enum Optional[T] {
 // ============================================================================
 
 /// Equatable when the inner type is — `None == None` is true, `Some(a) ==
-/// Some(b)` defers to `T.equals`, and a present value is never equal to
+/// Some(b)` defers to `T.isEqual`, and a present value is never equal to
 /// `None`.
 extend Optional[T]: Equatable where T: Equatable {
 
@@ -534,7 +534,7 @@ extend Optional[T]: Equatable where T: Equatable {
     /// Some(1) == None;      // false
     /// None == None;         // true
     /// ```
-    public func equals(other: Optional[T]) -> Bool {
+    public func isEqual(to other: Optional[T]) -> Bool {
         match (self, other) {
             (.Some(a), .Some(b)) => a == b,
             (.None, .None) => true,

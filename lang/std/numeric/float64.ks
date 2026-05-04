@@ -351,11 +351,11 @@ public struct Float64:
     /// # Examples
     ///
     /// ```
-    /// (3.14).equals(3.14);                  // true
-    /// (0.0).equals(-0.0);                   // true
-    /// Float64.nan.equals(Float64.nan);      // false (!)
+    /// (3.14).isEqual(to: 3.14);                  // true
+    /// (0.0).isEqual(to: -0.0);                   // true
+    /// Float64.nan.isEqual(to: Float64.nan);      // false (!)
     /// ```
-    public func equals(other: Float64) -> Bool {
+    public func isEqual(to other: Float64) -> Bool {
         Bool(boolLiteral: lang.f64_eq(self.raw, other.raw))
     }
 

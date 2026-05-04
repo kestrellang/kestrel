@@ -5,7 +5,7 @@
 module Test
 struct Number: Prelude.NotEqualsOperatorProtocol {
     var value: lang.i64
-    func notEquals(rhs: Number) -> lang.i1 {
+    func isNotEqual(to rhs: Number) -> lang.i1 {
         lang.i64_ne(self.value, rhs.value)
     }
 }

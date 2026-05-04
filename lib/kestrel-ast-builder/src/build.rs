@@ -834,7 +834,7 @@ mod tests {
 
         // Methods
         let equals_fn =
-            find_child_by_name(&world, ordering, &NodeKind::Function, "equals").unwrap();
+            find_child_by_name(&world, ordering, &NodeKind::Function, "isEqual").unwrap();
         let callable = world.get::<Callable>(equals_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
         assert_eq!(callable.params[0].name, "other");

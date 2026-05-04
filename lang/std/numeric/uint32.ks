@@ -289,14 +289,14 @@ public struct UInt32:
     /// # Examples
     ///
     /// ```
-    /// (42).equals(42);  // true
-    /// 42 == 42;          // true
+    /// (42).isEqual(to: 42);  // true
+    /// 42 == 42;               // true
     /// ```
-    public func equals(other: UInt32) -> Bool {
+    public func isEqual(to other: UInt32) -> Bool {
         Bool(boolLiteral: lang.i32_eq(self.raw, other.raw))
     }
 
-    /// Pattern-matching hook for `Matchable`. Identical to `equals`.
+    /// Pattern-matching hook for `Matchable`. Identical to `isEqual`.
     public func matches(other: UInt32) -> Bool {
         Bool(boolLiteral: lang.i32_eq(self.raw, other.raw))
     }

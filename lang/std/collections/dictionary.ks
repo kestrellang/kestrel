@@ -763,7 +763,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             match bucket {
                 .Empty => return .None,
                 .Occupied(k, _, _) => {
-                    if k.equals(key) {
+                    if k.isEqual(to: key) {
                         return .Some(index)
                     }
                 },
@@ -1191,10 +1191,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// var dict = ["a": 1];
-    /// dict.mergeFrom([("b", 2), ("c", 3)]) { (_, new) in new };
+    /// dict.merge(from: [("b", 2), ("c", 3)]) { (_, new) in new };
     /// // dict == ["a": 1, "b": 2, "c": 3]
     /// ```
-    public mutating func mergeFrom[I](pairs: I, uniquingKeysWith combine: (V, V) -> V)
+    public mutating func merge[I](from pairs: I, uniquingKeysWith combine: (V, V) -> V)
         where I: Iterable, I.Item = (K, V)
     {
         var iter = pairs.iter();
@@ -1651,11 +1651,11 @@ extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H:
     /// # Examples
     ///
     /// ```
-    /// ["a": 1, "b": 2].equals(["b": 2, "a": 1]);  // true
-    /// ["a": 1].equals(["a": 2]);                  // false
-    /// ["a": 1].equals([:]);                       // false
+    /// ["a": 1, "b": 2].isEqual(to: ["b": 2, "a": 1]);  // true
+    /// ["a": 1].isEqual(to: ["a": 2]);                  // false
+    /// ["a": 1].isEqual(to: [:]);                       // false
     /// ```
-    public func equals(other: Dictionary[K, V, H]) -> Bool {
+    public func isEqual(to other: Dictionary[K, V, H]) -> Bool {
         let selfCount = self.count;
         let otherCount = other.count;
         if selfCount != otherCount {
@@ -1671,7 +1671,7 @@ extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H:
                 .Occupied(key, value, _) => {
                     let otherValue = other(key);
                     if let .Some(v) = otherValue {
-                        if not value.equals(v) {
+                        if not value.isEqual(to: v) {
                             return false
                         }
                     } else {
@@ -1708,7 +1708,7 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(_, v, _) => {
-                    if v.equals(value) {
+                    if v.isEqual(to: value) {
                         return true
                     }
                 },
@@ -1738,7 +1738,7 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(k, v, _) => {
-                    if v.equals(value) {
+                    if v.isEqual(to: value) {
                         return .Some(k)
                     }
                 },
@@ -1769,7 +1769,7 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(k, v, _) => {
-                    if v.equals(value) {
+                    if v.isEqual(to: value) {
                         result.append(k);
                     }
                 },
@@ -2125,9 +2125,9 @@ public struct ValuesView[K, V]: Iterable where K: Hash {
 /// / `Defaultable` conformances — what makes the `["a": 1, "b": 2]`
 /// literal syntax work for `Dictionary[K, V, H]`.
 extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hash, H: Hasher, H: Defaultable {
-    /// Key type for the literal protocol — equals `K`.
+    /// Key type for the literal protocol — matches `K`.
     type Key = K
-    /// Value type for the literal protocol — equals `V`.
+    /// Value type for the literal protocol — matches `V`.
     type Value = V
 
     /// @name Literal Bridge

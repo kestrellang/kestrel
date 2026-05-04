@@ -58,7 +58,7 @@ public struct Layout: Equatable {
     }
 
     /// Equal when both fields match.
-    public func equals(other: Layout) -> Bool {
+    public func isEqual(to other: Layout) -> Bool {
         self.size == other.size and self.alignment == other.alignment
     }
 
