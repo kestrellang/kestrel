@@ -79,7 +79,7 @@ public func generateHelp(
 
     // Positional args on the usage line
     for arg in arguments {
-        guard arg.isPositional else { continue; }
+        if not arg.isPositional { continue; }
         buf.append(" ");
         if arg.isRequired {
             buf.append("<");
@@ -106,7 +106,7 @@ public func generateHelp(
 
         var maxLeft: Int64 = 0;
         for arg in arguments {
-            guard not arg.isPositional else { continue; }
+            if arg.isPositional { continue; }
             let width = leftColumnWidth(arg);
             if width > maxLeft { maxLeft = width; }
         }
@@ -114,7 +114,7 @@ public func generateHelp(
         let padTo = maxLeft + 4;
 
         for arg in arguments {
-            guard not arg.isPositional else { continue; }
+            if arg.isPositional { continue; }
             buf.append("    ");
             let left = formatLeftColumn(arg);
             buf.append(left);
@@ -164,7 +164,7 @@ public func generateHelp(
         let namePadTo = maxName + 4;
 
         for arg in arguments {
-            guard arg.isPositional else { continue; }
+            if not arg.isPositional { continue; }
             buf.append("    ");
             if arg.isRequired {
                 buf.append("<");

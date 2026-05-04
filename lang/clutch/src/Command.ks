@@ -52,10 +52,10 @@ public struct Command: Cloneable {
     public var name: String
 
     /// Short description shown below the name in help output.
-    var about: Optional[String]
+    var _about: Optional[String]
 
     /// Version string shown in the help header (e.g., `"1.0.0"`).
-    var version: Optional[String]
+    var _version: Optional[String]
 
     /// Argument definitions registered with this command.
     var arguments: Array[Argument]
@@ -79,8 +79,8 @@ public struct Command: Cloneable {
     /// ```
     public init(name: String) {
         self.name = name;
-        self.about = .None;
-        self.version = .None;
+        self._about = .None;
+        self._version = .None;
         self.arguments = Array[Argument]();
         self.subcommands = Array[Command]();
     }
@@ -88,8 +88,8 @@ public struct Command: Cloneable {
     /// Creates a deep copy of the command and all its contents.
     public func clone() -> Command {
         var c = Command(self.name.clone());
-        if let .Some(a) = self.about { c.about = .Some(a.clone()); }
-        if let .Some(v) = self.version { c.version = .Some(v.clone()); }
+        if let .Some(a) = self._about { c._about = .Some(a.clone()); }
+        if let .Some(v) = self._version { c._version = .Some(v.clone()); }
         c.arguments = self.arguments.clone();
         c.subcommands = self.subcommands.clone();
         c
@@ -109,7 +109,7 @@ public struct Command: Cloneable {
     /// ```
     public func about(text: String) -> Command {
         var copy = self.clone();
-        copy.about = .Some(text);
+        copy._about = .Some(text);
         copy
     }
 
@@ -125,7 +125,7 @@ public struct Command: Cloneable {
     /// ```
     public func version(versionString: String) -> Command {
         var copy = self.clone();
-        copy.version = .Some(versionString);
+        copy._version = .Some(versionString);
         copy
     }
 
@@ -194,7 +194,7 @@ public struct Command: Cloneable {
     ///     .argument(Argument("file").toPositional().required());
     ///
     /// match cmd.parse(from: ["hello.txt"]) {
-    ///     .Ok(m) => m.value(for: "file"),  // .Some("hello.txt")
+    ///     .Ok(m) => m.value(of: "file"),  // .Some("hello.txt")
     ///     .Err(e) => eprintln(e.description())
     /// }
     /// ```
@@ -244,7 +244,7 @@ public struct Command: Cloneable {
 
         for sub in self.subcommands {
             subNames.append(sub.name);
-            match sub.about {
+            match sub._about {
                 .Some(a) => subAbouts.append(a),
                 .None => subAbouts.append("")
             }
@@ -252,8 +252,8 @@ public struct Command: Cloneable {
 
         generateHelp(
             name: self.name,
-            about: self.about,
-            version: self.version,
+            about: self._about,
+            version: self._version,
             arguments: self.arguments,
             subcommandNames: subNames,
             subcommandAbouts: subAbouts

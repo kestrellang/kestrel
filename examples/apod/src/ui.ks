@@ -3,7 +3,7 @@
 module apod.ui
 
 import quill.value.(Value)
-import plume.plume.(Template)
+import plume.(Template)
 import apod.data.(getStringField)
 
 // ============================================================================

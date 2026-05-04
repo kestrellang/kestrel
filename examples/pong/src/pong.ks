@@ -398,7 +398,7 @@ func usleep(usec: UInt32) -> Int32
 // Main
 // ============================================
 
-func main() -> Result[(), Error] {
+func main() {
     var game = Game();
 
     // Run until Ctrl+C
@@ -407,6 +407,4 @@ func main() -> Result[(), Error] {
         game.render();
         usleep(16667); // ~60 FPS
     }
-
-    .Ok(())
 }

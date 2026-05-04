@@ -31,15 +31,15 @@ import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
 func main() {
     let argv = getArgv();
 
-    let cmd = Command("flock")
-        .about("Package manager for Kestrel")
-        .version("0.1.0")
-        .subcommand(Command("build").about("Build the current package"))
-        .subcommand(Command("run").about("Build and run the current package"))
-        .subcommand(Command("check").about("Type-check the current package"))
-        .subcommand(Command("init").about("Create a new flock.toml in the current directory"))
-        .subcommand(Command("publish").about("Publish a package to the registry"))
-        .subcommand(Command("update").about("Update dependencies (re-resolve and rewrite flock.lock)"));
+    var cmd = Command("flock");
+    cmd = cmd.about("Package manager for Kestrel");
+    cmd = cmd.version("0.1.0");
+    cmd = cmd.subcommand(Command("build").about("Build the current package"));
+    cmd = cmd.subcommand(Command("run").about("Build and run the current package"));
+    cmd = cmd.subcommand(Command("check").about("Type-check the current package"));
+    cmd = cmd.subcommand(Command("init").about("Create a new flock.toml in the current directory"));
+    cmd = cmd.subcommand(Command("publish").about("Publish a package to the registry"));
+    cmd = cmd.subcommand(Command("update").about("Update dependencies (re-resolve and rewrite flock.lock)"));
 
     match cmd.parse(from: argv) {
         .Ok(matches) => {

@@ -27,11 +27,11 @@ struct Config {
             )
         }
 
-        let width = clampParse(matches.value(for: "width"), min: 5, max: 2000, default: 80);
-        let height = clampParse(matches.value(for: "height"), min: 5, max: 2000, default: 60);
+        let width = clampParse(matches.value(of: "width"), min: 5, max: 2000, default: 80);
+        let height = clampParse(matches.value(of: "height"), min: 5, max: 2000, default: 60);
 
         let headlessIters = if matches.hasFlag("headless") {
-            clampParse(matches.value(for: "iters"), min: 1, max: 999999999, default: 1000)
+            clampParse(matches.value(of: "iters"), min: 1, max: 999999999, default: 1000)
         } else {
             0
         };
@@ -39,7 +39,7 @@ struct Config {
         let cellSize = if headlessIters > 0 {
             1
         } else {
-            clampParse(matches.value(for: "cell-size"), min: 1, max: 40, default: 0)
+            clampParse(matches.value(of: "cell-size"), min: 1, max: 40, default: 0)
         };
 
         let finalCell = if cellSize > 0 { cellSize } else { autoCellSize(width: width, height: height) };
@@ -66,13 +66,14 @@ func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
 }
 
 func buildCommand() -> Command {
-    Command("life")
-        .about("Conway's Game of Life — an SDL example")
-        .argument(Argument("width").short("W").help("Board width (5..2000)").defaultsTo("80"))
-        .argument(Argument("height").short("H").help("Board height (5..2000)").defaultsTo("60"))
-        .argument(Argument("cell-size").short("c").help("Cell size in pixels (1..40, auto if omitted)"))
-        .argument(Argument("headless").toFlag().help("Run headless benchmark (no window)"))
-        .argument(Argument("iters").short("n").help("Number of generations for headless mode").defaultsTo("1000"))
+    var cmd = Command("life");
+    cmd = cmd.about("Conway's Game of Life — an SDL example");
+    cmd = cmd.argument(Argument("width").short("W").help("Board width (5..2000)").defaultsTo("80"));
+    cmd = cmd.argument(Argument("height").short("H").help("Board height (5..2000)").defaultsTo("60"));
+    cmd = cmd.argument(Argument("cell-size").short("c").help("Cell size in pixels (1..40, auto if omitted)"));
+    cmd = cmd.argument(Argument("headless").toFlag().help("Run headless benchmark (no window)"));
+    cmd = cmd.argument(Argument("iters").short("n").help("Number of generations for headless mode").defaultsTo("1000"));
+    cmd
 }
 
 func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default fallback: Int64) -> Int64 {

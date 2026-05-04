@@ -3,7 +3,7 @@
 module pokedex.ui
 
 import quill.value.(Value)
-import plume.plume.(Template)
+import plume.(Template)
 import pokedex.data.(PokemonEntry, kantoPokedex, kantoEntryById,
                     typeColor, typeColorDark, typeGlow, typeEmoji, allTypes,
                     statLabel, statPercent, statColor, statShortLabel,

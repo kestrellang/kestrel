@@ -27,11 +27,11 @@ module clutch.matches
 ///
 /// match cmd.parse(from: ["-v", "--output", "out.txt"]) {
 ///     .Ok(matches) => {
-///         matches.value(for: "output");   // .Some("out.txt")
-///         matches.hasFlag("verbose");     // true
-///     },
-///     .Err(e) => eprintln(e.description())
-/// }
+    ///         matches.value(of: "output");   // .Some("out.txt")
+    ///         matches.hasFlag("verbose");     // true
+    ///     },
+    ///     .Err(e) => eprintln(e.description())
+    /// }
 /// ```
 public struct ArgumentMatches: Cloneable {
     /// Named option keys, parallel with `values`.
@@ -122,11 +122,10 @@ public struct ArgumentMatches: Cloneable {
     ///
     /// ```
     /// // Given: mycli --output out.txt hello.txt
-    /// matches.value(for: "output");  // .Some("out.txt")
-    /// matches.value(for: "file");    // .Some("hello.txt")  (positional)
-    /// matches.value(for: "missing"); // .None
-    /// ```
-    public func value(for name: String) -> Optional[String] {
+    /// matches.value(of: "output");  // .Some("out.txt")
+    /// matches.value(of: "file");    // .Some("hello.txt")  (positional)
+    /// matches.value(of: "missing"); // .None
+    public func value(of name: String) -> Optional[String] {
         for i in 0..<self.names.count {
             if self.names(unchecked: i) == name {
                 return .Some(self.values(unchecked: i))
@@ -165,10 +164,10 @@ public struct ArgumentMatches: Cloneable {
     ///
     /// ```
     /// // Given: mycli -vvv
-    /// matches.flagCount(for: "verbose");  // 3
-    /// matches.flagCount(for: "quiet");    // 0
+    /// matches.flagCount(of: "verbose");  // 3
+    /// matches.flagCount(of: "quiet");    // 0
     /// ```
-    public func flagCount(for name: String) -> Int64 {
+    public func flagCount(of name: String) -> Int64 {
         var count: Int64 = 0;
         for flag in self.flags {
             if flag == name { count = count + 1; }
@@ -186,10 +185,9 @@ public struct ArgumentMatches: Cloneable {
     ///
     /// ```
     /// // Given: mycli --include foo --include bar
-    /// matches.allValues(for: "include");  // ["foo", "bar"]
-    /// matches.allValues(for: "missing");  // []
-    /// ```
-    public func allValues(for name: String) -> Array[String] {
+    /// matches.allValues(of: "include");  // ["foo", "bar"]
+    /// matches.allValues(of: "missing");  // []
+    public func allValues(of name: String) -> Array[String] {
         var result = Array[String]();
         for i in 0..<self.names.count {
             if self.names(unchecked: i) == name {

@@ -21,11 +21,11 @@
 ///     .argument(Argument("input").toPositional().required().help("Input file"));
 ///
 /// match cmd.parse(from: getArgv()) {
-///     .Ok(matches) => {
-///         let verbose = matches.hasFlag("verbose");
-///         let output = matches.value(for: "output");
-///         let input = matches.value(for: "input");
-///     },
+    ///     .Ok(matches) => {
+    ///         let verbose = matches.hasFlag("verbose");
+    ///         let output = matches.value(of: "output");
+    ///         let input = matches.value(of: "input");
+    ///     },
 ///     .Err(e) => {
 ///         eprintln(e.description())
 ///     }

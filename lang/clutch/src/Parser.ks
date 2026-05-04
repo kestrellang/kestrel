@@ -223,7 +223,7 @@ func handlePositional(
 ) -> Result[ArgumentMatches, ParseError] {
     var positionalCount: Int64 = 0;
     for arg in arguments {
-        guard arg.isPositional else { continue; }
+        if not arg.isPositional { continue; }
         if positionalCount == index {
             matches.setPositional(name: arg.name, value: value);
             return .Ok(matches)
@@ -249,9 +249,9 @@ func applyDefaultsAndCheck(
     mutating matches: ArgumentMatches
 ) -> Result[ArgumentMatches, ParseError] {
     for arg in arguments {
-        guard not arg.isFlag else { continue; }
+        if arg.isFlag { continue; }
 
-        if let .Some(_) = matches.value(for: arg.name) { continue; }
+        if let .Some(_) = matches.value(of: arg.name) { continue; }
 
         if let .Some(def) = arg.defaultValue {
             if arg.isPositional {

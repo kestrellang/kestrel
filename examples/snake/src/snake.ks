@@ -268,10 +268,10 @@ struct SnakeGame: not Copyable {
                     var i = self.body.count - 1;
                     while i > 0 {
                         let prev = self.body(unchecked: i - 1);
-                        self.body.setUnchecked(i, prev);
+                        self.body(unchecked: i) = prev;
                         i = i - 1;
                     }
-                    self.body.setUnchecked(0, Point(x: oldHeadX, y: oldHeadY));
+                    self.body(unchecked: 0) = Point(x: oldHeadX, y: oldHeadY);
                 }
             },
             .GameOver => {
@@ -390,7 +390,7 @@ func usleep(usec: UInt32) -> Int32
 // Main
 // ============================================
 
-func main() -> Result[(), Error] {
+func main() {
     var game = SnakeGame();
 
     // Game loop
@@ -402,9 +402,7 @@ func main() -> Result[(), Error] {
             .GameOver => game.renderGameOver(),
         }
 
-        // ~10 FPS for classic snake feel
-        usleep(100000);
+    // ~10 FPS for classic snake feel
+    usleep(100000);
     }
-
-    .Ok(())
 }

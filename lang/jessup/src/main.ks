@@ -26,32 +26,35 @@ import jessup.toolchain.(installToolchain, setDefault, listToolchains, removeToo
 func main() {
     let argv = getArgv();
 
-    let cmd = Command("jessup")
-        .about("Kestrel version manager")
-        .version("0.1.0")
-        .subcommand(
-            Command("install")
-                .about("Install a toolchain (stable, nightly, or specific version)")
-                .argument(Argument("channel").toPositional().help("Channel or version to install (e.g., stable, nightly, 1.0.0)").required())
-        )
-        .subcommand(
-            Command("default")
-                .about("Set the default toolchain")
-                .argument(Argument("toolchain").toPositional().help("Toolchain name (e.g., stable-1.0.0, nightly-2026-03-02)").required())
-        )
-        .subcommand(Command("list").about("Show installed toolchains"))
-        .subcommand(Command("update").about("Update installed channels to latest"))
-        .subcommand(
-            Command("remove")
-                .about("Remove an installed toolchain")
-                .argument(Argument("toolchain").toPositional().help("Toolchain to remove").required())
-        )
-        .subcommand(Command("show").about("Show active toolchain and path"))
-        .subcommand(
-            Command("self")
-                .about("Manage jessup itself")
-                .subcommand(Command("update").about("Update jessup to the latest version"))
-        );
+    var installCmd = Command("install");
+    installCmd = installCmd.about("Install a toolchain (stable, nightly, or specific version)");
+    installCmd = installCmd.argument(Argument("channel").toPositional().help("Channel or version to install (e.g., stable, nightly, 1.0.0)").required());
+
+    var defaultCmd = Command("default");
+    defaultCmd = defaultCmd.about("Set the default toolchain");
+    defaultCmd = defaultCmd.argument(Argument("toolchain").toPositional().help("Toolchain name (e.g., stable-1.0.0, nightly-2026-03-02)").required());
+
+    var removeCmd = Command("remove");
+    removeCmd = removeCmd.about("Remove an installed toolchain");
+    removeCmd = removeCmd.argument(Argument("toolchain").toPositional().help("Toolchain to remove").required());
+
+    var selfUpdateCmd = Command("update");
+    selfUpdateCmd = selfUpdateCmd.about("Update jessup to the latest version");
+
+    var selfCmd = Command("self");
+    selfCmd = selfCmd.about("Manage jessup itself");
+    selfCmd = selfCmd.subcommand(selfUpdateCmd);
+
+    var cmd = Command("jessup");
+    cmd = cmd.about("Kestrel version manager");
+    cmd = cmd.version("0.1.0");
+    cmd = cmd.subcommand(installCmd);
+    cmd = cmd.subcommand(defaultCmd);
+    cmd = cmd.subcommand(Command("list").about("Show installed toolchains"));
+    cmd = cmd.subcommand(Command("update").about("Update installed channels to latest"));
+    cmd = cmd.subcommand(removeCmd);
+    cmd = cmd.subcommand(Command("show").about("Show active toolchain and path"));
+    cmd = cmd.subcommand(selfCmd);
 
     match cmd.parse(from: argv) {
         .Ok(matches) => {
@@ -93,7 +96,7 @@ func handleInstall(matches matches: ArgumentMatches) {
     var channel = "stable";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
-        match sub.value(for: "channel") {
+        match sub.value(of: "channel") {
             .Some(c) => channel = c,
             .None => {}
         }
@@ -122,7 +125,7 @@ func handleDefault(matches matches: ArgumentMatches) {
     var toolchainName = "";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
-        match sub.value(for: "toolchain") {
+        match sub.value(of: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
                 let _ = eprintln("error: toolchain name required");
@@ -170,7 +173,7 @@ func handleRemove(matches matches: ArgumentMatches) {
     var toolchainName = "";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
-        match sub.value(for: "toolchain") {
+        match sub.value(of: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
                 let _ = eprintln("error: toolchain name required");

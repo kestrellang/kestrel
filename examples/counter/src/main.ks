@@ -11,7 +11,7 @@ module counter.main
 import perch.app.(App)
 import perch.request.(Request)
 import perch.response.(Response)
-import plume.plume.(Template)
+import plume.(Template)
 
 struct Ctx: Cloneable {
     var x: Int64

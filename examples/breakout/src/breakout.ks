@@ -192,7 +192,7 @@ struct BrickGrid : Cloneable {
 
         let idx = row * Config.brickCols + col;
         if self.bricks(unchecked: idx) {
-            self.bricks.setUnchecked(idx, false);
+            self.bricks(unchecked: idx) = false;
             self.remaining = self.remaining - 1;
             return Config.brickPoints(row: row)
         }
@@ -210,7 +210,7 @@ struct BrickGrid : Cloneable {
 
     mutating func reset() {
         for i in Range[Int64](0, Config.brickRows * Config.brickCols) {
-            self.bricks.setUnchecked(i, true);
+            self.bricks(unchecked: i) = true;
         }
         self.remaining = Config.brickRows * Config.brickCols;
     }
@@ -570,12 +570,11 @@ func usleep(usec: UInt32) -> Int32
 // Main
 // ============================================
 
-func main() -> () throws Error {
+func main() {
     var game = Game();
 
     for _ in game {
         usleep(16667);
     }
 
-    .Ok(())
 }
