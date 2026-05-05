@@ -112,7 +112,7 @@ public func joinPath(base base: String, rel rel: String) -> String {
     // Strip trailing slash from base
     var cleanBase = base;
     if cleanBase.byteCount > 1 and cleanBase.ends(with: "/") {
-        cleanBase = cleanBase.substringBytes(from: 0, to: cleanBase.byteCount - 1)
+        cleanBase = cleanBase.asSlice().subslice(from: 0, to: cleanBase.byteCount - 1).toOwned()
     }
 
     // Split relative path and process ".." segments
@@ -122,11 +122,11 @@ public func joinPath(base base: String, rel rel: String) -> String {
     var i: Int64 = 0;
     while i < relParts.count {
         let part = relParts(unchecked: i);
-        if part.equals("..") {
+        if part == ".." {
             if parts.count > 0 {
                 let _ = parts.pop();
             }
-        } else if part.equals(".") {
+        } else if part == "." {
             // skip current dir
         } else if part.byteCount > 0 {
             parts.append(part)
@@ -163,7 +163,7 @@ func splitOnSlash(s: String) -> Array[String] {
         let byte = s.bytes(unchecked: i);
         if byte == 47 { // '/'
             if i > start {
-                result.append(s.substringBytes(from: start, to: i))
+                result.append(s.asSlice().subslice(from: start, to: i).toOwned())
             }
             start = i + 1
         }
@@ -171,7 +171,7 @@ func splitOnSlash(s: String) -> Array[String] {
     }
 
     if start < len {
-        result.append(s.substringBytes(from: start, to: len))
+        result.append(s.asSlice().subslice(from: start, to: len).toOwned())
     }
 
     result

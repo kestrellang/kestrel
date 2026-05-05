@@ -103,12 +103,12 @@ public enum HttpMethod {
 /// parseMethod("UNKNOWN");  // None
 /// ```
 public func parseMethod(s: String) -> HttpMethod? {
-    if s.equals("GET") { return .Some(.Get) }
-    if s.equals("POST") { return .Some(.Post) }
-    if s.equals("PUT") { return .Some(.Put) }
-    if s.equals("DELETE") { return .Some(.Delete) }
-    if s.equals("PATCH") { return .Some(.Patch) }
-    if s.equals("HEAD") { return .Some(.Head) }
-    if s.equals("OPTIONS") { return .Some(.Options) }
+    if s == "GET" { return .Some(.Get) }
+    if s == "POST" { return .Some(.Post) }
+    if s == "PUT" { return .Some(.Put) }
+    if s == "DELETE" { return .Some(.Delete) }
+    if s == "PATCH" { return .Some(.Patch) }
+    if s == "HEAD" { return .Some(.Head) }
+    if s == "OPTIONS" { return .Some(.Options) }
     .None
 }

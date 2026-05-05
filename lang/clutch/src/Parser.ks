@@ -52,12 +52,12 @@ public func parseCommand(
 
         // Long flags: --key or --key=value
         if token.starts(with: "--") {
-            let rest = token.substringBytes(from: 2, to: token.byteCount);
+            let restSlice = token.asSlice().subslice(from: 2, to: token.byteCount);
 
-            match rest.find("=") {
+            match restSlice.firstIndex(of: "=") {
                 .Some(eqPos) => {
-                    let name = rest.substringBytes(from: 0, to: eqPos);
-                    let value = rest.substringBytes(from: eqPos + 1, to: rest.byteCount);
+                    let name = restSlice.subslice(from: restSlice.start, to: eqPos.value).toOwned();
+                    let value = restSlice.subslice(from: eqPos.value + 1, to: restSlice.end).toOwned();
                     let argDef = try findByLong(arguments, name);
                     if argDef.isFlag {
                         var msg = String();
@@ -69,6 +69,7 @@ public func parseCommand(
                     matches.setValue(name: argDef.name, value: value)
                 },
                 .None => {
+                    let rest = restSlice.toOwned();
                     let argDef = try findByLong(arguments, rest);
                     if argDef.isFlag {
                         matches.setFlag(name: argDef.name)
@@ -91,9 +92,10 @@ public func parseCommand(
 
         // Short flags: -v, -vvv, -abc, -o value, -ovalue
         if token.starts(with: "-") and token.byteCount > 1 {
+            let tokenSlice = token.asSlice();
             var charPos: Int64 = 1;
             while charPos < token.byteCount {
-                let flagChar = token.substringBytes(from: charPos, to: charPos + 1);
+                let flagChar = tokenSlice.subslice(from: charPos, to: charPos + 1).toOwned();
                 let argDef = try findByShort(arguments, flagChar);
 
                 if argDef.isFlag {
@@ -101,7 +103,7 @@ public func parseCommand(
                     charPos = charPos + 1
                 } else {
                     if charPos + 1 < token.byteCount {
-                        let value = token.substringBytes(from: charPos + 1, to: token.byteCount);
+                        let value = tokenSlice.subslice(from: charPos + 1, to: tokenSlice.end).toOwned();
                         matches.setValue(name: argDef.name, value: value);
                         charPos = token.byteCount
                     } else {

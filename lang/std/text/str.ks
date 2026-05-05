@@ -192,7 +192,7 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "abc123".contains(matching: { (c) in c.isAsciiDigit() });  // true
+    /// "abc123".contains(matching: { (c) in c.isAsciiDigit });  // true
     /// ```
     public func contains(matching predicate: (Char) -> Bool) -> Bool {
         self.chars.firstIndex(matching: predicate).isSome()
@@ -338,7 +338,7 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "hello world".split(matching: { (c) in c.isWhitespace() }).count;  // 2
+    /// "hello world".split(matching: { (c) in c.isWhitespace }).count;  // 2
     /// ```
     public func split(matching predicate: (Char) -> Bool) -> SplitWhereView {
         SplitWhereView(slice: self.asSlice(), matching: predicate)
@@ -685,7 +685,7 @@ extend Str {
         var result = String();
         var atWordStart = true;
         for c in self.chars.iter() {
-            if c.isWhitespace() {
+            if c.isWhitespace {
                 result.appendChar(c);
                 atWordStart = true
             } else if atWordStart {

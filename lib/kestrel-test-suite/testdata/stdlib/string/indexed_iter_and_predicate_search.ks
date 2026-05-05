@@ -6,18 +6,18 @@ module Test
 func main() -> lang.i64 {
     // ---- CharsView.firstIndex(matching:) ----
     let s: std.text.String = "hello world";
-    let spaceIdx = s.chars.firstIndex(matching: { (c) in c.isWhitespace() });
+    let spaceIdx = s.chars.firstIndex(matching: { (c) in c.isWhitespace });
     if let .Some(idx) = spaceIdx {
         if idx.byteOffset != 5 { return 1 }
     } else { return 2 }
 
     // No match
-    let noMatch = s.chars.firstIndex(matching: { (c) in c.isAsciiDigit() });
+    let noMatch = s.chars.firstIndex(matching: { (c) in c.isAsciiDigit });
     if let .Some(_) = noMatch { return 3 }
 
     // ---- CharsView.lastIndex(matching:) ----
     let s2: std.text.String = "a b c d";
-    let lastSpace = s2.chars.lastIndex(matching: { (c) in c.isWhitespace() });
+    let lastSpace = s2.chars.lastIndex(matching: { (c) in c.isWhitespace });
     if let .Some(idx) = lastSpace {
         if idx.byteOffset != 5 { return 4 }
     } else { return 5 }
@@ -32,7 +32,7 @@ func main() -> lang.i64 {
     // ---- GraphemesView.firstIndex(matching:) ----
     let g: std.text.String = "abc def";
     let gIdx = g.graphemes.firstIndex(matching: { (gr) in
-        gr.firstChar.isWhitespace()
+        gr.firstChar.isWhitespace
     });
     if let .Some(idx) = gIdx {
         if idx.byteOffset != 3 { return 8 }

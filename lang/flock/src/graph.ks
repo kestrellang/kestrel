@@ -204,7 +204,7 @@ public func topologicalSort(nodes nodes: Array[DepNode]) -> Result[Array[DepNode
 func contains(arr arr: Array[String], value value: String) -> Bool {
     var i: Int64 = 0;
     while i < arr.count {
-        if arr(unchecked: i).equals(value) {
+        if arr(unchecked: i) == value {
             return true
         }
         i = i + 1
@@ -215,7 +215,7 @@ func contains(arr arr: Array[String], value value: String) -> Bool {
 func containsNode(nodes nodes: Array[DepNode], name name: String) -> Bool {
     var i: Int64 = 0;
     while i < nodes.count {
-        if nodes(unchecked: i).name.equals(name) {
+        if nodes(unchecked: i).name == name {
             return true
         }
         i = i + 1
@@ -230,7 +230,7 @@ func containsInDeps(depNames depNames: Array[String], name name: String) -> Bool
 func findIndex(nodes nodes: Array[DepNode], name name: String) -> Optional[Int64] {
     var i: Int64 = 0;
     while i < nodes.count {
-        if nodes(unchecked: i).name.equals(name) {
+        if nodes(unchecked: i).name == name {
             return .Some(i)
         }
         i = i + 1

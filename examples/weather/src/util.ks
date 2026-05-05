@@ -86,7 +86,7 @@ public func parseFormValue(body: String, key: String) -> String {
             while valEnd < bodyLen and body.bytes(unchecked: valEnd) != 38 {
                 valEnd = valEnd + 1
             }
-            return urlDecode(body.substringBytes(from: valStart, to: valEnd))
+            return urlDecode(body.asSlice().subslice(from: valStart, to: valEnd).toOwned())
         };
         pos = pos + 1
     }

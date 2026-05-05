@@ -45,17 +45,17 @@ func main() {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
-                    if sub.equals("build") {
+                    if sub == "build" {
                         handleBuild()
-                    } else if sub.equals("run") {
+                    } else if sub == "run" {
                         handleRun()
-                    } else if sub.equals("check") {
+                    } else if sub == "check" {
                         handleCheck()
-                    } else if sub.equals("init") {
+                    } else if sub == "init" {
                         handleInit()
-                    } else if sub.equals("publish") {
+                    } else if sub == "publish" {
                         handlePublish()
-                    } else if sub.equals("update") {
+                    } else if sub == "update" {
                         handleUpdate()
                     }
                 },
@@ -467,16 +467,16 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
                     let flag = flags(unchecked: j);
                     // Parse -l, -L, and -framework flags from command output
                     if flag.starts(with: "-l") {
-                        allLinkLibs.append(flag.substringBytes(from: 2, to: flag.byteCount))
+                        allLinkLibs.append(flag.asSlice().subslice(from: 2, to: flag.byteCount).toOwned())
                     } else if flag.starts(with: "-L") {
-                        allLinkPaths.append(flag.substringBytes(from: 2, to: flag.byteCount))
+                        allLinkPaths.append(flag.asSlice().subslice(from: 2, to: flag.byteCount).toOwned())
                     } else if flag.starts(with: "-framework") {
                         // -framework is usually followed by the name as next arg
                         // but sometimes it's -framework<Name>
                     }
                     j = j + 1;
                     // Handle "-framework Name" as two separate tokens
-                    if flag.equals("-framework") and j < flags.count {
+                    if flag == "-framework" and j < flags.count {
                         allFrameworks.append(flags(unchecked: j));
                         j = j + 1
                     }
@@ -511,7 +511,7 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
     while i < sorted.count {
         let node = sorted(unchecked: i);
         // Skip the root package itself
-        if not node.name.equals(manifest.package.name) {
+        if node.name != manifest.package.name {
             let isRegistry = isRegistryDep(name: node.name);
             let src = if isRegistry { "registry" } else { "path" };
             var entryPath: Optional[String] = .None;
@@ -556,7 +556,7 @@ func splitWhitespace(s: String) -> Array[String] {
         let isSpace = b == 32 or b == 9 or b == 10 or b == 13;
         if isSpace {
             if start >= 0 {
-                result.append(s.substringBytes(from: start, to: i));
+                result.append(s.asSlice().subslice(from: start, to: i).toOwned());
                 start = -1
             }
         } else {
@@ -568,7 +568,7 @@ func splitWhitespace(s: String) -> Array[String] {
     }
 
     if start >= 0 {
-        result.append(s.substringBytes(from: start, to: len))
+        result.append(s.asSlice().subslice(from: start, to: len).toOwned())
     }
 
     result
@@ -605,12 +605,12 @@ func lastPathComponent(path: String) -> String {
     var i = end - 1;
     while i >= 0 {
         if path.bytes(unchecked: i) == 47 { // '/'
-            return path.substringBytes(from: i + 1, to: end)
+            return path.asSlice().subslice(from: i + 1, to: end).toOwned()
         }
         i = i - 1
     }
 
-    path.substringBytes(from: 0, to: end)
+    path.asSlice().subslice(from: 0, to: end).toOwned()
 }
 
 /// Trims leading and trailing whitespace (spaces, tabs, newlines) from a string.
@@ -634,5 +634,5 @@ func trimWhitespace(s: String) -> String {
             break
         }
     }
-    s.substringBytes(from: start, to: end)
+    s.asSlice().subslice(from: start, to: end).toOwned()
 }

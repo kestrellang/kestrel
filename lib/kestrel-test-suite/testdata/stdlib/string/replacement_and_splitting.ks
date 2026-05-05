@@ -53,7 +53,7 @@ module Test
 
             // ---- split(matching:) ----
             let s6: std.text.String = "hello world\tthere";
-            let wsParts = s6.split(matching: { (c) in c.isWhitespace() }).collect();
+            let wsParts = s6.split(matching: { (c) in c.isWhitespace }).collect();
             if wsParts.count != 3 { return 15 }
             if wsParts(unchecked: 0).toOwned().isEqual(to: "hello") == false { return 16 }
             if wsParts(unchecked: 1).toOwned().isEqual(to: "world") == false { return 17 }

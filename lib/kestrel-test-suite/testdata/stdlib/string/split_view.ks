@@ -73,7 +73,7 @@ func main() -> lang.i64 {
 
     // ---- SplitWhereView (predicate) ----
     let ws: std.text.String = "hello world";
-    let wsView = ws.asSlice().split(matching: { (c) in c.isWhitespace() });
+    let wsView = ws.asSlice().split(matching: { (c) in c.isWhitespace });
     if wsView.count != 2 { return 30 }
 
     let wsParts = wsView.collect();
@@ -91,7 +91,7 @@ func main() -> lang.i64 {
 
     // Predicate split on digits
     let mixed: std.text.String = "abc1def2ghi";
-    let digitParts = mixed.asSlice().split(matching: { (c) in c.isAsciiDigit() }).collect();
+    let digitParts = mixed.asSlice().split(matching: { (c) in c.isAsciiDigit }).collect();
     if digitParts.count != 3 { return 37 }
     if digitParts(unchecked: 0).toOwned().isEqual(to: "abc") == false { return 38 }
     if digitParts(unchecked: 1).toOwned().isEqual(to: "def") == false { return 39 }

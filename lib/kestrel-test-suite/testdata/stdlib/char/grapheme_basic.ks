@@ -12,8 +12,8 @@ module Test
             let fc = g.firstChar;
             if fc.isEqual(to: 'a') == false { return 3 }
 
-            // ---- isAscii() ----
-            if g.isAscii() == false { return 4 }
+            // ---- isAscii ----
+            if g.isAscii == false { return 4 }
 
             // ---- utf8Length() ----
             if g.utf8Length() != 1 { return 5 }
@@ -35,7 +35,7 @@ module Test
             if gMulti.utf8Length() != 2 { return 10 }
 
             // Multi-char grapheme is not ASCII
-            if gMulti.isAscii() { return 11 }
+            if gMulti.isAscii { return 11 }
 
             0
         }

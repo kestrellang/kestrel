@@ -74,10 +74,11 @@ public func parseUrl(raw: String) -> ParsedUrl {
     var path = raw;
     var queryString = String();
 
-    match raw.find("?") {
+    let rawSlice = raw.asSlice();
+    match raw.firstIndex(of: "?") {
         .Some(qIdx) => {
-            path = raw.substringBytes(from: 0, to: qIdx);
-            queryString = raw.substringBytes(from: qIdx + 1, to: raw.byteCount)
+            path = rawSlice.subslice(from: rawSlice.start, to: qIdx.value).toOwned();
+            queryString = rawSlice.subslice(from: qIdx.value + 1, to: rawSlice.end).toOwned()
         },
         .None => {}
     }
@@ -111,16 +112,15 @@ public func parseQueryString(qs: String) -> Array[(String, String)] {
         return result
     }
 
-    var pairs = qs.split("&");
-    while let .Some(pair) = pairs.next() {
-        match pair.find("=") {
+    for pair in qs.split("&") {
+        match pair.firstIndex(of: "=") {
             .Some(eqIdx) => {
-                let key = percentDecode(pair.substringBytes(from: 0, to: eqIdx));
-                let val = percentDecode(pair.substringBytes(from: eqIdx + 1, to: pair.byteCount));
+                let key = percentDecode(pair.subslice(from: pair.start, to: eqIdx.value).toOwned());
+                let val = percentDecode(pair.subslice(from: eqIdx.value + 1, to: pair.end).toOwned());
                 result.append((key, val))
             },
             .None => {
-                result.append((percentDecode(pair), String()))
+                result.append((percentDecode(pair.toOwned()), String()))
             }
         }
     }
@@ -240,10 +240,9 @@ public func encodeQueryString(pairs: Array[(String, String)]) -> String {
 /// ```
 func splitSegments(path: String) -> Array[String] {
     var segments = Array[String]();
-    var parts = path.split("/");
-    while let .Some(part) = parts.next() {
+    for part in path.split("/") {
         if part.byteCount > 0 {
-            segments.append(part)
+            segments.append(part.toOwned())
         }
     }
     segments

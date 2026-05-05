@@ -398,9 +398,9 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
         let actual = requestSegments(unchecked: i);
 
         if pattern.starts(with: ":") {
-            let paramName = pattern.substringBytes(from: 1, to: pattern.byteCount);
+            let paramName = pattern.asSlice().subslice(from: 1, to: pattern.byteCount).toOwned();
             let _ = params.insert(paramName, actual);
-        } else if not pattern.equals(actual) {
+        } else if pattern != actual {
             return .None
         }
     }
@@ -410,16 +410,15 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
 
 /// Returns true if two HTTP methods are the same.
 func methodMatches(expected: HttpMethod, actual: HttpMethod) -> Bool {
-    expected.toString().equals(actual.toString())
+    expected.toString() == actual.toString()
 }
 
 /// Splits a path into non-empty segments.
 func splitPathSegments(path: String) -> Array[String] {
     var segments = Array[String]();
-    var parts = path.split("/");
-    while let .Some(part) = parts.next() {
+    for part in path.split("/") {
         if part.byteCount > 0 {
-            segments.append(part)
+            segments.append(part.toOwned())
         }
     }
     segments

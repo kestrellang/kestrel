@@ -189,7 +189,7 @@ func parseValue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                 parseArray(cursor)
             } else if c == '{' {
                 parseObject(cursor)
-            } else if c == '-' or c.isDigit() {
+            } else if c == '-' or c.isAsciiDigit {
                 parseNumber(cursor)
             } else {
                 var got = String();
@@ -237,10 +237,10 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
             let c = pair.0;
             if c == '0' {
                 cursor.pos = cursor.pos + pair.1
-            } else if c.isDigit() {
+            } else if c.isAsciiDigit {
                 cursor.pos = cursor.pos + pair.1;
                 while let .Some(p) = cursor.peekChar() {
-                    if p.0.isDigit() {
+                    if p.0.isAsciiDigit {
                         cursor.pos = cursor.pos + p.1
                     } else {
                         break
@@ -260,7 +260,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
             cursor.pos = cursor.pos + pair.1;
             var hasDigit = false;
             while let .Some(p) = cursor.peekChar() {
-                if p.0.isDigit() {
+                if p.0.isAsciiDigit {
                     cursor.pos = cursor.pos + p.1;
                     hasDigit = true
                 } else {
@@ -287,7 +287,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
             }
             var hasDigit = false;
             while let .Some(p) = cursor.peekChar() {
-                if p.0.isDigit() {
+                if p.0.isAsciiDigit {
                     cursor.pos = cursor.pos + p.1;
                     hasDigit = true
                 } else {
@@ -300,7 +300,7 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
         }
     }
 
-    let numStr = cursor.source.substringBytes(from: start, to: cursor.pos);
+    let numStr = cursor.source.asSlice().subslice(from: start, to: cursor.pos).toOwned();
 
     if isFloat {
         match parseFloat64(numStr) {

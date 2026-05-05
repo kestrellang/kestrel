@@ -158,7 +158,7 @@ public func formatDateLabel(dateStr: String, idx: Int64) -> String {
     if idx == 0 { return "Today" }
     if idx == 1 { return "Tmrw" }
     if dateStr.byteCount >= 10 {
-        return dateStr.substringBytes(from: 5, to: 10)
+        return dateStr.asSlice().subslice(from: 5, to: 10).toOwned()
     };
     dateStr
 }
@@ -177,7 +177,7 @@ public func getStringFromArray(arr: Array[Value], idx: Int64) -> String {
 
 public func parseHourFromIso(isoStr: String) -> Int64 {
     if isoStr.byteCount < 13 { return 0 };
-    let hourStr = isoStr.substringBytes(from: 11, to: 13);
+    let hourStr = isoStr.asSlice().subslice(from: 11, to: 13).toOwned();
     match Int64.parse(hourStr) {
         .Some(n) => n,
         .None => 0
@@ -195,8 +195,8 @@ public func formatHourLabel(timeStr: String, idx: Int64) -> String {
 
 public func formatSunTime(isoStr: String) -> String {
     if isoStr.byteCount < 16 { return "" };
-    let hourStr = isoStr.substringBytes(from: 11, to: 13);
-    let minStr = isoStr.substringBytes(from: 14, to: 16);
+    let hourStr = isoStr.asSlice().subslice(from: 11, to: 13).toOwned();
+    let minStr = isoStr.asSlice().subslice(from: 14, to: 16).toOwned();
     let hour = match Int64.parse(hourStr) {
         .Some(n) => n,
         .None => return ""

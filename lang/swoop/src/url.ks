@@ -112,16 +112,18 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     }
 
     // Extract host:port portion
-    let hostPort = raw.substringBytes(from: afterScheme, to: pathStart);
+    let rawSlice = raw.asSlice();
+    let hostPort = rawSlice.subslice(from: afterScheme, to: pathStart).toOwned();
     if hostPort.byteCount == 0 {
         return .Err(SwoopError.invalidUrl("missing host"))
     }
 
     var host = hostPort;
     var port = defaultPort;
-    if let .Some(colonIdx) = hostPort.find(":") {
-        host = hostPort.substringBytes(from: 0, to: colonIdx);
-        let portStr = hostPort.substringBytes(from: colonIdx + 1, to: hostPort.byteCount);
+    let hpSlice = hostPort.asSlice();
+    if let .Some(colonIdx) = hostPort.firstIndex(of: ":") {
+        host = hpSlice.subslice(from: hpSlice.start, to: colonIdx.value).toOwned();
+        let portStr = hpSlice.subslice(from: colonIdx.value + 1, to: hpSlice.end).toOwned();
         let port64 = parseDecimal(portStr);
         if port64 > 0 and port64 <= 65535 {
             port = UInt16(from: port64)
@@ -133,10 +135,11 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     var path = "/";
     var queryString = String();
     if pathStart < len {
-        let remainder = raw.substringBytes(from: pathStart, to: len);
-        if let .Some(qIdx) = remainder.find("?") {
-            path = remainder.substringBytes(from: 0, to: qIdx);
-            queryString = remainder.substringBytes(from: qIdx + 1, to: remainder.byteCount)
+        let remainder = rawSlice.subslice(from: pathStart, to: len).toOwned();
+        let remSlice = remainder.asSlice();
+        if let .Some(qIdx) = remainder.firstIndex(of: "?") {
+            path = remSlice.subslice(from: remSlice.start, to: qIdx.value).toOwned();
+            queryString = remSlice.subslice(from: qIdx.value + 1, to: remSlice.end).toOwned()
         } else {
             path = remainder
         }

@@ -131,7 +131,7 @@ public struct Request: Cloneable {
     /// ```
     public func query(name: String) -> String? {
         for (key, value) in parseQueryString(self.queryString) {
-            if key.equals(name) {
+            if key == name {
                 return .Some(value)
             }
         }
@@ -183,7 +183,7 @@ public struct Request: Cloneable {
     /// ```
     public func cookie(name: String) -> String? {
         for (key, value) in self.cookies() {
-            if key.equals(name) {
+            if key == name {
                 return .Some(value)
             }
         }

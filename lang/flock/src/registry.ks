@@ -85,8 +85,8 @@ public func splitPackageName(name name: String) -> Optional[(String, String)] {
     var i: Int64 = 0;
     while i < name.byteCount {
         if name.bytes(unchecked: i) == 47 {
-            let org = name.substringBytes(from: 0, to: i);
-            let pkg = name.substringBytes(from: i + 1, to: name.byteCount);
+            let org = name.asSlice().subslice(from: 0, to: i).toOwned();
+            let pkg = name.asSlice().subslice(from: i + 1, to: name.byteCount).toOwned();
             return .Some((org, pkg))
         }
         i = i + 1

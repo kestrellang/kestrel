@@ -47,7 +47,7 @@ public func fetchRelease(channel channel: String, platform platform: Platform) -
     client = client.header("Accept", "application/vnd.github+json");
     client = client.header("User-Agent", "jessup/0.1.0");
 
-    if channel.equals("nightly") {
+    if channel == "nightly" {
         // Fetch nightly release by tag
         let url = repoApi() + "/tags/nightly";
         match client.fetch(url) {
@@ -62,7 +62,7 @@ public func fetchRelease(channel channel: String, platform platform: Platform) -
                 }
             }
         }
-    } else if channel.equals("stable") {
+    } else if channel == "stable" {
         // Fetch latest stable release
         let url = repoApi() + "/latest";
         match client.fetch(url) {

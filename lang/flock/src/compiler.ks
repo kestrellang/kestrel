@@ -28,10 +28,10 @@ public func invokeCompiler(
     linkPaths linkPaths: Array[String],
     frameworks frameworks: Array[String]
 ) -> Result[(), FlockError] {
-    if mode.equals("run") {
+    if mode == "run" {
         return invokeRun(sources: sources, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks)
     }
-    if mode.equals("check") {
+    if mode == "check" {
         return invokeCheck(sources: sources)
     }
     invokeBuild(sources: sources, output: output, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks)

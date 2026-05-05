@@ -57,19 +57,20 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
 
     let headerStr = bytesToString(buffer, from: 0, to: headerEnd);
 
-    guard let .Some(firstLineEnd) = headerStr.find("\r\n") else {
+    guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
         return .Err(invalidInput());
     }
-    let requestLine = headerStr.substringBytes(from: 0, to: firstLineEnd);
+    let headerSlice = headerStr.asSlice();
+    let requestLine = headerSlice.subslice(from: headerSlice.start, to: firstLineEnd.value).toOwned();
 
-    var parts = requestLine.split(" ");
-    guard let .Some(methodStr) = parts.next() else { return .Err(invalidInput()); }
-    guard let .Some(rawPath) = parts.next() else { return .Err(invalidInput()); }
-    guard let .Some(method) = parseMethod(methodStr) else { return .Err(invalidInput()); }
+    var requestLineParts = requestLine.split(" ").iter();
+    guard let .Some(methodSlice) = requestLineParts.next() else { return .Err(invalidInput()); }
+    guard let .Some(rawPathSlice) = requestLineParts.next() else { return .Err(invalidInput()); }
+    guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { return .Err(invalidInput()); }
 
-    let parsed = parseUrl(rawPath);
+    let parsed = parseUrl(rawPathSlice.toOwned());
 
-    let headerLines = headerStr.substringBytes(from: firstLineEnd + 2, to: headerStr.byteCount);
+    let headerLines = headerSlice.subslice(from: firstLineEnd.value + 2, to: headerSlice.end).toOwned();
     let headers = Headers.parse(from: headerLines);
 
     var body = String();

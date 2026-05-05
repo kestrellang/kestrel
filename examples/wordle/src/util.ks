@@ -33,14 +33,14 @@ public func splitGuesses(s: String) -> Array[String] {
         if s.bytes(unchecked: i) == 44 {
             // ',' separator
             if i > start {
-                out.append(s.substringBytes(from: start, to: i))
+                out.append(s.asSlice().subslice(from: start, to: i).toOwned())
             };
             start = i + 1
         };
         i = i + 1
     }
     if i > start {
-        out.append(s.substringBytes(from: start, to: i))
+        out.append(s.asSlice().subslice(from: start, to: i).toOwned())
     };
     out
 }

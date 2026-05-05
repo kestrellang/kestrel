@@ -60,19 +60,19 @@ func main() {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
-                    if sub.equals("install") {
+                    if sub == "install" {
                         handleInstall(matches: matches)
-                    } else if sub.equals("default") {
+                    } else if sub == "default" {
                         handleDefault(matches: matches)
-                    } else if sub.equals("list") {
+                    } else if sub == "list" {
                         handleList()
-                    } else if sub.equals("update") {
+                    } else if sub == "update" {
                         handleUpdate()
-                    } else if sub.equals("remove") {
+                    } else if sub == "remove" {
                         handleRemove(matches: matches)
-                    } else if sub.equals("show") {
+                    } else if sub == "show" {
                         handleShow()
-                    } else if sub.equals("self") {
+                    } else if sub == "self" {
                         handleSelf(matches: matches)
                     }
                 },
@@ -211,7 +211,7 @@ func handleSelf(matches matches: ArgumentMatches) {
         let sub = matches.submatches(unchecked: 0);
         match sub.subcommand {
             .Some(selfSub) => {
-                if selfSub.equals("update") {
+                if selfSub == "update" {
                     match selfUpdate() {
                         .Ok(_) => {},
                         .Err(e) => {

@@ -7,10 +7,10 @@ module Test
             let s: std.text.String = "hello world hello";
 
             // ---- contains(matching:) ----
-            let hasUpper = s.contains(matching: { (c) in c.isAsciiUppercase() });
+            let hasUpper = s.contains(matching: { (c) in c.isAsciiUppercase });
             if hasUpper { return 1 }
 
-            let hasLower = s.contains(matching: { (c) in c.isAsciiLowercase() });
+            let hasLower = s.contains(matching: { (c) in c.isAsciiLowercase });
             if hasLower == false { return 2 }
 
             // ---- chars.firstIndex(matching:) ----
@@ -19,7 +19,7 @@ module Test
             if spacePos.unwrap().byteOffset != 5 { return 4 }
 
             // chars.firstIndex(matching:) no match
-            let noMatch = s.chars.firstIndex(matching: { (c) in c.isAsciiDigit() });
+            let noMatch = s.chars.firstIndex(matching: { (c) in c.isAsciiDigit });
             if noMatch.isSome() { return 5 }
 
             // ---- lastIndex(of:) via Str ----

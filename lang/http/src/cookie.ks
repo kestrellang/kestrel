@@ -141,13 +141,12 @@ public struct Cookie: Cloneable {
 /// ```
 public func parseCookieHeader(headerValue: String) -> Array[(String, String)] {
     var result = Array[(String, String)]();
-    var parts = headerValue.split("; ");
-    while let .Some(part) = parts.next() {
+    for part in headerValue.split("; ") {
         let trimmedPart = part.trimmed();
-        match trimmedPart.find("=") {
+        match trimmedPart.firstIndex(of: "=") {
             .Some(eqIdx) => {
-                let name = trimmedPart.substringBytes(from: 0, to: eqIdx).trimmed();
-                let value = trimmedPart.substringBytes(from: eqIdx + 1, to: trimmedPart.byteCount).trimmed();
+                let name = trimmedPart.subslice(from: trimmedPart.start, to: eqIdx.value).trimmed().toOwned();
+                let value = trimmedPart.subslice(from: eqIdx.value + 1, to: trimmedPart.end).trimmed().toOwned();
                 result.append((name, value))
             },
             .None => {}

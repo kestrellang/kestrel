@@ -21,7 +21,7 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
         i = i + 1;
 
         // Skip hidden entries and target directory
-        if entry.starts(with: ".") or entry.equals("target") {
+        if entry.starts(with: ".") or entry == "target" {
             // skip
         } else {
             let fullPath = joinPath(base: rootDir, rel: entry);

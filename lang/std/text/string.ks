@@ -532,7 +532,7 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
     }
 
     /// Internal substring by byte range. Returns empty for invalid ranges.
-    func substringBytes(from start: Int64, to end: Int64) -> String {
+    internal func substringBytes(from start: Int64, to end: Int64) -> String {
         let myLen = self.len();
         if start >= end or start < 0 or end > myLen {
             return String()
@@ -556,7 +556,7 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
 
     /// Removes leading and trailing ASCII whitespace in place.
     ///
-    /// Recognises the same whitespace set as `Char.isWhitespace()`:
+    /// Recognises the same whitespace set as `Char.isWhitespace`:
     /// space, tab, LF, CR, form feed. For Unicode-aware trimming, use
     /// the `(matching:)` overloads with a custom predicate. Non-mutating
     /// mirrors live under `trimmed*`.

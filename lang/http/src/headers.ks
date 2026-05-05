@@ -201,15 +201,14 @@ extend Headers {
     /// ```
     public static func parse(from headerBlock: String) -> Headers {
         var headers = Headers();
-        var lines = headerBlock.split("\r\n");
-        while let .Some(line) = lines.next() {
+        for line in headerBlock.split("\r\n") {
             if line.byteCount == 0 {
                 break
             }
-            match line.find(":") {
+            match line.firstIndex(of: ":") {
                 .Some(colonIdx) => {
-                    let name = line.substringBytes(from: 0, to: colonIdx).trimmed();
-                    let value = line.substringBytes(from: colonIdx + 1, to: line.byteCount).trimmed();
+                    let name = line.subslice(from: line.start, to: colonIdx.value).trimmed().toOwned();
+                    let value = line.subslice(from: colonIdx.value + 1, to: line.end).trimmed().toOwned();
                     headers.add(name, value)
                 },
                 .None => {}
