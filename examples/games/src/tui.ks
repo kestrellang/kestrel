@@ -106,7 +106,7 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Clon
         get {
             var s = String();
             s.append(self.codes());
-            s.append(value.format());
+            s.append(value.formatted());
             s.append("\x1b[0m");
             s
         }
@@ -127,9 +127,9 @@ public struct Style: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Clon
 public func moveTo(x x: Int64, y y: Int64) -> String {
     var s = String();
     s.append("\x1b[");
-    s.append((y + 1).format());
+    s.append((y + 1).formatted());
     s.append(";");
-    s.append((x + 1).format());
+    s.append((x + 1).formatted());
     s.append("H");
     s
 }

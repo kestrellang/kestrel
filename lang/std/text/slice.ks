@@ -2,12 +2,12 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, Hash, Hasher, fatalError)
+import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, RcBox, Slice)
+import std.memory.(Layout, Pointer, RawPointer, RcBox, ArraySlice)
 import std.iter.(Iterable)
-import std.text.(Formattable, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
+import std.text.(Formattable, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
 
 // ============================================================================
 // STRING INDEX PROTOCOL
@@ -124,7 +124,7 @@ extend CharIndex {
 /// Shared ownership via `RcBox`. The source string's buffer stays
 /// alive as long as any slice references it. Call `.toOwned()` to
 /// copy just the slice's bytes into an independent `String`.
-public struct StringSlice: Str, Equatable, Comparable, Hash, Cloneable, Formattable, Iterable {
+public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Formattable, Iterable {
     type Item = Char
     type TargetIterator = CharsIterator
 
@@ -193,8 +193,8 @@ public struct StringSlice: Str, Equatable, Comparable, Hash, Cloneable, Formatta
 
     // -- Protocol conformances -----------------------------------------------
 
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        self.toOwned().format(options)
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        self.toOwned().format(into: writer, options)
     }
 
     public func isEqual(to other: StringSlice) -> Bool {
@@ -223,7 +223,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hash, Cloneable, Formatta
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(Slice(pointer: self._rawPtr().offset(by: self.start), count: self.byteCount))
+        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: self.byteCount))
     }
 
     public func clone() -> StringSlice {

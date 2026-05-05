@@ -13,7 +13,7 @@ import std.core.(
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, Formattable, FormatOptions)
+import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, Float32)
 
 /// A 64-bit IEEE 754 double-precision float.
@@ -1023,20 +1023,8 @@ public struct Float64:
     // FORMATTING
     // ========================================================================
 
-    /// Renders the float to a `String`, honouring the supplied
+    /// Formats the float directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements `Formattable`.
-    ///
-    /// Recognised options:
-    /// - `precision` — digits after the decimal point (default 6).
-    /// - `width` / `fill` / `alignment` — padding control.
-    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
-    /// - `floatStyle` — `.Fixed`, `.Scientific`, `.Auto`, or `.Percent`.
-    ///   `.Auto` picks fixed or scientific based on magnitude.
-    ///   `.Percent` multiplies by 100 and appends `%`.
-    ///
-    /// String interpolation forwards through the same options:
-    /// `"\{x:.2}"` is two decimal places, `"\{x:.2e}"` is scientific,
-    /// `"\{x:%}"` is percentage.
     ///
     /// # Examples
     ///
@@ -1048,7 +1036,7 @@ public struct Float64:
     /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
     /// (3.14).format(.{sign: .Always});                    // "+3.14"
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;
         var precisionProvided = false;
         if let .Some(p) = options.precision {
@@ -1245,11 +1233,11 @@ public struct Float64:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendByte(45)  // '-'
+                result.appendChar('-')
             } else if options.sign == .Always {
-                result.appendByte(43)  // '+'
+                result.appendChar('+')
             } else if options.sign == .Space {
-                result.appendByte(32)  // ' '
+                result.appendChar(' ')
             }
         }
         if trimTrailingZeros {
@@ -1298,38 +1286,10 @@ public struct Float64:
 
         result.append(number);
         if suffixPercent {
-            result.appendByte(37)  // '%'
+            result.appendChar('%')
         }
 
-        if let .Some(width) = options.width {
-            if width > result.byteCount {
-                var padLeft: Int64 = 0;
-                var padRight: Int64 = 0;
-                let padding = width - result.byteCount;
-                if options.alignment == .Left {
-                    padRight = padding
-                } else if options.alignment == .Right {
-                    padLeft = padding
-                } else {
-                    padLeft = padding / 2;
-                    padRight = padding - padLeft
-                }
-
-                var padded = String();
-                while padLeft > 0 {
-                    padded.appendChar(options.fill);
-                    padLeft = padLeft - 1
-                }
-                padded.append(result);
-                while padRight > 0 {
-                    padded.appendChar(options.fill);
-                    padRight = padRight - 1
-                }
-                return padded
-            }
-        }
-
-        result
+        _writePadded(into: writer, result, options)
     }}
 
 

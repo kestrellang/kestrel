@@ -25,8 +25,8 @@ struct SdlGameRenderer: GameRenderer, InputManager {
     mutating func render(state: GameState) {
         let grid = state.grid;
         let cell = self.cellSize;
-        let patternText = "PATTERN: " + state.selectedPattern.format();
-        let fpsText = "FPS: " + state.fps.format();
+        let patternText = "PATTERN: " + state.selectedPattern.formatted();
+        let fpsText = "FPS: " + state.fps.formatted();
         self.app.render { (renderer) in
             renderer.clear(Color.black());
 

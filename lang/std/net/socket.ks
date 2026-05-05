@@ -4,7 +4,7 @@ module std.net.socket
 
 import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
@@ -128,7 +128,7 @@ public struct TcpStream: Readable, Writable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `recv`
     /// returns `-1`.
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.recv(self.fd, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
@@ -146,7 +146,7 @@ public struct TcpStream: Readable, Writable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.send(self.fd, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
@@ -220,7 +220,7 @@ extend TcpStream {
     public static func connect(host: String, port: UInt16) -> Result[TcpStream, IoError] {
         // Build port string for getaddrinfo
         let port64 = Int64(from: port);
-        let portStr = port64.format();
+        let portStr = port64.formatted();
 
         // Set up hints: AF_INET, SOCK_STREAM, IPPROTO_TCP
         let addrinfoSize = ADDRINFO_SIZE();

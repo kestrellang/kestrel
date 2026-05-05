@@ -2,8 +2,8 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable, fatalError)
-import std.text.(Formattable, FormatOptions, String)
+import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, fatalError)
+import std.text.(Formattable, FormatOptions, String, StringBuilder)
 import std.numeric.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
@@ -21,7 +21,7 @@ import std.collections.(DefaultHasher, Array)
 /// (`.Deleted`) preserve probe chains after a key is removed so later
 /// lookups for keys that originally collided still find their entries.
 /// The cached hash on `.Occupied` lets resizes rehash without re-running
-/// the user's `Hash` implementation.
+/// the user's `Hashable` implementation.
 ///
 /// # Examples
 ///
@@ -192,7 +192,7 @@ public struct DictionaryIterator[K, V]: Iterator {
 /// Owns the bucket buffer; `deinit` deallocates it. Used as the value
 /// inside an `RcBox`, providing the refcount that powers COW on the
 /// dictionary level.
-struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaultable {
+struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: Defaultable {
     /// Heap pointer to the bucket array; null when `cap == 0`.
     var buckets: Pointer[Bucket[K, V]]
     /// Number of `.Occupied` entries (excludes `.Empty` and `.Deleted`).
@@ -265,7 +265,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
 // DICTIONARY
 // ============================================================================
 
-/// An unordered hash map keyed by any `K: Hash`, parameterized over the
+/// An unordered hash map keyed by any `K: Hashable`, parameterized over the
 /// hasher type `H` (defaults to `DefaultHasher`).
 ///
 /// Uses open addressing with linear probing and a 75% load-factor
@@ -320,7 +320,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
 ///
 /// # Guarantees
 ///
-/// - Every key satisfies `K: Hash`. The cached hash is computed once
+/// - Every key satisfies `K: Hashable`. The cached hash is computed once
 ///   per insert and reused on resize.
 /// - `count <= capacity * 3 / 4` after every mutation (the resize
 ///   threshold).
@@ -328,7 +328,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hash, H: Hasher, H: Defaul
 ///   work but tombstones reduce effective capacity until the next
 ///   resize.
 /// - Iteration order is **not** specified.
-public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: Hash, H: Hasher, H: Defaultable {
+public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: Hashable, H: Hasher, H: Defaultable {
     /// `Iterable` element type — a `(key, value)` tuple.
     type Item = (K, V)
     /// Concrete iterator type returned by `iter()`.
@@ -1640,7 +1640,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
 /// `Equatable` conformance for dictionaries whose values are themselves
 /// `Equatable`.
-extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
     /// Order-independent equality: dictionaries are equal iff they have
     /// the same `count` and every key in `self` is present in `other`
     /// with an equal value.
@@ -1686,7 +1686,7 @@ extend Dictionary[K, V, H]: Equatable where K: Hash, V: Equatable, H: Hasher, H:
 }
 
 /// Value-based search operations available when `V: Equatable`.
-extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
 
     /// `true` if any entry's value equals `value`.
     ///
@@ -1785,7 +1785,7 @@ extend Dictionary[K, V, H] where K: Hash, V: Equatable, H: Hasher, H: Defaultabl
 ///
 /// Drives string interpolation. Empty dictionaries render as `"{}"`.
 /// Entry order in the output reflects bucket order and is unspecified.
-extend Dictionary[K, V, H]: Formattable where K: Hash, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
     /// Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
     /// passing `options` to each key and value's `format`.
     ///
@@ -1796,8 +1796,8 @@ extend Dictionary[K, V, H]: Formattable where K: Hash, K: Formattable, V: Format
     /// Dictionary[String, Int64]().format();  // "{}"
     /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        var result = "{";
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        writer.appendChar('{');
         var first = true;
         let myCap = self.capacity;
         let myBuckets = self.getBuckets();
@@ -1807,22 +1807,24 @@ extend Dictionary[K, V, H]: Formattable where K: Hash, K: Formattable, V: Format
             match bucket {
                 .Occupied(key, value, _) => {
                     if first {
-                        first = false;
+                        first = false
                     } else {
-                        result = result + ", ";
+                        writer.append(", ")
                     }
-                    result = result + key.format(options) + ": " + value.format(options);
+                    key.format(into: writer, options);
+                    writer.append(": ");
+                    value.format(into: writer, options)
                 },
                 _ => {}
             }
         }
-        result + "}"
+        writer.appendChar('}')
     }
 }
 
 /// Eager-copy variant of `clone()` for callers that don't want to
 /// inherit the COW share with the source.
-extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
 
     /// Returns a fully-detached copy of the dictionary, with no shared
     /// storage.
@@ -1859,7 +1861,7 @@ extend Dictionary[K, V, H] where K: Hash, H: Hasher, H: Defaultable {
 
 /// Aggregation available when the value type forms an `Addable`
 /// monoid (`V + V = V` with a `Defaultable` zero).
-extend Dictionary[K, V, H] where K: Hash, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
 
     /// Returns the sum of every value, starting from `V()` (the
     /// default-constructed zero).
@@ -1919,7 +1921,7 @@ extend Dictionary[K, V, H] where K: Hash, V: Addable, V.Output = V, V: Defaultab
 ///
 /// Value type. Aliases dictionary storage; do not retain across
 /// mutations.
-public struct KeysIterator[K, V]: Iterator where K: Hash {
+public struct KeysIterator[K, V]: Iterator where K: Hashable {
     /// Element type yielded by `next()` — `K`.
     type Item = K
 
@@ -1976,7 +1978,7 @@ public struct KeysIterator[K, V]: Iterator where K: Hash {
 /// # Memory Model
 ///
 /// Value type that borrows the source dictionary's buffer.
-public struct KeysView[K, V]: Iterable where K: Hash {
+public struct KeysView[K, V]: Iterable where K: Hashable {
     /// `Iterable` element type — `K`.
     type Item = K
     /// Concrete iterator type returned by `iter()`.
@@ -2031,7 +2033,7 @@ public struct KeysView[K, V]: Iterable where K: Hash {
 ///
 /// Value type. Aliases dictionary storage; do not retain across
 /// mutations.
-public struct ValuesIterator[K, V]: Iterator where K: Hash {
+public struct ValuesIterator[K, V]: Iterator where K: Hashable {
     /// Element type yielded by `next()` — `V`.
     type Item = V
 
@@ -2088,7 +2090,7 @@ public struct ValuesIterator[K, V]: Iterator where K: Hash {
 /// # Memory Model
 ///
 /// Value type that borrows the source dictionary's buffer.
-public struct ValuesView[K, V]: Iterable where K: Hash {
+public struct ValuesView[K, V]: Iterable where K: Hashable {
     /// `Iterable` element type — `V`.
     type Item = V
     /// Concrete iterator type returned by `iter()`.
@@ -2124,7 +2126,7 @@ public struct ValuesView[K, V]: Iterable where K: Hash {
 /// `_ExpressibleByDictionaryLiteral` / `ExpressibleByDictionaryLiteral`
 /// / `Defaultable` conformances — what makes the `["a": 1, "b": 2]`
 /// literal syntax work for `Dictionary[K, V, H]`.
-extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hash, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hashable, H: Hasher, H: Defaultable {
     /// Key type for the literal protocol — matches `K`.
     type Key = K
     /// Value type for the literal protocol — matches `V`.

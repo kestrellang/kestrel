@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, fatalError)
+import std.core.(Bool, Cloneable, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.memory.(Layout, Pointer, RawPointer, RcBox, CowBox)
 import std.text.(Char, encodeUtf8, String, StringSlice, StringStorage, Str, _textAlloc, _textDealloc, _memcpyBytes)
@@ -32,7 +32,7 @@ import std.text.(Char, encodeUtf8, String, StringSlice, StringStorage, Str, _tex
 /// Owns its buffer directly. `build()` donates the buffer to a
 /// `String`; the builder is left empty. `deinit` frees the buffer
 /// if `build()` was never called.
-public struct StringBuilder {
+public struct StringBuilder: Cloneable {
     private var ptr: Pointer[UInt8]
     private var len: Int64
     private var cap: Int64
@@ -145,6 +145,18 @@ public struct StringBuilder {
 
     /// True when nothing has been written.
     public var isEmpty: Bool { self.len == 0 }
+
+    // -- Clone ---------------------------------------------------------------
+
+    /// Returns a copy with its own buffer.
+    public func clone() -> StringBuilder {
+        var copy = StringBuilder(capacity: self.cap);
+        if self.len > 0 {
+            _memcpyBytes(dst: copy.ptr, src: self.ptr, n: self.len);
+            copy.len = self.len
+        }
+        copy
+    }
 
     // -- Cleanup -------------------------------------------------------------
 

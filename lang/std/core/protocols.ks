@@ -5,7 +5,7 @@ module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 import std.numeric.(UInt64, Int64)
 
 /// Protocol for types whose values can be compared for equality.
@@ -31,7 +31,7 @@ import std.numeric.(UInt64, Int64)
 /// ```
 public protocol Equatable {
     /// Returns `true` iff `self` and `other` are considered equal. Should
-    /// be reflexive, symmetric, and transitive — `Hash` requires equal
+    /// be reflexive, symmetric, and transitive — `Hashable` requires equal
     /// values to hash equal, so don't drift from those laws.
     func isEqual(to other: Self) -> Bool
 }
@@ -77,7 +77,7 @@ public protocol RangeMatchable[Bound = Self] {
 /// compiler has already verified. A conformer may assume `0 <= index <
 /// matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 /// own bounds checks; the conformance is unsafe to satisfy if those
-/// invariants don't hold. `Array[T]` and `Slice[T]` are the canonical
+/// invariants don't hold. `Array[T]` and `ArraySlice[T]` are the canonical
 /// conformers.
 @builtin(.ArrayMatchable)
 public protocol ArrayMatchable {
@@ -95,7 +95,7 @@ public protocol ArrayMatchable {
     /// Returns the slice `[from, to)`. Caller guarantees
     /// `0 <= from <= to <= matchLength()`.
     @builtin(.ArrayMatchableMatchSlice)
-    func matchSlice(from: Int64, to: Int64) -> Slice[Element]
+    func matchSlice(from: Int64, to: Int64) -> ArraySlice[Element]
 }
 
 /// Blanket extension giving every `Equatable` type the `==` and `!=`
@@ -202,7 +202,7 @@ extend Comparable: RangeMatchable[Self] {
 
 /// Protocol for types whose values can be hashed.
 ///
-/// `Hash` extends `Equatable`: the contract is that `a == b` implies
+/// `Hashable` extends `Equatable`: the contract is that `a == b` implies
 /// `a.hash(into:)` and `b.hash(into:)` feed the same bytes to the hasher.
 /// Violating this breaks `Set` and `Dictionary` — equal lookups won't
 /// land on the equal stored value. The hasher is generic so the same
@@ -211,7 +211,7 @@ extend Comparable: RangeMatchable[Self] {
 /// # Examples
 ///
 /// ```
-/// public struct Tag: Hash {
+/// public struct Tag: Hashable {
 ///     public var name: String
 ///     public func isEqual(to other: Tag) -> Bool { self.name == other.name }
 ///     public func hash[H](mutating into hasher: H) where H: Hasher {
@@ -219,21 +219,21 @@ extend Comparable: RangeMatchable[Self] {
 ///     }
 /// }
 /// ```
-public protocol Hash: Equatable {
+public protocol Hashable: Equatable {
     /// Feeds this value's bytes into `hasher`. Must be deterministic
     /// across calls and consistent with `isEqual`.
     func hash[H](mutating into hasher: H) where H: Hasher
 }
 
-/// Protocol for hash algorithm implementations consumed by `Hash`.
+/// Protocol for hash algorithm implementations consumed by `Hashable`.
 ///
-/// The contract is the same as Rust / Swift: `Hash`-conforming types
+/// The contract is the same as Rust / Swift: `Hashable`-conforming types
 /// `write` their bytes into the hasher; the hasher accumulates state
 /// and emits a `UInt64` digest on `finish()`. Used by `Set`,
 /// `Dictionary`, and any structure that wants stable hashes.
 public protocol Hasher {
     /// Mixes `bytes` into the running hash state.
-    mutating func write(bytes: Slice[UInt8])
+    mutating func write(bytes: ArraySlice[UInt8])
     /// Returns the finalised hash. After calling `finish` the hasher's
     /// state is unspecified — don't reuse it.
     mutating func finish() -> UInt64

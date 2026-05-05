@@ -4,7 +4,7 @@ module std.io.write
 
 import std.numeric.(Int64, UInt8)
 import std.result.(Result)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
@@ -26,7 +26,7 @@ import std.io.error.(IoError, brokenPipe)
 /// ```
 /// public struct CountingSink: Writable {
 ///     var written: Int64 = 0
-///     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+///     public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
 ///         self.written = self.written + buf.count;
 ///         .Ok(buf.count)
 ///     }
@@ -38,7 +38,7 @@ public protocol Writable {
     /// `.Ok(0)` indicates the sink could accept no more right now (full
     /// buffer / would-block); other amounts are partial successes that
     /// the caller may retry.
-    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError]
+    mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError]
 
     /// Pushes any internally buffered bytes to the underlying destination.
     /// Unbuffered writers may implement this as a no-op. Errors here can
@@ -63,7 +63,7 @@ public struct Sink: Writable {
     public init() {}
 
     /// Returns `.Ok(buf.count)` without storing the bytes.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         .Ok(buf.count)
     }
 
@@ -119,7 +119,7 @@ public struct Buffer: Writable, Cloneable {
     }
 
     /// Appends every byte from `buf`. Always succeeds with `.Ok(buf.count)`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         var i: Int64 = 0;
         while i < buf.count {
             self.data.append(buf.pointer.offset(by: i).read());
@@ -155,7 +155,7 @@ public struct Buffer: Writable, Cloneable {
     /// Returns a non-owning slice view over the buffered bytes. The slice
     /// dangles once the buffer is mutated again — copy via `toArray` if
     /// you need to outlive the next write.
-    public func asSlice() -> Slice[UInt8] {
+    public func asSlice() -> ArraySlice[UInt8] {
         self.data.asSlice()
     }
 
@@ -194,10 +194,10 @@ public struct Buffer: Writable, Cloneable {
 /// var file = try File.create("output.bin");
 /// try writeAll(file, from: data.asSlice());
 /// ```
-public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), IoError] where W: Writable {
+public func writeAll[W](mutating writer: W, from buf: ArraySlice[UInt8]) -> Result[(), IoError] where W: Writable {
     var written: Int64 = 0;
     while written < buf.count {
-        let remaining = Slice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
+        let remaining = ArraySlice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
         let n = try writer.write(from: remaining);
         if n == 0 {
             return .Err(brokenPipe())
@@ -211,7 +211,7 @@ public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[()
 public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Writable {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
-    let slice = Slice(pointer: buf.asPointer(), count: 1);
+    let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
     writeAll(writer, from: slice)
 }
 

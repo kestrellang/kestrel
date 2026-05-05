@@ -43,7 +43,7 @@ func pageHtml(count: Int64) -> String {
 /// Returns the htmx fragment for the counter display and buttons.
 func counterHtml(count: Int64) -> String {
     var t = Template();
-    t.setRaw("c", count.format());
+    t.setRaw("c", count.formatted());
     t.render("<div id=\"count\">{c}</div><div>"
         + "<button class=\"dec\" hx-post=\"/dec?n={c}\" hx-target=\"#counter\" hx-swap=\"innerHTML\">- 1</button>"
         + "<button class=\"rst\" hx-post=\"/reset\" hx-target=\"#counter\" hx-swap=\"innerHTML\">Reset</button>"

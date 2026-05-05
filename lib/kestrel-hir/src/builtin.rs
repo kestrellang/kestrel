@@ -238,7 +238,7 @@ pub enum Builtin {
     DefaultStringInterpolationBuild,
     FormatOptions,
     FormattableProtocol,
-    FormattableFormatMethod,
+    FormattableFormatIntoMethod,
 }
 
 impl Builtin {
@@ -421,7 +421,7 @@ impl Builtin {
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
-            Self::FormattableFormatMethod => "FormattableFormat",
+            Self::FormattableFormatIntoMethod => "FormattableFormatInto",
         }
     }
 
@@ -600,7 +600,7 @@ impl Builtin {
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
-            "FormattableFormat" => Some(Self::FormattableFormatMethod),
+            "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
             _ => None,
         }
@@ -768,7 +768,7 @@ impl Builtin {
             | Self::DefaultStringInterpolationAppendInterpolation
             | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
-            Self::FormattableFormatMethod => BuiltinKind::ProtocolMethod,
+            Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
 
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,

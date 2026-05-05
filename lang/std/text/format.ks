@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
 import std.numeric.(Int64)
-import std.text.(String, Char)
+import std.text.(String, Char, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
 
@@ -365,12 +365,64 @@ public struct FormatOptions: Equatable {
 /// ```
 @builtin(.FormattableProtocol)
 public protocol Formattable {
-    /// Returns this value rendered as a `String` under the supplied options.
+    /// Writes this value's formatted representation directly into `writer`.
     ///
-    /// Default arg uses `FormatOptions.default()` so unsuffixed calls
-    /// behave like the bare `"\{expr}"` interpolation form.
-    @builtin(.FormattableFormat)
-    func format(options: FormatOptions = FormatOptions.default()) -> String
+    /// This is the kernel method — all formatting ultimately bottoms out
+    /// here. The convenience `format(options:) -> String` in the protocol
+    /// extension calls this under the hood.
+    @builtin(.FormattableFormatInto)
+    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default())
+}
+
+extend Formattable {
+    /// Returns this value rendered as a `String`.
+    ///
+    /// Convenience wrapper: creates a `StringBuilder`, calls
+    /// `format(into:)`, and returns the built string. Uses a distinct
+    /// name to avoid overload-resolution ambiguity with `format(into:)`.
+    public func formatted(options: FormatOptions = FormatOptions.default()) -> String {
+        var b = StringBuilder();
+        self.format(into: b, options);
+        b.build()
+    }
+}
+
+// ============================================================================
+// PADDING HELPER
+// ============================================================================
+
+/// Writes `content` into `writer` with width/alignment/fill padding applied.
+/// Used by String, integer, and float `format(into:)` implementations.
+public func _writePadded(mutating into writer: StringBuilder, content: String, options: FormatOptions) {
+    if let .Some(width) = options.width {
+        let currentLen = content.chars.count;
+        if width > currentLen {
+            let padding = width - currentLen;
+            var padLeft: Int64 = 0;
+            var padRight: Int64 = 0;
+
+            if options.alignment == .Left {
+                padRight = padding
+            } else if options.alignment == .Right {
+                padLeft = padding
+            } else {
+                padLeft = padding / 2;
+                padRight = padding - padLeft
+            }
+
+            while padLeft > 0 {
+                writer.appendChar(options.fill);
+                padLeft = padLeft - 1
+            }
+            writer.append(content);
+            while padRight > 0 {
+                writer.appendChar(options.fill);
+                padRight = padRight - 1
+            }
+            return
+        }
+    }
+    writer.append(content)
 }
 
 // ============================================================================
@@ -447,18 +499,17 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 ///
 /// # Representation
 ///
-/// A single `Array[String]` of accumulated parts. Empty literal pieces
-/// are dropped on append.
+/// A single `StringBuilder` that accumulates all literal and formatted
+/// bytes in one buffer. Pre-sized using the compiler's capacity hints.
 @builtin(.DefaultStringInterpolation)
 public struct DefaultStringInterpolation: Interpolatable, Cloneable {
-    private var parts: Array[String]
+    private var builder: StringBuilder
 
     /// @name With Capacity
-    /// Constructs an empty accumulator.
+    /// Constructs an empty accumulator pre-sized from compile-time hints.
     ///
-    /// The capacity arguments are ignored by the default implementation
-    /// — `Array[String]` grows on demand and the per-part cost dominates
-    /// the per-byte cost. Custom implementations may use them.
+    /// `literalCapacity` is the exact byte count of static segments;
+    /// `interpolationCount` estimates ~16 bytes per hole.
     ///
     /// # Examples
     ///
@@ -468,46 +519,31 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     /// ```
     @builtin(.DefaultStringInterpolationInit)
     public init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64) {
-        self.parts = [];
+        self.builder = StringBuilder(capacity: literalCapacity + interpolationCount * 16);
     }
 
-    /// Returns a shallow copy with cloned `parts`.
-    ///
-    /// `String` is COW so the part clone is itself shallow; mutating
-    /// either copy after this call does not affect the other.
+    /// Returns a copy with a cloned builder buffer.
     public func clone() -> DefaultStringInterpolation {
         var c = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
-        c.parts = self.parts.clone();
+        c.builder = self.builder.clone();
         c
     }
 
-    /// Records one static literal segment.
-    ///
-    /// Empty literals are dropped — they would force `build()` to do
-    /// extra work without changing the result. Non-empty literals are
-    /// appended verbatim with no copying beyond the `String`'s own COW.
+    /// Appends a static literal segment directly into the buffer.
     @builtin(.DefaultStringInterpolationAppendLiteral)
     public mutating func appendLiteral(literal: String) {
         if literal.isEmpty == false {
-            self.parts.append(literal);
+            self.builder.append(literal);
         }
     }
 
-    /// Records one interpolation hole, eagerly formatted with `options`.
-    ///
-    /// Calls `value.format(options)` immediately so the resulting
-    /// `String` is what gets stored — `value` is not retained past this
-    /// call. Default `options` matches `FormatOptions.default()`.
+    /// Formats one interpolation hole directly into the buffer.
     @builtin(.DefaultStringInterpolationAppendInterpolation)
     public mutating func appendInterpolation[T](value: T, options: FormatOptions = FormatOptions.default()) where T: Formattable {
-        self.parts.append(value.format(options));
+        value.format(into: self.builder, options);
     }
 
-    /// Concatenates all recorded parts into the final `String`.
-    ///
-    /// Fast paths the zero-part and one-part cases. For the multi-part
-    /// case, computes the exact total byte length first, allocates once
-    /// at that size, then appends — no growth churn.
+    /// Transfers the buffer into a `String` without copying.
     ///
     /// # Examples
     ///
@@ -518,26 +554,7 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     /// acc.build();  // "ab"
     /// ```
     @builtin(.DefaultStringInterpolationBuild)
-    public func build() -> String {
-        let partsCount = self.parts.count;
-        if partsCount == 0 {
-            return ""
-        }
-        if partsCount == 1 {
-            return self.parts(unchecked: 0)
-        }
-        var totalBytes: Int64 = 0;
-        var j: Int64 = 0;
-        while j < partsCount {
-            totalBytes = totalBytes + self.parts(unchecked: j).byteCount;
-            j = j + 1;
-        }
-        var result = String(capacity: totalBytes);
-        var i: Int64 = 0;
-        while i < partsCount {
-            result.append(self.parts(unchecked: i));
-            i = i + 1;
-        }
-        result
+    public mutating func build() -> String {
+        self.builder.build()
     }
 }

@@ -168,9 +168,9 @@ func hexPoints(cx: Float64, cy: Float64, r: Float64) -> String {
     while i < 6 {
         let x = cx + r * unitX(i);
         let y = cy + r * unitY(i);
-        s.append(roundInt(x).format());
+        s.append(roundInt(x).formatted());
         s.append(",");
-        s.append(roundInt(y).format());
+        s.append(roundInt(y).formatted());
         if i < 5 { s.append(" ") };
         i = i + 1
     }
@@ -223,9 +223,9 @@ public func statsRadarSvg(statsArr: Array[Value]) -> String {
         let normalized = (Float64(from: cap) / 200.0) * r;
         let x = cx + normalized * unitX(pi);
         let y = cy + normalized * unitY(pi);
-        s.append(roundInt(x).format());
+        s.append(roundInt(x).formatted());
         s.append(",");
-        s.append(roundInt(y).format());
+        s.append(roundInt(y).formatted());
         if pi < 5 { s.append(" ") };
         pi = pi + 1
     }

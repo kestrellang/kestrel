@@ -2,11 +2,12 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hash, Hasher, RangeMatchable)
+import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hashable, Hasher, RangeMatchable)
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
-import std.text.(String, Formattable, FormatOptions)
+import std.memory.(ArraySlice, Pointer)
+import std.text.(String, StringBuilder, Formattable, FormatOptions)
 import std.text.unicode as unicode
 
 // ============================================================================
@@ -38,7 +39,7 @@ import std.text.unicode as unicode
 ///
 /// A single `UInt32` holding the scalar value. Comparison and hashing
 /// operate on that integer directly.
-public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash, RangeMatchable {
+public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hashable, RangeMatchable {
     private var _value: UInt32
 
     // ========================================================================
@@ -459,7 +460,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
@@ -488,8 +489,8 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 // -- Formattable conformance -------------------------------------------------
 
 extend Char: Formattable {
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        self.toString()
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        writer.appendChar(self)
     }
 }
 
@@ -700,7 +701,7 @@ public struct Grapheme: Equatable, Cloneable {
     }
 }
 
-// -- Grapheme: Comparable, Hash, Formattable ---------------------------------
+// -- Grapheme: Comparable, Hashable, Formattable ---------------------------------
 
 extend Grapheme: Comparable {
     public func compare(other: Grapheme) -> Ordering {
@@ -716,7 +717,7 @@ extend Grapheme: Comparable {
     }
 }
 
-extend Grapheme: Hash {
+extend Grapheme: Hashable {
     public func hash[H](mutating into hasher: H) where H: Hasher {
         for c in self.chars {
             c.hash(into: hasher)
@@ -725,12 +726,10 @@ extend Grapheme: Hash {
 }
 
 extend Grapheme: Formattable {
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        var s = String();
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         for c in self.chars {
-            s.appendChar(c)
+            writer.appendChar(c)
         }
-        s
     }
 }
 

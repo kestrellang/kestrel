@@ -114,7 +114,7 @@ public func capitalize(s: String) -> String {
 
 // Pad an integer with leading zeros to width N (e.g., padId(7, 3) = "007")
 public func padId(n: Int64, width: Int64) -> String {
-    let raw = n.format();
+    let raw = n.formatted();
     if raw.byteCount >= width { return raw };
     var out = String();
     var pad = width - raw.byteCount;
@@ -131,9 +131,9 @@ public func formatMeters(decimeters: Int64) -> String {
     let whole = decimeters / 10;
     let frac = decimeters - whole * 10;
     var s = String();
-    s.append(whole.format());
+    s.append(whole.formatted());
     s.append(".");
-    s.append(frac.format());
+    s.append(frac.formatted());
     s.append(" m");
     s
 }
@@ -143,9 +143,9 @@ public func formatKilos(hectograms: Int64) -> String {
     let whole = hectograms / 10;
     let frac = hectograms - whole * 10;
     var s = String();
-    s.append(whole.format());
+    s.append(whole.formatted());
     s.append(".");
-    s.append(frac.format());
+    s.append(frac.formatted());
     s.append(" kg");
     s
 }

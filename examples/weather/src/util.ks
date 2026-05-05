@@ -112,14 +112,14 @@ public func formatTemp(t: Float64) -> String {
     if negative and total > 0 {
         s.append("-")
     };
-    s.append(whole.format());
+    s.append(whole.formatted());
     s.append(".");
-    s.append(frac.format());
+    s.append(frac.formatted());
     s
 }
 
 public func formatInt(n: Int64) -> String {
-    n.format()
+    n.formatted()
 }
 
 public func formatTempWhole(t: Float64) -> String {
@@ -134,6 +134,6 @@ public func formatTempWhole(t: Float64) -> String {
     if negative and whole > 0 {
         s.append("-")
     };
-    s.append(whole.format());
+    s.append(whole.formatted());
     s
 }

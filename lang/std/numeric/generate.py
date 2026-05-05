@@ -432,23 +432,19 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
 
 
 def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> str:
-    """Generate the format() method for integer types."""
+    """Generate the format(into:) method for integer types."""
 
     # For converting values between types
     if bits == 64 and signed:
-        # Int64: radix is already Int64, digit is already Int64
         digit_as_i64 = "digit"
-        radix_as_type = "radix"  # radix is Int64, self is Int64, no conversion needed
+        radix_as_type = "radix"
     elif bits == 64:
-        # UInt64: radix is Int64, need to convert to UInt64; digit is UInt64, need to convert to Int64
         digit_as_i64 = "Int64(from: digit)"
         radix_as_type = "UInt64(from: radix)"
     else:
-        # Smaller types: radix is Int64, need to convert to type; digit is type, need to convert to Int64
         digit_as_i64 = f"Int64(from: digit)"
         radix_as_type = f"{type_name}(from: radix)"
 
-    # For signed types, we need to handle negative numbers
     if signed:
         sign_handling = f'''
         let isNegative = n < 0;
@@ -456,36 +452,26 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
             n = n.negate()
         }}'''
         sign_prefix = '''
-        // Add sign prefix
         if isNegative {
-            result.appendByte(45)  // '-'
+            result.appendChar('-')
         } else if options.sign == .Always {
-            result.appendByte(43)  // '+'
+            result.appendChar('+')
         } else if options.sign == .Space {
-            result.appendByte(32)  // ' '
+            result.appendChar(' ')
         }'''
     else:
         sign_handling = '''
         let isNegative = false;'''
         sign_prefix = '''
-        // Add sign prefix (unsigned types only show + if requested)
         if options.sign == .Always {
-            result.appendByte(43)  // '+'
+            result.appendChar('+')
         } else if options.sign == .Space {
-            result.appendByte(32)  // ' '
+            result.appendChar(' ')
         }'''
 
     return f'''    // Formattable
-    /// Renders the integer to a `String`, honouring the supplied
+    /// Formats the integer directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements the `Formattable` protocol.
-    ///
-    /// Recognised options:
-    /// - `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-    /// - `width` — minimum output width; shorter values are padded.
-    /// - `fill` / `alignment` — padding character and side.
-    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
-    /// - `uppercase` — uppercase hex digits.
-    /// - `alternate` — emit the `0b` / `0o` / `0x` prefix.
     ///
     /// # Examples
     ///
@@ -498,94 +484,56 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     /// (42).format(.{{width: .Some(5), fill: '0'}});     // "00042"
     /// (-42).format(.{{sign: .Always}});                 // "-42"
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {{
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {{
         var n = self;{sign_handling}
 
-        // Get radix (default 10)
         var radix: Int64 = options.radix;
         if radix < 2 or radix > 36 {{
             radix = 10
         }}
 
-        // Build digits in reverse order
+        // Build digits in reverse order (need random access to reverse)
         var digits = String();
         if n == {type_name}.zero {{
-            digits.appendByte(48)  // '0'
+            digits.appendByte(48)
         }} else {{
             let radixVal: {type_name} = {radix_as_type};
             while n != {type_name}.zero {{
                 let digit: {type_name} = n % radixVal;
                 let digitVal: Int64 = {digit_as_i64};
                 let charCode: Int64 = if digitVal < 10 {{
-                    digitVal + 48  // '0'-'9'
+                    digitVal + 48
                 }} else if options.uppercase {{
-                    digitVal - 10 + 65  // 'A'-'Z'
+                    digitVal - 10 + 65
                 }} else {{
-                    digitVal - 10 + 97  // 'a'-'z'
+                    digitVal - 10 + 97
                 }};
                 digits.appendByte(UInt8(from: charCode));
                 n = n / radixVal
             }}
         }}
 
-        // Build result string
+        // Build content: sign + prefix + reversed digits
         var result = String();
 {sign_prefix}
 
-        // Add alternate form prefix (always lowercase, even with uppercase digits)
         if options.alternate {{
             if radix == 2 {{
-                result.appendByte(48);  // '0'
-                result.appendByte(98)   // 'b'
+                result.append("0b")
             }} else if radix == 8 {{
-                result.appendByte(48);  // '0'
-                result.appendByte(111)  // 'o'
+                result.append("0o")
             }} else if radix == 16 {{
-                result.appendByte(48);  // '0'
-                result.appendByte(120)  // 'x'
+                result.append("0x")
             }}
         }}
 
-        // Append digits in correct order (reverse)
         var i = digits.byteCount - 1;
         while i >= 0 {{
             result.appendByte(digits.bytes(unchecked: i));
             i = i - 1
         }}
 
-        // Apply width and alignment padding
-        if let .Some(width) = options.width {{
-            let currentLen = result.byteCount;
-            if width > currentLen {{
-                let padding = width - currentLen;
-                var padLeft: Int64 = 0;
-                var padRight: Int64 = 0;
-
-                if options.alignment == .Left {{
-                    padRight = padding
-                }} else if options.alignment == .Right {{
-                    padLeft = padding
-                }} else {{
-                    // Center
-                    padLeft = padding / 2;
-                    padRight = padding - padLeft
-                }}
-
-                var padded = String();
-                while padLeft > 0 {{
-                    padded.appendChar(options.fill);
-                    padLeft = padLeft - 1
-                }}
-                padded.append(result);
-                while padRight > 0 {{
-                    padded.appendChar(options.fill);
-                    padRight = padRight - 1
-                }}
-                return padded
-            }}
-        }}
-
-        result
+        _writePadded(into: writer, result, options)
     }}'''
 
 
@@ -1492,20 +1440,8 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     """Generate the format() method for float types."""
     lang_type = f"f{bits}"
 
-    method = '''    /// Renders the float to a `String`, honouring the supplied
+    method = '''    /// Formats the float directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements `Formattable`.
-    ///
-    /// Recognised options:
-    /// - `precision` — digits after the decimal point (default 6).
-    /// - `width` / `fill` / `alignment` — padding control.
-    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
-    /// - `floatStyle` — `.Fixed`, `.Scientific`, `.Auto`, or `.Percent`.
-    ///   `.Auto` picks fixed or scientific based on magnitude.
-    ///   `.Percent` multiplies by 100 and appends `%`.
-    ///
-    /// String interpolation forwards through the same options:
-    /// `"\\{x:.2}"` is two decimal places, `"\\{x:.2e}"` is scientific,
-    /// `"\\{x:%}"` is percentage.
     ///
     /// # Examples
     ///
@@ -1517,7 +1453,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
     /// (3.14).format(.{sign: .Always});                    // "+3.14"
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;
         var precisionProvided = false;
         if let .Some(p) = options.precision {
@@ -1714,11 +1650,11 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendByte(45)  // '-'
+                result.appendChar('-')
             } else if options.sign == .Always {
-                result.appendByte(43)  // '+'
+                result.appendChar('+')
             } else if options.sign == .Space {
-                result.appendByte(32)  // ' '
+                result.appendChar(' ')
             }
         }
         if trimTrailingZeros {
@@ -1767,38 +1703,10 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
 
         result.append(number);
         if suffixPercent {
-            result.appendByte(37)  // '%'
+            result.appendChar('%')
         }
 
-        if let .Some(width) = options.width {
-            if width > result.byteCount {
-                var padLeft: Int64 = 0;
-                var padRight: Int64 = 0;
-                let padding = width - result.byteCount;
-                if options.alignment == .Left {
-                    padRight = padding
-                } else if options.alignment == .Right {
-                    padLeft = padding
-                } else {
-                    padLeft = padding / 2;
-                    padRight = padding - padLeft
-                }
-
-                var padded = String();
-                while padLeft > 0 {
-                    padded.appendChar(options.fill);
-                    padLeft = padLeft - 1
-                }
-                padded.append(result);
-                while padRight > 0 {
-                    padded.appendChar(options.fill);
-                    padRight = padRight - 1
-                }
-                return padded
-            }
-        }
-
-        result
+        _writePadded(into: writer, result, options)
     }'''
 
     return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)

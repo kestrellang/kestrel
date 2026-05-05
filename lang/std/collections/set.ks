@@ -2,8 +2,8 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hash, Hasher, Defaultable, Addable, Comparable)
-import std.text.(Formattable, FormatOptions)
+import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, Comparable)
+import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
@@ -69,7 +69,7 @@ struct Unit: Equatable, Cloneable {
 ///
 /// Value type. Aliases the source set's bucket array; do not retain
 /// across mutations of the set.
-public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hasher, H: Defaultable {
+public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hashable, H: Hasher, H: Defaultable {
     /// Element type yielded by `next()` — `T`.
     type Item = T
 
@@ -151,7 +151,7 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
 ///
 /// # Hashing
 ///
-/// Each element's hash is computed via `T: Hash` and stored in the
+/// Each element's hash is computed via `T: Hashable` and stored in the
 /// underlying dictionary's bucket. Swap the hasher type by writing
 /// `Set[T, SipHasher]` etc.; the default `DefaultHasher` is FNV-1a
 /// (see `DefaultHasher` for caveats around adversarial inputs).
@@ -170,11 +170,11 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hash, H: Hash
 ///
 /// # Guarantees
 ///
-/// - Elements are unique by `Hash`/`Equatable` equality.
+/// - Elements are unique by `Hashable`/`Equatable` equality.
 /// - Iteration order is **not** specified.
 /// - Operations marked O(1) are amortized; the underlying dictionary
 ///   resizes geometrically.
-public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: Hasher, H: Defaultable {
+public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, H: Hasher, H: Defaultable {
     /// `Iterable` element type — `T`.
     type Item = T
     /// Concrete iterator type returned by `iter()`.
@@ -997,7 +997,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// let lower = words.map { (s) in s.lowercase() };
     /// // {"hello", "world"} — even though both originals lowercase to distinct strings
     /// ```
-    public func map[U](transform: (T) -> U) -> Set[U, H] where U: Hash {
+    public func map[U](transform: (T) -> U) -> Set[U, H] where U: Hashable {
         var result = Set[U, H]();
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -1021,7 +1021,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// let nums = set.compactMap { (s) in Int64.parse(s) };
     /// // {1, 3}  — "two" failed to parse
     /// ```
-    public func compactMap[U](transform: (T) -> U?) -> Set[U, H] where U: Hash {
+    public func compactMap[U](transform: (T) -> U?) -> Set[U, H] where U: Hashable {
         var result = Set[U, H]();
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -1046,7 +1046,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
     /// let expanded = set.flatMap { (x) in Set([x, x * 10]) };
     /// // {1, 10, 2, 20}
     /// ```
-    public func flatMap[U](transform: (T) -> Set[U, H]) -> Set[U, H] where U: Hash {
+    public func flatMap[U](transform: (T) -> Set[U, H]) -> Set[U, H] where U: Hashable {
         var result = Set[U, H]();
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -1178,8 +1178,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hash, H: H
 // ============================================================================
 
 /// `Equatable` conformance — every `Set[T, H]` is equatable because
-/// `T: Hash` already implies `T: Equatable`.
-extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
+/// `T: Hashable` already implies `T: Equatable`.
+extend Set[T, H]: Equatable where T: Hashable, H: Hasher, H: Defaultable {
 
     /// `true` when `self` and `other` contain exactly the same
     /// elements.
@@ -1211,7 +1211,7 @@ extend Set[T, H]: Equatable where T: Hash, H: Hasher, H: Defaultable {
 ///
 /// Drives string interpolation. Empty sets render as `"{}"`. Element
 /// order in the output matches iteration order and is unspecified.
-extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defaultable {
+extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: Defaultable {
     /// Renders the set as `"{" + elements.joined(", ") + "}"`,
     /// passing `options` to each element's `format`.
     ///
@@ -1222,20 +1222,18 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
     /// Set[Int64]().format();    // "{}"
     /// "\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        // Implementation: build string representation
-        var result = "{";
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        writer.appendChar('{');
         var first = true;
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if not first {
-                result = result + ", ";
+                writer.append(", ")
             }
             first = false;
-            result = result + elem.format(options);
+            elem.format(into: writer, options)
         }
-        result = result + "}";
-        result
+        writer.appendChar('}')
     }
 }
 
@@ -1246,7 +1244,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hash, H: Hasher, H: Defau
 /// Eager-copy variant of `clone()` for callers that don't want to
 /// inherit the COW share with the source. Available when `T` itself
 /// is `Cloneable`.
-extend Set[T, H] where T: Hash, T: Cloneable, H: Hasher, H: Defaultable {
+extend Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
 
     /// Returns a fully-detached copy of the set with no shared
     /// storage; every element is also `clone()`-d.
@@ -1277,7 +1275,7 @@ extend Set[T, H] where T: Hash, T: Cloneable, H: Hasher, H: Defaultable {
 // ============================================================================
 
 /// Ordering-aware operations available when `T: Comparable`.
-extend Set[T, H] where T: Hash, T: Comparable, H: Hasher, H: Defaultable {
+extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
 
     /// Returns the smallest element, or `None` for an empty set.
     ///
@@ -1352,7 +1350,7 @@ extend Set[T, H] where T: Hash, T: Comparable, H: Hasher, H: Defaultable {
 
 /// Aggregation available when `T` forms an `Addable` monoid (`T + T = T`
 /// with a `Defaultable` zero).
-extend Set[T, H] where T: Hash, T: Addable, T.Output = T, T: Defaultable, H: Hasher, H: Defaultable {
+extend Set[T, H] where T: Hashable, T: Addable, T.Output = T, T: Defaultable, H: Hasher, H: Defaultable {
 
     /// Returns the sum of every element, starting from `T()` (the
     /// default-constructed zero).
@@ -1382,7 +1380,7 @@ extend Set[T, H] where T: Hash, T: Addable, T.Output = T, T: Defaultable, H: Has
 
 // TODO: DirectIterable protocol not yet implemented
 // /// DirectIterable conformance allows using iterator methods directly on sets.
-// extend Set[T, H]: DirectIterable[T] where T: Hash, H: Hasher, H: Defaultable {
+// extend Set[T, H]: DirectIterable[T] where T: Hashable, H: Hasher, H: Defaultable {
 //     public static func collect[I](from iter: I) -> Set[T, H] where I: Iterator, I.Item = T {
 //         var result = Set[T, H]();
 //         var iterator = iter;
@@ -1409,7 +1407,7 @@ extend Set[T, H] where T: Hash, T: Addable, T.Output = T, T: Defaultable, H: Has
 /// let strings: Set[String] = ["a", "b", "c"];
 /// let empty: Set[Int64] = [];
 /// ```
-extend Set[T, H]: ExpressibleByArrayLiteral where T: Hash, H: Hasher, H: Defaultable {
+extend Set[T, H]: ExpressibleByArrayLiteral where T: Hashable, H: Hasher, H: Defaultable {
     /// `ExpressibleByArrayLiteral` element type — equals `T`.
     type Element = T
 

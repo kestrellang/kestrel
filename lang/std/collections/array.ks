@@ -4,14 +4,15 @@ module std.collections
 
 import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable, fatalError)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
-import std.core.(Range, ClosedRange, Hash)
-import std.text.(Formattable, FormatOptions)
+import std.core.(Range, ClosedRange, Hashable)
+import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, RcBox)
+import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, RcBox)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
+import std.collections.(Slice)
 
 // ============================================================================
 // ARRAY ITERATOR
@@ -107,10 +108,10 @@ public struct ArrayIterator[T]: Iterator {
 // CHUNKS ITERATOR
 // ============================================================================
 
-/// Iterator over non-overlapping `Slice[T]` chunks of an `Array[T]`.
+/// Iterator over non-overlapping `ArraySlice[T]` chunks of an `Array[T]`.
 ///
 /// Produced by `Array.chunks(of:)`, walks the source buffer in fixed-size
-/// strides and yields each chunk as a borrowed `Slice[T]`. The last chunk
+/// strides and yields each chunk as a borrowed `ArraySlice[T]`. The last chunk
 /// may be shorter than `chunkSize` when the array length is not evenly
 /// divisible. For overlapping windows of a fixed size instead, use
 /// `WindowsIterator` / `Array.windows(of:)`.
@@ -120,7 +121,7 @@ public struct ArrayIterator[T]: Iterator {
 /// ```
 /// let arr = [1, 2, 3, 4, 5];
 /// for chunk in arr.chunks(of: 2) {
-///     // yields: Slice[1, 2], Slice[3, 4], Slice[5]
+///     // yields: ArraySlice[1, 2], ArraySlice[3, 4], ArraySlice[5]
 /// }
 /// ```
 ///
@@ -135,9 +136,9 @@ public struct ArrayIterator[T]: Iterator {
 /// Value type. Yielded slices alias the source array's buffer; do not
 /// retain them across mutations of the array.
 public struct ChunksIterator[T]: Iterator {
-    /// The element type yielded by `next()` — a borrowed `Slice[T]` over
+    /// The element type yielded by `next()` — a borrowed `ArraySlice[T]` over
     /// one chunk.
-    type Item = Slice[T]
+    type Item = ArraySlice[T]
 
     /// Pointer to the start of the next chunk to yield.
     private var ptr: Pointer[T]
@@ -170,7 +171,7 @@ public struct ChunksIterator[T]: Iterator {
 
     /// Returns the next chunk, or `None` when the source is exhausted.
     ///
-    /// The returned `Slice[T]` has length `chunkSize`, except for the final
+    /// The returned `ArraySlice[T]` has length `chunkSize`, except for the final
     /// chunk which may be shorter if the total count was not evenly
     /// divisible.
     ///
@@ -178,12 +179,12 @@ public struct ChunksIterator[T]: Iterator {
     ///
     /// ```
     /// var it = [1, 2, 3, 4, 5].chunks(of: 2);
-    /// it.next();  // Some(Slice[1, 2])
-    /// it.next();  // Some(Slice[3, 4])
-    /// it.next();  // Some(Slice[5])     // shorter trailing chunk
+    /// it.next();  // Some(ArraySlice[1, 2])
+    /// it.next();  // Some(ArraySlice[3, 4])
+    /// it.next();  // Some(ArraySlice[5])     // shorter trailing chunk
     /// it.next();  // None
     /// ```
-    public mutating func next() -> Slice[T]? {
+    public mutating func next() -> ArraySlice[T]? {
         if self.remaining <= 0 {
             return .None
         }
@@ -195,7 +196,7 @@ public struct ChunksIterator[T]: Iterator {
             self.chunkSize
         };
 
-        let slice = Slice(pointer: self.ptr, count: thisChunkSize);
+        let slice = ArraySlice(pointer: self.ptr, count: thisChunkSize);
         self.ptr = self.ptr.offset(by: thisChunkSize);
         self.remaining = self.remaining - thisChunkSize;
         .Some(slice)
@@ -219,7 +220,7 @@ public struct ChunksIterator[T]: Iterator {
 /// ```
 /// let arr = [1, 2, 3, 4];
 /// for window in arr.windows(of: 2) {
-///     // yields: Slice[1, 2], Slice[2, 3], Slice[3, 4]
+///     // yields: ArraySlice[1, 2], ArraySlice[2, 3], ArraySlice[3, 4]
 /// }
 /// ```
 ///
@@ -233,9 +234,9 @@ public struct ChunksIterator[T]: Iterator {
 /// Value type. Yielded slices alias the source array's buffer; do not
 /// retain them across mutations of the array.
 public struct WindowsIterator[T]: Iterator {
-    /// The element type yielded by `next()` — a borrowed `Slice[T]` over
+    /// The element type yielded by `next()` — a borrowed `ArraySlice[T]` over
     /// one window.
-    type Item = Slice[T]
+    type Item = ArraySlice[T]
 
     /// Pointer to the start of the next window; advances by one element
     /// per call.
@@ -284,16 +285,16 @@ public struct WindowsIterator[T]: Iterator {
     ///
     /// ```
     /// var it = [1, 2, 3].windows(of: 2);
-    /// it.next();  // Some(Slice[1, 2])
-    /// it.next();  // Some(Slice[2, 3])
+    /// it.next();  // Some(ArraySlice[1, 2])
+    /// it.next();  // Some(ArraySlice[2, 3])
     /// it.next();  // None
     /// ```
-    public mutating func next() -> Slice[T]? {
+    public mutating func next() -> ArraySlice[T]? {
         if self.remaining <= 0 {
             return .None
         }
 
-        let slice = Slice(pointer: self.ptr, count: self.windowSize);
+        let slice = ArraySlice(pointer: self.ptr, count: self.windowSize);
         self.ptr = self.ptr.offset(by: 1);
         self.remaining = self.remaining - 1;
         .Some(slice)
@@ -423,8 +424,8 @@ struct ArrayStorage[T]: Cloneable {
 /// arbitrary-position insert/remove via shifting. Storage is shared between
 /// copies until one of them mutates, at which point that copy lazily clones
 /// the buffer (see "Memory Model" below). For non-owning views over an
-/// existing buffer use `Slice[T]`; for fixed-size or set-like collections
-/// see `Slice[T]`, `Set`, or `Dictionary`.
+/// existing buffer use `ArraySlice[T]`; for fixed-size or set-like collections
+/// see `ArraySlice[T]`, `Set`, or `Dictionary`.
 ///
 /// # Examples
 ///
@@ -451,7 +452,7 @@ struct ArrayStorage[T]: Cloneable {
 /// same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
 /// `arr(clamped: r)` — dispatched through the `ArrayIndex[T]` and
 /// `ArrayClampable[T]` protocols. `Int64` and range types share each
-/// label; the result type varies (`T?` vs `Slice[T]` for `clamped:`).
+/// label; the result type varies (`T?` vs `ArraySlice[T]` for `clamped:`).
 ///
 /// # Capacity & Reallocation
 ///
@@ -493,7 +494,7 @@ struct ArrayStorage[T]: Cloneable {
 /// `(checked: i)`, and `(unchecked: i)` subscripts so a single declaration
 /// covers single elements (`Int64`), half-open slices (`Range[Int64]`),
 /// and closed slices (`ClosedRange[Int64]`). `Yield` is what the access
-/// produces — `T` for single-element indexes, `Slice[T]` for range
+/// produces — `T` for single-element indexes, `ArraySlice[T]` for range
 /// indexes.
 ///
 /// Sealed: this protocol is `internal` so user code can't add new index
@@ -534,7 +535,7 @@ internal protocol ArrayIndex[T] {
 /// Clamping indexes saturate to the array's valid range rather than
 /// panicking on out-of-bounds. `Yield` differs across conformances:
 /// `Int64.Yield = T?` (still `None` on an empty array), `Range[Int64].Yield
-/// = Slice[T]` (always a valid slice, possibly empty).
+/// = ArraySlice[T]` (always a valid slice, possibly empty).
 internal protocol ArrayClampable[T] {
     type ArrayClampedYield
 
@@ -565,7 +566,7 @@ internal protocol ArrayWrappable[T] {
 }
 
 @builtin(.ArrayStruct)
-public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
+public struct Array[T]: Slice, Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -932,7 +933,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     public func asPointer() -> Pointer[T] { self.ptr() }
 
-    /// Returns a `Slice[T]` over the entire array.
+    /// Returns a `ArraySlice[T]` over the entire array.
     ///
     /// The slice borrows the array's buffer; reallocation invalidates
     /// it. For a sub-range, use a range subscript such as `arr(0..<n)`.
@@ -943,8 +944,8 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// let arr = [1, 2, 3];
     /// let slice = arr.asSlice();  // Slice over [1, 2, 3]
     /// ```
-    public func asSlice() -> Slice[T] {
-        Slice(pointer: self.ptr(), count: self.len())
+    public func asSlice() -> ArraySlice[T] {
+        ArraySlice(pointer: self.ptr(), count: self.len())
     }
 
     /// `true` if `index` is in `[0, count)`.
@@ -976,7 +977,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// The default subscript: trades safety for ergonomics. Dispatches via
     /// the `ArrayIndex[T]` protocol — `Int64` reads/writes a single
     /// element, `Range[Int64]` and `ClosedRange[Int64]` read or replace a
-    /// `Slice[T]`. Range writes require the source slice's length to
+    /// `ArraySlice[T]`. Range writes require the source slice's length to
     /// match the range's length and panic otherwise. Use
     /// `arr(checked: i)` for an `Optional` instead of a panic, or
     /// `arr(unchecked: i)` to skip the bounds check entirely. Setters
@@ -996,7 +997,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// var arr = [10, 20, 30, 40, 50];
     /// arr(0);                        // 10
     /// arr(1) = 25;                   // [10, 25, 30, 40, 50]
-    /// arr(1..<4);                    // Slice[25, 30, 40]
+    /// arr(1..<4);                    // ArraySlice[25, 30, 40]
     /// arr(1..<4) = otherSlice3;      // splice in three elements
     /// arr(5);                        // PANIC: index out of bounds
     /// ```
@@ -1011,7 +1012,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// The non-panicking counterpart to `arr(i)`. Read-only; for fallible
     /// writes pattern-match the result and assign through the default
     /// subscript. Single-element indexes return `T?`; range indexes
-    /// return `Slice[T]?`. Prefer this when `index` may come from
+    /// return `ArraySlice[T]?`. Prefer this when `index` may come from
     /// untrusted input.
     ///
     /// # Examples
@@ -1020,7 +1021,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// let arr = [10, 20, 30];
     /// arr(checked: 0);       // Some(10)
     /// arr(checked: 5);       // None
-    /// arr(checked: 0..<2);   // Some(Slice[10, 20])
+    /// arr(checked: 0..<2);   // Some(ArraySlice[10, 20])
     /// arr(checked: 0..<10);  // None
     ///
     /// if let .Some(v) = arr(checked: i) {
@@ -1051,7 +1052,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// for i in arr.indices {
     ///     let v = arr(unchecked: i);   // safe — i is in range
     /// }
-    /// let s = arr(unchecked: 0..<2);   // Slice[10, 20]
+    /// let s = arr(unchecked: 0..<2);   // ArraySlice[10, 20]
     /// ```
     public subscript[I](unchecked index: I) -> I.ArrayYield where I: ArrayIndex[T] {
         get { index.readArrayUnchecked(from: self) }
@@ -1064,7 +1065,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// Never panics on out-of-bounds. For `Int64`, indices below `0`
     /// clamp up and indices `>= count` clamp down; an empty array yields
     /// `None`. For `Range[Int64]`, both endpoints clamp into `[0, count]`
-    /// and the result is a (possibly empty) `Slice[T]`. Compare
+    /// and the result is a (possibly empty) `ArraySlice[T]`. Compare
     /// `arr(wrapped: i)`, which wraps instead of saturating.
     ///
     /// # Examples
@@ -1077,7 +1078,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// [](clamped: 0);            // None     — empty array
     ///
     /// arr(clamped: -5..<100);    // Slice over the whole array
-    /// arr(clamped: -5..<1);      // Slice[10]
+    /// arr(clamped: -5..<1);      // ArraySlice[10]
     /// arr(clamped: 10..<20);     // empty Slice (both clamp to 3)
     /// ```
     public subscript[I](clamped index: I) -> I.ArrayClampedYield where I: ArrayClampable[T] {
@@ -2098,7 +2099,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // SLICING
     // ========================================================================
 
-    /// Returns a `Slice[T]` over the first `count` elements.
+    /// Returns a `ArraySlice[T]` over the first `count` elements.
     ///
     /// Borrows the array's buffer; reallocation invalidates it. Pair
     /// with `drop(first:)` to get the complementary suffix. For the
@@ -2112,19 +2113,19 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].prefix(3);  // Slice[1, 2, 3]
+    /// [1, 2, 3, 4, 5].prefix(3);  // ArraySlice[1, 2, 3]
     /// [1, 2].prefix(0);           // empty Slice
     /// [1, 2].prefix(9);           // PANIC
     /// ```
-    public func prefix(count: Int64) -> Slice[T] {
+    public func prefix(count: Int64) -> ArraySlice[T] {
         let myLen = self.len();
         if count > myLen {
             fatalError("Array.prefix: count exceeds array length")
         }
-        Slice(pointer: self.ptr(), count: count)
+        ArraySlice(pointer: self.ptr(), count: count)
     }
 
-    /// Returns a `Slice[T]` over the last `count` elements.
+    /// Returns a `ArraySlice[T]` over the last `count` elements.
     ///
     /// Mirror of `prefix(count:)`. Borrows the array's buffer.
     ///
@@ -2136,18 +2137,18 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].suffix(2);  // Slice[4, 5]
+    /// [1, 2, 3, 4, 5].suffix(2);  // ArraySlice[4, 5]
     /// [1, 2].suffix(0);           // empty Slice
     /// ```
-    public func suffix(count: Int64) -> Slice[T] {
+    public func suffix(count: Int64) -> ArraySlice[T] {
         let myLen = self.len();
         if count > myLen {
             fatalError("Array.suffix: count exceeds array length")
         }
-        Slice(pointer: self.ptr().offset(by: myLen - count), count: count)
+        ArraySlice(pointer: self.ptr().offset(by: myLen - count), count: count)
     }
 
-    /// Returns a `Slice[T]` with the first `count` elements skipped.
+    /// Returns a `ArraySlice[T]` with the first `count` elements skipped.
     ///
     /// Complement of `prefix(count:)`. Borrows the array's buffer.
     ///
@@ -2159,18 +2160,18 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].drop(first: 2);  // Slice[3, 4, 5]
+    /// [1, 2, 3, 4, 5].drop(first: 2);  // ArraySlice[3, 4, 5]
     /// [1, 2].drop(first: 2);           // empty Slice
     /// ```
-    public func drop(first count: Int64) -> Slice[T] {
+    public func drop(first count: Int64) -> ArraySlice[T] {
         let myLen = self.len();
         if count > myLen {
             fatalError("Array.drop(first:): count exceeds array length")
         }
-        Slice(pointer: self.ptr().offset(by: count), count: myLen - count)
+        ArraySlice(pointer: self.ptr().offset(by: count), count: myLen - count)
     }
 
-    /// Returns a `Slice[T]` with the last `count` elements skipped.
+    /// Returns a `ArraySlice[T]` with the last `count` elements skipped.
     ///
     /// Complement of `suffix(count:)`. Borrows the array's buffer.
     ///
@@ -2182,15 +2183,15 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].drop(last: 2);  // Slice[1, 2, 3]
+    /// [1, 2, 3, 4, 5].drop(last: 2);  // ArraySlice[1, 2, 3]
     /// [1, 2].drop(last: 2);           // empty Slice
     /// ```
-    public func drop(last count: Int64) -> Slice[T] {
+    public func drop(last count: Int64) -> ArraySlice[T] {
         let myLen = self.len();
         if count > myLen {
             fatalError("Array.drop(last:): count exceeds array length")
         }
-        Slice(pointer: self.ptr(), count: myLen - count)
+        ArraySlice(pointer: self.ptr(), count: myLen - count)
     }
 
     // ========================================================================
@@ -2198,7 +2199,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // ========================================================================
 
     /// Returns a `ChunksIterator[T]` over non-overlapping `size`-sized
-    /// `Slice[T]`s.
+    /// `ArraySlice[T]`s.
     ///
     /// The final chunk may be shorter when `count` is not divisible by
     /// `size`. For overlapping fixed-size views, use `windows(of:)`. The
@@ -2213,7 +2214,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     /// let arr = [1, 2, 3, 4, 5];
     /// for chunk in arr.chunks(of: 2) {
-    ///     // yields Slice[1,2], Slice[3,4], Slice[5]
+    ///     // yields ArraySlice[1,2], ArraySlice[3,4], ArraySlice[5]
     /// }
     /// arr.chunks(of: 0);  // PANIC
     /// ```
@@ -2225,7 +2226,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     }
 
     /// Returns a `WindowsIterator[T]` over overlapping `size`-sized
-    /// `Slice[T]`s.
+    /// `ArraySlice[T]`s.
     ///
     /// Adjacent windows overlap by `size - 1` elements. For
     /// non-overlapping fixed-size groups, use `chunks(of:)`. The
@@ -2242,7 +2243,7 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     /// ```
     /// let arr = [1, 2, 3, 4];
     /// for window in arr.windows(of: 2) {
-    ///     // yields Slice[1,2], Slice[2,3], Slice[3,4]
+    ///     // yields ArraySlice[1,2], ArraySlice[2,3], ArraySlice[3,4]
     /// }
     /// [1, 2].windows(of: 5);  // PANIC: size exceeds array length
     /// ```
@@ -2465,36 +2466,36 @@ extend Int64: ArrayWrappable[T] {
 
 // `Range[Int64]` indexes a contiguous half-open slice of `Array[T]`.
 //
-// Reads return a `Slice[T]` aliasing the array's buffer; reallocation
+// Reads return a `ArraySlice[T]` aliasing the array's buffer; reallocation
 // invalidates it. Writes copy elements from the source slice into the
 // range one-by-one and panic on length mismatch.
 extend Range[Int64]: ArrayIndex[T] {
-    type ArrayYield = Slice[T]
+    type ArrayYield = ArraySlice[T]
 
-    public func readArray(from array: Array[T]) -> Slice[T] {
+    public func readArray(from array: Array[T]) -> ArraySlice[T] {
         let start = self.start;
         let end = self.end;
         if start < 0 or end > array.len() or start > end {
             fatalError("Array range out of bounds")
         }
-        Slice(pointer: array.ptr().offset(by: start), count: end - start)
+        ArraySlice(pointer: array.ptr().offset(by: start), count: end - start)
     }
 
-    public func readArrayChecked(from array: Array[T]) -> Slice[T]? {
+    public func readArrayChecked(from array: Array[T]) -> ArraySlice[T]? {
         let start = self.start;
         let end = self.end;
         if start >= 0 and end <= array.len() and start <= end {
-            .Some(Slice(pointer: array.ptr().offset(by: start), count: end - start))
+            .Some(ArraySlice(pointer: array.ptr().offset(by: start), count: end - start))
         } else {
             .None
         }
     }
 
-    public func readArrayUnchecked(from array: Array[T]) -> Slice[T] {
-        Slice(pointer: array.ptr().offset(by: self.start), count: self.end - self.start)
+    public func readArrayUnchecked(from array: Array[T]) -> ArraySlice[T] {
+        ArraySlice(pointer: array.ptr().offset(by: self.start), count: self.end - self.start)
     }
 
-    public func writeArray(mutating to array: Array[T], with value: Slice[T]) {
+    public func writeArray(mutating to array: Array[T], with value: ArraySlice[T]) {
         let start = self.start;
         let end = self.end;
         if start < 0 or end > array.len() or start > end {
@@ -2512,7 +2513,7 @@ extend Range[Int64]: ArrayIndex[T] {
         }
     }
 
-    public func writeArrayUnchecked(mutating to array: Array[T], with value: Slice[T]) {
+    public func writeArrayUnchecked(mutating to array: Array[T], with value: ArraySlice[T]) {
         let start = self.start;
         let rangeLen = self.end - start;
         if value.count != rangeLen {
@@ -2528,22 +2529,22 @@ extend Range[Int64]: ArrayIndex[T] {
 }
 
 // `Range[Int64]` clamping — both endpoints clamp into `[0, count]`,
-// always producing a (possibly empty) `Slice[T]`. Writes panic on
+// always producing a (possibly empty) `ArraySlice[T]`. Writes panic on
 // length mismatch after clamping.
 extend Range[Int64]: ArrayClampable[T] {
-    type ArrayClampedYield = Slice[T]
+    type ArrayClampedYield = ArraySlice[T]
 
-    public func readArrayClamped(from array: Array[T]) -> Slice[T] {
+    public func readArrayClamped(from array: Array[T]) -> ArraySlice[T] {
         let len = array.len();
         var start = self.start;
         var end = self.end;
         if start < 0 { start = 0 }
         if end > len { end = len }
         if start > end { start = end }
-        Slice(pointer: array.ptr().offset(by: start), count: end - start)
+        ArraySlice(pointer: array.ptr().offset(by: start), count: end - start)
     }
 
-    public func writeArrayClamped(mutating to array: Array[T], with value: Slice[T]) {
+    public func writeArrayClamped(mutating to array: Array[T], with value: ArraySlice[T]) {
         let len = array.len();
         var start = self.start;
         var end = self.end;
@@ -2567,34 +2568,34 @@ extend Range[Int64]: ArrayClampable[T] {
 // both endpoints are included. Internally converts to `[start, end+1)`
 // so the rest of the implementation matches `Range`.
 extend ClosedRange[Int64]: ArrayIndex[T] {
-    type ArrayYield = Slice[T]
+    type ArrayYield = ArraySlice[T]
 
-    public func readArray(from array: Array[T]) -> Slice[T] {
+    public func readArray(from array: Array[T]) -> ArraySlice[T] {
         let start = self.start;
         let endExclusive = self.end + 1;
         if start < 0 or endExclusive > array.len() or start > endExclusive {
             fatalError("Array range out of bounds")
         }
-        Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
+        ArraySlice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
     }
 
-    public func readArrayChecked(from array: Array[T]) -> Slice[T]? {
+    public func readArrayChecked(from array: Array[T]) -> ArraySlice[T]? {
         let start = self.start;
         let endExclusive = self.end + 1;
         if start >= 0 and endExclusive <= array.len() and start <= endExclusive {
-            .Some(Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start))
+            .Some(ArraySlice(pointer: array.ptr().offset(by: start), count: endExclusive - start))
         } else {
             .None
         }
     }
 
-    public func readArrayUnchecked(from array: Array[T]) -> Slice[T] {
+    public func readArrayUnchecked(from array: Array[T]) -> ArraySlice[T] {
         let start = self.start;
         let endExclusive = self.end + 1;
-        Slice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
+        ArraySlice(pointer: array.ptr().offset(by: start), count: endExclusive - start)
     }
 
-    public func writeArray(mutating to array: Array[T], with value: Slice[T]) {
+    public func writeArray(mutating to array: Array[T], with value: ArraySlice[T]) {
         let start = self.start;
         let endExclusive = self.end + 1;
         if start < 0 or endExclusive > array.len() or start > endExclusive {
@@ -2612,7 +2613,7 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
         }
     }
 
-    public func writeArrayUnchecked(mutating to array: Array[T], with value: Slice[T]) {
+    public func writeArrayUnchecked(mutating to array: Array[T], with value: ArraySlice[T]) {
         let start = self.start;
         let rangeLen = self.end + 1 - start;
         if value.count != rangeLen {
@@ -2766,7 +2767,7 @@ extend Array[T]: Equatable where T: Equatable {
     }
 
     /// Splits the array on each element equal to `separator`, returning
-    /// the in-between runs as `Slice[T]`s.
+    /// the in-between runs as `ArraySlice[T]`s.
     ///
     /// Separators themselves are dropped, but empty runs (between
     /// adjacent separators, or before the first / after the last) are
@@ -2777,28 +2778,28 @@ extend Array[T]: Equatable where T: Equatable {
     ///
     /// ```
     /// [1, 0, 2, 0, 3].split(0);
-    /// // [Slice[1], Slice[2], Slice[3]]
+    /// // [ArraySlice[1], ArraySlice[2], ArraySlice[3]]
     ///
     /// [0, 1, 0, 0, 2, 0].split(0);
-    /// // [Slice[], Slice[1], Slice[], Slice[2], Slice[]]
+    /// // [ArraySlice[], ArraySlice[1], ArraySlice[], ArraySlice[2], ArraySlice[]]
     ///
     /// [1, 2, 3].split(0);
-    /// // [Slice[1, 2, 3]] — separator not found
+    /// // [ArraySlice[1, 2, 3]] — separator not found
     ///
     /// [].split(0);
-    /// // [Slice[]] — empty array yields one empty slice
+    /// // [ArraySlice[]] — empty array yields one empty slice
     /// ```
-    public func split(separator: T) -> Array[Slice[T]] {
-        var result = Array[Slice[T]]();
+    public func split(separator: T) -> Array[ArraySlice[T]] {
+        var result = Array[ArraySlice[T]]();
         let myLen = self.count;
         var start: Int64 = 0;
         for i in 0..<myLen {
             if self(unchecked: i).isEqual(to: separator) {
-                result.append( Slice(pointer: self.asPointer().offset(by: start), count: i - start));
+                result.append( ArraySlice(pointer: self.asPointer().offset(by: start), count: i - start));
                 start = i + 1
             }
         }
-        result.append( Slice(pointer: self.asPointer().offset(by: start), count: myLen - start));
+        result.append( ArraySlice(pointer: self.asPointer().offset(by: start), count: myLen - start));
         result
     }
 
@@ -2843,7 +2844,7 @@ extend Array[T]: Equatable where T: Equatable {
     /// Removes runs of consecutive equal elements, in place.
     ///
     /// Only adjacent duplicates collapse — non-adjacent equal values are
-    /// kept. To deduplicate globally, `sort()` first or, for `Hash`
+    /// kept. To deduplicate globally, `sort()` first or, for `Hashable`
     /// elements, use the `unique()` / `removeDuplicates()` extension
     /// methods. The non-mutating variant is `deduped()`.
     ///
@@ -2927,8 +2928,8 @@ extend Array[T]: ArrayMatchable {
     ///
     /// Used to bind `..rest` segments. The matcher guarantees the
     /// indices are in range.
-    public func matchSlice(from: Int64, to: Int64) -> Slice[T] {
-        Slice(pointer: self.asPointer().offset(by: from), count: to - from)
+    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
+        ArraySlice(pointer: self.asPointer().offset(by: from), count: to - from)
     }
 }
 
@@ -3087,15 +3088,15 @@ extend Array[T] where T: Comparable {
 // HASH EXTENSION
 // ============================================================================
 
-/// Set-like deduplication available when `T: Hash`.
-extend Array[T] where T: Hash {
+/// Set-like deduplication available when `T: Hashable`.
+extend Array[T] where T: Hashable {
     /// Returns a new array containing each distinct element once, in the
     /// order of first occurrence.
     ///
     /// Currently O(n²) (linear scan per insert). For an O(n) build, push
     /// the elements through a `Set` first. The in-place mirror is
     /// `removeDuplicates()`. Compare with `dedup()`, which only collapses
-    /// adjacent duplicates and does not require `Hash`.
+    /// adjacent duplicates and does not require `Hashable`.
     ///
     /// # Examples
     ///
@@ -3283,12 +3284,13 @@ extend Array[T] where T: Formattable {
         if self.count == 0 {
             return ""
         }
-        var result = self(unchecked: 0).format();
+        var b = StringBuilder();
+        self(unchecked: 0).format(into: b);
         for i in 1..<self.count {
-            result = result + separator;
-            result = result + self(unchecked: i).format()
+            b.append(separator);
+            self(unchecked: i).format(into: b)
         }
-        result
+        b.build()
     }
 }
 
@@ -3314,17 +3316,16 @@ extend Array[T]: Formattable where T: Formattable {
     /// Array[Int64]().format();    // "[]"
     /// "\{[1, 2, 3]}";             // "[1, 2, 3]" (via interpolation)
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        var result = "[";
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        writer.appendChar('[');
         let myLen = self.count;
         for i in 0..<myLen {
             if i > 0 {
-                result = result + ", "
+                writer.append(", ")
             }
-            result = result + self(unchecked: i).format(options)
+            self(unchecked: i).format(into: writer, options)
         }
-        result = result + "]";
-        result
+        writer.appendChar(']')
     }
 }
 

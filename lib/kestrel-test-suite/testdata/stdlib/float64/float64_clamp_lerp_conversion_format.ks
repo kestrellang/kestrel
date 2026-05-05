@@ -95,7 +95,7 @@ module Test
 
             // format: default
             let fmtVal: std.numeric.Float64 = 3.14;
-            let fmtStr = fmtVal.format();
+            let fmtStr = fmtVal.formatted();
             if fmtStr.contains("3.14") == false { return 30 }
 
             0

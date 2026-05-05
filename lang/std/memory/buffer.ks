@@ -5,7 +5,7 @@ module std.memory
 import std.result.(Optional)
 import std.core.(Bool, Copyable, fatalError)
 import std.numeric.(Int64)
-import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
+import std.memory.(Layout, Pointer, ArraySlice, RawPointer, Allocator, GlobalAllocator)
 import std.ffi.(memcpy, memmove, memset)
 
 /// Owning, allocator-parameterised contiguous storage.
@@ -174,19 +174,19 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         }
     }
 
-    /// Returns a `Slice[T]` over the entire buffer. The slice does not
+    /// Returns a `ArraySlice[T]` over the entire buffer. The slice does not
     /// extend the buffer's lifetime; callers must keep the buffer alive
     /// for as long as they use the slice.
-    public func asSlice() -> Slice[T] {
-        Slice(pointer: self.ptr, count: self.cap)
+    public func asSlice() -> ArraySlice[T] {
+        ArraySlice(pointer: self.ptr, count: self.cap)
     }
 
     /// Returns a slice over `[start, end)`, or `.None` when the range
     /// falls outside `[0, capacity]`. As with `asSlice`, the slice
     /// borrows from the buffer.
-    public func slice(from start: Int64, to end: Int64) -> Slice[T]? {
+    public func slice(from start: Int64, to end: Int64) -> ArraySlice[T]? {
         if start >= 0 and end <= self.cap and start <= end {
-            .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
+            .Some(ArraySlice(pointer: self.ptr.offset(by: start), count: end - start))
         } else {
             .None
         }

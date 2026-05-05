@@ -8,11 +8,11 @@ module Test
             let none: std.result.Optional[std.numeric.Int64] = .None;
 
             // Format Some
-            let someStr = some.format();
+            let someStr = some.formatted();
             if someStr.isEqual(to: "Some(42)") == false { return 1 }
 
             // Format None
-            let noneStr = none.format();
+            let noneStr = none.formatted();
             if noneStr.isEqual(to: "None") == false { return 2 }
 
             0

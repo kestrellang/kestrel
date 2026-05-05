@@ -8,11 +8,11 @@ module Test
             let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(99);
 
             // Format Ok
-            let okStr = ok.format();
+            let okStr = ok.formatted();
             if okStr.isEqual(to: "Ok(42)") == false { return 1 }
 
             // Format Err
-            let errStr = err.format();
+            let errStr = err.formatted();
             if errStr.isEqual(to: "Err(99)") == false { return 2 }
 
             0

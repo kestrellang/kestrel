@@ -2,11 +2,11 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hash, Hasher, Defaultable, fatalError)
-import std.text.(Formattable)
+import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
+import std.text.(Formattable, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, Slice)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, ArraySlice)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
 import std.text.unicode as unicode
@@ -177,7 +177,7 @@ struct StringStorage: Cloneable {
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
-public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hash, Defaultable {
+public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
@@ -318,7 +318,7 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
     /// String.fromUtf8("héllo".bytes.asSlice());  // Some("héllo")
     /// String.fromUtf8(badSlice);                 // None
     /// ```
-    public static func fromUtf8(bytes: Slice[UInt8]) -> String? {
+    public static func fromUtf8(bytes: ArraySlice[UInt8]) -> String? {
         let count = bytes.count;
         if count == 0 {
             return .Some(String())
@@ -765,7 +765,7 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
     /// Sends the whole buffer in a single `write` so the hasher gets
     /// to choose how to consume it.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(Slice(pointer: self.ptr(), count: self.len()))
+        hasher.write(ArraySlice(pointer: self.ptr(), count: self.len()))
     }
 
     /// Returns a shallow clone — storage is shared until either side mutates.
@@ -795,38 +795,7 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
     /// opts.alignment = .Center;
     /// "test".format(opts);   // "   test   "
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        // Apply width and alignment padding
-        if let .Some(width) = options.width {
-            let currentLen = self.chars.count;
-            if width > currentLen {
-                let padding = width - currentLen;
-                var padLeft: Int64 = 0;
-                var padRight: Int64 = 0;
-
-                if options.alignment == .Left {
-                    padRight = padding
-                } else if options.alignment == .Right {
-                    padLeft = padding
-                } else {
-                    // Center
-                    padLeft = padding / 2;
-                    padRight = padding - padLeft
-                }
-
-                var result = String();
-                while padLeft > 0 {
-                    result.appendChar(options.fill);
-                    padLeft = padLeft - 1
-                }
-                result.append(self);
-                while padRight > 0 {
-                    result.appendChar(options.fill);
-                    padRight = padRight - 1
-                }
-                return result
-            }
-        }
-        self.clone()
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        _writePadded(into: writer, self, options)
     }
 }

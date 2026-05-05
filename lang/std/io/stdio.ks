@@ -4,7 +4,7 @@ module std.io.stdio
 
 import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 import std.collections.(Array)
 import std.text.(String, Formattable)
 import std.core.(Bool)
@@ -33,7 +33,7 @@ public struct Stdin: Readable {
 
     /// Calls `read(2)` on `STDIN_FILENO`. Returns `0` on EOF (e.g. after
     /// the user types Ctrl-D in a terminal).
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -61,7 +61,7 @@ public struct Stdout: Writable {
     public init() {}
 
     /// Calls `write(2)` on `STDOUT_FILENO`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -94,7 +94,7 @@ public struct Stderr: Writable {
     public init() {}
 
     /// Calls `write(2)` on `STDERR_FILENO`.
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -142,13 +142,13 @@ public func stderr() -> Stderr {
 /// ```
 public func print[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
-    writeString(out, value.format())
+    writeString(out, value.formatted())
 }
 
 /// Like `print`, plus a trailing `\n`.
 public func println[F](value: F) -> Result[(), IoError] where F: Formattable {
     var out = stdout();
-    writeLine(out, value.format())
+    writeLine(out, value.formatted())
 }
 
 /// Writes a single newline to stdout — the no-argument form of `println`.
@@ -161,13 +161,13 @@ public func printlnEmpty() -> Result[(), IoError] {
 /// pollute a piped stdout.
 public func eprint[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
-    writeString(err, value.format())
+    writeString(err, value.formatted())
 }
 
 /// Stderr counterpart to `println`.
 public func eprintln[F](value: F) -> Result[(), IoError] where F: Formattable {
     var err = stderr();
-    writeLine(err, value.format())
+    writeLine(err, value.formatted())
 }
 
 // ============================================================================
@@ -188,7 +188,7 @@ public func readLine() -> Result[String, IoError] {
     loop {
         var buf = Array[UInt8](capacity: 1);
         buf.append(0);
-        let slice = Slice(pointer: buf.asPointer(), count: 1);
+        let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
         let n = try input.read(into: slice);
         if n == 0 {
             break  // EOF

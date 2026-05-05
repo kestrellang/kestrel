@@ -127,12 +127,12 @@ struct Score {
     }
 
     func render(renderer: Renderer) {
-        let text = self.format();
+        let text = self.formatted();
         renderer.drawText(text, 350, 20, 4);
     }
 
     func format() -> String {
-        var result = self.player1.format() + " - " + self.player2.format();
+        var result = self.player1.formatted() + " - " + self.player2.formatted();
         result
     }
 }

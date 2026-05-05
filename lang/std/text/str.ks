@@ -2,13 +2,13 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Hash, Hasher, fatalError)
+import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Pointer, RawPointer)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
-import std.text.(Formattable, FormatOptions, Char, decodeUtf8, String, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
+import std.text.(Formattable, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
 import std.text.unicode as unicode
 
 // ============================================================================
@@ -20,7 +20,7 @@ import std.text.unicode as unicode
 /// Requires exactly one method from conformers: `asSlice()`. All
 /// read-only methods are defined once in `extend Str` and inherited
 /// by both types automatically.
-public protocol Str: Iterable, Equatable, Comparable, Hash, Formattable {
+public protocol Str: Iterable, Equatable, Comparable, Hashable, Formattable {
     func asSlice() -> StringSlice
 }
 
@@ -169,8 +169,8 @@ extend Str {
     /// ```
     /// "hi".format(FormatOptions(width: 5));  // "hi   "
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        self.toOwned().format(options)
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        self.toOwned().format(into: writer, options)
     }
 
     // -- Searching -------------------------------------------------------------

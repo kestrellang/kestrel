@@ -13,7 +13,7 @@ import std.core.(
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, Formattable, FormatOptions)
+import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, {{OTHER_FLOAT}})
 
 /// A {{BITS}}-bit IEEE 754 {{PRECISION_KIND}} float.

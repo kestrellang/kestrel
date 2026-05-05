@@ -86,8 +86,8 @@ public func searchResultsHtml(json: Value) -> String {
                         let lat = getFloat(getField(city, "latitude"));
                         let lon = getFloat(getField(city, "longitude"));
 
-                        t.setRaw("lat", lat.format());
-                        t.setRaw("lon", lon.format());
+                        t.setRaw("lat", lat.formatted());
+                        t.setRaw("lon", lon.formatted());
                         t.put("name", name);
                         t.setRaw("encodedName", urlEncode(name));
                         t.setInt("delay", i * 40);

@@ -37,7 +37,7 @@ public func pageHtml(seed: Int64, guesses: Array[String], answer: String, errorM
 
     // Header
     var nextSeedStr = String();
-    nextSeedStr.append((seed * 2654435761 % 2147483647).format());
+    nextSeedStr.append((seed * 2654435761 % 2147483647).formatted());
     var th = Template();
     th.setRaw("nextSeed", nextSeedStr);
     h.append(th.render("""<div class="header"><div class="title">Kestrel Wordle</div><a class="new-game" href="/?s={nextSeed}">New Game &rarr;</a></div>"""));
@@ -46,7 +46,7 @@ public func pageHtml(seed: Int64, guesses: Array[String], answer: String, errorM
     match result {
         .Won => {
             var t = Template();
-            t.setRaw("guesses", guesses.count.format());
+            t.setRaw("guesses", guesses.count.formatted());
             t.put("answer", answer);
             h.append(t.render("""<div class="banner won">Solved in {guesses}<span class="answer">{answer}</span></div>"""))
         },
@@ -112,14 +112,14 @@ func boardHtml(guesses: Array[String], answer: String) -> String {
 
 func inputFormHtml(seed: Int64, guesses: Array[String]) -> String {
     var t = Template();
-    t.setRaw("seed", seed.format());
+    t.setRaw("seed", seed.formatted());
     t.put("guesses", joinGuesses(guesses));
     t.render("""<form class="input-row" method="get" action="/" autocomplete="off"><input type="hidden" name="s" value="{seed}"><input type="hidden" name="g" value="{guesses}"><input type="text" name="w" maxlength="5" minlength="5" placeholder="Enter guess" autofocus required pattern="[A-Za-z]{{5}}"><button type="submit">Guess</button></form>""")
 }
 
 func shareRowHtml(seed: Int64) -> String {
     var t = Template();
-    t.setRaw("seed", seed.format());
+    t.setRaw("seed", seed.formatted());
     t.render("""<div class="share-row"><input class="share-input" readonly value="http://localhost:8090/?s={seed}" onclick="this.select()"></div>""")
 }
 

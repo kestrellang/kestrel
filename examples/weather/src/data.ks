@@ -188,9 +188,9 @@ public func formatHourLabel(timeStr: String, idx: Int64) -> String {
     if idx == 0 { return "Now" };
     let hour = parseHourFromIso(timeStr);
     if hour == 0 { return "12a" };
-    if hour < 12 { return hour.format() + "a" };
+    if hour < 12 { return hour.formatted() + "a" };
     if hour == 12 { return "12p" };
-    (hour - 12).format() + "p"
+    (hour - 12).formatted() + "p"
 }
 
 public func formatSunTime(isoStr: String) -> String {
@@ -205,9 +205,9 @@ public func formatSunTime(isoStr: String) -> String {
     if hour == 0 {
         s.append("12")
     } else if hour <= 12 {
-        s.append(hour.format())
+        s.append(hour.formatted())
     } else {
-        s.append((hour - 12).format())
+        s.append((hour - 12).formatted())
     };
     s.append(":");
     s.append(minStr);

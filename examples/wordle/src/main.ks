@@ -114,7 +114,7 @@ func validateAndAppend(raw: String, guesses: Array[String], answer: String, word
 func cleanUrl(seed: Int64, guesses: Array[String], err: String) -> String {
     var u = String();
     u.append("/?s=");
-    u.append(seed.format());
+    u.append(seed.formatted());
     if guesses.count > 0 {
         u.append("&g=");
         u.append(joinGuesses(guesses))
