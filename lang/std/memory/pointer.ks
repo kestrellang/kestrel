@@ -387,15 +387,32 @@ extend ArraySlice[T]: ArrayMatchable {
     }
 }
 
+/// `Slice[T]` conformance — `ArraySlice` is the kernel type, so
+/// `asSlice()` returns `self`. Also declares the `Iterable` associated
+/// types so slices can be used in `for`-`in` loops and generic
+/// `I: Iterable` contexts.
 extend ArraySlice[T]: Slice[T], Iterable {
-    // Slice[T] conformance + Iterable associated types
     type Item = T
     type TargetIterator = ArraySliceIterator[T]
 
+    /// Returns `self` — `ArraySlice` is already the borrowed view.
     public func asSlice() -> ArraySlice[T] { self }
 }
 
+/// Element-wise equality when the element type is `Equatable`.
+///
+/// # Examples
+///
+/// ```
+/// let a = [1, 2, 3].asSlice();
+/// let b = [1, 2, 3].asSlice();
+/// a == b;  // true
+///
+/// let c = [4, 5, 6].asSlice();
+/// a == c;  // false (same length, different elements)
+/// ```
 extend ArraySlice[T]: Equatable where T: Equatable {
+    /// Compares element-by-element. Short-circuits on the first mismatch.
     public func isEqual(to other: ArraySlice[T]) -> Bool {
         if self.len != other.len {
             return false

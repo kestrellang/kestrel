@@ -271,15 +271,25 @@ impl TypeResolver for WorldResolver<'_> {
         // itself. We only look at extension-provided members (not the abstract
         // requirements themselves) to avoid ambiguity with the default impl.
         //
-        // Multiple protocol extensions may provide the same method (e.g. notEquals
-        // from both extend Equatable and extend Comparable). These are equivalent
-        // default implementations, so we deduplicate by label signature.
-        if all_candidates.is_empty() {
+        // The fallback fires either when there are no direct candidates at all,
+        // OR when none of the direct candidates' labels match the call site —
+        // the latter lets `Slice.sorted()` resolve when `Array` only declares
+        // `sorted(by:)` / `sorted(byKey:)` (different label signatures).
+        let arg_labels_for_fallback: Vec<Option<&str>> =
+            _args.iter().map(|a| a.label.as_deref()).collect();
+        let direct_label_match = !all_candidates.is_empty()
+            && all_candidates
+                .iter()
+                .any(|&c| self.matches_labels(c, &arg_labels_for_fallback));
+        if !direct_label_match {
             let protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
                 entity: *entity,
                 root: self.root,
             });
-            let mut seen_signatures = std::collections::HashSet::new();
+            let mut seen_signatures: std::collections::HashSet<_> = all_candidates
+                .iter()
+                .map(|&c| self.label_signature(c))
+                .collect();
             for proto in &protocols {
                 let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
                     protocol: *proto,

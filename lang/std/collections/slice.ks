@@ -16,9 +16,23 @@ import std.collections.(Array)
 
 /// Shared read-only protocol for contiguous collections.
 ///
-/// Requires exactly one method from conformers: `asSlice()`. All
-/// read-only methods are defined once in `extend Slice` and inherited
-/// by both `Array[T]` and `ArraySlice[T]` automatically.
+/// `Slice[T]` is the contiguous-collection counterpart to `Str` in
+/// `std.text`: one kernel method (`asSlice`), all read-only logic in a
+/// protocol extension. Both `Array[T]` and `ArraySlice[T]` conform, so
+/// generic code constrained to `S: Slice[T]` accepts either without
+/// overloading.
+///
+/// # Examples
+///
+/// ```
+/// func sum[S](s: S) -> Int64 where S: Slice[Int64] {
+///     var total: Int64 = 0;
+///     for elem in s { total = total + elem }
+///     total
+/// }
+/// sum([1, 2, 3]);              // works with Array
+/// sum([1, 2, 3].asSlice());    // works with ArraySlice
+/// ```
 public protocol Slice[T]: Iterable {
     func asSlice() -> ArraySlice[T]
 }
@@ -32,17 +46,47 @@ extend Slice[T] {
     // -- Size ----------------------------------------------------------------
 
     /// Element count. O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].count;  // 3
+    /// [].count;          // 0
+    /// ```
     public var count: Int64 { self.asSlice().count }
 
     /// `true` when `count == 0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [].isEmpty;   // true
+    /// [1].isEmpty;  // false
+    /// ```
     public var isEmpty: Bool { self.asSlice().count == 0 }
 
     /// Half-open range `0..<count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [10, 20, 30].indices;  // 0..<3
+    /// ```
     public var indices: Range[Int64] { 0..<self.asSlice().count }
 
     // -- Element access ------------------------------------------------------
 
-    /// First element, or `.None` for an empty collection.
+    /// First element, or `.None` for an empty collection. O(1).
+    ///
+    /// Read-only — to remove the first element from an `Array`, use
+    /// `popFirst()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].first();  // Some(1)
+    /// [].first();          // None
+    /// ```
     public func first() -> T? {
         let s = self.asSlice();
         if s.count > 0 {
@@ -52,7 +96,17 @@ extend Slice[T] {
         }
     }
 
-    /// Last element, or `.None` for an empty collection.
+    /// Last element, or `.None` for an empty collection. O(1).
+    ///
+    /// Read-only — to remove the last element from an `Array`, use
+    /// `pop()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].last();  // Some(3)
+    /// [].last();          // None
+    /// ```
     public func last() -> T? {
         let s = self.asSlice();
         if s.count > 0 {
@@ -65,6 +119,12 @@ extend Slice[T] {
     // -- Iteration -----------------------------------------------------------
 
     /// Forward iterator over the elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// for item in [1, 2, 3] { ... }
+    /// ```
     public func iter() -> ArraySliceIterator[T] {
         let s = self.asSlice();
         ArraySliceIterator(ptr: s.pointer, remaining: s.count)
@@ -72,19 +132,43 @@ extend Slice[T] {
 
     // -- Pointer access (FFI) ------------------------------------------------
 
-    /// Pointer to the first element.
+    /// Pointer to the first element. The pointer aliases the collection's
+    /// buffer; do not outlive the source or mutate through it.
+    ///
+    /// # Safety
+    ///
+    /// Reading past `count` is undefined behavior.
     public func asPointer() -> Pointer[T] { self.asSlice().pointer }
 
     // -- Validation ----------------------------------------------------------
 
     /// `true` if `index` is in `[0, count)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [10, 20, 30].isValidIndex(2);   // true
+    /// [10, 20, 30].isValidIndex(3);   // false
+    /// [10, 20, 30].isValidIndex(-1);  // false
+    /// ```
     public func isValidIndex(index: Int64) -> Bool {
         index >= 0 and index < self.asSlice().count
     }
 
     // -- Slicing -------------------------------------------------------------
 
-    /// Returns a slice over the first `count` elements.
+    /// Returns a slice over the first `count` elements. O(1).
+    ///
+    /// # Errors
+    ///
+    /// Panics if `count > self.count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].prefix(3);  // ArraySlice[1, 2, 3]
+    /// [1, 2].prefix(0);            // empty slice
+    /// ```
     public func prefix(count: Int64) -> ArraySlice[T] {
         let s = self.asSlice();
         if count > s.count {
@@ -93,7 +177,17 @@ extend Slice[T] {
         ArraySlice(pointer: s.pointer, count: count)
     }
 
-    /// Returns a slice over the last `count` elements.
+    /// Returns a slice over the last `count` elements. O(1).
+    ///
+    /// # Errors
+    ///
+    /// Panics if `count > self.count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].suffix(2);  // ArraySlice[4, 5]
+    /// ```
     public func suffix(count: Int64) -> ArraySlice[T] {
         let s = self.asSlice();
         if count > s.count {
@@ -102,7 +196,19 @@ extend Slice[T] {
         ArraySlice(pointer: s.pointer.offset(by: s.count - count), count: count)
     }
 
-    /// Returns a slice with the first `count` elements skipped.
+    /// Returns a slice with the first `count` elements skipped. O(1).
+    ///
+    /// Complement of `prefix`.
+    ///
+    /// # Errors
+    ///
+    /// Panics if `count > self.count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].drop(first: 2);  // ArraySlice[3, 4, 5]
+    /// ```
     public func drop(first count: Int64) -> ArraySlice[T] {
         let s = self.asSlice();
         if count > s.count {
@@ -111,7 +217,19 @@ extend Slice[T] {
         ArraySlice(pointer: s.pointer.offset(by: count), count: s.count - count)
     }
 
-    /// Returns a slice with the last `count` elements skipped.
+    /// Returns a slice with the last `count` elements skipped. O(1).
+    ///
+    /// Complement of `suffix`.
+    ///
+    /// # Errors
+    ///
+    /// Panics if `count > self.count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].drop(last: 2);  // ArraySlice[1, 2, 3]
+    /// ```
     public func drop(last count: Int64) -> ArraySlice[T] {
         let s = self.asSlice();
         if count > s.count {
@@ -122,7 +240,17 @@ extend Slice[T] {
 
     // -- Searching (predicate) -----------------------------------------------
 
-    /// Index of the first element matching `predicate`, or `None`.
+    /// Index of the first element matching `predicate`, or `None`. O(n).
+    ///
+    /// Short-circuits on the first match. For value-based search on
+    /// `Equatable` collections, use `firstIndex(of:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].firstIndex(matching: { it > 3 });   // Some(3)
+    /// [1, 2, 3].firstIndex(matching: { it > 10 });         // None
+    /// ```
     public func firstIndex(matching predicate: (T) -> Bool) -> Int64? {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -134,7 +262,15 @@ extend Slice[T] {
         .None
     }
 
-    /// Index of the last element matching `predicate`, or `None`.
+    /// Index of the last element matching `predicate`, or `None`. O(n).
+    ///
+    /// Scans from the back; short-circuits on the first match.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 2, 1].lastIndex(matching: { it == 2 });  // Some(3)
+    /// ```
     public func lastIndex(matching predicate: (T) -> Bool) -> Int64? {
         let s = self.asSlice();
         if s.count == 0 {
@@ -151,7 +287,13 @@ extend Slice[T] {
         .None
     }
 
-    /// First element matching `predicate`, or `None`.
+    /// First element matching `predicate`, or `None`. O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].first(matching: { it > 3 });  // Some(4)
+    /// ```
     public func first(matching predicate: (T) -> Bool) -> T? {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -164,7 +306,13 @@ extend Slice[T] {
         .None
     }
 
-    /// Last element matching `predicate`, or `None`.
+    /// Last element matching `predicate`, or `None`. O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 2, 1].last(matching: { it > 1 });  // Some(2)
+    /// ```
     public func last(matching predicate: (T) -> Bool) -> T? {
         let s = self.asSlice();
         if s.count == 0 {
@@ -184,7 +332,17 @@ extend Slice[T] {
 
     // -- Predicates ----------------------------------------------------------
 
-    /// `true` when every element satisfies `predicate`.
+    /// `true` when every element satisfies `predicate`. O(n).
+    ///
+    /// Short-circuits on the first failure. Vacuously true for empty
+    /// collections.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [2, 4, 6].all(matching: { it % 2 == 0 });  // true
+    /// [2, 3, 6].all(matching: { it % 2 == 0 });  // false
+    /// ```
     public func all(matching predicate: (T) -> Bool) -> Bool {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -196,7 +354,17 @@ extend Slice[T] {
         true
     }
 
-    /// `true` when at least one element satisfies `predicate`.
+    /// `true` when at least one element satisfies `predicate`. O(n).
+    ///
+    /// Short-circuits on the first match. Always `false` for empty
+    /// collections.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].any(matching: { it > 2 });  // true
+    /// [1, 2, 3].any(matching: { it > 5 });  // false
+    /// ```
     public func any(matching predicate: (T) -> Bool) -> Bool {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -208,7 +376,13 @@ extend Slice[T] {
         false
     }
 
-    /// Number of elements for which `predicate` is true.
+    /// Number of elements for which `predicate` is true. O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].countItems(matching: { it % 2 == 0 });  // 2
+    /// ```
     public func countItems(matching predicate: (T) -> Bool) -> Int64 {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -227,7 +401,16 @@ extend Slice[T] {
 // ============================================================================
 
 extend Slice[T] where T: Equatable {
-    /// Element-wise equality.
+    /// Element-wise equality. O(n).
+    ///
+    /// Short-circuits on the first mismatch. Order matters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].isEqual(to: [1, 2, 3]);  // true
+    /// [1, 2, 3].isEqual(to: [3, 2, 1]);  // false
+    /// ```
     public func isEqual(to other: Self) -> Bool {
         let a = self.asSlice();
         let b = other.asSlice();
@@ -242,7 +425,16 @@ extend Slice[T] where T: Equatable {
         true
     }
 
-    /// `true` if the collection contains `element`.
+    /// `true` if the collection contains `element`. O(n).
+    ///
+    /// Linear scan; short-circuits on the first match.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].contains(2);  // true
+    /// [1, 2, 3].contains(5);  // false
+    /// ```
     public func contains(element: T) -> Bool {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -254,17 +446,40 @@ extend Slice[T] where T: Equatable {
         false
     }
 
-    /// Index of the first element equal to `element`, or `None`.
+    /// Index of the first element equal to `element`, or `None`. O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 2].firstIndex(of: 2);  // Some(1)
+    /// [1, 2, 3].firstIndex(of: 5);      // None
+    /// ```
     public func firstIndex(of element: T) -> Int64? {
         self.firstIndex(matching: { (x) in x.isEqual(to: element) })
     }
 
-    /// Index of the last element equal to `element`, or `None`.
+    /// Index of the last element equal to `element`, or `None`. O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 2].lastIndex(of: 2);  // Some(3)
+    /// [1, 2, 3].lastIndex(of: 5);      // None
+    /// ```
     public func lastIndex(of element: T) -> Int64? {
         self.lastIndex(matching: { (x) in x.isEqual(to: element) })
     }
 
-    /// `true` if the leading elements match `prefix`.
+    /// `true` if the leading elements match `prefix`. O(k) where k is
+    /// the prefix length. Accepts any `Slice[T]` conformer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].starts(with: [1, 2]);     // true
+    /// [1, 2, 3].starts(with: [2, 3]);     // false
+    /// [1, 2, 3].starts(with: []);          // true (vacuous)
+    /// ```
     public func starts[S](with prefix: S) -> Bool where S: Slice[T] {
         let a = self.asSlice();
         let b = prefix.asSlice();
@@ -279,7 +494,16 @@ extend Slice[T] where T: Equatable {
         true
     }
 
-    /// `true` if the trailing elements match `suffix`.
+    /// `true` if the trailing elements match `suffix`. O(k) where k is
+    /// the suffix length. Accepts any `Slice[T]` conformer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].ends(with: [2, 3]);  // true
+    /// [1, 2, 3].ends(with: [1, 2]);  // false
+    /// [1, 2, 3].ends(with: []);       // true (vacuous)
+    /// ```
     public func ends[S](with suffix: S) -> Bool where S: Slice[T] {
         let a = self.asSlice();
         let b = suffix.asSlice();
@@ -295,7 +519,21 @@ extend Slice[T] where T: Equatable {
         true
     }
 
-    /// Splits on each element equal to `separator`.
+    /// Splits on each element equal to `separator`. O(n).
+    ///
+    /// Separators are dropped; empty runs between adjacent separators
+    /// are preserved. The result always has `(separatorCount + 1)`
+    /// elements. The returned slices alias the source buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 0, 2, 0, 3].split(0);
+    /// // [ArraySlice[1], ArraySlice[2], ArraySlice[3]]
+    ///
+    /// [1, 2, 3].split(0);
+    /// // [ArraySlice[1, 2, 3]] — separator not found
+    /// ```
     public func split(separator: T) -> Array[ArraySlice[T]] {
         var result = Array[ArraySlice[T]]();
         let s = self.asSlice();
@@ -317,7 +555,16 @@ extend Slice[T] where T: Equatable {
 // ============================================================================
 
 extend Slice[T] where T: Comparable {
-    /// Smallest element, or `None` if empty.
+    /// Smallest element, or `None` if empty. O(n).
+    ///
+    /// Ties go to the first occurrence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [3, 1, 4].min();  // Some(1)
+    /// [].min();          // None
+    /// ```
     public func min() -> T? {
         let s = self.asSlice();
         if s.count == 0 {
@@ -334,7 +581,16 @@ extend Slice[T] where T: Comparable {
         .Some(result)
     }
 
-    /// Largest element, or `None` if empty.
+    /// Largest element, or `None` if empty. O(n).
+    ///
+    /// Ties go to the first occurrence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [3, 1, 4].max();  // Some(4)
+    /// [].max();          // None
+    /// ```
     public func max() -> T? {
         let s = self.asSlice();
         if s.count == 0 {
@@ -351,7 +607,19 @@ extend Slice[T] where T: Comparable {
         .Some(result)
     }
 
-    /// `true` if elements are in non-decreasing order.
+    /// `true` if elements are in non-decreasing order. O(n).
+    ///
+    /// Equal adjacent elements are allowed. Empty and single-element
+    /// collections are vacuously sorted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].isSorted();  // true
+    /// [1, 3, 2].isSorted();  // false
+    /// [1, 1, 1].isSorted();  // true
+    /// [].isSorted();          // true
+    /// ```
     public func isSorted() -> Bool {
         let s = self.asSlice();
         if s.count <= 1 {
@@ -366,8 +634,21 @@ extend Slice[T] where T: Comparable {
         true
     }
 
-    /// Binary search for `element`. Returns its index or `None`.
-    /// The collection must be sorted in ascending order.
+    /// Binary search for `element`. Returns its index or `None`. O(log n).
+    ///
+    /// When duplicates exist, which index is returned is unspecified.
+    ///
+    /// # Safety
+    ///
+    /// The collection must be sorted in ascending order. Calling on
+    /// unsorted data won't crash but may produce false negatives.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].binarySearch(3);  // Some(2)
+    /// [1, 2, 3, 4, 5].binarySearch(6);  // None
+    /// ```
     public func binarySearch(element: T) -> Int64? {
         let s = self.asSlice();
         let myPtr = s.pointer;
@@ -387,7 +668,15 @@ extend Slice[T] where T: Comparable {
         .None
     }
 
-    /// Returns a new sorted array; original unchanged.
+    /// Returns a new sorted array; original unchanged. O(n log n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [3, 1, 4, 1, 5];
+    /// arr.sorted();  // [1, 1, 3, 4, 5]
+    /// // arr is still [3, 1, 4, 1, 5]
+    /// ```
     public func sorted() -> Array[T] {
         var copy = Array[T]();
         let s = self.asSlice();
@@ -406,7 +695,16 @@ extend Slice[T] where T: Comparable {
 // ============================================================================
 
 extend Slice[T] where T: Hashable {
-    /// Returns a new array with duplicates removed, preserving first-occurrence order.
+    /// Returns a new array with duplicates removed, preserving
+    /// first-occurrence order. O(n²).
+    ///
+    /// For the mutating variant on `Array`, see `removeDuplicates()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
+    /// ```
     public func unique() -> Array[T] {
         var result = Array[T]();
         let s = self.asSlice();
@@ -432,7 +730,14 @@ extend Slice[T] where T: Hashable {
 // ============================================================================
 
 extend Slice[T] where T: Formattable {
-    /// Renders as `"[e1, e2, ...]"`.
+    /// Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].format();  // "[1, 2, 3]"
+    /// [].format();          // "[]"
+    /// ```
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         writer.appendChar('[');
         let s = self.asSlice();

@@ -634,21 +634,31 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     self.ctx.register_name(static_entity);
                     Value::Place(Place::Global(static_entity))
                 } else if is_callable {
-                    // Computed property: emit a getter call
+                    // Computed property: emit a getter call. Protocol-default
+                    // getters (`var count: Int64 { ... }` in `extend Slice[T]`)
+                    // route through the witness so monomorphization resolves
+                    // the protocol's type params from the witness binding —
+                    // prepending the receiver's args here would double-count
+                    // them and trip the dispatch arity check.
                     let getter_entity = resolved.unwrap();
                     self.ctx.register_name(getter_entity);
                     let receiver_ty = self.resolve_expr_type(*base);
                     let base_val = self.lower_expr(*base);
                     let result_ty = self.resolve_expr_type(expr_id);
-
-                    // Pass receiver as Ref (borrowing getter)
                     let receiver_arg = CallArg::borrow(base_val);
-                    let type_args = self.resolve_type_args(expr_id);
-                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
+                    let method_type_args = self.resolve_type_args(expr_id);
 
-                    // Use method callee so self_type is set — monomorphization
-                    // needs self_type to mangle the name correctly
-                    let callee = Callee::method(getter_entity, type_args, receiver_ty);
+                    let callee = if let Some(protocol) =
+                        self.find_protocol_for_method(getter_entity)
+                    {
+                        self.ctx.register_name(protocol);
+                        let method_key = self.witness_method_key_of(getter_entity);
+                        Callee::witness(protocol, method_key, receiver_ty, method_type_args)
+                    } else {
+                        let type_args =
+                            self.prepend_receiver_type_args(&receiver_ty, method_type_args);
+                        Callee::method(getter_entity, type_args, receiver_ty)
+                    };
                     self.emit_call(callee, vec![receiver_arg], result_ty)
                 } else {
                     // Stored field: direct place access

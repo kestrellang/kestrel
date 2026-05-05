@@ -2335,8 +2335,38 @@ fn solve_member(
     // 2. Method's own type params → fresh vars
     let mut subs: Vec<(kestrel_hecs::Entity, TyVar)> = Vec::new();
 
-    // Map struct type params to the receiver's actual type args
-    let recv_type_args: Vec<TyVar> = recv_kind.args().to_vec();
+    // Map struct type params to the receiver's actual type args.
+    // SelfType has no args, so for protocol extension bodies we synthesize
+    // them from the owner's parent (the extension or protocol whose type
+    // params are positionally equivalent to the protocol's).
+    let recv_type_args: Vec<TyVar> = if matches!(&recv_kind, TyKind::SelfType { .. })
+        && recv_kind.args().is_empty()
+    {
+        // Walk from the owner (function) to its parent (protocol, extension,
+        // or struct). For extensions, type params live on the target type, not
+        // the extension entity itself.
+        let parent = ctx.query_ctx.parent_of(ctx.owner);
+        let params_source = parent.and_then(|p| {
+            if ctx.query_ctx.get::<TypeParams>(p).is_some() {
+                Some(p)
+            } else if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(p)
+                == Some(&kestrel_ast_builder::NodeKind::Extension)
+            {
+                ctx.query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: p,
+                    root: ctx.root,
+                })
+            } else {
+                None
+            }
+        });
+        params_source
+            .and_then(|src| ctx.query_ctx.get::<TypeParams>(src))
+            .map(|tp| tp.0.iter().map(|&p| ctx.param(p)).collect::<Vec<TyVar>>())
+            .unwrap_or_default()
+    } else {
+        recv_kind.args().to_vec()
+    };
     let recv_entity = recv_kind.entity();
     if let Some(entity) = recv_entity {
         let struct_type_params: Vec<kestrel_hecs::Entity> = ctx
@@ -2388,12 +2418,50 @@ fn solve_member(
             .get::<TypeParams>(self_entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
+        // When the method comes from a protocol extension, the extension has
+        // its own type params that are positionally equivalent to the protocol's.
+        // These already have TyVars from body inference. Use them instead of
+        // falling back to `receiver` (which would collapse T → Self).
+        let ext_type_params: Vec<kestrel_hecs::Entity> = resolution
+            .from_extension
+            .and_then(|ext| ctx.query_ctx.get::<TypeParams>(ext).map(|tp| tp.0.clone()))
+            .unwrap_or_default();
         for (i, &param) in proto_type_params.iter().enumerate() {
             let tv = if let Some(&(_, existing)) = subs.iter().find(|(e, _)| *e == param) {
                 existing
             } else if let Some(hir_ty) = resolution.protocol_type_args.get(i) {
                 // Use the explicit type arg from the where clause bound
                 let tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                subs.push((param, tv));
+                tv
+            } else if let Some(&ext_param) = ext_type_params.get(i) {
+                // Protocol extension with RHS free type params: map the protocol's
+                // type param through the extension's positionally-corresponding
+                // type param. If the extension param was already substituted to
+                // a concrete TyVar (e.g. recv `Array[Int64]` mapped SliceExt's
+                // T → Int64), use *that* — otherwise the abstract
+                // `ctx.param(ext_param)` would collapse `T` to a free Param.
+                let tv = subs
+                    .iter()
+                    .find(|(e, _)| *e == ext_param)
+                    .map(|&(_, tv)| tv)
+                    .unwrap_or_else(|| ctx.param(ext_param));
+                subs.push((param, tv));
+                tv
+            } else if let Some(tv) = resolve_proto_param_via_conformance(
+                ctx,
+                recv_entity,
+                self_entity,
+                i,
+                proto_type_params.len(),
+                &subs,
+            ) {
+                // Protocol-default extension (e.g. `extend Slice[T]`): the
+                // extension's `T` resolves to the protocol's T entity itself,
+                // so `ext_type_params` is empty. Recover the binding from the
+                // receiver's conformance to the protocol — explicit type args
+                // (`Dictionary[K,V]: Slice[V]`) lower through subs; positional
+                // (`Array[T]: Slice`) maps proto-param i → recv struct param i.
                 subs.push((param, tv));
                 tv
             } else {
@@ -3237,6 +3305,109 @@ fn find_extension_conformance_protocol(
             && matches!(ctx.get::<NodeKind>(proto), Some(NodeKind::Protocol)) {
                 return Some(proto);
             }
+    }
+    None
+}
+
+/// Recover the protocol's `i`-th type-param binding from the receiver's
+/// conformance to that protocol. Returns `None` when no positive conformance
+/// from `recv_entity` (or its extensions) to `protocol` is found.
+///
+/// Two shapes:
+/// - Implicit-positional (`extend Array[T]: Slice` / `struct Array[T]: Slice`):
+///   the conformance has no AST type args. Maps proto param i → recv struct
+///   param i, looked up via `subs`. Falls back to `recv_type_args` indexing
+///   if the struct param entity isn't in `subs` (shouldn't happen in practice).
+/// - Explicit (`extend Dictionary[K, V]: Slice[V]`): lowers the i-th AST type
+///   arg through `subs` so identifiers like `V` resolve to whatever K/V map to.
+///
+/// Used when the protocol-default extension (`extend Slice[T] { ... }`) doesn't
+/// register its own TypeParams — its `T` IS the protocol's T entity, so the
+/// extension-positional fallback finds nothing.
+fn resolve_proto_param_via_conformance(
+    ctx: &mut InferCtx<'_>,
+    recv_entity: Option<kestrel_hecs::Entity>,
+    protocol: kestrel_hecs::Entity,
+    proto_param_idx: usize,
+    proto_param_count: usize,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+) -> Option<TyVar> {
+    use kestrel_ast_builder::{ConformanceItem, Conformances};
+    let recv = recv_entity?;
+    if ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Struct)
+        && ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Enum)
+    {
+        return None;
+    }
+
+    // Search direct conformances + extension conformances. The first positive
+    // conformance whose resolved entity is `protocol` wins.
+    let mut sources: Vec<kestrel_hecs::Entity> = vec![recv];
+    sources.extend(
+        ctx.query_ctx
+            .query(kestrel_name_res::ExtensionsFor {
+                target: recv,
+                root: ctx.root,
+            })
+            .iter()
+            .copied(),
+    );
+
+    for source in sources {
+        let Some(confs) = ctx.query_ctx.get::<Conformances>(source) else {
+            continue;
+        };
+        for item in &confs.0 {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                continue;
+            };
+            let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
+                continue;
+            };
+            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            let kestrel_name_res::TypeResolution::Found(resolved) =
+                ctx.query_ctx.query(kestrel_name_res::ResolveTypePath {
+                    segments: seg_names,
+                    context: source,
+                    root: ctx.root,
+                })
+            else {
+                continue;
+            };
+            if resolved != protocol {
+                continue;
+            }
+            let type_args = kestrel_name_res::extract_ast_type_args(ast_ty);
+
+            // Implicit-positional: empty args means "match struct params positionally".
+            if type_args.is_empty() {
+                let struct_params = ctx
+                    .query_ctx
+                    .get::<TypeParams>(recv)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                if struct_params.len() != proto_param_count {
+                    return None;
+                }
+                let struct_param = struct_params.get(proto_param_idx).copied()?;
+                return subs
+                    .iter()
+                    .find(|(e, _)| *e == struct_param)
+                    .map(|&(_, tv)| tv);
+            }
+
+            // Explicit: lower the i-th conformance type arg through subs so
+            // Param references (`V`) resolve to the receiver's TyVar.
+            let arg_ast = type_args.get(proto_param_idx)?;
+            let hir_ty = kestrel_hir_lower::lower_ast_type(
+                ctx.query_ctx,
+                source,
+                ctx.root,
+                arg_ast,
+            );
+            let subs_vec = subs.to_vec();
+            return Some(lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs_vec));
+        }
     }
     None
 }

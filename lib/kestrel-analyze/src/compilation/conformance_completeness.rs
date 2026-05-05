@@ -36,13 +36,13 @@ use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, Settable,
-    TypeAnnotation, WhereClause, WhereConstraint,
+    TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::{
     ConformingProtocols, ExtensionTargetEntity, ExtensionsFor, ProtocolAssociatedTypes,
-    ProtocolMembers, ResolveTypePath, TypeResolution,
+    ProtocolMembers, ResolveTypePath, TypeResolution, extract_ast_type_args,
 };
 use kestrel_type_infer::compare::{AssocBinding, TypeCompareEnv, compare_hir_types};
 use kestrel_type_infer::result::ResolvedTy;
@@ -179,7 +179,9 @@ fn check_type_conformances(
             continue;
         }
 
-        check_protocol_requirements(cx, entity, protocol, conforming_entity, diags);
+        let proto_param_subs =
+            build_proto_param_subs(cx, entity, protocol, ast_ty, conforming_entity);
+        check_protocol_requirements(cx, entity, protocol, conforming_entity, &proto_param_subs, diags);
     }
 }
 
@@ -205,7 +207,9 @@ fn check_extension_conformances(
             continue;
         }
 
-        check_protocol_requirements(cx, target, protocol, extension, diags);
+        let proto_param_subs =
+            build_proto_param_subs(cx, target, protocol, ast_ty, extension);
+        check_protocol_requirements(cx, target, protocol, extension, &proto_param_subs, diags);
     }
 }
 
@@ -216,6 +220,7 @@ fn check_protocol_requirements(
     type_entity: Entity,
     protocol: Entity,
     decl_entity: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let type_name = util::entity_name(cx.query, type_entity);
@@ -322,6 +327,7 @@ fn check_protocol_requirements(
                         impl_method,
                         type_entity,
                         member.declaring_protocol,
+                        proto_param_subs,
                         &name,
                         &proto_name,
                         diags,
@@ -767,6 +773,7 @@ fn check_method_return_type(
     impl_method: Entity,
     type_entity: Entity,
     protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
     method_name: &str,
     proto_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
@@ -781,18 +788,25 @@ fn check_method_return_type(
     });
     let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
 
+    // Map protocol-level type parameters to the conforming type's params.
+    // e.g. for `Array[T]: Slice[T]`, maps Slice's T → Array's T so that
+    // `ArraySlice[Proto_T]` and `ArraySlice[Impl_T]` compare equal.
+    for (entity, ty) in proto_param_subs {
+        env.param_subs.push((*entity, ty.clone()));
+    }
+
     // Align method-level type parameters. `func make[U] -> U` on the protocol
     // and impl have distinct `U` entities, so the returns compare unequal
     // without this mapping. Matched positionally; if arities differ the
     // signature analyzer (E457) has already reported that.
     let proto_params: Vec<Entity> = cx
         .query
-        .get::<kestrel_ast_builder::TypeParams>(proto_method)
+        .get::<TypeParams>(proto_method)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     let impl_params: Vec<Entity> = cx
         .query
-        .get::<kestrel_ast_builder::TypeParams>(impl_method)
+        .get::<TypeParams>(impl_method)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     for (&proto_param, &impl_param) in proto_params.iter().zip(impl_params.iter()) {
@@ -867,7 +881,7 @@ fn type_compare_env_for_conformance(
 fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> ResolvedTy {
     let args = cx
         .query
-        .get::<kestrel_ast_builder::TypeParams>(type_entity)
+        .get::<TypeParams>(type_entity)
         .map(|params| {
             params
                 .0
@@ -879,6 +893,144 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
     ResolvedTy::Named {
         entity: type_entity,
         args,
+    }
+}
+
+/// Build substitutions that map a protocol's type parameters to the conforming
+/// type's type parameters, based on the conformance declaration's type args.
+///
+/// For `extend Array[T]: Slice[T]`, maps Slice's `T` → Array's `T`.
+/// For `extend Dictionary[K, V]: Slice[V]`, maps Slice's `T` → Dictionary's `V`.
+fn build_proto_param_subs(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    protocol: Entity,
+    conformance_ast_ty: &AstType,
+    decl_entity: Entity,
+) -> Vec<(Entity, ResolvedTy)> {
+    let proto_params = cx
+        .query
+        .get::<TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    if proto_params.is_empty() {
+        return Vec::new();
+    }
+
+    let ast_type_args = extract_ast_type_args(conformance_ast_ty);
+
+    // When no type args are written (e.g. `Array[T]: Slice` instead of
+    // `Array[T]: Slice[T]`), fall back to positional mapping: protocol
+    // param 0 → struct param 0, etc.
+    if ast_type_args.is_empty() {
+        let type_params = cx
+            .query
+            .get::<TypeParams>(type_entity)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        return proto_params
+            .iter()
+            .zip(type_params.iter())
+            .map(|(&pp, &tp)| (pp, ResolvedTy::Param { entity: tp }))
+            .collect();
+    }
+
+    // If the conformance is on an extension, its type params are distinct
+    // entities from the struct's. Build a mapping so resolved extension params
+    // are translated to the corresponding struct params.
+    let ext_to_struct: HashMap<Entity, Entity> =
+        if decl_entity != type_entity && cx.query.get::<NodeKind>(decl_entity) == Some(&NodeKind::Extension) {
+            let ext_params = cx
+                .query
+                .get::<TypeParams>(decl_entity)
+                .map(|tp| &tp.0[..])
+                .unwrap_or(&[]);
+            let struct_params = cx
+                .query
+                .get::<TypeParams>(type_entity)
+                .map(|tp| &tp.0[..])
+                .unwrap_or(&[]);
+            ext_params.iter().zip(struct_params.iter()).map(|(&e, &s)| (e, s)).collect()
+        } else {
+            HashMap::new()
+        };
+
+    let mut subs = Vec::new();
+    for (&proto_param, ast_arg) in proto_params.iter().zip(ast_type_args.iter()) {
+        if let Some(resolved) =
+            resolve_conformance_type_arg(cx, ast_arg, decl_entity, &ext_to_struct)
+        {
+            subs.push((proto_param, resolved));
+        }
+    }
+    subs
+}
+
+/// Resolve a single AST type argument from a conformance declaration to a
+/// `ResolvedTy`, mapping extension type params to struct type params via
+/// `ext_to_struct`.
+fn resolve_conformance_type_arg(
+    cx: &CompilationContext<'_>,
+    ast_ty: &AstType,
+    context: Entity,
+    ext_to_struct: &HashMap<Entity, Entity>,
+) -> Option<ResolvedTy> {
+    match ast_ty {
+        AstType::Named { segments, .. } => {
+            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            match cx.query.query(ResolveTypePath {
+                segments: seg_names,
+                context,
+                root: cx.root,
+            }) {
+                TypeResolution::Found(entity) => {
+                    // Remap extension params to the struct's params
+                    let entity = ext_to_struct.get(&entity).copied().unwrap_or(entity);
+                    if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::TypeParameter) {
+                        Some(ResolvedTy::Param { entity })
+                    } else {
+                        let type_args = segments
+                            .last()
+                            .map(|s| s.type_args.as_slice())
+                            .unwrap_or(&[]);
+                        let args: Vec<ResolvedTy> = type_args
+                            .iter()
+                            .filter_map(|arg| {
+                                resolve_conformance_type_arg(cx, arg, context, ext_to_struct)
+                            })
+                            .collect();
+                        Some(ResolvedTy::Named { entity, args })
+                    }
+                }
+                _ => None,
+            }
+        }
+        AstType::Tuple(elems, _) => {
+            let resolved: Vec<ResolvedTy> = elems
+                .iter()
+                .filter_map(|e| resolve_conformance_type_arg(cx, e, context, ext_to_struct))
+                .collect();
+            Some(ResolvedTy::Tuple(resolved))
+        }
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => {
+            let params: Vec<ResolvedTy> = params
+                .iter()
+                .filter_map(|p| resolve_conformance_type_arg(cx, p, context, ext_to_struct))
+                .collect();
+            let ret =
+                resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
+            Some(ResolvedTy::Function {
+                params,
+                ret: Box::new(ret),
+            })
+        }
+        AstType::Unit(_) => Some(ResolvedTy::Tuple(Vec::new())),
+        AstType::Never(_) => Some(ResolvedTy::Never),
+        _ => None,
     }
 }
 
@@ -1214,12 +1366,12 @@ fn param_types_match(
     let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
     let proto_ty_params: Vec<Entity> = cx
         .query
-        .get::<kestrel_ast_builder::TypeParams>(proto_method)
+        .get::<TypeParams>(proto_method)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     let impl_ty_params: Vec<Entity> = cx
         .query
-        .get::<kestrel_ast_builder::TypeParams>(impl_method)
+        .get::<TypeParams>(impl_method)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     for (&p, &i) in proto_ty_params.iter().zip(impl_ty_params.iter()) {
