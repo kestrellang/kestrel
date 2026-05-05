@@ -15,6 +15,9 @@ use crate::common::{
     initializer_declaration_parser_internal, token,
 };
 use crate::event::{EventSink, TreeBuilder};
+use crate::field::{
+    FieldDeclarationData, emit_field_declaration, field_declaration_parser_internal,
+};
 use crate::function::{
     FunctionDeclarationData, emit_function_declaration, function_declaration_parser_internal,
 };
@@ -73,7 +76,7 @@ impl ExtensionDeclaration {
             .map(|tok| tok.text().to_string())
     }
 
-    /// Get child declaration items (functions, initializers, type aliases)
+    /// Get child declaration items (functions, initializers, type aliases, fields)
     pub fn children(&self) -> Vec<SyntaxNode> {
         self.syntax
             .children()
@@ -87,6 +90,7 @@ impl ExtensionDeclaration {
                                 | SyntaxKind::SubscriptDeclaration
                                 | SyntaxKind::InitializerDeclaration
                                 | SyntaxKind::TypeAliasDeclaration
+                                | SyntaxKind::FieldDeclaration
                         )
                     })
                     .collect()
@@ -121,11 +125,12 @@ pub enum ExtensionBodyItem {
     Subscript(SubscriptDeclarationData),
     Initializer(InitializerDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
+    Field(FieldDeclarationData),
 }
 
 /// Internal parser for extension body items
 ///
-/// Extension bodies can contain: functions, subscripts, initializers, and associated types
+/// Extension bodies can contain: functions, subscripts, initializers, associated types, and computed properties
 fn extension_body_item_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ExtensionBodyItem, ParserExtra<'tokens>> + Clone {
     let initializer_parser =
@@ -139,10 +144,13 @@ fn extension_body_item_parser_internal<'tokens>()
     let type_alias_parser =
         type_alias_declaration_parser_internal().map(ExtensionBodyItem::TypeAlias);
 
+    let field_parser = field_declaration_parser_internal().map(ExtensionBodyItem::Field);
+
     type_alias_parser
         .or(initializer_parser)
         .or(function_parser)
         .or(subscript_parser)
+        .or(field_parser)
         .boxed()
 }
 
@@ -224,6 +232,7 @@ pub fn emit_extension_declaration(sink: &mut EventSink, data: ExtensionDeclarati
             ExtensionBodyItem::Subscript(d) => emit_subscript_declaration(sink, d),
             ExtensionBodyItem::Initializer(d) => emit_initializer_declaration(sink, d),
             ExtensionBodyItem::TypeAlias(d) => emit_type_alias_declaration(sink, d),
+            ExtensionBodyItem::Field(d) => emit_field_declaration(sink, d),
         }
     }
 

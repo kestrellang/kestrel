@@ -681,6 +681,7 @@ Bugfixes:
 - normal guard
 - Self constructors
 - ..n and n.. ranges
+- Optional constructors, throwing constructors
 
 ## Version 0.17: Derives, Attributes & Sugar
 

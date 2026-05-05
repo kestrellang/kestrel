@@ -6,20 +6,20 @@ module Test
         func main() -> lang.i64 {
             let s: std.text.String = "hello";
 
-            // Test first()
-            let f = s.first();
+            // Test first
+            let f = s.chars.first;
             if f.isNone() { return 1 }
             if f.unwrap().isEqual(to: 'h') == false { return 2 }
 
-            // Test last()
-            let l = s.last();
+            // Test last
+            let l = s.chars.last;
             if l.isNone() { return 3 }
             if l.unwrap().isEqual(to: 'o') == false { return 4 }
 
-            // Test first() and last() on empty string
+            // Test first and last on empty string
             let empty = std.text.String();
-            if empty.first().isSome() { return 5 }
-            if empty.last().isSome() { return 6 }
+            if empty.chars.first.isSome() { return 5 }
+            if empty.chars.last.isSome() { return 6 }
 
             // Test chars()(i)
             let c0 = s.chars(0);
@@ -52,9 +52,9 @@ module Test
             if bu != 101 { return 15 }
 
             // Test count (Unicode code point count)
-            if s.count != 5 { return 16 }
+            if s.chars.count != 5 { return 16 }
             let ascii: std.text.String = "abc";
-            if ascii.count != 3 { return 17 }
+            if ascii.chars.count != 3 { return 17 }
 
             0
         }

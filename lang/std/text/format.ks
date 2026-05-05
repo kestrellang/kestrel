@@ -335,6 +335,9 @@ public struct FormatOptions: Equatable {
         if self.alternate != other.alternate { return false }
         if self.floatStyle.isEqual(to: other.floatStyle) == false { return false }
         if self.debug != other.debug { return false }
+        if self.fill.isEqual(to: other.fill) == false { return false }
+        if self.width.isEqual(to: other.width) == false { return false }
+        if self.precision.isEqual(to: other.precision) == false { return false }
         true
     }
 }

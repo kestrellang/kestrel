@@ -16,7 +16,7 @@ The current `std.text` API has several structural problems:
 
 5. **Supporting types are undercooked.** `Char` is not `Formattable` (can't interpolate). `Grapheme` is not `Hash`, `Comparable`, or `Formattable`. No `Char` → `String` conversion path exists.
 
-6. **`appendByte` is public on String.** An unsafe escape hatch that breaks the UTF-8 invariant sits on the primary text type with the same visibility as `append`.
+6. **No raw byte access on text types.** Neither String nor StringBuilder should expose byte-level mutation (`appendByte`, `appendBytes`) — these break the UTF-8 invariant. Raw byte manipulation belongs in `Slice[UInt8]` or FFI layers, not text APIs.
 
 7. **Views hold raw pointers.** No ownership tie to the source string — dangling pointer bugs are possible if the source mutates or is deallocated while a view is live.
 
@@ -110,14 +110,10 @@ init(capacity: Int64)
 
 mutating func append[S](s: S) where S: Str
 mutating func appendChar(c: Char)
-mutating func appendByte(b: UInt8)          // unsafe — confined here, not on String
-mutating func appendBytes(ptr: Pointer[UInt8], count: Int64)
 
 func build() -> String     // transfer ownership, zero-copy (wrap buffer in RcBox)
 mutating func clear()      // reset len to 0, keep buffer for reuse
 ```
-
-This is where `appendByte` lives. It leaves String's public API entirely.
 
 `build()` wraps the builder's buffer in an `RcBox[StringStorage]` and returns an owned String without copying. The builder is left in the same state as `StringBuilder()` — zero length, zero capacity, null pointer. Calling `build()` a second time returns the empty string `""`. The builder can be reused after `build()` by appending more content and calling `build()` again; it will allocate a fresh buffer on the next append. This makes the builder a reusable tool for hot loops that produce many strings without repeated constructor overhead.
 
@@ -218,7 +214,7 @@ Every implementation body operates on `self.asSlice()`, which gives access to th
 | `firstIndex(matching:)` | `s.chars.firstIndex(matching:)` | `Int64?` → `CharIndex?` |
 | `substringBytes(from:to:)` | `s.bytes(start..<end)` | `String` → `StringSlice` |
 | `substring(range:)` | `s.chars(range)` | `String` → `StringSlice` |
-| `appendByte` | `StringBuilder.appendByte` | — (removed from String) |
+| `appendByte` | removed entirely | — (no byte-level mutation on text types) |
 | `trimmed()` | `extend Str` (inherited) | `String` → `StringSlice` |
 | `split(separator:)` | `extend Str` (inherited) | `SplitIterator` → `SplitView` |
 
@@ -747,8 +743,7 @@ This is a breaking redesign. Suggested migration order:
 19. Remove `String.first()` / `String.last()` (force `s.chars.first()`)
 20. Remove `String.firstIndex` / `String.lastIndex` (force view-based search)
 21. Remove `String.substringBytes` / `String.substring` (force view subscripts)
-22. Move `String.appendByte` to `StringBuilder`
-23. Remove `String.appendByte` from public API
+22. Remove `String.appendByte` entirely (no byte-level mutation on text types)
 24. Change `trimmed*` return types from `String` to `StringSlice`
 25. Change `split` return types from iterators to views
 26. Rename `Char` ASCII classifiers

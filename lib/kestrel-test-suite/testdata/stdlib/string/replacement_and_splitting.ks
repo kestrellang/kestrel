@@ -35,29 +35,29 @@ module Test
             let csv: std.text.String = "a,b,c";
             let parts = csv.split(",").collect();
             if parts.count != 3 { return 7 }
-            if parts(unchecked: 0).isEqual(to: "a") == false { return 8 }
-            if parts(unchecked: 1).isEqual(to: "b") == false { return 9 }
-            if parts(unchecked: 2).isEqual(to: "c") == false { return 10 }
+            if parts(unchecked: 0).toOwned().isEqual(to: "a") == false { return 8 }
+            if parts(unchecked: 1).toOwned().isEqual(to: "b") == false { return 9 }
+            if parts(unchecked: 2).toOwned().isEqual(to: "c") == false { return 10 }
 
             // Split with no separator found
             let noSep: std.text.String = "hello";
             let noParts = noSep.split(",").collect();
             if noParts.count != 1 { return 11 }
-            if noParts(unchecked: 0).isEqual(to: "hello") == false { return 12 }
+            if noParts(unchecked: 0).toOwned().isEqual(to: "hello") == false { return 12 }
 
             // Split with adjacent separators
             let adj: std.text.String = "a,,b";
             let adjParts = adj.split(",").collect();
             if adjParts.count != 3 { return 13 }
-            if adjParts(unchecked: 1).isEqual(to: "") == false { return 14 }
+            if adjParts(unchecked: 1).toOwned().isEqual(to: "") == false { return 14 }
 
             // ---- split(matching:) ----
             let s6: std.text.String = "hello world\tthere";
             let wsParts = s6.split(matching: { (c) in c.isWhitespace() }).collect();
             if wsParts.count != 3 { return 15 }
-            if wsParts(unchecked: 0).isEqual(to: "hello") == false { return 16 }
-            if wsParts(unchecked: 1).isEqual(to: "world") == false { return 17 }
-            if wsParts(unchecked: 2).isEqual(to: "there") == false { return 18 }
+            if wsParts(unchecked: 0).toOwned().isEqual(to: "hello") == false { return 16 }
+            if wsParts(unchecked: 1).toOwned().isEqual(to: "world") == false { return 17 }
+            if wsParts(unchecked: 2).toOwned().isEqual(to: "there") == false { return 18 }
 
             0
         }

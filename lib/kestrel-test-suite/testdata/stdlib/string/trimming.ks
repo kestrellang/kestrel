@@ -37,29 +37,29 @@ module Test
             // ---- Non-mutating trimmedStart() ----
             let s7: std.text.String = "  hello  ";
             let ts = s7.trimmedStart();
-            if ts.isEqual(to: "hello  ") == false { return 7 }
+            if ts.toOwned().isEqual(to: "hello  ") == false { return 7 }
             // Original unchanged
             if s7.byteCount != 9 { return 8 }
 
             // ---- Non-mutating trimmedEnd() ----
             let s8: std.text.String = "  hello  ";
             let te = s8.trimmedEnd();
-            if te.isEqual(to: "  hello") == false { return 9 }
+            if te.toOwned().isEqual(to: "  hello") == false { return 9 }
 
             // ---- Non-mutating trimmed(matching:) ----
             let s9: std.text.String = "..hello..";
             let tm = s9.trimmed(matching: { (c) in c.isEqual(to: '.') });
-            if tm.isEqual(to: "hello") == false { return 10 }
+            if tm.toOwned().isEqual(to: "hello") == false { return 10 }
 
             // ---- Non-mutating trimmedStart(matching:) ----
             let s10: std.text.String = "..hello..";
             let tsm = s10.trimmedStart(matching: { (c) in c.isEqual(to: '.') });
-            if tsm.isEqual(to: "hello..") == false { return 11 }
+            if tsm.toOwned().isEqual(to: "hello..") == false { return 11 }
 
             // ---- Non-mutating trimmedEnd(matching:) ----
             let s11: std.text.String = "..hello..";
             let tem = s11.trimmedEnd(matching: { (c) in c.isEqual(to: '.') });
-            if tem.isEqual(to: "..hello") == false { return 12 }
+            if tem.toOwned().isEqual(to: "..hello") == false { return 12 }
 
             // ---- Trim with leading/trailing whitespace including newlines ----
             var s12: std.text.String = "  hello  ";

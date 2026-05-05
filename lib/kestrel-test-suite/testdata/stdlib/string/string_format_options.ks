@@ -21,17 +21,17 @@ module Test
             // format with width and left alignment
             let leftPadded = s.format(makeOpts(10, std.text.Alignment.Left, ' '));
             if leftPadded.isEqual(to: "test      ") == false { return 2 }
-            if leftPadded.count != 10 { return 3 }
+            if leftPadded.chars.count != 10 { return 3 }
 
             // format with width and right alignment
             let rightPadded = s.format(makeOpts(10, std.text.Alignment.Right, ' '));
             if rightPadded.isEqual(to: "      test") == false { return 4 }
-            if rightPadded.count != 10 { return 5 }
+            if rightPadded.chars.count != 10 { return 5 }
 
             // format with width and center alignment
             let centerPadded = s.format(makeOpts(10, std.text.Alignment.Center, ' '));
             if centerPadded.isEqual(to: "   test   ") == false { return 6 }
-            if centerPadded.count != 10 { return 7 }
+            if centerPadded.chars.count != 10 { return 7 }
 
             // format when string is already wider than width
             let noChange = s.format(makeOpts(2, std.text.Alignment.Left, ' '));

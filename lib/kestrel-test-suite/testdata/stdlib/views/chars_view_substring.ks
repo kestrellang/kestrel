@@ -16,11 +16,11 @@ module Test
             // ---- chars.substring convenience (Range) ----
             if s.chars.substring(std.core.Range[std.numeric.Int64](0, 5)).isEqual(to: "hello") == false { return 3 }
 
-            // ---- s.substring (defaults to chars, Range) ----
-            if s.substring(std.core.Range[std.numeric.Int64](0, 5)).isEqual(to: "hello") == false { return 4 }
+            // ---- s.chars.substring (Range) ----
+            if s.chars.substring(std.core.Range[std.numeric.Int64](0, 5)).isEqual(to: "hello") == false { return 4 }
 
-            // ---- s.substring with ClosedRange ----
-            if s.substring(std.core.ClosedRange[std.numeric.Int64](6, 10)).isEqual(to: "world") == false { return 10 }
+            // ---- s.chars.substring with ClosedRange ----
+            if s.chars.substring(std.core.ClosedRange[std.numeric.Int64](6, 10)).isEqual(to: "world") == false { return 10 }
 
             // ---- chars(checked: Range) ----
             let checked = s.chars(checked: std.core.Range[std.numeric.Int64](0, 5));
