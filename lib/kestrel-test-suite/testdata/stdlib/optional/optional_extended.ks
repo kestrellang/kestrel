@@ -19,11 +19,11 @@ module Test
             // Test expect on Some (should not panic, returns value)
             if some.expect("should have value") != 42 { return 4 }
 
-            // Test unwrap(orElse:) on Some (should return contained value, not call closure)
-            if some.unwrap(orElse: { () in 99 }) != 42 { return 5 }
+            // Test unwrap(or:) on Some (should return contained value, not call closure)
+            if some.unwrap(or: { () in 99 }) != 42 { return 5 }
 
-            // Test unwrap(orElse:) on None (should call closure)
-            if none.unwrap(orElse: { () in 99 }) != 99 { return 6 }
+            // Test unwrap(or:) on None (should call closure)
+            if none.unwrap(or: { () in 99 }) != 99 { return 6 }
 
             // Test inspect on Some (returns self unchanged)
             // Note: cannot modify captured variables in closures, so just verify return value

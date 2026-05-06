@@ -13,7 +13,7 @@ module Test
 
             // Test inspect in chain - elements still flow through
             let inspected = [1, 2, 3, 4, 5].iter().inspect({ (x) in });
-            let filtered: std.collections.Array[std.numeric.Int64] = inspected.filter(matching: { (x) in x > 2 }).collect();
+            let filtered: std.collections.Array[std.numeric.Int64] = inspected.filter(where: { (x) in x > 2 }).collect();
             if filtered.count != 3 { return 5 }
             if filtered(unchecked: 0) != 3 { return 6 }
 

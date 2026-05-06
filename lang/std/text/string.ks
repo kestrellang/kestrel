@@ -567,7 +567,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     ///
     /// Recognises the same whitespace set as `Char.isWhitespace`:
     /// space, tab, LF, CR, form feed. For Unicode-aware trimming, use
-    /// the `(matching:)` overloads with a custom predicate. Non-mutating
+    /// the `(where:)` overloads with a custom predicate. Non-mutating
     /// mirrors live under `trimmed*`.
     ///
     /// # Examples
@@ -601,18 +601,18 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// s.trim { (c) in c == '*' };
     /// s;  // "hi"
     /// ```
-    public mutating func trim(matching predicate: (Char) -> Bool) {
-        self = self.trimmed(matching: predicate).toOwned()
+    public mutating func trim(where predicate: (Char) -> Bool) {
+        self = self.trimmed(where: predicate).toOwned()
     }
 
     /// Removes leading code points matching `predicate`, in place.
-    public mutating func trimStart(matching predicate: (Char) -> Bool) {
-        self = self.trimmedStart(matching: predicate).toOwned()
+    public mutating func trimStart(where predicate: (Char) -> Bool) {
+        self = self.trimmedStart(where: predicate).toOwned()
     }
 
     /// Removes trailing code points matching `predicate`, in place.
-    public mutating func trimEnd(matching predicate: (Char) -> Bool) {
-        self = self.trimmedEnd(matching: predicate).toOwned()
+    public mutating func trimEnd(where predicate: (Char) -> Bool) {
+        self = self.trimmedEnd(where: predicate).toOwned()
     }
 
     // ========================================================================

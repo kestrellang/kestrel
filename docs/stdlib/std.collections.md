@@ -330,21 +330,21 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `all`
 
 ```kestrel
-public func all(matching: (T) -> Bool) -> Bool
+public func all(where: (T) -> Bool) -> Bool
 ```
 
 `true` when every element satisfies `predicate` (vacuously true
 for an empty array).
 
 Short-circuits on the first failure. The dual is
-`any(matching:)`.
+`any(where:)`.
 
 ##### Examples
 
 ```
-[2, 4, 6].all(matching: { (x) in x % 2 == 0 });  // true
-[2, 3, 6].all(matching: { (x) in x % 2 == 0 });  // false
-[].all(matching: { (x) in false });              // true (vacuous)
+[2, 4, 6].all(where: { (x) in x % 2 == 0 });  // true
+[2, 3, 6].all(where: { (x) in x % 2 == 0 });  // false
+[].all(where: { (x) in false });              // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -352,20 +352,20 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `any`
 
 ```kestrel
-public func any(matching: (T) -> Bool) -> Bool
+public func any(where: (T) -> Bool) -> Bool
 ```
 
 `true` when at least one element satisfies `predicate` (always
 `false` for an empty array).
 
-Short-circuits on the first match. The dual is `all(matching:)`.
+Short-circuits on the first match. The dual is `all(where:)`.
 
 ##### Examples
 
 ```
-[1, 2, 3].any(matching: { (x) in x > 2 });  // true
-[1, 2, 3].any(matching: { (x) in x > 5 });  // false
-[].any(matching: { (x) in true });          // false (empty)
+[1, 2, 3].any(where: { (x) in x > 2 });  // true
+[1, 2, 3].any(where: { (x) in x > 5 });  // false
+[].any(where: { (x) in true });          // false (empty)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -600,7 +600,7 @@ public func contains(T) -> Bool
 `true` if the array contains an element equal to `element`.
 
 Linear scan; short-circuits on the first match. For predicate-
-based searching see `any(matching:)` or `firstIndex(matching:)`.
+based searching see `any(where:)` or `firstIndex(where:)`.
 
 ##### Examples
 
@@ -634,20 +634,20 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `countItems`
 
 ```kestrel
-public func countItems(matching: (T) -> Bool) -> Int64
+public func countItems(where: (T) -> Bool) -> Int64
 ```
 
 Returns the number of elements for which `predicate` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(matching:)`; for a yes/no on every element,
-`all(matching:)`.
+`any(where:)`; for a yes/no on every element,
+`all(where:)`.
 
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].countItems(matching: { (x) in x % 2 == 0 });  // 2
-[].countItems(matching: { (x) in true });                     // 0
+[1, 2, 3, 4, 5].countItems(where: { (x) in x % 2 == 0 });  // 2
+[].countItems(where: { (x) in true });                     // 0
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -774,7 +774,7 @@ Returns the first element, or `None` if the array is empty.
 
 O(1). Read-only — to remove the first element use `popFirst()`.
 To find the first element matching a predicate, see
-`first(matching:)`.
+`first(where:)`.
 
 ##### Examples
 
@@ -788,20 +788,20 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `first`
 
 ```kestrel
-public func first(matching: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> T?
 ```
 
 Returns the first element matching `predicate`, or `None`.
 
-Wraps `firstIndex(matching:)` and reads the element at the
-returned index. For just the index, use `firstIndex(matching:)`.
+Wraps `firstIndex(where:)` and reads the element at the
+returned index. For just the index, use `firstIndex(where:)`.
 
 ##### Examples
 
 ```
 let arr = [1, 2, 3, 4, 5];
-arr.first(matching: { (x) in x > 3 });   // Some(4)
-arr.first(matching: { (x) in x > 99 });  // None
+arr.first(where: { (x) in x > 3 });   // Some(4)
+arr.first(where: { (x) in x > 99 });  // None
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -809,14 +809,14 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(matching: (T) -> Bool) -> Int64?
+public func firstIndex(where: (T) -> Bool) -> Int64?
 ```
 
 Returns the index of the first element matching `predicate`, or
 `None`.
 
 Linear scan from the front; short-circuits on the first match.
-To get the element instead of the index, use `first(matching:)`.
+To get the element instead of the index, use `first(where:)`.
 For value-based search on `Equatable` arrays, use
 `firstIndex(of:)`.
 
@@ -824,8 +824,8 @@ For value-based search on `Equatable` arrays, use
 
 ```
 let arr = [1, 2, 3, 4, 5];
-arr.firstIndex(matching: { (x) in x > 3 });   // Some(3)
-arr.firstIndex(matching: { (x) in x > 10 });  // None
+arr.firstIndex(where: { (x) in x > 3 });   // Some(3)
+arr.firstIndex(where: { (x) in x > 10 });  // None
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -839,7 +839,7 @@ public func firstIndex(of: T) -> Int64?
 Returns the index of the first element equal to `element`, or
 `None`.
 
-Wraps `firstIndex(matching:)` with `equals(element)`. The mirror
+Wraps `firstIndex(where:)` with `equals(element)`. The mirror
 is `lastIndex(of:)`.
 
 ##### Examples
@@ -1032,7 +1032,7 @@ public func last() -> T?
 Returns the last element, or `None` if the array is empty.
 
 O(1). Read-only — to remove the last element use `pop()`. To find
-the last element matching a predicate, see `last(matching:)`.
+the last element matching a predicate, see `last(where:)`.
 
 ##### Examples
 
@@ -1046,19 +1046,19 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `last`
 
 ```kestrel
-public func last(matching: (T) -> Bool) -> T?
+public func last(where: (T) -> Bool) -> T?
 ```
 
 Returns the last element matching `predicate`, or `None`.
 
-Wraps `lastIndex(matching:)`. For just the index, use
-`lastIndex(matching:)`.
+Wraps `lastIndex(where:)`. For just the index, use
+`lastIndex(where:)`.
 
 ##### Examples
 
 ```
 let arr = [1, 2, 3, 2, 1];
-arr.last(matching: { (x) in x > 1 });  // Some(2) — the second 2
+arr.last(where: { (x) in x > 1 });  // Some(2) — the second 2
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1066,22 +1066,22 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `lastIndex`
 
 ```kestrel
-public func lastIndex(matching: (T) -> Bool) -> Int64?
+public func lastIndex(where: (T) -> Bool) -> Int64?
 ```
 
 Returns the index of the last element matching `predicate`, or
 `None`.
 
 Linear scan from the back; short-circuits on the first match. The
-mirror of `firstIndex(matching:)`. For value-based search on
+mirror of `firstIndex(where:)`. For value-based search on
 `Equatable` arrays, use `lastIndex(of:)`.
 
 ##### Examples
 
 ```
 let arr = [1, 2, 3, 2, 1];
-arr.lastIndex(matching: { (x) in x == 2 });   // Some(3)
-arr.lastIndex(matching: { (x) in x == 99 });  // None
+arr.lastIndex(where: { (x) in x == 2 });   // Some(3)
+arr.lastIndex(where: { (x) in x == 99 });  // None
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1095,7 +1095,7 @@ public func lastIndex(of: T) -> Int64?
 Returns the index of the last element equal to `element`, or
 `None`.
 
-Wraps `lastIndex(matching:)` with `equals(element)`. The mirror
+Wraps `lastIndex(where:)` with `equals(element)`. The mirror
 is `firstIndex(of:)`.
 
 ##### Examples
@@ -1325,22 +1325,22 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `removeAll`
 
 ```kestrel
-public mutating func removeAll(matching: (T) -> Bool)
+public mutating func removeAll(where: (T) -> Bool)
 ```
 
 Removes every element for which `predicate` returns true.
 
-The inverse of `retain(matching:)` — implemented as
+The inverse of `retain(where:)` — implemented as
 `retain` over the negated predicate. O(n), stable.
 
 ##### Examples
 
 ```
 var arr = [1, 2, 3, 4, 5];
-arr.removeAll(matching: { (x) in x % 2 == 0 });  // [1, 3, 5]
+arr.removeAll(where: { (x) in x % 2 == 0 });  // [1, 3, 5]
 
 var names = ["Alice", "", "Bob", ""];
-names.removeAll(matching: { (s) in s.isEmpty });  // ["Alice", "Bob"]
+names.removeAll(where: { (s) in s.isEmpty });  // ["Alice", "Bob"]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1474,21 +1474,21 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `retain`
 
 ```kestrel
-public mutating func retain(matching: (T) -> Bool)
+public mutating func retain(where: (T) -> Bool)
 ```
 
 Keeps only elements for which `predicate` returns true; removes
 the rest in place.
 
 O(n), single pass, stable (relative order preserved). The mirror
-operation is `removeAll(matching:)`. For a copy instead of an
+operation is `removeAll(where:)`. For a copy instead of an
 in-place edit, use `iter().filter(...).collect()`.
 
 ##### Examples
 
 ```
 var arr = [1, 2, 3, 4, 5];
-arr.retain(matching: { (x) in x % 2 == 0 });  // [2, 4]
+arr.retain(where: { (x) in x % 2 == 0 });  // [2, 4]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -2853,20 +2853,20 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `all`
 
 ```kestrel
-public func all(matching: (K, V) -> Bool) -> Bool
+public func all(where: (K, V) -> Bool) -> Bool
 ```
 
 `true` when every entry satisfies `predicate(key, value)`
 (vacuously true for empty).
 
-Short-circuits on the first failure. Dual of `any(matching:)`.
+Short-circuits on the first failure. Dual of `any(where:)`.
 
 ##### Examples
 
 ```
-["a": 2, "b": 4].all(matching: { (k, v) in v % 2 == 0 });  // true
-["a": 1, "b": 2].all(matching: { (k, v) in v % 2 == 0 });  // false
-[:].all(matching: { (k, v) in false });                    // true (vacuous)
+["a": 2, "b": 4].all(where: { (k, v) in v % 2 == 0 });  // true
+["a": 1, "b": 2].all(where: { (k, v) in v % 2 == 0 });  // false
+[:].all(where: { (k, v) in false });                    // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2895,20 +2895,20 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `any`
 
 ```kestrel
-public func any(matching: (K, V) -> Bool) -> Bool
+public func any(where: (K, V) -> Bool) -> Bool
 ```
 
 `true` when at least one entry satisfies `predicate(key, value)`.
 
-Alias for `contains(matching:)` — the two names exist so
+Alias for `contains(where:)` — the two names exist so
 predicate-style code reads naturally regardless of context.
 Short-circuits on the first match.
 
 ##### Examples
 
 ```
-["a": 1, "b": 5].any(matching: { (k, v) in v > 3 });  // true
-[:].any(matching: { (k, v) in true });                // false (empty)
+["a": 1, "b": 5].any(where: { (k, v) in v > 3 });  // true
+[:].any(where: { (k, v) in true });                // false (empty)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3004,7 +3004,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (K, V) -> Bool) -> Bool
+public func contains(where: (K, V) -> Bool) -> Bool
 ```
 
 `true` if any entry satisfies `predicate(key, value)`.
@@ -3016,8 +3016,8 @@ for symmetry with `Array`.
 ##### Examples
 
 ```
-["a": 1, "b": 5].contains(matching: { (k, v) in v > 3 });  // true
-["a": 1, "b": 2].contains(matching: { (k, v) in v > 3 });  // false
+["a": 1, "b": 5].contains(where: { (k, v) in v > 3 });  // true
+["a": 1, "b": 2].contains(where: { (k, v) in v > 3 });  // false
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3066,21 +3066,21 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `countItems`
 
 ```kestrel
-public func countItems(matching: (K, V) -> Bool) -> Int64
+public func countItems(where: (K, V) -> Bool) -> Int64
 ```
 
 Returns the number of entries for which
 `predicate(key, value)` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(matching:)`; for a yes/no on every entry,
-`all(matching:)`.
+`any(where:)`; for a yes/no on every entry,
+`all(where:)`.
 
 ##### Examples
 
 ```
-["a": 1, "b": 2, "c": 3].countItems(matching: { (k, v) in v > 1 });  // 2
-[:].countItems(matching: { (k, v) in true });                        // 0
+["a": 1, "b": 2, "c": 3].countItems(where: { (k, v) in v > 1 });  // 2
+[:].countItems(where: { (k, v) in true });                        // 0
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3112,21 +3112,21 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (K, V) -> Bool) -> Dictionary[K, V, H]
+public func filter(where: (K, V) -> Bool) -> Dictionary[K, V, H]
 ```
 
 Returns a new dictionary containing only entries for which
 `predicate(key, value)` is true.
 
-Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+Non-mutating mirror of `retain(where:)`. Allocates a fresh
 dictionary; for in-place filtering use `retain` or
-`removeAll(matching:)`.
+`removeAll(where:)`.
 
 ##### Examples
 
 ```
 let dict = ["a": 1, "b": 2, "c": 3];
-let big = dict.filter(matching: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
+let big = dict.filter(where: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3134,7 +3134,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `first`
 
 ```kestrel
-public func first(matching: (K, V) -> Bool) -> (K, V)?
+public func first(where: (K, V) -> Bool) -> (K, V)?
 ```
 
 Returns *some* entry matching `predicate(key, value)`, or
@@ -3148,8 +3148,8 @@ entries. Short-circuits on the first match.
 
 ```
 let dict = ["a": 1, "b": 5, "c": 3];
-dict.first(matching: { (k, v) in v > 2 });  // Some entry with v > 2
-dict.first(matching: { (k, v) in v > 99 }); // None
+dict.first(where: { (k, v) in v > 2 });  // Some entry with v > 2
+dict.first(where: { (k, v) in v > 99 }); // None
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3362,12 +3362,12 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `removeAll`
 
 ```kestrel
-public mutating func removeAll(matching: (K, V) -> Bool)
+public mutating func removeAll(where: (K, V) -> Bool)
 ```
 
 Removes every entry for which `predicate(key, value)` is true.
 
-Inverse of `retain(matching:)`; implemented as `retain` over
+Inverse of `retain(where:)`; implemented as `retain` over
 the negated predicate. Same tombstone caveat applies — consider
 `shrinkToFit()` after large removals.
 
@@ -3375,7 +3375,7 @@ the negated predicate. Same tombstone caveat applies — consider
 
 ```
 var dict = ["a": 1, "b": 2, "c": 3];
-dict.removeAll(matching: { (k, v) in v < 2 });  // ["b": 2, "c": 3]
+dict.removeAll(where: { (k, v) in v < 2 });  // ["b": 2, "c": 3]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3407,7 +3407,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `retain`
 
 ```kestrel
-public mutating func retain(matching: (K, V) -> Bool)
+public mutating func retain(where: (K, V) -> Bool)
 ```
 
 Keeps only entries for which `predicate(key, value)` is true.
@@ -3415,13 +3415,13 @@ Keeps only entries for which `predicate(key, value)` is true.
 Two-pass implementation: collects keys to remove, then deletes
 them. Each removal leaves a tombstone — call `shrinkToFit()`
 afterwards if you've removed a large fraction. The mirror is
-`removeAll(matching:)`.
+`removeAll(where:)`.
 
 ##### Examples
 
 ```
 var dict = ["a": 1, "b": 2, "c": 3];
-dict.retain(matching: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
+dict.retain(where: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -4185,21 +4185,21 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `all`
 
 ```kestrel
-public func all(matching: (T) -> Bool) -> Bool
+public func all(where: (T) -> Bool) -> Bool
 ```
 
 `true` when every element satisfies `predicate` (vacuously
 true for empty sets).
 
 Short-circuits on the first failure. Dual of
-`any(matching:)`.
+`any(where:)`.
 
 ##### Examples
 
 ```
-Set([2, 4, 6]).all(matching: { (x) in x % 2 == 0 });  // true
-Set([1, 2, 4]).all(matching: { (x) in x % 2 == 0 });  // false
-Set[Int64]().all(matching: { (x) in false });         // true (vacuous)
+Set([2, 4, 6]).all(where: { (x) in x % 2 == 0 });  // true
+Set([1, 2, 4]).all(where: { (x) in x % 2 == 0 });  // false
+Set[Int64]().all(where: { (x) in false });         // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4207,20 +4207,20 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `any`
 
 ```kestrel
-public func any(matching: (T) -> Bool) -> Bool
+public func any(where: (T) -> Bool) -> Bool
 ```
 
 `true` when at least one element satisfies `predicate`.
 
-Alias for `contains(matching:)` — both names exist so
+Alias for `contains(where:)` — both names exist so
 predicate-style code reads naturally regardless of context.
 Short-circuits.
 
 ##### Examples
 
 ```
-Set([1, 2, 3]).any(matching: { (x) in x > 2 });  // true
-Set[Int64]().any(matching: { (x) in true });     // false (empty)
+Set([1, 2, 3]).any(where: { (x) in x > 2 });  // true
+Set[Int64]().any(where: { (x) in true });     // false (empty)
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4300,7 +4300,7 @@ public func contains(T) -> Bool
 `true` if `element` is a member of the set; O(1) average.
 
 Forwards to the dictionary's key lookup. For predicate-based
-search use `contains(matching:)`.
+search use `contains(where:)`.
 
 ##### Examples
 
@@ -4315,20 +4315,20 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (T) -> Bool) -> Bool
+public func contains(where: (T) -> Bool) -> Bool
 ```
 
 `true` if any element satisfies `predicate`.
 
 Linear scan; short-circuits on the first match. `false` for
-empty sets. The aliased shape `any(matching:)` exists for
+empty sets. The aliased shape `any(where:)` exists for
 symmetry with `Array`.
 
 ##### Examples
 
 ```
-Set([1, 2, 3]).contains(matching: { (x) in x > 2 });  // true
-Set([1, 2, 3]).contains(matching: { (x) in x > 5 });  // false
+Set([1, 2, 3]).contains(where: { (x) in x > 2 });  // true
+Set([1, 2, 3]).contains(where: { (x) in x > 5 });  // false
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4355,20 +4355,20 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `countItems`
 
 ```kestrel
-public func countItems(matching: (T) -> Bool) -> Int64
+public func countItems(where: (T) -> Bool) -> Int64
 ```
 
 Returns the number of elements for which `predicate` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(matching:)`; for a yes/no on every element,
-`all(matching:)`.
+`any(where:)`; for a yes/no on every element,
+`all(where:)`.
 
 ##### Examples
 
 ```
-Set([1, 2, 3, 4, 5]).countItems(matching: { (x) in x % 2 == 0 });  // 2
-Set[Int64]().countItems(matching: { (x) in true });                // 0
+Set([1, 2, 3, 4, 5]).countItems(where: { (x) in x % 2 == 0 });  // 2
+Set[Int64]().countItems(where: { (x) in true });                // 0
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4434,21 +4434,21 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (T) -> Bool) -> Set[T, H]
+public func filter(where: (T) -> Bool) -> Set[T, H]
 ```
 
 Returns a new set containing only elements for which
 `predicate` is true.
 
-Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+Non-mutating mirror of `retain(where:)`. Allocates a fresh
 set; for in-place filtering use `retain` or
-`removeAll(matching:)`.
+`removeAll(where:)`.
 
 ##### Examples
 
 ```
 let set: Set = [1, 2, 3, 4, 5];
-let evens = set.filter(matching: { (x) in x % 2 == 0 });  // {2, 4}
+let evens = set.filter(where: { (x) in x % 2 == 0 });  // {2, 4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4456,7 +4456,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `first`
 
 ```kestrel
-public func first(matching: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> T?
 ```
 
 Returns *some* element matching `predicate`, or `None`.
@@ -4469,8 +4469,8 @@ elements. Short-circuits on the first match.
 
 ```
 let set: Set = [1, 2, 3, 4, 5];
-set.first(matching: { (x) in x > 3 });   // Some(4) or Some(5)
-set.first(matching: { (x) in x > 99 });  // None
+set.first(where: { (x) in x > 3 });   // Some(4) or Some(5)
+set.first(where: { (x) in x > 99 });  // None
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4894,18 +4894,18 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `removeAll`
 
 ```kestrel
-public mutating func removeAll(matching: (T) -> Bool)
+public mutating func removeAll(where: (T) -> Bool)
 ```
 
 Removes every element for which `predicate` is true.
 
-Inverse of `retain(matching:)`. Same two-pass structure.
+Inverse of `retain(where:)`. Same two-pass structure.
 
 ##### Examples
 
 ```
 var set: Set = [1, 2, 3, 4, 5];
-set.removeAll(matching: { (x) in x % 2 == 0 });  // {1, 3, 5}
+set.removeAll(where: { (x) in x % 2 == 0 });  // {1, 3, 5}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4937,20 +4937,20 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `retain`
 
 ```kestrel
-public mutating func retain(matching: (T) -> Bool)
+public mutating func retain(where: (T) -> Bool)
 ```
 
 Keeps only elements for which `predicate` is true.
 
 Two-pass implementation: collects elements to remove, then
 deletes each. Stable in iteration semantics (set is unordered
-anyway). Mirror is `removeAll(matching:)`.
+anyway). Mirror is `removeAll(where:)`.
 
 ##### Examples
 
 ```
 var set: Set = [1, 2, 3, 4, 5];
-set.retain(matching: { (x) in x % 2 == 0 });  // {2, 4}
+set.retain(where: { (x) in x % 2 == 0 });  // {2, 4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._

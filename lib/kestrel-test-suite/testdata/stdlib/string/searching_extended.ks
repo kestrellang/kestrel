@@ -6,20 +6,20 @@ module Test
         func main() -> lang.i64 {
             let s: std.text.String = "hello world hello";
 
-            // ---- contains(matching:) ----
-            let hasUpper = s.contains(matching: { (c) in c.isAsciiUppercase });
+            // ---- contains(where:) ----
+            let hasUpper = s.contains(where: { (c) in c.isAsciiUppercase });
             if hasUpper { return 1 }
 
-            let hasLower = s.contains(matching: { (c) in c.isAsciiLowercase });
+            let hasLower = s.contains(where: { (c) in c.isAsciiLowercase });
             if hasLower == false { return 2 }
 
-            // ---- chars.firstIndex(matching:) ----
-            let spacePos = s.chars.firstIndex(matching: { (c) in c.isEqual(to: ' ') });
+            // ---- chars.firstIndex(where:) ----
+            let spacePos = s.chars.firstIndex(where: { (c) in c.isEqual(to: ' ') });
             if spacePos.isNone() { return 3 }
             if spacePos.unwrap().byteOffset != 5 { return 4 }
 
-            // chars.firstIndex(matching:) no match
-            let noMatch = s.chars.firstIndex(matching: { (c) in c.isAsciiDigit });
+            // chars.firstIndex(where:) no match
+            let noMatch = s.chars.firstIndex(where: { (c) in c.isAsciiDigit });
             if noMatch.isSome() { return 5 }
 
             // ---- lastIndex(of:) via Str ----

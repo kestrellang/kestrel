@@ -41,7 +41,7 @@ grouped by phase. `[x]` = landed; `[ ]` = pending.
 - [x] `windows(of:)` → `WindowsView`
 - [x] `reversed()` → `ReversedView`
 - [x] `split(separator:)` → `ArraySplitView` (where `T: Equatable`)
-- [x] `split(matching:)` → `ArraySplitWhereView`
+- [x] `split(where:)` → `ArraySplitWhereView`
 - [x] Old eager `Array.reversed() -> Array[T]`, `Array.chunks(of:) -> ChunksIterator`, `Array.windows(of:) -> WindowsIterator` removed
 
 ### Collection-returning transforms (eager)

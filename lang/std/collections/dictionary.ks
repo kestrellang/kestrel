@@ -1216,7 +1216,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Two-pass implementation: collects keys to remove, then deletes
     /// them. Each removal leaves a tombstone — call `shrinkToFit()`
     /// afterwards if you've removed a large fraction. The mirror is
-    /// `removeAll(matching:)`.
+    /// `removeAll(where:)`.
     ///
     /// # Examples
     ///
@@ -1224,7 +1224,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2, "c": 3];
     /// dict.retain { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
-    public mutating func retain(matching predicate: (K, V) -> Bool) {
+    public mutating func retain(where predicate: (K, V) -> Bool) {
         self.makeUnique();
         let myCap = self.cap();
         let myBuckets = self.buckets();
@@ -1250,7 +1250,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// Removes every entry for which `predicate(key, value)` is true.
     ///
-    /// Inverse of `retain(matching:)`; implemented as `retain` over
+    /// Inverse of `retain(where:)`; implemented as `retain` over
     /// the negated predicate. Same tombstone caveat applies — consider
     /// `shrinkToFit()` after large removals.
     ///
@@ -1260,8 +1260,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2, "c": 3];
     /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
     /// ```
-    public mutating func removeAll(matching predicate: (K, V) -> Bool) {
-        self.retain(matching: { (k, v) in not predicate(k, v) })
+    public mutating func removeAll(where predicate: (K, V) -> Bool) {
+        self.retain(where: { (k, v) in not predicate(k, v) })
     }
 
     /// Grows the bucket array so at least `minimumCapacity` entries
@@ -1357,7 +1357,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 5].contains { (k, v) in v > 3 };  // true
     /// ["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
     /// ```
-    public func contains(matching predicate: (K, V) -> Bool) -> Bool {
+    public func contains(where predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1389,7 +1389,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
     /// dict.first { (k, v) in v > 99 }; // None
     /// ```
-    public func first(matching predicate: (K, V) -> Bool) -> (K, V)? {
+    public func first(where predicate: (K, V) -> Bool) -> (K, V)? {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1410,7 +1410,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// `true` when every entry satisfies `predicate(key, value)`
     /// (vacuously true for empty).
     ///
-    /// Short-circuits on the first failure. Dual of `any(matching:)`.
+    /// Short-circuits on the first failure. Dual of `any(where:)`.
     ///
     /// # Examples
     ///
@@ -1419,7 +1419,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2].all { (k, v) in v % 2 == 0 };  // false
     /// [:].all { (k, v) in false };                    // true (vacuous)
     /// ```
-    public func all(matching predicate: (K, V) -> Bool) -> Bool {
+    public func all(where predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1439,7 +1439,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// `true` when at least one entry satisfies `predicate(key, value)`.
     ///
-    /// Alias for `contains(matching:)` — the two names exist so
+    /// Alias for `contains(where:)` — the two names exist so
     /// predicate-style code reads naturally regardless of context.
     /// Short-circuits on the first match.
     ///
@@ -1449,16 +1449,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 5].any { (k, v) in v > 3 };  // true
     /// [:].any { (k, v) in true };                // false (empty)
     /// ```
-    public func any(matching predicate: (K, V) -> Bool) -> Bool {
-        self.contains(matching: predicate)
+    public func any(where predicate: (K, V) -> Bool) -> Bool {
+        self.contains(where: predicate)
     }
 
     /// Returns the number of entries for which
     /// `predicate(key, value)` is true.
     ///
     /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(matching:)`; for a yes/no on every entry,
-    /// `all(matching:)`.
+    /// `any(where:)`; for a yes/no on every entry,
+    /// `all(where:)`.
     ///
     /// # Examples
     ///
@@ -1466,7 +1466,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2, "c": 3].countItems { (k, v) in v > 1 };  // 2
     /// [:].countItems { (k, v) in true };                        // 0
     /// ```
-    public func countItems(matching predicate: (K, V) -> Bool) -> Int64 {
+    public func countItems(where predicate: (K, V) -> Bool) -> Int64 {
         var result: Int64 = 0;
         let myCap = self.cap();
         let myBuckets = self.buckets();
@@ -1557,9 +1557,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Returns a new dictionary containing only entries for which
     /// `predicate(key, value)` is true.
     ///
-    /// Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+    /// Non-mutating mirror of `retain(where:)`. Allocates a fresh
     /// dictionary; for in-place filtering use `retain` or
-    /// `removeAll(matching:)`.
+    /// `removeAll(where:)`.
     ///
     /// # Examples
     ///
@@ -1567,7 +1567,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// let dict = ["a": 1, "b": 2, "c": 3];
     /// let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
-    public func filter(matching predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
+    public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
         var result = Dictionary[K, V, H]();
         let myCap = self.cap();
         let myBuckets = self.buckets();

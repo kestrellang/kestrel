@@ -494,7 +494,7 @@ public func unwrap() -> T
 ```
 
 Returns the wrapped value, panicking if `None`. Reach for
-`unwrapOr`, `unwrap(orElse:)`, the `??` operator, or pattern
+`unwrapOr`, `unwrap(or:)`, the `??` operator, or pattern
 matching unless you can prove the value is `Some`.
 
 ##### Errors
@@ -513,7 +513,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `unwrap`
 
 ```kestrel
-public func unwrap(orElse: () -> T) -> T
+public func unwrap(or: () -> T) -> T
 ```
 
 Like `unwrapOr`, but `defaultFn` is only called on `None`. Use this
@@ -522,8 +522,8 @@ when the default is expensive to compute or has side effects.
 ##### Examples
 
 ```
-Some(42).unwrap(orElse: || expensiveDefault());   // 42, no call
-None.unwrap(orElse: || expensiveDefault());       // calls fn
+Some(42).unwrap(or: || expensiveDefault());   // 42, no call
+None.unwrap(or: || expensiveDefault());       // calls fn
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -535,7 +535,7 @@ public func unwrapOr(T) -> T
 ```
 
 Returns the wrapped value or `default` when `None`. `default` is
-always evaluated — use `unwrap(orElse:)` if computing it is
+always evaluated — use `unwrap(or:)` if computing it is
 expensive.
 
 ##### Examples
@@ -1079,7 +1079,7 @@ public func unwrap() -> T
 ```
 
 Returns the success value, panicking if `Err`. Use `unwrapOr`,
-`unwrap(orElse:)`, or pattern matching unless you can prove the
+`unwrap(or:)`, or pattern matching unless you can prove the
 result is `Ok`.
 
 ##### Errors
@@ -1091,7 +1091,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `unwrap`
 
 ```kestrel
-public func unwrap(orElse: (E) -> T) -> T
+public func unwrap(or: (E) -> T) -> T
 ```
 
 Like `unwrapOr`, but `defaultFn` receives the error value and is
@@ -1122,7 +1122,7 @@ public func unwrapOr(T) -> T
 ```
 
 Returns the success value or `default` on `Err`. `default` is
-always evaluated — use `unwrap(orElse:)` if computing it is
+always evaluated — use `unwrap(or:)` if computing it is
 expensive or depends on the error.
 
 _Defined in `lang/std/result/result.ks`._

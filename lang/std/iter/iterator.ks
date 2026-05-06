@@ -205,8 +205,8 @@ extend Iterator {
     /// [1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
     /// ["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
     /// ```
-    public func map[U](mapping: (Item) -> U) -> MapIterator[Self, U] {
-        MapIterator(inner: self, mapping: mapping)
+    public func map[U](as transform: (Item) -> U) -> MapIterator[Self, U] {
+        MapIterator(inner: self, as: transform)
     }
 
     /// Yields only elements where `predicate` returns `true`. Lazy —
@@ -217,8 +217,8 @@ extend Iterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
     /// ```
-    public func filter(matching predicate: (Item) -> Bool) -> FilterIterator[Self] {
-        FilterIterator(inner: self, matching: predicate)
+    public func filter(where predicate: (Item) -> Bool) -> FilterIterator[Self] {
+        FilterIterator(inner: self, where: predicate)
     }
 
     /// Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -232,8 +232,8 @@ extend Iterator {
     ///     .filterMap { Int64.parse(it) }
     ///     .collect();   // [1, 3]
     /// ```
-    public func filterMap[U](mapping: (Item) -> U?) -> FilterMapIterator[Self, U] {
-        FilterMapIterator(inner: self, mapping: mapping)
+    public func filterMap[U](as transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
+        FilterMapIterator(inner: self, as: transform)
     }
 
     /// Drops `None`s and unwraps `Some`s — the identity-transform special
@@ -247,7 +247,7 @@ extend Iterator {
     /// xs.iter().compactMap().collect();   // [1, 2, 3]
     /// ```
     public func compactMap[T]() -> FilterMapIterator[Self, T] where Item = Optional[T] {
-        FilterMapIterator(inner: self, mapping: { it })
+        FilterMapIterator(inner: self, as: { it })
     }
 
     /// Pairs each element with its zero-based position.
@@ -280,8 +280,8 @@ extend Iterator {
     ///     .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
     ///     .collect();   // [2, 2]
     /// ```
-    public func flatMap[U](mapping: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
-        FlatMapIterator(inner: self, mapping: mapping)
+    public func flatMap[U](as transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
+        FlatMapIterator(inner: self, as: transform)
     }
 
     /// Like `fold`, but yields each intermediate accumulator value
@@ -296,8 +296,8 @@ extend Iterator {
     ///     .scan(from: 0) { (acc, x) in acc + x }
     ///     .collect();   // [1, 3, 6, 10]
     /// ```
-    public func scan[Acc](from initial: Acc, combining combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
-        ScanIterator(inner: self, from: initial, combining: combine)
+    public func scan[Acc](from initial: Acc, by combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
+        ScanIterator(inner: self, from: initial, by: combine)
     }
 }
 
@@ -331,8 +331,8 @@ extend Iterator {
     ///     .takeWhile { it < 4 }
     ///     .collect();   // [1, 2, 3]
     /// ```
-    public func takeWhile(matching predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
-        TakeWhileIterator(inner: self, matching: predicate)
+    public func takeWhile(where predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
+        TakeWhileIterator(inner: self, where: predicate)
     }
 
     /// Drops the first `count` elements, then yields the rest.
@@ -358,8 +358,8 @@ extend Iterator {
     ///     .skipWhile { it < 3 }
     ///     .collect();   // [3, 4, 1, 2]
     /// ```
-    public func skipWhile(matching predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
-        SkipWhileIterator(inner: self, matching: predicate)
+    public func skipWhile(where predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
+        SkipWhileIterator(inner: self, where: predicate)
     }
 }
 
@@ -596,7 +596,7 @@ extend Iterator {
     /// [1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
     /// [].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
     /// ```
-    public consuming func fold[Acc](from initial: Acc, combining combine: (Acc, Item) -> Acc) -> Acc {
+    public consuming func fold[Acc](from initial: Acc, by combine: (Acc, Item) -> Acc) -> Acc {
         var acc = initial;
         while let .Some(item) = self.next() {
             acc = combine(acc, item);
@@ -615,9 +615,9 @@ extend Iterator {
     /// [5].iter().reduce { (a, b) in a + b };            // Some(5)
     /// [].iter().reduce { (a, b) in a + b };             // None
     /// ```
-    public consuming func reduce(combining combine: (Item, Item) -> Item) -> Item? {
+    public consuming func reduce(by combine: (Item, Item) -> Item) -> Item? {
         if let .Some(first) = self.next() {
-            .Some(self.fold(from: first, combining: combine))
+            .Some(self.fold(from: first, by: combine))
         } else {
             .None
         }
@@ -647,7 +647,7 @@ extend Iterator {
     ///         }
     ///     };   // Err("parse error")
     /// ```
-    public mutating func tryFold[Acc, E](from initial: Acc, combining combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E] {
+    public mutating func tryFold[Acc, E](from initial: Acc, by combine: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E] {
         var acc = initial;
         while let .Some(item) = self.next() {
             match combine(acc, item) {
@@ -669,7 +669,7 @@ extend Iterator {
     /// };   // stops on first failure
     /// ```
     public mutating func tryForEach[E](action: (Item) -> Result[(), E]) -> Result[(), E] {
-        self.tryFold(from: (), combining: { (_, item) in action(item) })
+        self.tryFold(from: (), by: { (_, item) in action(item) })
     }
 }
 
@@ -712,7 +712,7 @@ extend Iterator {
     /// [1, 2, 3].iter().any { it > 10 };      // false
     /// [].iter().any { true };                // false
     /// ```
-    public mutating func any(matching predicate: (Item) -> Bool) -> Bool {
+    public mutating func any(where predicate: (Item) -> Bool) -> Bool {
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return true
@@ -731,7 +731,7 @@ extend Iterator {
     /// [2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
     /// [].iter().all { false };                // true (empty)
     /// ```
-    public mutating func all(matching predicate: (Item) -> Bool) -> Bool {
+    public mutating func all(where predicate: (Item) -> Bool) -> Bool {
         while let .Some(item) = self.next() {
             if not predicate(item) {
                 return false
@@ -757,7 +757,7 @@ extend Iterator {
     /// [1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
     /// [1, 2, 3].iter().first { it > 10 };        // None
     /// ```
-    public mutating func first(matching predicate: (Item) -> Bool) -> Item? {
+    public mutating func first(where predicate: (Item) -> Bool) -> Item? {
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return .Some(item)
@@ -771,10 +771,10 @@ extend Iterator {
     /// # Examples
     ///
     /// ```
-    /// ["a", "b", "c"].iter().firstIndex(matching: { it == "b" });   // Some(1)
-    /// [1, 2, 3].iter().firstIndex(matching: { it > 10 });           // None
+    /// ["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+    /// [1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
     /// ```
-    public mutating func firstIndex(matching predicate: (Item) -> Bool) -> Int64? {
+    public mutating func firstIndex(where predicate: (Item) -> Bool) -> Int64? {
         var index = 0;
         while let .Some(item) = self.next() {
             if predicate(item) {
@@ -842,7 +842,7 @@ extend Iterator where Item: Equatable {
     /// [1, 2, 3].iter().contains(5);   // false
     /// ```
     public mutating func contains(element: Item) -> Bool {
-        self.any(matching: { (item) in item.isEqual(to: element) })
+        self.any(where: { (item) in item.isEqual(to: element) })
     }
 }
 
@@ -863,13 +863,13 @@ extend Iterator where Item: Comparable {
     /// [].iter().min();                // None
     /// ```
     public consuming func min() -> Item? {
-        self.reduce(combining: { (a, b) in if a.compare(b) == Ordering.Less { a } else { b } })
+        self.reduce(by: { (a, b) in if a.compare(b) == Ordering.Less { a } else { b } })
     }
 
     /// Largest element, or `None` for an empty iterator. Ties go to the
     /// first occurrence.
     public consuming func max() -> Item? {
-        self.reduce(combining: { (a, b) in if a.compare(b) == Ordering.Greater { a } else { b } })
+        self.reduce(by: { (a, b) in if a.compare(b) == Ordering.Greater { a } else { b } })
     }
 
     /// Collects into an `Array[Item]`, sorted ascending. Eager and
@@ -1029,7 +1029,7 @@ extend Iterator where Item: Addable, Item.Output = Item {
     /// [].iter().sum();                 // 0
     /// ```
     public consuming func sum() -> Item {
-        self.fold(from: Item.zero, combining: { (acc, x) in acc.add(x) })
+        self.fold(from: Item.zero, by: { (acc, x) in acc.add(x) })
     }
 }
 
@@ -1047,7 +1047,7 @@ extend Iterator where Item: Multipliable, Item.Output = Item {
     /// [].iter().product();                // 1
     /// ```
     public consuming func product() -> Item {
-        self.fold(from: Item.one, combining: { (acc, x) in acc.multiply(x) })
+        self.fold(from: Item.one, by: { (acc, x) in acc.multiply(x) })
     }
 }
 

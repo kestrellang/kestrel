@@ -948,16 +948,16 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// the rest in place.
     ///
     /// O(n), single pass, stable (relative order preserved). The mirror
-    /// operation is `removeAll(matching:)`. For a copy instead of an
+    /// operation is `removeAll(where:)`. For a copy instead of an
     /// in-place edit, use `iter().filter(...).collect()`.
     ///
     /// # Examples
     ///
     /// ```
     /// var arr = [1, 2, 3, 4, 5];
-    /// arr.retain(matching: { (x) in x % 2 == 0 });  // [2, 4]
+    /// arr.retain(where: { (x) in x % 2 == 0 });  // [2, 4]
     /// ```
-    public mutating func retain(matching predicate: (T) -> Bool) {
+    public mutating func retain(where predicate: (T) -> Bool) {
         self.makeUnique();
         var s = self.storage.getValue();
         var writeIdx: Int64 = 0;
@@ -976,20 +976,20 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
     /// Removes every element for which `predicate` returns true.
     ///
-    /// The inverse of `retain(matching:)` — implemented as
+    /// The inverse of `retain(where:)` — implemented as
     /// `retain` over the negated predicate. O(n), stable.
     ///
     /// # Examples
     ///
     /// ```
     /// var arr = [1, 2, 3, 4, 5];
-    /// arr.removeAll(matching: { (x) in x % 2 == 0 });  // [1, 3, 5]
+    /// arr.removeAll(where: { (x) in x % 2 == 0 });  // [1, 3, 5]
     ///
     /// var names = ["Alice", "", "Bob", ""];
-    /// names.removeAll(matching: { (s) in s.isEmpty });  // ["Alice", "Bob"]
+    /// names.removeAll(where: { (s) in s.isEmpty });  // ["Alice", "Bob"]
     /// ```
-    public mutating func removeAll(matching predicate: (T) -> Bool) {
-        self.retain(matching: { (x) in predicate(x) == false })
+    public mutating func removeAll(where predicate: (T) -> Bool) {
+        self.retain(where: { (x) in predicate(x) == false })
     }
 
     // ========================================================================
@@ -1346,9 +1346,9 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
     }
 
-    // first(), last(), firstIndex(matching:), lastIndex(matching:),
-    // first(matching:), last(matching:), all(matching:), any(matching:),
-    // countItems(matching:), prefix(count:), suffix(count:),
+    // first(), last(), firstIndex(where:), lastIndex(where:),
+    // first(where:), last(where:), all(where:), any(where:),
+    // countItems(where:), prefix(count:), suffix(count:),
     // drop(first:), drop(last:): provided by extend Slice[T]
 
     // ========================================================================
@@ -1516,7 +1516,7 @@ extend Array[T] where T: Equatable {
     /// arr.removeAll(2);  // [1, 3, 4]
     /// ```
     public mutating func removeAll(element: T) {
-        self.retain(matching: { (x) in x.isEqual(to: element) == false })
+        self.retain(where: { (x) in x.isEqual(to: element) == false })
     }
 
     /// Removes runs of consecutive equal elements, in place.

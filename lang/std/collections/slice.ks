@@ -561,10 +561,10 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].firstIndex(matching: { it > 3 });   // Some(3)
-    /// [1, 2, 3].firstIndex(matching: { it > 10 });         // None
+    /// [1, 2, 3, 4, 5].firstIndex(where: { it > 3 });   // Some(3)
+    /// [1, 2, 3].firstIndex(where: { it > 10 });         // None
     /// ```
-    public func firstIndex(matching predicate: (T) -> Bool) -> Int64? {
+    public func firstIndex(where predicate: (T) -> Bool) -> Int64? {
         let s = self.asSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
@@ -582,9 +582,9 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 2, 1].lastIndex(matching: { it == 2 });  // Some(3)
+    /// [1, 2, 3, 2, 1].lastIndex(where: { it == 2 });  // Some(3)
     /// ```
-    public func lastIndex(matching predicate: (T) -> Bool) -> Int64? {
+    public func lastIndex(where predicate: (T) -> Bool) -> Int64? {
         let s = self.asSlice();
         if s.count == 0 {
             return .None
@@ -605,9 +605,9 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].first(matching: { it > 3 });  // Some(4)
+    /// [1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
     /// ```
-    public func first(matching predicate: (T) -> Bool) -> T? {
+    public func first(where predicate: (T) -> Bool) -> T? {
         let s = self.asSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
@@ -624,9 +624,9 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 2, 1].last(matching: { it > 1 });  // Some(2)
+    /// [1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
     /// ```
-    public func last(matching predicate: (T) -> Bool) -> T? {
+    public func last(where predicate: (T) -> Bool) -> T? {
         let s = self.asSlice();
         if s.count == 0 {
             return .None
@@ -653,10 +653,10 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [2, 4, 6].all(matching: { it % 2 == 0 });  // true
-    /// [2, 3, 6].all(matching: { it % 2 == 0 });  // false
+    /// [2, 4, 6].all(where: { it % 2 == 0 });  // true
+    /// [2, 3, 6].all(where: { it % 2 == 0 });  // false
     /// ```
-    public func all(matching predicate: (T) -> Bool) -> Bool {
+    public func all(where predicate: (T) -> Bool) -> Bool {
         let s = self.asSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
@@ -675,10 +675,10 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].any(matching: { it > 2 });  // true
-    /// [1, 2, 3].any(matching: { it > 5 });  // false
+    /// [1, 2, 3].any(where: { it > 2 });  // true
+    /// [1, 2, 3].any(where: { it > 5 });  // false
     /// ```
-    public func any(matching predicate: (T) -> Bool) -> Bool {
+    public func any(where predicate: (T) -> Bool) -> Bool {
         let s = self.asSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
@@ -694,9 +694,9 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].countItems(matching: { it % 2 == 0 });  // 2
+    /// [1, 2, 3, 4, 5].countItems(where: { it % 2 == 0 });  // 2
     /// ```
-    public func countItems(matching predicate: (T) -> Bool) -> Int64 {
+    public func countItems(where predicate: (T) -> Bool) -> Int64 {
         let s = self.asSlice();
         let myPtr = s.pointer;
         var result: Int64 = 0;
@@ -779,10 +779,10 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// let v = [1, -1, 2, 3, -1, 4].split(matching: { it < 0 });
+    /// let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
     /// for seg in v { ... }
     /// ```
-    public func split(matching predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
+    public func split(where predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
         ArraySplitWhereView(slice: self.asSlice(), predicate: predicate)
     }
 
@@ -815,9 +815,9 @@ extend Slice[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4].filter(matching: { it % 2 == 0 });  // [2, 4]
+    /// [1, 2, 3, 4].filter(where: { it % 2 == 0 });  // [2, 4]
     /// ```
-    public func filter(matching predicate: (T) -> Bool) -> Array[T] {
+    public func filter(where predicate: (T) -> Bool) -> Array[T] {
         let s = self.asSlice();
         var b = ArrayBuilder[T]();
         let p = s.pointer;
@@ -931,7 +931,7 @@ extend Slice[T] where T: Equatable {
     /// [1, 2, 3].firstIndex(of: 5);      // None
     /// ```
     public func firstIndex(of element: T) -> Int64? {
-        self.firstIndex(matching: { (x) in x.isEqual(to: element) })
+        self.firstIndex(where: { (x) in x.isEqual(to: element) })
     }
 
     /// Index of the last element equal to `element`, or `None`. O(n).
@@ -943,7 +943,7 @@ extend Slice[T] where T: Equatable {
     /// [1, 2, 3].lastIndex(of: 5);      // None
     /// ```
     public func lastIndex(of element: T) -> Int64? {
-        self.lastIndex(matching: { (x) in x.isEqual(to: element) })
+        self.lastIndex(where: { (x) in x.isEqual(to: element) })
     }
 
     /// `true` if the leading elements match `prefix`. O(k) where k is

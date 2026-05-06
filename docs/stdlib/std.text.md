@@ -3064,7 +3064,7 @@ public struct SplitWhereIterator { /* private fields */ }
 
 Iterator that splits a string at every code point matching a predicate.
 
-Produced by `String.split(matching:)`. Decodes the source one
+Produced by `String.split(where:)`. Decodes the source one
 `Char` at a time and breaks the string at each character for which
 the predicate returns `true`; the matching character itself is not
 included in any segment.
@@ -3072,7 +3072,7 @@ included in any segment.
 ### Examples
 
 ```
-var it = "a1b2c".split(matching: |c| c.isDigit());
+var it = "a1b2c".split(where: |c| c.isDigit());
 it.next();  // Some("a")
 it.next();  // Some("b")
 it.next();  // Some("c")
@@ -3090,12 +3090,12 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From Predicate`
 
 ```kestrel
-public init(pointer: Pointer[UInt8], length: Int64, matching: (Char) -> Bool)
+public init(pointer: Pointer[UInt8], length: Int64, where: (Char) -> Bool)
 ```
 
 Constructs a split-where iterator from a buffer pointer and a `Char` predicate.
 
-Prefer `someString.split(matching:)` over calling this directly.
+Prefer `someString.split(where:)` over calling this directly.
 
 ##### Safety
 
@@ -3439,7 +3439,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (Char) -> Bool) -> Bool
+public func contains(where: (Char) -> Bool) -> Bool
 ```
 
 Returns true if any code point matches `predicate`.
@@ -3518,7 +3518,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `find`
 
 ```kestrel
-public func find(matching: (Char) -> Bool) -> Int64?
+public func find(where: (Char) -> Bool) -> Int64?
 ```
 
 Returns the byte offset of the first code point matching `predicate`, or `None`.
@@ -3866,7 +3866,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `split`
 
 ```kestrel
-public func split(matching: (Char) -> Bool) -> SplitWhereIterator
+public func split(where: (Char) -> Bool) -> SplitWhereIterator
 ```
 
 Returns an iterator that splits at every code point matching `predicate`.
@@ -3877,7 +3877,7 @@ The matching characters are not included in any segment.
 
 ```
 var parts = Array[String]();
-for p in "a 1 b 2 c".split(matching: |c| c.isDigit() or c.isWhitespace()) {
+for p in "a 1 b 2 c".split(where: |c| c.isDigit() or c.isWhitespace()) {
     if p.isEmpty == false { parts.append(p); }
 }
 // parts: ["a", "b", "c"]
@@ -4013,7 +4013,7 @@ Removes leading and trailing ASCII whitespace in place.
 Recognises space, tab, LF, CR — same set as `Char.isWhitespace`
 minus form feed (which `Char.isWhitespace` accepts but the
 trim helpers do not). For Unicode-aware trimming, use the
-`(matching:)` overloads with a custom predicate. Non-mutating
+`(where:)` overloads with a custom predicate. Non-mutating
 mirrors live under `trimmed*`.
 
 ##### Examples
@@ -4029,7 +4029,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trim`
 
 ```kestrel
-public mutating func trim(matching: (Char) -> Bool)
+public mutating func trim(where: (Char) -> Bool)
 ```
 
 Removes leading and trailing code points matching `predicate`, in place.
@@ -4038,7 +4038,7 @@ Removes leading and trailing code points matching `predicate`, in place.
 
 ```
 var s = "***hi***";
-s.trim(matching: |c| c == '*');
+s.trim(where: |c| c == '*');
 s;  // "hi"
 ```
 
@@ -4057,7 +4057,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimEnd`
 
 ```kestrel
-public mutating func trimEnd(matching: (Char) -> Bool)
+public mutating func trimEnd(where: (Char) -> Bool)
 ```
 
 Removes trailing code points matching `predicate`, in place.
@@ -4081,7 +4081,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimStart`
 
 ```kestrel
-public mutating func trimStart(matching: (Char) -> Bool)
+public mutating func trimStart(where: (Char) -> Bool)
 ```
 
 Removes leading code points matching `predicate`, in place.
@@ -4103,7 +4103,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimmed`
 
 ```kestrel
-public func trimmed(matching: (Char) -> Bool) -> String
+public func trimmed(where: (Char) -> Bool) -> String
 ```
 
 Returns a copy with leading and trailing code points matching `predicate` removed.
@@ -4123,7 +4123,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimmedEnd`
 
 ```kestrel
-public func trimmedEnd(matching: (Char) -> Bool) -> String
+public func trimmedEnd(where: (Char) -> Bool) -> String
 ```
 
 Returns a copy with trailing code points matching `predicate` removed.
@@ -4143,7 +4143,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimmedStart`
 
 ```kestrel
-public func trimmedStart(matching: (Char) -> Bool) -> String
+public func trimmedStart(where: (Char) -> Bool) -> String
 ```
 
 Returns a copy with leading code points matching `predicate` removed.
