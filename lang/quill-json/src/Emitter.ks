@@ -65,7 +65,7 @@ func emitValue(value: Value, mutating buf: String) {
                 buf.append("false")
             }
         },
-        .Int(n) => buf.append(n.format()),
+        .Int(n) => buf.append("\(n)"),
         .Float(f) => emitFloat(f, buf),
         .Str(s) => emitString(s, buf),
         .Arr(arr) => {
@@ -113,7 +113,7 @@ func emitPretty(value: Value, mutating buf: String, indent: Int64) {
                 buf.append("false")
             }
         },
-        .Int(n) => buf.append(n.format()),
+        .Int(n) => buf.append("\(n)"),
         .Float(f) => emitFloat(f, buf),
         .Str(s) => emitString(s, buf),
         .Arr(arr) => {
@@ -206,12 +206,9 @@ func emitString(s: String, mutating buf: String) {
         } else if b == 9 {
             buf.append("\\t")
         } else if b < 32 {
-            buf.append("\\u00");
-            let n = Int64(from: b);
-            buf.appendByte(hexChar(n / 16));
-            buf.appendByte(hexChar(n % 16))
+            buf.append("\\u00\(b:02x)")
         } else {
-            buf.appendByte(b)
+            buf.appendChar(Char(UInt32(from: b)))
         }
         i = i + 1
     }
@@ -234,7 +231,7 @@ func hexChar(n: Int64) -> UInt8 {
 /// Emits a float, appending `.0` when the formatted representation lacks
 /// a decimal point or exponent (so `3.0` is never confused with integer `3`).
 func emitFloat(f: Float64, mutating buf: String) {
-    let s = f.format();
+    let s = "\(f)";
     buf.append(s);
     // Check if the formatted string contains a '.' or 'e'
     // If not, append ".0" to distinguish from integers

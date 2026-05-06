@@ -107,7 +107,7 @@ public func fetchAllReleases() -> Result[Array[String], JessupError] {
         .Err(_) => .Err(JessupError.NetworkError("failed to fetch releases")),
         .Ok(resp) => {
             if not resp.status.isSuccess() {
-                return .Err(JessupError.NetworkError("GitHub API returned status " + resp.status.code.format()))
+                return .Err(JessupError.NetworkError("GitHub API returned status \(resp.status.code)"))
             };
             match resp.json() {
                 .Err(_) => .Err(JessupError.ParseError("invalid JSON in releases response")),

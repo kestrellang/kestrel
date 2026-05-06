@@ -4,7 +4,7 @@ module wordle.ui
 
 import plume.(Template)
 import wordle.game.(LetterState, Outcome, MAX_GUESSES, WORD_LEN, scoreGuess, keyboardState, outcome)
-import wordle.util.(joinGuesses, urlEncode)
+import wordle.util.(joinGuesses)
 
 // ============================================================================
 // CSS

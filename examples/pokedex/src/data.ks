@@ -3,7 +3,6 @@
 module pokedex.data
 
 import quill.value.(Value)
-import pokedex.util.(capitalize)
 
 // ============================================================================
 // JSON HELPERS

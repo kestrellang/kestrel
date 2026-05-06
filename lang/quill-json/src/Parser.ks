@@ -343,12 +343,8 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
             cursor.pos = cursor.pos + 1
         }
 
-        // Copy the run verbatim — no UTF-8 decode/encode overhead.
-        var i = runStart;
-        while i < cursor.pos {
-            result.appendByte(srcBytes(unchecked: i));
-            i = i + 1
-        }
+        // Copy the run verbatim.
+        result.append(srcBytes.substring(runStart..<cursor.pos));
 
         if cursor.pos >= cursor.len {
             return .Err(JsonParseError("unterminated string", cursor.pos))
@@ -365,21 +361,21 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
         let esc = try cursor.advanceChar();
         // \" \\ \/ \b \f \n \r \t \uXXXX
         if esc == '"' {
-            result.appendByte(34)
+            result.appendChar('"')
         } else if esc == '\\' {
-            result.appendByte(92)
+            result.appendChar('\\')
         } else if esc == '/' {
-            result.appendByte(47)
+            result.appendChar('/')
         } else if esc == 'b' {
-            result.appendByte(8)
+            result.appendChar(Char(8))
         } else if esc == 'f' {
-            result.appendByte(12)
+            result.appendChar(Char(12))
         } else if esc == 'n' {
-            result.appendByte(10)
+            result.appendChar('\n')
         } else if esc == 'r' {
-            result.appendByte(13)
+            result.appendChar('\r')
         } else if esc == 't' {
-            result.appendByte(9)
+            result.appendChar('\t')
         } else if esc == 'u' {
             let codepoint = try parseUnicodeEscape(cursor);
             result.appendChar(Char(UInt32(from: codepoint)))

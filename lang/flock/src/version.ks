@@ -26,7 +26,7 @@ public struct Version: Cloneable {
 
     /// Returns "major.minor.patch" string representation.
     public func toString() -> String {
-        var s = String(); s.append(self.major.format()); s.append("."); s.append(self.minor.format()); s.append("."); s.append(self.patch.format()); s
+        "\(self.major).\(self.minor).\(self.patch)"
     }
 
     /// Returns true if this version equals another.

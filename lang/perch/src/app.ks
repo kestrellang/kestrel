@@ -109,7 +109,7 @@ public struct App[T] {
     /// already in use, permission denied).
     public func listen(port: UInt16) -> Result[(), IoError] {
         var listener = try TcpListener.bind(port);
-        let _ = println("Perch listening on port " + Int64(from: port).format());
+        let _ = println("Perch listening on port \(port)");
 
         loop {
             var stream = try listener.accept();

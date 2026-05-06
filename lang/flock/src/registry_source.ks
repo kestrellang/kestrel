@@ -31,8 +31,7 @@ public struct RegistrySource: PackageSource, Cloneable {
     public func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> Result[ResolvedPackage, FlockError] {
         match spec {
             .Path(_) => {
-                var msg = String(); msg.append(name); msg.append(" (path dependency sent to registry source)");
-                .Err(FlockError.DependencyNotFound(msg))
+                .Err(FlockError.DependencyNotFound("\(name) (path dependency sent to registry source)"))
             },
             .Registry(constraint) => {
                 self.resolveRegistry(name: name, constraint: constraint)
@@ -48,8 +47,7 @@ public struct RegistrySource: PackageSource, Cloneable {
         // 1. Split org/pkg
         match splitPackageName(name: name) {
             .None => {
-                var msg = String(); msg.append(name); msg.append(" (registry packages must use org/pkg format)");
-                return .Err(FlockError.DependencyNotFound(msg))
+                return .Err(FlockError.DependencyNotFound("\(name) (registry packages must use org/pkg format)"))
             },
             .Some(parts) => {
                 let org = parts.0;
@@ -65,8 +63,7 @@ public struct RegistrySource: PackageSource, Cloneable {
                 // 3. Select best version satisfying constraint
                 match selectBestVersion(versions: versions, constraint: constraint) {
                     .None => {
-                        var msg = String(); msg.append(name); msg.append(" (no version satisfies constraint)");
-                        return .Err(FlockError.DependencyNotFound(msg))
+                        return .Err(FlockError.DependencyNotFound("\(name) (no version satisfies constraint)"))
                     },
                     .Some(bestVersion) => {
                         // 4. Check local cache
@@ -96,26 +93,23 @@ public struct RegistrySource: PackageSource, Cloneable {
     /// API: GET /api/v1/packages/{org}/{pkg}
     /// Response: { "name": "org/pkg", "versions": ["1.0.0", "1.1.0", ...] }
     func fetchVersions(org org: String, pkg pkg: String) -> Result[Array[Version], FlockError] {
-        var url = String(); url.append(self.config.url); url.append("/api/v1/packages/"); url.append(org); url.append("/"); url.append(pkg);
+        let url = "\(self.config.url)/api/v1/packages/\(org)/\(pkg)";
 
         var client = Swoop();
         client = client.header("Accept", "application/json");
 
         match client.fetch(url) {
             .Err(_) => {
-                var msg = String(); msg.append("failed to fetch package info for "); msg.append(org); msg.append("/"); msg.append(pkg);
-                return .Err(FlockError.RegistryError(msg))
+                return .Err(FlockError.RegistryError("failed to fetch package info for \(org)/\(pkg)"))
             },
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    var msg = String(); msg.append(org); msg.append("/"); msg.append(pkg); msg.append(": registry returned status "); msg.append(resp.status.code.format());
-                    return .Err(FlockError.RegistryError(msg))
+                    return .Err(FlockError.RegistryError("\(org)/\(pkg): registry returned status \(resp.status.code)"))
                 }
 
                 match resp.json() {
                     .Err(_) => {
-                        var msg = String(); msg.append("invalid JSON response for "); msg.append(org); msg.append("/"); msg.append(pkg);
-                        return .Err(FlockError.RegistryError(msg))
+                        return .Err(FlockError.RegistryError("invalid JSON response for \(org)/\(pkg)"))
                     },
                     .Ok(json) => {
                         parseVersionList(json: json)
@@ -132,26 +126,23 @@ public struct RegistrySource: PackageSource, Cloneable {
     ///             "archive_url": "/api/v1/packages/{org}/{pkg}/{version}/download" }
     func fetchVersionMeta(org org: String, pkg pkg: String, version version: Version) -> Result[VersionMeta, FlockError] {
         let versionStr = version.toString();
-        var url = String(); url.append(self.config.url); url.append("/api/v1/packages/"); url.append(org); url.append("/"); url.append(pkg); url.append("/"); url.append(versionStr);
+        let url = "\(self.config.url)/api/v1/packages/\(org)/\(pkg)/\(versionStr)";
 
         var client = Swoop();
         client = client.header("Accept", "application/json");
 
         match client.fetch(url) {
             .Err(_) => {
-                var msg = String(); msg.append("failed to fetch version info for "); msg.append(org); msg.append("/"); msg.append(pkg); msg.append("@"); msg.append(versionStr);
-                return .Err(FlockError.RegistryError(msg))
+                return .Err(FlockError.RegistryError("failed to fetch version info for \(org)/\(pkg)@\(versionStr)"))
             },
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    var msg = String(); msg.append(org); msg.append("/"); msg.append(pkg); msg.append("@"); msg.append(versionStr); msg.append(": registry returned status "); msg.append(resp.status.code.format());
-                    return .Err(FlockError.RegistryError(msg))
+                    return .Err(FlockError.RegistryError("\(org)/\(pkg)@\(versionStr): registry returned status \(resp.status.code)"))
                 }
 
                 match resp.json() {
                     .Err(_) => {
-                        var msg = String(); msg.append("invalid JSON response for "); msg.append(org); msg.append("/"); msg.append(pkg); msg.append("@"); msg.append(versionStr);
-                        return .Err(FlockError.RegistryError(msg))
+                        return .Err(FlockError.RegistryError("invalid JSON response for \(org)/\(pkg)@\(versionStr)"))
                     },
                     .Ok(json) => {
                         parseVersionMeta(json: json)
@@ -181,8 +172,8 @@ public struct RegistrySource: PackageSource, Cloneable {
         }
 
         // 3. Download archive
-        var archivePath = String(); archivePath.append(pkgDir); archivePath.append("/archive.tar.gz");
-        var downloadUrl = String(); downloadUrl.append(self.config.url); downloadUrl.append(meta.archiveUrl);
+        let archivePath = "\(pkgDir)/archive.tar.gz";
+        let downloadUrl = "\(self.config.url)\(meta.archiveUrl)";
         match downloadFile(url: downloadUrl, outputPath: archivePath) {
             .Err(e) => return .Err(e),
             .Ok(_) => {}

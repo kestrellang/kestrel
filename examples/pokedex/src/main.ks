@@ -12,7 +12,7 @@ import perch.middleware.(logger)
 import swoop.swoop.(Swoop)
 import quill.json.parser.(parseJson)
 import pokedex.ui.(landingPageHtml, gridItemsHtml, detailPageHtml, errorPageHtml, filterKanto)
-import pokedex.util.(urlDecode)
+import http.url.(percentDecode)
 
 // ============================================================================
 // CONTEXT
@@ -33,11 +33,11 @@ struct Ctx: Cloneable {
 
 func handleSearch(req: Request, ctx: Ctx) -> Response {
     let q = match req.query("q") {
-        .Some(v) => urlDecode(v),
+        .Some(v) => percentDecode(v),
         .None => ""
     };
     let typeFilter = match req.query("type") {
-        .Some(v) => urlDecode(v),
+        .Some(v) => percentDecode(v),
         .None => ""
     };
     let entries = filterKanto(q, typeFilter);

@@ -49,7 +49,7 @@ public struct SwoopError: Cloneable {
             .ConnectionFailed(msg) => "connection failed: " + msg,
             .Timeout => "request timed out",
             .InvalidUrl(msg) => "invalid URL: " + msg,
-            .HttpError(code) => "HTTP error: status " + code.format(),
+            .HttpError(code) => "HTTP error: status \(code)",
             .InvalidResponse(msg) => "invalid response: " + msg
         }
     }

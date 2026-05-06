@@ -133,7 +133,7 @@ public struct Template: Cloneable {
     /// t.render("{count} bottles");  // "99 bottles"
     /// ```
     public mutating func setInt(k: String, v: Int64) {
-        self.vars.insert(k, v.format());
+        self.vars.insert(k, "\(v)");
     }
 
     /// Removes a single variable by name.

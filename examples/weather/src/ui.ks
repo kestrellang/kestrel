@@ -5,7 +5,8 @@ module weather.ui
 import quill.value.(Value)
 import plume.(Template)
 import weather.data.(getFloat, getString, getInt, getField, getArrayField, getFloatFromArray, getIntFromArray, getStringFromArray, weatherEmoji, weatherDescription, weatherClass, tempColorClass, evocativeDescription, formatDateLabel, parseHourFromIso, formatHourLabel, formatSunTime, uvDescription, pressureDescription, feelsLikeNote)
-import weather.util.(urlEncode, formatTemp, formatTempWhole, formatInt)
+import http.url.(percentEncode)
+import weather.util.(formatTemp, formatTempWhole, formatInt)
 
 // ============================================================================
 // SHARED CSS (landing page + dropdown)
@@ -89,7 +90,7 @@ public func searchResultsHtml(json: Value) -> String {
                         t.setRaw("lat", lat.formatted());
                         t.setRaw("lon", lon.formatted());
                         t.put("name", name);
-                        t.setRaw("encodedName", urlEncode(name));
+                        t.setRaw("encodedName", percentEncode(name));
                         t.setInt("delay", i * 40);
 
                         var detail = String();

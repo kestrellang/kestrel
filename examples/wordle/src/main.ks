@@ -11,7 +11,8 @@ import perch.middleware.(logger)
 import wordle.words.(wordList, pickWord, isValidWord)
 import wordle.game.(MAX_GUESSES, WORD_LEN, outcome, Outcome)
 import wordle.ui.(pageHtml)
-import wordle.util.(splitGuesses, joinGuesses, parseSeed, normalizeGuess, urlEncode)
+import http.url.(percentEncode)
+import wordle.util.(splitGuesses, joinGuesses, parseSeed, normalizeGuess)
 
 // ============================================================================
 // CONTEXT — the word list is loaded once and reused across requests.
@@ -121,7 +122,7 @@ func cleanUrl(seed: Int64, guesses: Array[String], err: String) -> String {
     };
     if err.byteCount > 0 {
         u.append("&err=");
-        u.append(urlEncode(err))
+        u.append(percentEncode(err))
     };
     u
 }
