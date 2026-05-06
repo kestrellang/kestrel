@@ -3,7 +3,7 @@
 //! Verifies that guard/guard-let else blocks always diverge (return, break,
 //! continue). Both `guard <condition> else { ... }` and `guard let <pattern> = <expr> else { ... }`
 //! are desugared to `if condition { } else { else_body }` in the HIR.
-//! The `HirBody.guard_let_stmts` field marks which statements originated from
+//! The `HirBody.guard_stmts` field marks which statements originated from
 //! guard desugaring, so this analyzer can identify them reliably.
 //!
 //! ## Diagnostics
@@ -32,23 +32,23 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     category: Category::Correctness,
 }];
 
-pub struct GuardLetDivergenceAnalyzer;
+pub struct GuardDivergenceAnalyzer;
 
-impl Describe for GuardLetDivergenceAnalyzer {
+impl Describe for GuardDivergenceAnalyzer {
     fn id(&self) -> &'static str {
-        "guard_let_divergence"
+        "guard_divergence"
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
     }
 }
 
-impl BodyCheck for GuardLetDivergenceAnalyzer {
+impl BodyCheck for GuardDivergenceAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
         // Check each guard-let-originated statement
-        for &stmt_id in &cx.hir.guard_let_stmts {
+        for &stmt_id in &cx.hir.guard_stmts {
             // The desugared form is: HirStmt::Expr { HirExpr::If { then: empty, else: body } }
             let HirStmt::Expr { expr, .. } = &cx.hir.stmts[stmt_id] else {
                 continue;

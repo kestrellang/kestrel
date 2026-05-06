@@ -37,9 +37,9 @@ pub struct HirBody {
     pub statements: Vec<HirStmtId>,
     /// Trailing expression (the block's value), if any
     pub tail_expr: Option<HirExprId>,
-    /// Statements that originated from guard-let desugaring.
-    /// Used by the guard-let divergence analyzer to check that the else block diverges.
-    pub guard_let_stmts: Vec<HirStmtId>,
+    /// Statements that originated from guard desugaring.
+    /// Used by the guard divergence analyzer to check that the else block diverges.
+    pub guard_stmts: Vec<HirStmtId>,
     /// Original condition expressions from while-loop desugaring.
     /// Used by the condition type analyzer to check that while conditions are Bool.
     pub while_conditions: Vec<HirExprId>,
@@ -56,8 +56,8 @@ pub enum MatchSource {
     IfLet,
     /// Desugared from `while let p = v { ... }`.
     WhileLet,
-    /// Desugared from `guard let p = v else { ... }`.
-    GuardLet,
+    /// Desugared from `guard <condition> else { ... }` or `guard let p = v else { ... }`.
+    Guard,
     /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
     ForLoop,
     /// Desugared from `let <pattern> = expr;`.
@@ -318,7 +318,7 @@ pub enum HirExpr {
 
 // ===== Statements (3 variants) =====
 
-/// HIR statement. GuardLet is desugared into if + diverging block.
+/// HIR statement. Guard is desugared into if + diverging block.
 #[derive(Clone, Debug, Hash)]
 pub enum HirStmt {
     Let {
@@ -339,7 +339,7 @@ pub enum HirStmt {
         local: Option<LocalId>,
         span: Span,
     },
-    // GuardLet desugared: if !condition { else_body } where else_body diverges
+    // Guard desugared: if !condition { else_body } where else_body diverges
 }
 
 // ===== Patterns (10 variants) =====

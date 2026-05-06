@@ -62,7 +62,7 @@ impl BodyCheck for ConditionCheckAnalyzer {
                     continue;
                 }
                 // Guard statements desugar to If; use "guard" label for those
-                let kind = if cx.hir.guard_let_stmts.iter().any(|&stmt_id| {
+                let kind = if cx.hir.guard_stmts.iter().any(|&stmt_id| {
                     matches!(&cx.hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id)
                 }) {
                     "guard"

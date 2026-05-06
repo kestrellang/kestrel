@@ -125,9 +125,9 @@ pub enum SyntaxKind {
     Statement,           // Wrapper for statement variants
     ExpressionStatement, // expression;
     VariableDeclaration, // let/var name: Type = expr;
-    GuardLetStatement,   // guard let pattern = expr else { block }
+    GuardStatement,      // guard <condition> else { block }
     DeinitStatement,     // deinit identifier; - explicit destructor call
-    GuardLetCondition,   // let pattern = expr (in guard-let condition chain)
+    GuardCondition,      // let pattern = expr (in guard condition chain)
 
     // Expression nodes
     Expression,               // Wrapper for expression variants
@@ -534,8 +534,8 @@ impl Language for KestrelLanguage {
         const STATEMENT: u16 = SyntaxKind::Statement as u16;
         const EXPRESSION_STATEMENT: u16 = SyntaxKind::ExpressionStatement as u16;
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
-        const GUARD_LET_STATEMENT: u16 = SyntaxKind::GuardLetStatement as u16;
-        const GUARD_LET_CONDITION: u16 = SyntaxKind::GuardLetCondition as u16;
+        const GUARD_STATEMENT: u16 = SyntaxKind::GuardStatement as u16;
+        const GUARD_CONDITION: u16 = SyntaxKind::GuardCondition as u16;
         const DEINIT_STATEMENT: u16 = SyntaxKind::DeinitStatement as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
@@ -789,8 +789,8 @@ impl Language for KestrelLanguage {
             STATEMENT => SyntaxKind::Statement,
             EXPRESSION_STATEMENT => SyntaxKind::ExpressionStatement,
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
-            GUARD_LET_STATEMENT => SyntaxKind::GuardLetStatement,
-            GUARD_LET_CONDITION => SyntaxKind::GuardLetCondition,
+            GUARD_STATEMENT => SyntaxKind::GuardStatement,
+            GUARD_CONDITION => SyntaxKind::GuardCondition,
             DEINIT_STATEMENT => SyntaxKind::DeinitStatement,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,

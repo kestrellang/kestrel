@@ -429,11 +429,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // errors point at the mismatched expression, not the if keyword
                 let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
                 ctx.equal(then_tv, result_tv, then_span);
-                // Guard-let desugars to `if cond {} else { body }` where the
+                // Guard desugars to `if cond {} else { body }` where the
                 // else block is required to diverge. Don't equate its value
-                // type with the empty then branch — the guard_let_divergence
+                // type with the empty then branch — the guard divergence
                 // analyzer is responsible for enforcing divergence.
-                if !is_guard_let_if(hir, id) {
+                if !is_guard_if(hir, id) {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
                     ctx.equal(else_tv, result_tv, else_span);
@@ -1783,11 +1783,11 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
 }
 
 /// Extract the span from an expression.
-/// Whether this If expression is the desugared form of a guard-let.
-/// Guard-let lowers to `HirStmt::Expr { HirExpr::If { then: empty, else: body } }`
-/// and the statement id is tracked in `hir.guard_let_stmts`.
-fn is_guard_let_if(hir: &HirBody, expr_id: HirExprId) -> bool {
-    hir.guard_let_stmts.iter().any(
+/// Whether this If expression is the desugared form of a guard statement.
+/// Guard lowers to `HirStmt::Expr { HirExpr::If { then: empty, else: body } }`
+/// and the statement id is tracked in `hir.guard_stmts`.
+fn is_guard_if(hir: &HirBody, expr_id: HirExprId) -> bool {
+    hir.guard_stmts.iter().any(
         |&stmt_id| matches!(&hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id),
     )
 }

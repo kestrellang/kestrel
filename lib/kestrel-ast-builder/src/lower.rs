@@ -159,7 +159,7 @@ impl LowerCtx {
         match node.kind() {
             SyntaxKind::VariableDeclaration => self.lower_variable_decl(node),
             SyntaxKind::ExpressionStatement => self.lower_expr_stmt(node),
-            SyntaxKind::GuardLetStatement => self.lower_guard_let(node),
+            SyntaxKind::GuardStatement => self.lower_guard(node),
             SyntaxKind::DeinitStatement => self.lower_deinit_stmt(node),
             _ => {
                 // Fallback: wrap as expression statement if it looks like an expr
@@ -257,11 +257,11 @@ impl LowerCtx {
         self.alloc_stmt(AstStmt::Expr { expr, span })
     }
 
-    /// `guard let pattern = expr [, let pattern = expr] else { block }`
-    fn lower_guard_let(&mut self, node: &SyntaxNode) -> StmtId {
+    /// `guard <condition> [, <condition>] else { block }`
+    fn lower_guard(&mut self, node: &SyntaxNode) -> StmtId {
         let span = self.span(node);
 
-        let conditions = self.lower_let_conditions(node, SyntaxKind::GuardLetCondition);
+        let conditions = self.lower_let_conditions(node, SyntaxKind::GuardCondition);
 
         // Else block — find CodeBlock child
         let else_body = node
@@ -273,7 +273,7 @@ impl LowerCtx {
                 tail_expr: None,
             });
 
-        self.alloc_stmt(AstStmt::GuardLet {
+        self.alloc_stmt(AstStmt::Guard {
             conditions,
             else_body,
             span,
@@ -1868,7 +1868,7 @@ impl LowerCtx {
 
     // ===== Shared helpers =====
 
-    /// Lower IfLetCondition/WhileLetCondition/GuardLetCondition nodes.
+    /// Lower IfLetCondition/WhileLetCondition/GuardCondition nodes.
     fn lower_let_conditions(
         &mut self,
         parent: &SyntaxNode,

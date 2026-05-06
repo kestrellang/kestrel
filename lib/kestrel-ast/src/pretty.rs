@@ -75,7 +75,7 @@ impl PrettyCtx<'_> {
                 self.print_expr(*expr, depth);
                 self.buf.push('\n');
             },
-            AstStmt::GuardLet {
+            AstStmt::Guard {
                 conditions,
                 else_body,
                 ..

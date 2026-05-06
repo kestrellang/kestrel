@@ -44,9 +44,9 @@ pub(crate) struct LowerCtx<'a> {
     /// Local scope stack (innermost last)
     scopes: Vec<HashMap<String, LocalId>>,
 
-    /// Statements that originated from guard-let desugaring.
+    /// Statements that originated from guard desugaring.
     /// Populated during lowering, transferred to HirBody for analysis.
-    pub guard_let_stmts: Vec<HirStmtId>,
+    pub guard_stmts: Vec<HirStmtId>,
     /// Original condition expressions from while-loop desugaring.
     /// Populated during lowering, used by condition type analyzer.
     pub while_conditions: Vec<HirExprId>,
@@ -71,7 +71,7 @@ impl<'a> LowerCtx<'a> {
             locals: Arena::new(),
             params: Vec::new(),
             scopes: vec![HashMap::new()], // start with one scope for params
-            guard_let_stmts: Vec::new(),
+            guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),

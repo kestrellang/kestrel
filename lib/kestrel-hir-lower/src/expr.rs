@@ -1101,7 +1101,7 @@ impl LowerCtx<'_> {
     /// Multiple conditions are ANDed together.
     /// Let-conditions create bindings in the current scope.
     /// `source` tags any desugared let-condition matches so the right
-    /// diagnostic fires (IfLet → E302, WhileLet → E308, GuardLet → E309).
+    /// diagnostic fires (IfLet → E302, WhileLet → E308, Guard → E309).
     pub(crate) fn lower_if_conditions(
         &mut self,
         body: &AstBody,
