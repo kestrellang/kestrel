@@ -42,14 +42,13 @@ public protocol ExpressibleByFloatLiteral {
 
 /// Protocol for types that accept a string literal (`"…"`).
 ///
-/// The init receives a primitive `lang.str` (pointer + length pair) so that
-/// string literal lowering does not require the target type to already exist
-/// in stdlib form.
+/// The init receives a raw pointer and byte length so that string literal
+/// lowering does not require the target type to already exist in stdlib form.
 @builtin(.ExpressibleByStringLiteral)
 public protocol ExpressibleByStringLiteral {
     /// @name String Literal
     /// Builds an instance from a string literal.
-    init(stringLiteral value: lang.str)
+    init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
 }
 
 /// Protocol for types that accept a character literal (`'a'`).
@@ -94,7 +93,7 @@ public protocol _ExpressibleByArrayLiteral {
 public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
     /// @name Array Literal
     /// Builds an instance from a literal slice of elements.
-    init(arrayLiteral: LiteralSlice[Element])
+    init(arrayLiteral elements: LiteralSlice[Element])
 }
 
 // Bridge: default implementation satisfies _ExpressibleByArrayLiteral
@@ -124,7 +123,7 @@ public protocol _ExpressibleByDictionaryLiteral {
 public protocol ExpressibleByDictionaryLiteral: _ExpressibleByDictionaryLiteral {
     /// @name Dictionary Literal
     /// Builds an instance from a literal slice of key-value pairs.
-    init(dictionaryLiteral: LiteralSlice[(Key, Value)])
+    init(dictionaryLiteral elements: LiteralSlice[(Key, Value)])
 }
 
 // ============================================================================
