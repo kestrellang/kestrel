@@ -2,7 +2,7 @@
 name: Bug Report
 about: Report a bug in the Kestrel compiler
 title: ''
-labels: bug, needs-triage
+labels: bug, triage
 assignees: ''
 ---
 

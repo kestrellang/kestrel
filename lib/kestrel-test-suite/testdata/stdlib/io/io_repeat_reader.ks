@@ -16,7 +16,7 @@ module Test
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
-            let slice = std.memory.Slice[std.numeric.UInt8](pointer: buf.asPointer(), count: 5);
+            let slice = std.memory.ArraySlice[std.numeric.UInt8](pointer: buf.asPointer(), count: 5);
 
             // Read should fill the entire buffer with byte 42
             let result = rep.read(into: slice);
@@ -36,7 +36,7 @@ module Test
             var buf2 = std.collections.Array[std.numeric.UInt8]();
             buf2.append(zeroByte);
             buf2.append(zeroByte);
-            let slice2 = std.memory.Slice[std.numeric.UInt8](pointer: buf2.asPointer(), count: 2);
+            let slice2 = std.memory.ArraySlice[std.numeric.UInt8](pointer: buf2.asPointer(), count: 2);
             let result2 = rep.read(into: slice2);
             match result2 {
                 .Ok(n) => if n != 2 { return 8 },

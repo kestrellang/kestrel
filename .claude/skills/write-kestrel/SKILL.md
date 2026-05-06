@@ -218,6 +218,44 @@ type Handler = (Int64) -> Bool;
 type Pair[T] = (T, T);
 ```
 
+### String Forms
+
+| Form | Multi-line? | Escapes? | Interpolation? |
+|---|---|---|---|
+| `"..."` | no | yes | yes |
+| `"""\n...\n"""` | **yes** (Swift-style indent strip from closing `"""` column) | yes | yes |
+| `#"..."#` | no | no | no |
+| `#"""\n...\n"""#` | yes | no | no |
+| `##"..."##`, `##"""\n...\n"""##`, etc. | escalate pound count to embed `"#`, `"##`, etc. literally | no | no |
+
+Multi-line cooked rules: the opening `"""` must be followed immediately by `\n`; the closing `"""` must be on its own line (only whitespace before it). The closing line's indentation column defines the strip prefix — every content line must start with at least that whitespace, otherwise E704.
+
+`#`-prefixed forms are **fully raw** — no escapes, no interpolation, no `\#(...)` escalator. Use them for embedded source (regex, HTML, CSS, JSON, JS) where backslashes and quotes shouldn't be touched. Pick the smallest pound count whose closer (`"#`, `"##`, …) doesn't appear in the body.
+
+```kestrel
+let html  = ##"<a href="/x" class="big">"##;     // single-line raw
+let regex = #"\d{3}-\d{4}"#;                     // single-line raw
+let block = """
+    line one
+    line two
+    """;                                          // multi-line cooked → "line one\nline two"
+let css   = ##"""
+*{box-sizing:border-box}
+"""##;                                            // multi-line raw
+```
+
+### String Interpolation
+
+```kestrel
+let greeting = "Hello, \(name)!";
+let info = "\(name) is \(age) years old";
+let padded = "Value: \(age:>5)";       // right-align, width 5
+let hex = "Code: \(code:08x)";         // zero-pad, width 8, hex
+let debug = "\(value:?)";              // debug format
+```
+
+Format specifiers: `>` right-align, `<` left-align, `^` center, `0` zero-pad, `x`/`X` hex, `b` binary, `o` octal, `.n` precision. Interpolation works in both single-line and multi-line cooked strings (`"..."` and `"""..."""`); raw forms (`#"..."#` etc.) do **not** support interpolation.
+
 ## Protocols
 
 ```kestrel
@@ -325,10 +363,42 @@ struct Connection: not Copyable { deinit { self.close(); } }         // RAII
 
 ## Style
 
-- **Naming**: `PascalCase` types/protocols/enums; `camelCase` functions/methods/variables; `SCREAMING_SNAKE_CASE` constants.
+- **Naming**: `PascalCase` types/protocols/enums; `camelCase` functions/methods/variables; `SCREAMING_SNAKE_CASE` constants. No abbreviations in public APIs — `count`, `pointer`, `address`, not `cnt`, `ptr`, `addr`.
 - **Mutability**: prefer `let`; `var` only when the binding mutates.
 - **Integers**: use type annotations (`let x: Int32 = 42`) not constructors (`Int32(intLiteral: 42)`).
 - **Self**: `self` = borrowing; `mutating self` = modify fields; `consuming self` = take ownership.
+
+## Idioms
+
+- **Mutating = verb, non-mutating = past participle.**
+  ```kestrel
+  sort() / sorted()       reverse() / reversed()
+  trim() / trimmed()      formUnion(with:) / union(with:)
+  ```
+- **`to*` converts (allocates), `as*` views (no copy).**
+  ```kestrel
+  toArray()       // new value
+  asSlice()       // cheap reinterpretation
+  ```
+- **Prefer enums over booleans** at call sites.
+  ```kestrel
+  sort(order: .ascending)     // good
+  sort(ascending: true)       // bad — opaque
+  ```
+- **Properties = state, methods = actions.** `count`, `isEmpty`, `capacity` are properties everywhere. `collect()`, `fold()`, `iter()` are methods.
+- **Closure labels are standardized:** predicates `matching:`, key extractors `byKey:`, combining `combining:`, mapping `mapping:`.
+  ```kestrel
+  filter(matching: { it > 0 })
+  sort(byKey: { it.name })
+  fold(from: 0, combining: { a + b })
+  ```
+- **Labels are prepositions** — `with:`, `from:`, `by:`, `of:`, `at:`. Not bare nouns like `predicate:` or `action:`.
+- **Prefer `for` over `while` for iteration.** Use `for elem in collection`, `for i in 0..<n`.
+- **Avoid indexing strings.** Use views and iterators; prefer utf8 operations when possible.
+- **Prefer early returns.** Use `guard` for preconditions instead of deep nesting.
+  ```kestrel
+  guard x > 0 else { return; }
+  ```
 
 ## Label Rules Summary
 

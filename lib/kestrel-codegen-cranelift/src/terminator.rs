@@ -62,8 +62,8 @@ fn compile_return(
         ctx.module,
     );
 
-    // Unit return — empty tuple is the canonical unit value.
-    if ret_ty.is_unit() {
+    // Unit/Never return — both compile to void in the Cranelift signature.
+    if ret_ty.is_unit() || matches!(ret_ty, MirTy::Never) {
         if state.is_main {
             let zero = builder.ins().iconst(ir::types::I64, 0);
             builder.ins().return_(&[zero]);
@@ -247,8 +247,14 @@ fn compile_switch(
                 )
             },
             SwitchCase::StringLiteral(_) => {
-                // Not yet implemented — fall through to the next case.
-                builder.ins().iconst(ir::types::I8, 0)
+                // String-literal cases are diverted to a `Matchable.matches`
+                // call chain in `kestrel-mir-lower::body_lower::emit_decision_tree`,
+                // so they should never reach codegen. If one does, the diversion
+                // was bypassed — fail loudly rather than silently falling through.
+                unreachable!(
+                    "SwitchCase::StringLiteral lowered to method dispatch in \
+                     kestrel-mir-lower; codegen should never see it"
+                )
             },
         };
         let next_block = builder.create_block();

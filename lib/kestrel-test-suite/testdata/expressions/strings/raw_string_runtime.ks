@@ -17,17 +17,17 @@ func consume(s: String) -> Int64 {
 
 func main() -> lang.i64 {
     // Direct binding round-trips through codegen.
-    let raw = """hello""";
+    let raw = #"hello"#;
     if raw.byteCount != 5 { return 1 }
 
     // Passing a raw literal as an argument was the original failure shape.
-    if consume("""hello""") != 5 { return 2 }
+    if consume(#"hello"#) != 5 { return 2 }
 
     // Raw and regular literals must produce equal Strings.
     if raw != "hello" { return 3 }
 
     // Empty raw string has zero bytes (and isn't mistaken for a null pointer).
-    let empty = """""";
+    let empty = #""#;
     if empty.byteCount != 0 { return 4 }
     if not empty.isEmpty { return 5 }
 

@@ -11,16 +11,16 @@ module Test
 
             // ---- view(i) ----
             let l0 = s.lines(0);
-            if l0.equals("alpha") == false { return 2 }
+            if l0.isEqual(to: "alpha") == false { return 2 }
             let l1 = s.lines(1);
-            if l1.equals("beta") == false { return 3 }
+            if l1.isEqual(to: "beta") == false { return 3 }
             let l2 = s.lines(2);
-            if l2.equals("gamma") == false { return 4 }
+            if l2.isEqual(to: "gamma") == false { return 4 }
 
             // ---- view(checked: i) ----
             let lc = s.lines(checked: 1);
             if lc.isNone() { return 5 }
-            if lc.unwrap().equals("beta") == false { return 6 }
+            if lc.unwrap().isEqual(to: "beta") == false { return 6 }
 
             let lOob = s.lines(checked: 100);
             if lOob.isSome() { return 7 }
@@ -30,13 +30,13 @@ module Test
 
             // ---- view(clamped: i) ----
             let lcl = s.lines(clamped: 1);
-            if lcl.unwrap().equals("beta") == false { return 9 }
+            if lcl.unwrap().isEqual(to: "beta") == false { return 9 }
 
             let lNegClamp = s.lines(clamped: -10);
-            if lNegClamp.unwrap().equals("alpha") == false { return 10 }
+            if lNegClamp.unwrap().isEqual(to: "alpha") == false { return 10 }
 
             let lOverClamp = s.lines(clamped: 100);
-            if lOverClamp.unwrap().equals("gamma") == false { return 11 }
+            if lOverClamp.unwrap().isEqual(to: "gamma") == false { return 11 }
 
             // ---- empty view returns None on clamp ----
             let empty = std.text.String();
@@ -46,10 +46,10 @@ module Test
             // ---- mixed terminators ----
             let mixed: std.text.String = "a\nb\r\nc\rd";
             if mixed.lines.count != 4 { return 13 }
-            if mixed.lines(0).equals("a") == false { return 14 }
-            if mixed.lines(1).equals("b") == false { return 15 }
-            if mixed.lines(2).equals("c") == false { return 16 }
-            if mixed.lines(3).equals("d") == false { return 17 }
+            if mixed.lines(0).isEqual(to: "a") == false { return 14 }
+            if mixed.lines(1).isEqual(to: "b") == false { return 15 }
+            if mixed.lines(2).isEqual(to: "c") == false { return 16 }
+            if mixed.lines(3).isEqual(to: "d") == false { return 17 }
 
             0
         }

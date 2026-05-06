@@ -3,7 +3,7 @@
 module std.result
 
 import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, fatalError)
-import std.text.(String, Formattable, FormatOptions)
+import std.text.(String, StringBuilder, Formattable, FormatOptions)
 import std.result.(Optional)
 
 /// The fallible-operation enum: either `Ok(value)` or `Err(error)`. The
@@ -333,7 +333,7 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
     /// Err("x")    == Err("x");     // true
     /// Ok(1)       == Err("x");     // false
     /// ```
-    public func equals(other: Result[T, E]) -> Bool {
+    public func isEqual(to other: Result[T, E]) -> Bool {
         match (self, other) {
             (.Ok(a), .Ok(b)) => a == b,
             (.Err(a), .Err(b)) => a == b,
@@ -351,10 +351,18 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
 extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
     /// Renders `Ok(...)` or `Err(...)`, forwarding `options` to the inner
     /// `format` for the payload.
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         match self {
-            .Ok(value) => "Ok(" + value.format(options) + ")",
-            .Err(error) => "Err(" + error.format(options) + ")"
+            .Ok(value) => {
+                writer.append("Ok(");
+                value.format(into: writer, options);
+                writer.appendChar(')')
+            },
+            .Err(error) => {
+                writer.append("Err(");
+                error.format(into: writer, options);
+                writer.appendChar(')')
+            }
         }
     }
 }

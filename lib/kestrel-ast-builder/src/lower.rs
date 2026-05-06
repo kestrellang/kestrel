@@ -304,7 +304,26 @@ impl LowerCtx {
             // Literals
             SyntaxKind::ExprInteger => self.lower_literal(&node, AstLiteral::Integer),
             SyntaxKind::ExprFloat => self.lower_literal(&node, AstLiteral::Float),
-            SyntaxKind::ExprString => self.lower_literal(&node, AstLiteral::String),
+            SyntaxKind::ExprString => {
+                // Parser only promotes top-level strings to ExprInterpolatedString.
+                // Re-check here so nested strings (inside calls etc.) get caught.
+                // The body span depends on whether this is single-line `"..."`
+                // or multi-line `"""..."""`, so route through `classify`.
+                if let Some(text) = first_token_text(&node) {
+                    let form = crate::string_token::classify_string_token(&text);
+                    if form.body_end > form.body_start
+                        && string_contains_interpolation(
+                            &text[form.body_start..form.body_end],
+                        )
+                    {
+                        self.lower_interpolated_string_from_token(&text, &node)
+                    } else {
+                        self.lower_literal(&node, AstLiteral::String)
+                    }
+                } else {
+                    self.lower_literal(&node, AstLiteral::String)
+                }
+            },
             SyntaxKind::ExprRawString => {
                 self.lower_literal(&node, AstLiteral::RawString)
             },
@@ -460,6 +479,102 @@ impl LowerCtx {
             }
 
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
+    }
+
+    /// Parse a string token (e.g. `"hello \(name)!"` or
+    /// `"""\n  hello \(name)\n  """`) into an `InterpolatedString` AST node.
+    /// Used when the parser left this as a plain `ExprString` because it
+    /// only promotes top-level expressions.
+    fn lower_interpolated_string_from_token(
+        &mut self,
+        token_text: &str,
+        node: &SyntaxNode,
+    ) -> ExprId {
+        let span = self.span(node);
+        let form = crate::string_token::classify_string_token(token_text);
+        let body = &token_text[form.body_start..form.body_end];
+
+        // Multi-line cooked: indent-strip + `\r\n` normalize, then split.
+        // We swallow indent errors here for now — the non-interpolated path
+        // (HIR-lower's `decode_string_literal_token`) reports them; surfacing
+        // them through the interpolation pipeline would require new
+        // diagnostic plumbing in `LowerCtx`.
+        let processed_owned;
+        let inner: &str = if form.is_multiline {
+            processed_owned = crate::string_token::process_multiline_body(body, 0, 0).value;
+            &processed_owned
+        } else {
+            body
+        };
+
+        let mut parts = Vec::new();
+        let mut chars = inner.char_indices().peekable();
+        let mut literal = String::new();
+        while let Some((i, c)) = chars.next() {
+            if c == '\\' {
+                if let Some(&(_, next)) = chars.peek() {
+                    if next == '(' {
+                        chars.next(); // skip '('
+
+                        // Flush accumulated literal
+                        if !literal.is_empty() {
+                            parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+                        }
+
+                        // Extract expression text + optional format spec
+                        let (expr_text, format_spec, _interp_end) =
+                            extract_interpolation(&mut chars, inner, i + 2);
+
+                        // Re-lex and re-parse the expression
+                        let expr = self.reparse_interpolation_expr(&expr_text, &span);
+                        parts.push(StringPart::Interpolation {
+                            expr,
+                            format: format_spec,
+                        });
+                    } else {
+                        chars.next(); // skip escaped char
+                        literal.push(unescape_char_simple(next));
+                    }
+                }
+            } else {
+                literal.push(c);
+            }
+        }
+
+        // Flush any remaining literal
+        if !literal.is_empty() {
+            parts.push(StringPart::Literal(literal));
+        }
+
+        self.alloc_expr(AstExpr::InterpolatedString { parts, span })
+    }
+
+    /// Re-lex, re-parse, and lower a sub-expression extracted from inside `\(...)`.
+    fn reparse_interpolation_expr(&mut self, expr_text: &str, parent_span: &Span) -> ExprId {
+        let file_id = self.file_id;
+
+        let tokens: Vec<_> = kestrel_lexer::lex(expr_text, file_id)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+
+        if tokens.is_empty() {
+            return self.alloc_expr(AstExpr::Error {
+                span: parent_span.clone(),
+            });
+        }
+
+        let parsed = kestrel_parser::parse_expr_from_source(expr_text, tokens.into_iter());
+
+        // The parsed Expression wraps a root SyntaxNode; its first child is
+        // the actual expression node.
+        if let Some(expr_node) = parsed.syntax.children().next() {
+            self.lower_expr(&expr_node)
+        } else {
+            self.alloc_expr(AstExpr::Error {
+                span: parent_span.clone(),
+            })
+        }
     }
 
     // ----- Collections -----
@@ -2688,4 +2803,92 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
         false
     }
     walk(node)
+}
+
+// ===== String interpolation helpers =====
+
+/// Quick check: does the unquoted string body contain `\(`?
+fn string_contains_interpolation(text: &str) -> bool {
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if chars.peek() == Some(&'(') {
+                return true;
+            }
+            chars.next();
+        }
+    }
+    false
+}
+
+/// Scan from just after `\(` to the matching `)`, tracking paren depth and
+/// nested string/char literals. Returns `(expr_text, format_spec, end_offset)`
+/// where `end_offset` is the index in `input` just past the closing `)`.
+fn extract_interpolation(
+    chars: &mut std::iter::Peekable<std::str::CharIndices>,
+    input: &str,
+    start: usize,
+) -> (String, Option<String>, usize) {
+    let mut depth: u32 = 1;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut format_start: Option<usize> = None;
+
+    while let Some(&(i, c)) = chars.peek() {
+        chars.next();
+
+        if c == '"' && !in_char {
+            in_string = !in_string;
+        }
+        if c == '\'' && !in_string {
+            in_char = !in_char;
+        }
+
+        if in_string || in_char {
+            if c == '\\' {
+                chars.next(); // skip escaped char inside nested literal
+            }
+            continue;
+        }
+
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = i + 1;
+                    if let Some(fmt_start) = format_start {
+                        let expr_text = input[start..fmt_start].to_string();
+                        let fmt_text = input[fmt_start + 1..i].to_string();
+                        return (expr_text, Some(fmt_text), end);
+                    } else {
+                        let expr_text = input[start..i].to_string();
+                        return (expr_text, None, end);
+                    }
+                }
+            },
+            ':' if depth == 1 && format_start.is_none() => {
+                format_start = Some(i);
+            },
+            _ => {},
+        }
+    }
+
+    // Unterminated interpolation — return what we have
+    let expr_text = input[start..].to_string();
+    (expr_text, None, input.len())
+}
+
+/// Minimal escape decoder for literal segments of interpolated strings.
+fn unescape_char_simple(c: char) -> char {
+    match c {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '\\' => '\\',
+        '"' => '"',
+        '\'' => '\'',
+        '0' => '\0',
+        other => other,
+    }
 }

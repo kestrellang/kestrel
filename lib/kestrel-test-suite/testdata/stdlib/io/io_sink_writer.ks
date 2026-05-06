@@ -15,7 +15,7 @@ module Test
             data.append(byte1);
             data.append(byte2);
             data.append(byte3);
-            let slice = std.memory.Slice[std.numeric.UInt8](pointer: data.asPointer(), count: 3);
+            let slice = std.memory.ArraySlice[std.numeric.UInt8](pointer: data.asPointer(), count: 3);
 
             // Write should succeed and report all bytes as written
             let result = sink.write(from: slice);
@@ -39,7 +39,7 @@ module Test
                 big.append(byte255);
                 i = i + 1
             }
-            let bigSlice = std.memory.Slice[std.numeric.UInt8](pointer: big.asPointer(), count: 100);
+            let bigSlice = std.memory.ArraySlice[std.numeric.UInt8](pointer: big.asPointer(), count: 100);
             let result2 = sink.write(from: bigSlice);
             match result2 {
                 .Ok(n) => if n != 100 { return 4 },

@@ -9,8 +9,8 @@ module Test
             let a2: std.text.Char = 'a';
 
             // ---- equals() ----
-            if a.equals(a2) == false { return 1 }
-            if a.equals(b) { return 2 }
+            if a.isEqual(to: a2) == false { return 1 }
+            if a.isEqual(to: b) { return 2 }
 
             // ---- compare() ----
             let cmp = a.compare(b);

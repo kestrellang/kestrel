@@ -1,0 +1,59 @@
+name: Promote nightly to beta
+
+# End-of-week-2 cut for the release train. Manually dispatched with the
+# milestone being promoted (e.g. "0.16"). Merges nightly into beta with
+# --no-ff (so the merge commit is a clear cycle boundary), pushes beta,
+# and moves every Nightly-status issue in the milestone to Beta.
+#
+# See docs/contributing/git.md for the full release-train cadence.
+
+on:
+  workflow_dispatch:
+    inputs:
+      milestone:
+        description: 'Milestone to promote (e.g. "0.16")'
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout beta
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+          fetch-depth: 0
+          token: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge nightly into beta
+        env:
+          MILESTONE: ${{ inputs.milestone }}
+        run: |
+          set -euo pipefail
+          git fetch origin nightly
+          git merge --no-ff origin/nightly -m "merge nightly for ${MILESTONE} stabilization"
+          git push origin beta
+
+      - name: Move Nightly issues to Beta in this milestone
+        if: ${{ vars.PROJECT_ID != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_ID: ${{ vars.PROJECT_ID }}
+          STATUS_FIELD_ID: ${{ vars.PROJECT_STATUS_FIELD_ID }}
+          NIGHTLY_OPTION_ID: ${{ vars.PROJECT_STATUS_NIGHTLY_ID }}
+          BETA_OPTION_ID: ${{ vars.PROJECT_STATUS_BETA_ID }}
+          MILESTONE: ${{ inputs.milestone }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/scripts/setup/promote_status.py"

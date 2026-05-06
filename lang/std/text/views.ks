@@ -2,17 +2,15 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, fatalError)
+import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, Cloneable, fatalError)
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, Grapheme, Byte, decodeUtf8, String)
+import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, LineIndex)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
+import std.memory.(Pointer)
 import std.collections.(Array)
-
-// TODO: all view structs store lang.ptr[lang.i8] and use lang.ptr_offset/lang.ptr_read
-// directly. Migrate fields to RawPointer and byte access to RawPointer.offset/cast
-// once the UTF-8 codec (char.ks) accepts RawPointer instead of lang.ptr[lang.i8].
+import std.ffi.(memmem)
 
 // ============================================================================
 // BYTES VIEW
@@ -109,28 +107,26 @@ public struct BytesIterator: Iterator {
 /// Borrows the source string's storage; the view is invalidated by any
 /// mutation that reallocates that buffer. Copy out to a new `String`
 /// (e.g. via `substring`) if you need an independent value.
-public struct BytesView: Iterable {
+public struct BytesView: Iterable, Cloneable {
     /// The element type yielded by iteration — always `UInt8`.
     type Item = UInt8
     /// The iterator type returned by `iter()`.
     type TargetIterator = BytesIterator
 
-    private var ptr: lang.ptr[lang.i8]
-    private var length: Int64
+    fileprivate var slice: StringSlice
+    fileprivate var ptr: lang.ptr[lang.i8]
+    fileprivate var length: Int64
 
-    /// @name From Pointer
-    /// Constructs a bytes view from a raw pointer and a byte count.
-    ///
-    /// Prefer `someString.bytes` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to `length` valid bytes that remain live for as
-    /// long as the view is used.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
-        self.length = length;
+    /// @name From Slice
+    /// Constructs a bytes view backed by the given string slice.
+    /// The view retains shared ownership of the underlying bytes.
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
+        self.length = slice.byteCount;
     }
+
+    public func clone() -> BytesView { BytesView(slice: self.slice.clone()) }
 
     /// Number of bytes in the view.
     ///
@@ -217,9 +213,7 @@ public struct BytesView: Iterable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> BytesView {
-        let rawOffset: lang.i64 = startByte.raw;
-        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-        BytesView(ptr: newPtr, length: endByte - startByte)
+        BytesView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
     }
 }
 
@@ -326,28 +320,26 @@ public struct CharsIterator: Iterator {
 ///
 /// Borrows the source string's buffer. Invalidated by any mutation
 /// that reallocates the storage.
-public struct CharsView: Iterable {
+public struct CharsView: Iterable, Cloneable {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
     type TargetIterator = CharsIterator
 
-    private var ptr: lang.ptr[lang.i8]
-    private var length: Int64
+    fileprivate var slice: StringSlice
+    fileprivate var ptr: lang.ptr[lang.i8]
+    fileprivate var length: Int64
 
-    /// @name From Pointer
-    /// Constructs a chars view from a raw pointer and a byte length.
-    ///
-    /// Prefer `someString.chars` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to `length` valid UTF-8 bytes that remain live
-    /// for the view's lifetime.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
-        self.length = length;
+    /// @name From Slice
+    /// Constructs a chars view backed by the given string slice.
+    /// The view retains shared ownership of the underlying bytes.
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
+        self.length = slice.byteCount;
     }
+
+    public func clone() -> CharsView { CharsView(slice: self.slice.clone()) }
 
     /// Returns a `CharsIterator` positioned at byte 0.
     ///
@@ -355,6 +347,11 @@ public struct CharsView: Iterable {
     public func iter() -> CharsIterator {
         CharsIterator(ptr: self.ptr, length: self.length, byteIndex: 0)
     }
+
+    /// `true` when the view spans zero bytes (no code points).
+    ///
+    /// O(1) — checks `byteCount`, not `count`.
+    public var isEmpty: Bool { self.length == 0 }
 
     /// Number of code points. **O(n)** — walks the buffer counting
     /// UTF-8 leading bytes (those whose top two bits are not `10`). For
@@ -436,9 +433,7 @@ public struct CharsView: Iterable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> CharsView {
-        let rawOffset: lang.i64 = startByte.raw;
-        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-        CharsView(ptr: newPtr, length: endByte - startByte)
+        CharsView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
     }
 
     /// Materializes the view as an owned `String`. O(n) — copies bytes.
@@ -489,9 +484,6 @@ public struct GraphemesIterator: Iterator {
 
     private var charsIter: CharsIterator
     private var pendingChar: Char?
-    private var prevProp: GraphemeBreakProperty
-    private var prevPrevWasRI: Bool
-    private var started: Bool
 
     /// @name From Chars
     /// Wraps a `CharsIterator` to produce graphemes via UAX #29 segmentation.
@@ -500,9 +492,6 @@ public struct GraphemesIterator: Iterator {
     public init(charsIter: CharsIterator) {
         self.charsIter = charsIter;
         self.pendingChar = .None;
-        self.prevProp = GraphemeBreakProperty.Other;
-        self.prevPrevWasRI = false;
-        self.started = false;
     }
 
     /// Returns the next grapheme cluster, or `None` when the source is exhausted.
@@ -597,33 +586,36 @@ public struct GraphemesIterator: Iterator {
 ///
 /// A `(ptr, length)` pair; iteration is delegated to a wrapped
 /// `CharsIterator` plus the UAX #29 segmenter state machine.
-public struct GraphemesView: Iterable {
+public struct GraphemesView: Iterable, Cloneable {
     /// The element type yielded by iteration — always `Grapheme`.
     type Item = Grapheme
     /// The iterator type returned by `iter()`.
     type TargetIterator = GraphemesIterator
 
-    private var ptr: lang.ptr[lang.i8]
-    private var length: Int64
+    fileprivate var slice: StringSlice
+    fileprivate var ptr: lang.ptr[lang.i8]
+    fileprivate var length: Int64
 
-    /// @name From Pointer
-    /// Constructs a graphemes view from a raw pointer and a byte length.
-    ///
-    /// Prefer `someString.graphemes` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to `length` valid UTF-8 bytes that remain live
-    /// for the view's lifetime.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
-        self.length = length;
+    /// @name From Slice
+    /// Constructs a graphemes view backed by the given string slice.
+    /// The view retains shared ownership of the underlying bytes.
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
+        self.length = slice.byteCount;
     }
+
+    public func clone() -> GraphemesView { GraphemesView(slice: self.slice.clone()) }
 
     /// Returns a `GraphemesIterator` positioned at byte 0.
     public func iter() -> GraphemesIterator {
         GraphemesIterator(CharsIterator(ptr: self.ptr, length: self.length, byteIndex: 0))
     }
+
+    /// `true` when the view spans zero bytes (no graphemes).
+    ///
+    /// O(1) — checks `byteCount`, not `count`.
+    public var isEmpty: Bool { self.length == 0 }
 
     /// Number of grapheme clusters. **O(n)** — walks the entire string
     /// through the UAX #29 segmenter. Cache the result if you need it
@@ -696,9 +688,7 @@ public struct GraphemesView: Iterable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> GraphemesView {
-        let rawOffset: lang.i64 = startByte.raw;
-        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-        GraphemesView(ptr: newPtr, length: endByte - startByte)
+        GraphemesView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
     }
 
     /// Materializes the view as an owned `String`. O(n) — copies bytes.
@@ -866,33 +856,36 @@ public struct LinesIterator: Iterator {
 /// # Representation
 ///
 /// A `(ptr, length)` pair pointing into the source string.
-public struct LinesView: Iterable {
+public struct LinesView: Iterable, Cloneable {
     /// The element type yielded by iteration — always `String`.
     type Item = String
     /// The iterator type returned by `iter()`.
     type TargetIterator = LinesIterator
 
-    private var ptr: lang.ptr[lang.i8]
-    private var length: Int64
+    fileprivate var slice: StringSlice
+    fileprivate var ptr: lang.ptr[lang.i8]
+    fileprivate var length: Int64
 
-    /// @name From Pointer
-    /// Constructs a lines view from a raw pointer and a byte length.
-    ///
-    /// Prefer `someString.lines` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to `length` valid bytes that remain live for
-    /// the view's lifetime.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
-        self.length = length;
+    /// @name From Slice
+    /// Constructs a lines view backed by the given string slice.
+    /// The view retains shared ownership of the underlying bytes.
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
+        self.length = slice.byteCount;
     }
+
+    public func clone() -> LinesView { LinesView(slice: self.slice.clone()) }
 
     /// Returns a `LinesIterator` positioned at byte 0.
     public func iter() -> LinesIterator {
         LinesIterator(ptr: self.ptr, length: self.length, byteIndex: 0, done: false)
     }
+
+    /// `true` when the view spans zero bytes (no lines).
+    ///
+    /// O(1) — checks `byteCount`, not `count`.
+    public var isEmpty: Bool { self.length == 0 }
 
     /// Number of lines in the view. **O(n)** — walks the buffer
     /// scanning for terminators. Cache the result if you need it more
@@ -1015,9 +1008,7 @@ public struct LinesView: Iterable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> LinesView {
-        let rawOffset: lang.i64 = startByte.raw;
-        let newPtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-        LinesView(ptr: newPtr, length: endByte - startByte)
+        LinesView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
     }
 }
 
@@ -1046,7 +1037,7 @@ public struct ByteIndex: Equatable, Comparable {
     }
 
     /// Returns true if the two indices wrap the same byte offset.
-    public func equals(other: ByteIndex) -> Bool {
+    public func isEqual(to other: ByteIndex) -> Bool {
         self.value == other.value
     }
 
@@ -1077,7 +1068,7 @@ public struct CharIndex: Equatable {
     }
 
     /// Returns true if the two indices point at the same byte offset.
-    public func equals(other: CharIndex) -> Bool {
+    public func isEqual(to other: CharIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }
 }
@@ -1102,7 +1093,7 @@ public struct GraphemeIndex: Equatable {
     }
 
     /// Returns true if the two indices point at the same byte offset.
-    public func equals(other: GraphemeIndex) -> Bool {
+    public func isEqual(to other: GraphemeIndex) -> Bool {
         self.byteOffset == other.byteOffset
     }
 }
@@ -1236,6 +1227,20 @@ extend ClosedRange[Int64]: BytesIndex {
     public func readBytesUnchecked(from view: BytesView) -> BytesView {
         let endExclusive = self.end + 1;
         view._subView(startByte: self.start, endByte: endExclusive)
+    }
+}
+
+extend ClosedRange[Int64]: BytesClampable {
+    type BytesClampedYield = BytesView
+
+    public func readBytesClamped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        var start = self.start;
+        var end = self.end + 1;
+        if start < 0 { start = 0 }
+        if end > len { end = len }
+        if start > end { start = end }
+        view._subView(startByte: start, endByte: end)
     }
 }
 
@@ -1414,6 +1419,22 @@ extend ClosedRange[Int64]: CharsIndex {
     }
 }
 
+extend ClosedRange[Int64]: CharsClampable {
+    type CharsClampedYield = CharsView
+
+    public func readCharsClamped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end + 1;
+        if s < 0 { s = 0 }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 /// Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.
 public protocol CharsSubstringIndex {
     func readCharsSubstring(from view: CharsView) -> String
@@ -1581,6 +1602,22 @@ extend ClosedRange[Int64]: GraphemesIndex {
             return .None
         }
         .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend ClosedRange[Int64]: GraphemesClampable {
+    type GraphemesClampedYield = GraphemesView
+
+    public func readGraphemesClamped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end + 1;
+        if s < 0 { s = 0 }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
     }
 }
 
@@ -1755,6 +1792,22 @@ extend ClosedRange[Int64]: LinesIndex {
     }
 }
 
+extend ClosedRange[Int64]: LinesClampable {
+    type LinesClampedYield = LinesView
+
+    public func readLinesClamped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        var s = self.start;
+        var e = self.end + 1;
+        if s < 0 { s = 0 }
+        if e > n { e = n }
+        if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 /// Range-only index for `LinesView.substring`. See `BytesSubstringIndex`.
 public protocol LinesSubstringIndex {
     func readLinesSubstring(from view: LinesView) -> String
@@ -1769,5 +1822,940 @@ extend Range[Int64]: LinesSubstringIndex {
 extend ClosedRange[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
         view(self).toString()
+    }
+}
+
+// ============================================================================
+// TYPED INDEX CONFORMANCES
+// ============================================================================
+
+// -- ByteIndex on BytesView --------------------------------------------------
+
+extend ByteIndex: BytesIndex {
+    type BytesYield = UInt8
+
+    public func readBytes(from view: BytesView) -> UInt8 {
+        if self.value < 0 or self.value >= view.length {
+            fatalError("BytesView index out of bounds")
+        }
+        view._readByteRaw(index: self.value)
+    }
+
+    public func readBytesChecked(from view: BytesView) -> UInt8? {
+        if self.value >= 0 and self.value < view.length {
+            .Some(view._readByteRaw(index: self.value))
+        } else {
+            .None
+        }
+    }
+
+    public func readBytesUnchecked(from view: BytesView) -> UInt8 {
+        view._readByteRaw(index: self.value)
+    }
+}
+
+// -- CharIndex on CharsView --------------------------------------------------
+
+extend CharIndex: CharsIndex {
+    type CharsYield = Char
+
+    public func readChars(from view: CharsView) -> Char {
+        if self.byteOffset < 0 or self.byteOffset >= view.length {
+            fatalError("CharsView index out of bounds")
+        }
+        let result = decodeUtf8(view.ptr, view.length, at: self.byteOffset);
+        match result {
+            .Some(d) => d.char,
+            .None => Char(0xFFFD)
+        }
+    }
+
+    public func readCharsChecked(from view: CharsView) -> Char? {
+        if self.byteOffset < 0 or self.byteOffset >= view.length {
+            return .None
+        }
+        let result = decodeUtf8(view.ptr, view.length, at: self.byteOffset);
+        match result {
+            .Some(d) => .Some(d.char),
+            .None => .Some(Char(0xFFFD))
+        }
+    }
+}
+
+// -- View range-slice methods ------------------------------------------------
+
+extend BytesView {
+    /// Returns a `StringSlice` covering the byte range `[start, end)`.
+    public func slice(from start: ByteIndex, to end: ByteIndex) -> StringSlice {
+        self.slice.subslice(from: self.slice.start + start.value, to: self.slice.start + end.value)
+    }
+
+    /// Byte index of the first byte.
+    public var startIndex: ByteIndex { ByteIndex(0) }
+
+    /// Byte index one past the last byte.
+    public var endIndex: ByteIndex { ByteIndex(self.length) }
+}
+
+extend CharsView {
+    /// Returns a `StringSlice` covering `[start, end)` by byte offset.
+    public func slice(from start: CharIndex, to end: CharIndex) -> StringSlice {
+        self.slice.subslice(from: self.slice.start + start.byteOffset, to: self.slice.start + end.byteOffset)
+    }
+
+    /// Char index at byte 0 (the first code point).
+    public var startIndex: CharIndex { CharIndex(0) }
+
+    /// Char index at the end (one past the last byte).
+    public var endIndex: CharIndex { CharIndex(self.length) }
+}
+
+extend GraphemesView {
+    /// Returns a `StringSlice` covering `[start, end)` by byte offset.
+    public func slice(from start: GraphemeIndex, to end: GraphemeIndex) -> StringSlice {
+        self.slice.subslice(from: self.slice.start + start.byteOffset, to: self.slice.start + end.byteOffset)
+    }
+
+    /// Grapheme index at byte 0.
+    public var startIndex: GraphemeIndex { GraphemeIndex(0) }
+
+    /// Grapheme index at the end (one past the last byte).
+    public var endIndex: GraphemeIndex { GraphemeIndex(self.length) }
+}
+
+extend LinesView {
+    /// Returns a `StringSlice` covering `[start, end)` by byte offset.
+    public func slice(from start: LineIndex, to end: LineIndex) -> StringSlice {
+        self.slice.subslice(from: self.slice.start + start.byteOffset, to: self.slice.start + end.byteOffset)
+    }
+
+    /// Line index at byte 0.
+    public var startIndex: LineIndex { LineIndex(0) }
+
+    /// Line index at the end (one past the last byte).
+    public var endIndex: LineIndex { LineIndex(self.length) }
+}
+
+// ============================================================================
+// SEARCH METHODS RETURNING TYPED INDICES
+// ============================================================================
+
+extend BytesView {
+    /// Returns the index of the first occurrence of `byte`, or `.None`.
+    public func firstIndex(of byte: UInt8) -> ByteIndex? {
+        for i in 0..<self.length {
+            if self._readByteRaw(index: i) == byte {
+                return .Some(ByteIndex(i))
+            }
+        }
+        .None
+    }
+
+    /// Returns the index of the last occurrence of `byte`, or `.None`.
+    public func lastIndex(of byte: UInt8) -> ByteIndex? {
+        var i = self.length - 1;
+        while i >= 0 {
+            if self._readByteRaw(index: i) == byte {
+                return .Some(ByteIndex(i))
+            }
+            i = i - 1
+        }
+        .None
+    }
+}
+
+extend CharsView {
+    /// Returns the index of the first occurrence of `c`, or `.None`.
+    public func firstIndex(of c: Char) -> CharIndex? {
+        var byteIdx: Int64 = 0;
+        while byteIdx < self.length {
+            let result = decodeUtf8(self.ptr, self.length, at: byteIdx);
+            if let .Some(decoded) = result {
+                if decoded.char == c {
+                    return .Some(CharIndex(byteIdx))
+                }
+                byteIdx = byteIdx + decoded.bytesConsumed
+            } else {
+                byteIdx = byteIdx + 1
+            }
+        }
+        .None
+    }
+
+    /// Returns the index of the last occurrence of `c`, or `.None`.
+    public func lastIndex(of c: Char) -> CharIndex? {
+        var lastFound: CharIndex? = .None;
+        var byteIdx: Int64 = 0;
+        while byteIdx < self.length {
+            let result = decodeUtf8(self.ptr, self.length, at: byteIdx);
+            if let .Some(decoded) = result {
+                if decoded.char == c {
+                    lastFound = .Some(CharIndex(byteIdx))
+                }
+                byteIdx = byteIdx + decoded.bytesConsumed
+            } else {
+                byteIdx = byteIdx + 1
+            }
+        }
+        lastFound
+    }
+
+    /// Resolves the n-th code point to its byte offset. O(n).
+    public func index(at position: Int64) -> CharIndex? {
+        let (offset, found) = self._byteOffsetForCharIndex(charIndex: position);
+        if found { .Some(CharIndex(offset)) } else { .None }
+    }
+
+    /// Returns the index of the first code point matching `predicate`, or `.None`.
+    public func firstIndex(matching predicate: (Char) -> Bool) -> CharIndex? {
+        var byteIdx: Int64 = 0;
+        while byteIdx < self.length {
+            let result = decodeUtf8(self.ptr, self.length, at: byteIdx);
+            if let .Some(decoded) = result {
+                if predicate(decoded.char) {
+                    return .Some(CharIndex(byteIdx))
+                }
+                byteIdx = byteIdx + decoded.bytesConsumed
+            } else {
+                byteIdx = byteIdx + 1
+            }
+        }
+        .None
+    }
+
+    /// Returns the index of the last code point matching `predicate`, or `.None`.
+    public func lastIndex(matching predicate: (Char) -> Bool) -> CharIndex? {
+        var lastFound: CharIndex? = .None;
+        var byteIdx: Int64 = 0;
+        while byteIdx < self.length {
+            let result = decodeUtf8(self.ptr, self.length, at: byteIdx);
+            if let .Some(decoded) = result {
+                if predicate(decoded.char) {
+                    lastFound = .Some(CharIndex(byteIdx))
+                }
+                byteIdx = byteIdx + decoded.bytesConsumed
+            } else {
+                byteIdx = byteIdx + 1
+            }
+        }
+        lastFound
+    }
+}
+
+extend GraphemesView {
+    /// Returns the index of the first grapheme matching `predicate`, or `.None`.
+    public func firstIndex(matching predicate: (Grapheme) -> Bool) -> GraphemeIndex? {
+        var byteIdx: Int64 = 0;
+        var it = self.iter();
+        while let .Some(g) = it.next() {
+            if predicate(g) {
+                return .Some(GraphemeIndex(byteIdx))
+            }
+            byteIdx = byteIdx + g.utf8Length()
+        }
+        .None
+    }
+
+    /// Resolves the n-th grapheme cluster to its byte offset. O(n) —
+    /// walks the segmenter from the start.
+    public func index(at position: Int64) -> GraphemeIndex? {
+        let (offset, found) = self._byteOffsetForGraphemeIndex(graphemeIndex: position);
+        if found { .Some(GraphemeIndex(offset)) } else { .None }
+    }
+}
+
+extend LinesView {
+    /// Resolves the n-th line to its byte offset. O(n) — scans for
+    /// line terminators from the start.
+    public func index(at position: Int64) -> LineIndex? {
+        let (offset, found) = self._byteOffsetForLineIndex(lineIndex: position);
+        if found { .Some(LineIndex(offset)) } else { .None }
+    }
+}
+
+// ============================================================================
+// INDEX ADVANCEMENT
+// ============================================================================
+
+extend GraphemeIndex {
+    /// Advances by `n` grapheme clusters. Requires the source slice to
+    /// run the UAX #29 segmenter forward. O(n) in graphemes advanced.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = "héllo";
+    /// let idx = s.graphemes.startIndex;    // byte 0
+    /// let next = idx.advance(by: 2, from: s.asSlice());
+    /// // Skipped 'h' (1 byte) and 'é' (2 bytes) → byte 3
+    /// ```
+    public func advance(by n: Int64, from source: StringSlice) -> GraphemeIndex {
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().offset(by: source.start).asRaw().raw);
+        let length = source.byteCount;
+        var offset = self.byteOffset;
+        var remaining = n;
+
+        var charsIter = CharsIterator(ptr: rawPtr, length: length, byteIndex: offset);
+        var graphemeIter = GraphemesIterator(charsIter);
+
+        while remaining > 0 {
+            if let .Some(g) = graphemeIter.next() {
+                offset = offset + g.utf8Length();
+                remaining = remaining - 1
+            } else {
+                break
+            }
+        }
+
+        GraphemeIndex(offset)
+    }
+}
+
+extend LineIndex {
+    /// Advances by `n` lines. Scans for line terminators (`\n`, `\r\n`,
+    /// `\r`) from the current byte offset. O(n) in lines advanced.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = "a\nb\nc";
+    /// let idx = s.lines.startIndex;       // byte 0
+    /// let second = idx.advance(by: 1, from: s.asSlice());
+    /// // second.byteOffset == 2 (past "a\n")
+    /// ```
+    public func advance(by n: Int64, from source: StringSlice) -> LineIndex {
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().offset(by: source.start).asRaw().raw);
+        let length = source.byteCount;
+        var offset = self.byteOffset;
+        var remaining = n;
+
+        while remaining > 0 and offset < length {
+            let rawOffset: lang.i64 = offset.raw;
+            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](rawPtr, rawOffset);
+            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byteVal: lang.i32 = lang.cast_i8_i32(byte);
+            let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
+
+            if Bool(boolLiteral: lang.i32_eq(unsignedByte, 10)) {
+                offset = offset + 1;
+                remaining = remaining - 1
+            } else if Bool(boolLiteral: lang.i32_eq(unsignedByte, 13)) {
+                offset = offset + 1;
+                if offset < length {
+                    let nextOffset: lang.i64 = offset.raw;
+                    let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](rawPtr, nextOffset);
+                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
+                    let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
+                    if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
+                        offset = offset + 1
+                    }
+                }
+                remaining = remaining - 1
+            } else {
+                offset = offset + 1
+            }
+        }
+
+        LineIndex(offset)
+    }
+}
+
+// ============================================================================
+// INDEXED ITERATORS
+// ============================================================================
+
+/// Iterator yielding `(CharIndex, Char)` pairs — the byte offset of each
+/// code point alongside the decoded character. Useful when you need to
+/// know where each char starts in the buffer.
+public struct IndexedCharsIterator: Iterator {
+    type Item = (CharIndex, Char)
+
+    private var ptr: lang.ptr[lang.i8]
+    private var length: Int64
+    private var byteIndex: Int64
+
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
+        self.ptr = ptr;
+        self.length = length;
+        self.byteIndex = 0;
+    }
+
+    public mutating func next() -> (CharIndex, Char)? {
+        if self.byteIndex >= self.length { return .None }
+
+        let idx = CharIndex(self.byteIndex);
+        let result = decodeUtf8(self.ptr, self.length, at: self.byteIndex);
+        if let .Some(decoded) = result {
+            self.byteIndex = self.byteIndex + decoded.bytesConsumed;
+            .Some((idx, decoded.char))
+        } else {
+            self.byteIndex = self.byteIndex + 1;
+            let replacementValue = UInt32(raw: 0xFFFD);
+            .Some((idx, Char(replacementValue)))
+        }
+    }
+}
+
+/// Iterator yielding `(GraphemeIndex, Grapheme)` pairs — the byte offset
+/// of each grapheme cluster alongside the grapheme value.
+public struct IndexedGraphemesIterator: Iterator {
+    type Item = (GraphemeIndex, Grapheme)
+
+    private var inner: GraphemesIterator
+    private var byteOffset: Int64
+
+    public init(inner inner: GraphemesIterator) {
+        self.inner = inner;
+        self.byteOffset = 0;
+    }
+
+    public mutating func next() -> (GraphemeIndex, Grapheme)? {
+        if let .Some(g) = self.inner.next() {
+            let idx = GraphemeIndex(self.byteOffset);
+            self.byteOffset = self.byteOffset + g.utf8Length();
+            .Some((idx, g))
+        } else {
+            .None
+        }
+    }
+}
+
+/// Iterator yielding `(LineIndex, String)` pairs — the byte offset of each
+/// line's start alongside the line content (without terminator).
+public struct IndexedLinesIterator: Iterator {
+    type Item = (LineIndex, String)
+
+    private var ptr: lang.ptr[lang.i8]
+    private var length: Int64
+    private var byteIndex: Int64
+    private var done: Bool
+
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
+        self.ptr = ptr;
+        self.length = length;
+        self.byteIndex = 0;
+        self.done = false;
+    }
+
+    public mutating func next() -> (LineIndex, String)? {
+        if self.done or self.byteIndex >= self.length {
+            return .None
+        }
+
+        let start = self.byteIndex;
+        let idx = LineIndex(start);
+        var foundNewline: Bool = false;
+        var lineEnd: Int64 = self.byteIndex;
+
+        while self.byteIndex < self.length and foundNewline == false {
+            let rawOffset: lang.i64 = self.byteIndex.raw;
+            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byteVal: lang.i32 = lang.cast_i8_i32(byte);
+            let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
+
+            if Bool(boolLiteral: lang.i32_eq(unsignedByte, 10)) {
+                lineEnd = self.byteIndex;
+                self.byteIndex = self.byteIndex + 1;
+                foundNewline = true
+            } else if Bool(boolLiteral: lang.i32_eq(unsignedByte, 13)) {
+                lineEnd = self.byteIndex;
+                self.byteIndex = self.byteIndex + 1;
+                if self.byteIndex < self.length {
+                    let nextOffset: lang.i64 = self.byteIndex.raw;
+                    let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, nextOffset);
+                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
+                    let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
+                    if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
+                        self.byteIndex = self.byteIndex + 1
+                    }
+                }
+                foundNewline = true
+            } else {
+                self.byteIndex = self.byteIndex + 1
+            }
+        }
+
+        if foundNewline {
+            return .Some((idx, self._createSubstring(start, lineEnd)))
+        }
+
+        if start < self.length {
+            self.done = true;
+            return .Some((idx, self._createSubstring(start, self.length)))
+        }
+
+        let none: (LineIndex, String)? = .None;
+        none
+    }
+
+    private func _createSubstring(start: Int64, end: Int64) -> String {
+        let count = end - start;
+        if count <= 0 {
+            return String()
+        }
+        let srcAt: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, start.raw);
+        String.fromRawBytes(srcAt, count)
+    }
+}
+
+extend CharsView {
+    /// Returns an iterator yielding `(CharIndex, Char)` pairs.
+    public func indexedIter() -> IndexedCharsIterator {
+        IndexedCharsIterator(ptr: self.ptr, length: self.length)
+    }
+}
+
+extend GraphemesView {
+    /// Returns an iterator yielding `(GraphemeIndex, Grapheme)` pairs.
+    public func indexedIter() -> IndexedGraphemesIterator {
+        IndexedGraphemesIterator(inner: self.iter())
+    }
+}
+
+extend LinesView {
+    /// Returns an iterator yielding `(LineIndex, String)` pairs.
+    public func indexedIter() -> IndexedLinesIterator {
+        IndexedLinesIterator(ptr: self.ptr, length: self.length)
+    }
+}
+
+// ============================================================================
+// REVERSED CHARS VIEW
+// ============================================================================
+
+/// Iterator that yields code points back-to-front by walking backward
+/// through UTF-8 continuation bytes to find each leading byte, then
+/// decoding forward.
+public struct ReversedCharsIterator: Iterator {
+    type Item = Char
+
+    private var ptr: lang.ptr[lang.i8]
+    private var length: Int64
+    private var byteIndex: Int64
+
+    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
+        self.ptr = ptr;
+        self.length = length;
+        self.byteIndex = length;
+    }
+
+    public mutating func next() -> Char? {
+        if self.byteIndex <= 0 { return .None }
+
+        // Walk backwards past continuation bytes (10xxxxxx)
+        var i = self.byteIndex - 1;
+        while i > 0 {
+            let rawOffset: lang.i64 = i.raw;
+            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
+            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+            let v: lang.i32 = lang.cast_i8_i32(signedByte);
+            if lang.i32_ne(lang.i32_and(v, 0xC0), 0x80) {
+                break
+            }
+            i = i - 1
+        }
+
+        self.byteIndex = i;
+        let result = decodeUtf8(self.ptr, self.length, at: i);
+        if let .Some(decoded) = result {
+            .Some(decoded.char)
+        } else {
+            .Some(Char(UInt32(raw: 0xFFFD)))
+        }
+    }
+}
+
+/// A reversed view over the code points in a string. Iterates characters
+/// back-to-front without allocating.
+///
+/// # Examples
+///
+/// ```
+/// let view = "abc".chars.reversed;
+/// view.first();    // Some('c')
+/// view.count;      // 3
+/// ```
+public struct ReversedCharsView: Iterable, Cloneable {
+    type Item = Char
+    type TargetIterator = ReversedCharsIterator
+
+    fileprivate var slice: StringSlice
+    fileprivate var ptr: lang.ptr[lang.i8]
+    fileprivate var length: Int64
+
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
+        self.length = slice.byteCount;
+    }
+
+    public func clone() -> ReversedCharsView { ReversedCharsView(slice: self.slice.clone()) }
+
+    public func iter() -> ReversedCharsIterator {
+        ReversedCharsIterator(ptr: self.ptr, length: self.length)
+    }
+
+    /// Number of code points. O(n).
+    public var count: Int64 {
+        var n: Int64 = 0;
+        var it = self.iter();
+        while let .Some(_) = it.next() {
+            n = n + 1
+        }
+        n
+    }
+
+    public var isEmpty: Bool { self.length == 0 }
+
+    /// The first element of the reversed view (= last char of the source).
+    public var first: Char? {
+        var it = self.iter();
+        it.next()
+    }
+}
+
+extend CharsView {
+    /// A reversed view that iterates code points back-to-front.
+    public var reversed: ReversedCharsView { ReversedCharsView(slice: self.slice) }
+
+    /// The first code point, or `None` if the view is empty.
+    public var first: Char? {
+        var it = self.iter();
+        it.next()
+    }
+
+    /// The last code point, or `None` if the view is empty.
+    public var last: Char? {
+        self.reversed.first
+    }
+}
+
+extend GraphemesView {
+    /// The first grapheme cluster, or `None` if the view is empty.
+    ///
+    /// O(1) in practice — decodes one cluster from the start.
+    public var first: Grapheme? {
+        var it = self.iter();
+        it.next()
+    }
+
+    /// The last grapheme cluster, or `None` if the view is empty.
+    ///
+    /// O(n) — walks the entire string through the segmenter.
+    public var last: Grapheme? {
+        var it = self.iter();
+        var result: Grapheme? = .None;
+        while let .Some(g) = it.next() {
+            result = .Some(g)
+        }
+        result
+    }
+}
+
+extend LinesView {
+    /// The first line (without terminator), or `None` if the view is empty.
+    ///
+    /// O(first line length) — scans for the first terminator.
+    public var first: String? {
+        var it = self.iter();
+        it.next()
+    }
+}
+
+// ============================================================================
+// SPLIT VIEW
+// ============================================================================
+
+/// Iterator that yields `StringSlice` segments produced by splitting on a
+/// fixed separator. Zero-copy: each yielded slice is a window into the
+/// original source buffer.
+public struct SplitViewIterator: Iterator, Cloneable {
+    type Item = StringSlice
+
+    fileprivate var slice: StringSlice
+    fileprivate var separator: String
+    fileprivate var sourcePtr: Pointer[UInt8]
+    fileprivate var sourceLen: Int64
+    fileprivate var index: Int64
+    fileprivate var done: Bool
+
+    public init(slice slice: StringSlice, separator separator: String) {
+        self.slice = slice;
+        self.separator = separator;
+        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
+        self.sourceLen = slice.byteCount;
+        self.index = 0;
+        self.done = false;
+    }
+
+    fileprivate init(slice slice: StringSlice, separator separator: String, index index: Int64, done done: Bool) {
+        self.slice = slice;
+        self.separator = separator;
+        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
+        self.sourceLen = slice.byteCount;
+        self.index = index;
+        self.done = done;
+    }
+
+    public func clone() -> SplitViewIterator {
+        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone(), index: self.index, done: self.done)
+    }
+
+    public mutating func next() -> StringSlice? {
+        if self.done { return .None }
+
+        let start = self.index;
+        let sepLen = self.separator.asSlice().byteCount;
+
+        if sepLen == 0 {
+            // Empty separator — split per code point
+            if self.index >= self.sourceLen {
+                self.done = true;
+                return .None
+            }
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.sourcePtr.asRaw().raw);
+            let result = decodeUtf8(rawPtr, self.sourceLen, at: self.index);
+            if let .Some(decoded) = result {
+                self.index = self.index + decoded.bytesConsumed;
+                return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.start + self.index))
+            }
+            self.done = true;
+            return .None
+        }
+
+        // Search for separator via memmem
+        let remaining = self.sourceLen - self.index;
+        if remaining >= sepLen {
+            let base = self.sourcePtr.offset(by: self.index).asRaw();
+            let sepSlice = self.separator.asSlice();
+            let needle = sepSlice._rawPtr().offset(by: sepSlice.start).asRaw();
+            let result = memmem(base, remaining, needle, sepLen);
+            if result.isNull == false {
+                let diff: lang.i64 = lang.i64_sub(result.address.raw, base.address.raw);
+                let matchIndex = self.index + Int64(intLiteral: diff);
+                self.index = matchIndex + sepLen;
+                return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.start + matchIndex))
+            }
+        }
+
+        // No more separators — return trailing remainder
+        self.done = true;
+        if start < self.sourceLen {
+            return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.end))
+        }
+        .None
+    }
+}
+
+/// Lazy view over the segments of a string split on a fixed separator.
+///
+/// Each segment is a zero-copy `StringSlice` into the original buffer.
+/// Use `iter()` for one-pass iteration, or `first()`/`last()`/`collect()`
+/// for targeted access.
+///
+/// # Examples
+///
+/// ```
+/// let view = "a,b,c".asSlice().split(",");
+/// view.first();            // Some("a")
+/// view.count;              // 3
+/// view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
+/// ```
+public struct SplitView: Iterable, Cloneable {
+    type Item = StringSlice
+    type TargetIterator = SplitViewIterator
+
+    fileprivate var slice: StringSlice
+    fileprivate var separator: String
+
+    public init(slice slice: StringSlice, separator separator: String) {
+        self.slice = slice;
+        self.separator = separator;
+    }
+
+    public func clone() -> SplitView {
+        SplitView(slice: self.slice.clone(), separator: self.separator.clone())
+    }
+
+    public func iter() -> SplitViewIterator {
+        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone())
+    }
+
+    /// True when the source slice is empty.
+    public var isEmpty: Bool { self.slice.isEmpty }
+
+    /// Number of segments. O(n) — iterates once to count.
+    public var count: Int64 {
+        var it = self.iter();
+        var n: Int64 = 0;
+        while let .Some(_) = it.next() {
+            n = n + 1
+        }
+        n
+    }
+
+    /// The first segment, or `.None` if empty.
+    public var first: StringSlice? {
+        var it = self.iter();
+        it.next()
+    }
+
+    /// The last segment, or `.None` if empty.
+    public var last: StringSlice? {
+        var it = self.iter();
+        var result: StringSlice? = .None;
+        while let .Some(segment) = it.next() {
+            result = .Some(segment)
+        }
+        result
+    }
+
+    /// Collects all segments into an array.
+    public func collect() -> Array[StringSlice] {
+        var result = Array[StringSlice]();
+        for segment in self {
+            result.append(segment)
+        }
+        result
+    }
+}
+
+// ============================================================================
+// SPLIT WHERE VIEW
+// ============================================================================
+
+/// Iterator that yields `StringSlice` segments produced by splitting at
+/// every code point matching a predicate. The matching character is not
+/// included in any segment.
+public struct SplitWhereViewIterator: Iterator, Cloneable {
+    type Item = StringSlice
+
+    fileprivate var slice: StringSlice
+    fileprivate var predicate: (Char) -> Bool
+    fileprivate var sourcePtr: Pointer[UInt8]
+    fileprivate var sourceLen: Int64
+    fileprivate var index: Int64
+    fileprivate var done: Bool
+
+    public init(slice slice: StringSlice, matching predicate: (Char) -> Bool) {
+        self.slice = slice;
+        self.predicate = predicate;
+        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
+        self.sourceLen = slice.byteCount;
+        self.index = 0;
+        self.done = false;
+    }
+
+    fileprivate init(slice slice: StringSlice, matching predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
+        self.slice = slice;
+        self.predicate = predicate;
+        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
+        self.sourceLen = slice.byteCount;
+        self.index = index;
+        self.done = done;
+    }
+
+    public func clone() -> SplitWhereViewIterator {
+        SplitWhereViewIterator(slice: self.slice.clone(), matching: self.predicate, index: self.index, done: self.done)
+    }
+
+    public mutating func next() -> StringSlice? {
+        if self.done { return .None }
+
+        let start = self.index;
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.sourcePtr.asRaw().raw);
+
+        while self.index < self.sourceLen {
+            let result = decodeUtf8(rawPtr, self.sourceLen, at: self.index);
+            if let .Some(decoded) = result {
+                if self.predicate(decoded.char) {
+                    let matchIndex = self.index;
+                    self.index = self.index + decoded.bytesConsumed;
+                    return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.start + matchIndex))
+                }
+                self.index = self.index + decoded.bytesConsumed
+            } else {
+                self.index = self.index + 1
+            }
+        }
+
+        // No more matches — return remainder
+        self.done = true;
+        if start < self.sourceLen {
+            return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.end))
+        }
+        .None
+    }
+}
+
+/// Lazy view over the segments of a string split at every code point
+/// matching a predicate. The matching characters are excluded from segments.
+///
+/// # Examples
+///
+/// ```
+/// let view = "hello world".asSlice().split { (c) in c == Char(" ") };
+/// view.first();    // Some("hello")
+/// view.count;      // 2
+/// ```
+public struct SplitWhereView: Iterable, Cloneable {
+    type Item = StringSlice
+    type TargetIterator = SplitWhereViewIterator
+
+    fileprivate var slice: StringSlice
+    fileprivate var predicate: (Char) -> Bool
+
+    public init(slice slice: StringSlice, matching predicate: (Char) -> Bool) {
+        self.slice = slice;
+        self.predicate = predicate;
+    }
+
+    public func clone() -> SplitWhereView {
+        SplitWhereView(slice: self.slice.clone(), matching: self.predicate)
+    }
+
+    public func iter() -> SplitWhereViewIterator {
+        SplitWhereViewIterator(slice: self.slice.clone(), matching: self.predicate)
+    }
+
+    /// True when the source slice is empty.
+    public var isEmpty: Bool { self.slice.isEmpty }
+
+    /// Number of segments. O(n) — iterates once to count.
+    public var count: Int64 {
+        var it = self.iter();
+        var n: Int64 = 0;
+        while let .Some(_) = it.next() {
+            n = n + 1
+        }
+        n
+    }
+
+    /// The first segment, or `.None` if empty.
+    public var first: StringSlice? {
+        var it = self.iter();
+        it.next()
+    }
+
+    /// The last segment, or `.None` if empty.
+    public var last: StringSlice? {
+        var it = self.iter();
+        var result: StringSlice? = .None;
+        while let .Some(segment) = it.next() {
+            result = .Some(segment)
+        }
+        result
+    }
+
+    /// Collects all segments into an array.
+    public func collect() -> Array[StringSlice] {
+        var result = Array[StringSlice]();
+        for segment in self {
+            result.append(segment)
+        }
+        result
     }
 }

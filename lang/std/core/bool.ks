@@ -3,10 +3,10 @@
 module std.core
 
 import std.ffi.(FFISafe)
-import std.core.(Hash, Hasher)
-import std.text.(String, FormatOptions, Formattable)
+import std.core.(Hashable, Hasher)
+import std.text.(String, StringBuilder, FormatOptions, Formattable)
 import std.numeric.(UInt8, Int64)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 
 /// Two-state truth value with `true` and `false` as its only inhabitants.
 ///
@@ -34,7 +34,7 @@ public struct Bool:
     Equatable,
     Matchable,
     Formattable,
-    Hash,
+    Hashable,
     And[Bool],
     Or[Bool],
     Not,
@@ -59,11 +59,11 @@ public struct Bool:
     // ========================================================================
 
     /// Returns `true` if both bits agree. Drives `==` for `Bool`.
-    public func equals(other: Bool) -> Bool {
+    public func isEqual(to other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
     }
 
-    /// Pattern-match form of `equals`: `case true =>` and `case false =>`
+    /// Pattern-match form of `isEqual`: `case true =>` and `case false =>`
     /// dispatch through here.
     public func matches(other: Bool) -> Bool {
         Bool(boolLiteral: lang.i1_eq(self.value, other.value))
@@ -77,9 +77,9 @@ public struct Bool:
     /// stdlib hashes other primitives — equal `Bool`s always hash equal.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         if self.value {
-            hasher.write(Slice(pointer: Pointer(to: 1), count: 1))
+            hasher.write(ArraySlice(pointer: Pointer(to: 1), count: 1))
         } else {
-            hasher.write(Slice(pointer: Pointer(to: 0), count: 1))
+            hasher.write(ArraySlice(pointer: Pointer(to: 0), count: 1))
         }
     }
 
@@ -132,8 +132,14 @@ public struct Bool:
     /// true.format()                                       // "true"
     /// false.format(FormatOptions.debug())                 // "Bool(false)"
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         let value = if self.value { "true" } else { "false" };
-        if options.debug { "Bool(" + value + ")" } else { value }
+        if options.debug {
+            writer.append("Bool(");
+            writer.append(value);
+            writer.appendChar(')')
+        } else {
+            writer.append(value)
+        }
     }
 }

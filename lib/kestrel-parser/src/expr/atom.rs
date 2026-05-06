@@ -115,9 +115,12 @@ mod tests {
     /// `ExprRawString` and the `RawString` token were missing from
     /// `KestrelLanguage::kind_from_raw`. The `_ => SyntaxKind::Error` fallback
     /// silently swallowed them when the green tree was viewed via SyntaxNode.
+    ///
+    /// Updated for the redesigned string syntax: raw strings now use
+    /// `#"..."#` instead of `"""..."""` (which became multi-line cooked).
     #[test]
     fn raw_string_round_trips_through_full_pipeline() {
-        let source = "module Test\n\nfunc main() -> lang.i64 {\n    \"\"\"hello\"\"\"\n}\n";
+        let source = "module Test\n\nfunc main() -> lang.i64 {\n    #\"hello\"#\n}\n";
         let tokens: Vec<_> = lex(source, 0)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))

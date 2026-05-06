@@ -10,10 +10,10 @@ module Test
             if s.contains("world") == false { return 1 }
             if s.contains("xyz") { return 2 }
 
-            // Test find
-            let pos = s.find("world");
+            // Test firstIndex
+            let pos = s.firstIndex(of: "world");
             if pos.isNone() { return 3 }
-            if pos.unwrap() != 6 { return 4 }
+            if pos.unwrap().value != 6 { return 4 }
 
             // Test starts/ends with
             if s.starts(with: "hello") == false { return 5 }

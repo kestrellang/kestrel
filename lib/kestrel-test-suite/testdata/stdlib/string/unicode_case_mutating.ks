@@ -7,32 +7,32 @@ module Test
             // lowercase() mutating
             var s1: std.text.String = "HELLO WORLD";
             s1.lowercase();
-            if s1.equals("hello world") == false { return 1 }
+            if s1.isEqual(to: "hello world") == false { return 1 }
 
             // uppercase() mutating
             var s2: std.text.String = "hello world";
             s2.uppercase();
-            if s2.equals("HELLO WORLD") == false { return 2 }
+            if s2.isEqual(to: "HELLO WORLD") == false { return 2 }
 
             // lowercase on already lowercase
             var s3: std.text.String = "already lower";
             s3.lowercase();
-            if s3.equals("already lower") == false { return 3 }
+            if s3.isEqual(to: "already lower") == false { return 3 }
 
             // uppercase on already uppercase
             var s4: std.text.String = "ALREADY UPPER";
             s4.uppercase();
-            if s4.equals("ALREADY UPPER") == false { return 4 }
+            if s4.isEqual(to: "ALREADY UPPER") == false { return 4 }
 
             // lowercase on mixed case
             var s5: std.text.String = "HeLLo WoRLd";
             s5.lowercase();
-            if s5.equals("hello world") == false { return 5 }
+            if s5.isEqual(to: "hello world") == false { return 5 }
 
             // uppercase on mixed case
             var s6: std.text.String = "HeLLo WoRLd";
             s6.uppercase();
-            if s6.equals("HELLO WORLD") == false { return 6 }
+            if s6.isEqual(to: "HELLO WORLD") == false { return 6 }
 
             // lowercase on empty string
             var s7 = std.text.String();
@@ -47,12 +47,12 @@ module Test
             // lowercase preserves non-alpha chars
             var s9: std.text.String = "Hello 123!";
             s9.lowercase();
-            if s9.equals("hello 123!") == false { return 9 }
+            if s9.isEqual(to: "hello 123!") == false { return 9 }
 
             // uppercase preserves non-alpha chars
             var s10: std.text.String = "Hello 123!";
             s10.uppercase();
-            if s10.equals("HELLO 123!") == false { return 10 }
+            if s10.isEqual(to: "HELLO 123!") == false { return 10 }
 
             0
         }

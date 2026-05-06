@@ -1,9 +1,7 @@
-// HTTP/1.1 wire protocol: serialize requests and parse responses
-//
-// This is the reverse of what perch does:
-//   - perch.parse: parses requests FROM the wire
-//   - perch.send:  serializes responses TO the wire
-//   - swoop.send:  serializes requests TO the wire, parses responses FROM the wire
+/// HTTP/1.1 wire protocol — serializes requests and parses responses.
+///
+/// The reverse of perch: perch parses requests and serializes responses;
+/// swoop serializes requests and parses responses.
 
 module swoop.send
 
@@ -13,7 +11,7 @@ import http.headers.(Headers)
 import swoop.error.(SwoopError)
 import std.io.error.(IoError)
 import swoop.response.(Response)
-import http.wire.(findHeaderEnd, bytesToString, parseDecimal)
+import http.wire.(findHeaderEnd, bytesToString, parseDecimal, dechunk, stringToBytes)
 import swoop.url.(ClientUrl)
 import swoop.body.(Body)
 
@@ -43,16 +41,7 @@ public func sendRequest[S](
     req.append(url.hostHeader());
     req.append("\r\n");
 
-    // User headers
-    var hi: Int64 = 0;
-    while hi < headers.entries.count {
-        let pair = headers.entries(unchecked: hi);
-        req.append(pair.0);
-        req.append(": ");
-        req.append(pair.1);
-        req.append("\r\n");
-        hi = hi + 1
-    }
+    req.append(headers.toWireFormat());
 
     // Body handling
     var bodyBytes = Array[UInt8]();
@@ -113,19 +102,13 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
 
     // Read bytes until we find \r\n\r\n (header end)
     var buf = Array[UInt8]();
-    var chunk = Array[UInt8](capacity: 4096);
-    var ci: Int64 = 0;
-    while ci < 4096 {
-        chunk.append(0);
-        ci = ci + 1
-    }
+    var chunk = Array[UInt8](repeating: 0, count: 4096);
 
     var headerEnd: Int64 = -1;
 
     loop {
         let slice = Slice(pointer: chunk.asPointer(), count: 4096);
-        let readResult = recvStream.read(into: slice);
-        let n = match readResult {
+        let n = match recvStream.read(into: slice) {
             .Ok(bytes) => bytes,
             .Err(_) => return .Err(SwoopError.connectionFailed("failed to read response"))
         };
@@ -136,10 +119,8 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
             break
         }
 
-        var j: Int64 = 0;
-        while j < n {
-            buf.append(chunk(unchecked: j));
-            j = j + 1
+        for j in 0..<n {
+            buf.append(chunk(unchecked: j))
         }
 
         headerEnd = findHeaderEnd(buf);
@@ -156,125 +137,74 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
         return .Err(SwoopError.invalidResponse("no header terminator found"))
     }
 
-    // Parse header section
     let headerStr = bytesToString(buf, from: 0, to: headerEnd);
 
-    // Split into lines
-    var lines = headerStr.split("\r\n");
-
-    // Parse status line: HTTP/1.1 200 OK
-    let statusLine = match lines.next() {
-        .Some(line) => line,
-        .None => return .Err(SwoopError.invalidResponse("empty response"))
-    };
-
-    // Find first space (after HTTP/1.1)
-    let statusCode = match statusLine.find(" ") {
-        .Some(spaceIdx) => {
-            let afterVersion = statusLine.substringBytes(from: spaceIdx + 1, to: statusLine.byteCount);
-            // Find second space (between code and reason)
-            match afterVersion.find(" ") {
-                .Some(sp2) => {
-                    let codeStr = afterVersion.substringBytes(from: 0, to: sp2);
-                    parseDecimal(codeStr)
-                },
-                .None => {
-                    // No reason phrase, just status code
-                    parseDecimal(afterVersion)
-                }
-            }
-        },
-        .None => return .Err(SwoopError.invalidResponse("malformed status line"))
-    };
-
-    // Parse headers
-    var headers = Headers();
-    while let .Some(line) = lines.next() {
-        if line.byteCount == 0 {
-            break
-        }
-        match line.find(":") {
-            .Some(colonIdx) => {
-                let name = line.substringBytes(from: 0, to: colonIdx).trimmed();
-                let value = line.substringBytes(from: colonIdx + 1, to: line.byteCount).trimmed();
-                headers.add(name, value)
-            },
-            .None => {}
-        }
+    let hdrSlice = headerStr.asSlice();
+    guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
+        return .Err(SwoopError.invalidResponse("empty response"));
     }
+    let statusLine = hdrSlice.subslice(from: hdrSlice.start, to: firstLineEnd.value).toOwned();
 
-    // Read body
+    let slSlice = statusLine.asSlice();
+    guard let .Some(spaceIdx) = statusLine.firstIndex(of: " ") else {
+        return .Err(SwoopError.invalidResponse("malformed status line"));
+    }
+    let afterVersion = slSlice.subslice(from: spaceIdx.value + 1, to: slSlice.end).toOwned();
+    let avSlice = afterVersion.asSlice();
+    let statusCode = match afterVersion.firstIndex(of: " ") {
+        .Some(sp2) => parseDecimal(avSlice.subslice(from: avSlice.start, to: sp2.value).toOwned()),
+        .None => parseDecimal(afterVersion)
+    };
+
+    let headerLines = hdrSlice.subslice(from: firstLineEnd.value + 2, to: hdrSlice.end).toOwned();
+    let headers = Headers.parse(from: headerLines);
+
     let bodyStart = headerEnd + 4;
     var rawBuf = Array[UInt8]();
 
-    // Copy any bytes already read after the header
-    var k = bodyStart;
-    while k < buf.count {
-        rawBuf.append(buf(unchecked: k));
-        k = k + 1
+    for k in bodyStart..<buf.count {
+        rawBuf.append(buf(unchecked: k))
     }
 
-    // Check if chunked transfer encoding
     let isChunked = match headers.value(forName: "Transfer-Encoding") {
         .Some(te) => te.contains("chunked"),
         .None => false
     };
 
-    // Read remaining data from stream
-    match headers.value(forName: "Content-Length") {
-        .Some(clStr) => {
-            let contentLength = parseDecimal(clStr);
-            while rawBuf.count < contentLength {
-                let remaining = contentLength - rawBuf.count;
-                var readSize: Int64 = 4096;
-                if remaining < readSize {
-                    readSize = remaining
-                }
-                var bodyChunk = Array[UInt8](capacity: readSize);
-                var bi: Int64 = 0;
-                while bi < readSize {
-                    bodyChunk.append(0);
-                    bi = bi + 1
-                }
-                let bodySlice = Slice(pointer: bodyChunk.asPointer(), count: readSize);
-                let readResult = recvStream.read(into: bodySlice);
-                let bn = match readResult {
-                    .Ok(bytes) => bytes,
-                    .Err(_) => break
-                };
-                if bn <= 0 {
-                    break
-                }
-                var bj: Int64 = 0;
-                while bj < bn {
-                    rawBuf.append(bodyChunk(unchecked: bj));
-                    bj = bj + 1
-                }
+    if let .Some(clStr) = headers.value(forName: "Content-Length") {
+        let contentLength = parseDecimal(clStr);
+        while rawBuf.count < contentLength {
+            let remaining = contentLength - rawBuf.count;
+            var readSize: Int64 = 4096;
+            if remaining < readSize {
+                readSize = remaining
             }
-        },
-        .None => {
-            // No Content-Length: read until connection closes
-            loop {
-                var readChunk = Array[UInt8](capacity: 4096);
-                var ri: Int64 = 0;
-                while ri < 4096 {
-                    readChunk.append(0);
-                    ri = ri + 1
-                }
-                let readSlice = Slice(pointer: readChunk.asPointer(), count: 4096);
-                let readResult = recvStream.read(into: readSlice);
-                let rn = match readResult {
-                    .Ok(bytes) => bytes,
-                    .Err(_) => break
-                };
-                if rn <= 0 {
-                    break
-                }
-                var rj: Int64 = 0;
-                while rj < rn {
-                    rawBuf.append(readChunk(unchecked: rj));
-                    rj = rj + 1
-                }
+            var bodyChunk = Array[UInt8](repeating: 0, count: readSize);
+            let bodySlice = Slice(pointer: bodyChunk.asPointer(), count: readSize);
+            let bn = match recvStream.read(into: bodySlice) {
+                .Ok(bytes) => bytes,
+                .Err(_) => break
+            };
+            if bn <= 0 {
+                break
+            }
+            for bj in 0..<bn {
+                rawBuf.append(bodyChunk(unchecked: bj))
+            }
+        }
+    } else {
+        loop {
+            var readChunk = Array[UInt8](repeating: 0, count: 4096);
+            let readSlice = Slice(pointer: readChunk.asPointer(), count: 4096);
+            let rn = match recvStream.read(into: readSlice) {
+                .Ok(bytes) => bytes,
+                .Err(_) => break
+            };
+            if rn <= 0 {
+                break
+            }
+            for rj in 0..<rn {
+                rawBuf.append(readChunk(unchecked: rj))
             }
         }
     }
@@ -292,87 +222,16 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
 }
 
 // ============================================================================
-// CHUNKED DECODING
-// ============================================================================
-
-/// Decodes a chunked transfer-encoded body.
-/// Format: hex-size\r\ndata\r\nhex-size\r\ndata\r\n...0\r\n\r\n
-func dechunk(raw: Array[UInt8]) -> Array[UInt8] {
-    var result = Array[UInt8]();
-    var pos: Int64 = 0;
-    let len = raw.count;
-
-    loop {
-        if pos >= len {
-            break
-        }
-
-        // Parse hex chunk size
-        var chunkSize: Int64 = 0;
-        while pos < len {
-            let b = raw(unchecked: pos);
-            if b == 13 {
-                // \r — skip \r\n
-                pos = pos + 2;
-                break
-            }
-            // hex digit
-            let digit = hexDigitValue(b);
-            chunkSize = chunkSize * 16 + digit;
-            pos = pos + 1
-        }
-
-        // Zero chunk means end
-        if chunkSize == 0 {
-            break
-        }
-
-        // Copy chunk data
-        var ci: Int64 = 0;
-        while ci < chunkSize and pos < len {
-            result.append(raw(unchecked: pos));
-            pos = pos + 1;
-            ci = ci + 1
-        }
-
-        // Skip trailing \r\n after chunk data
-        if pos + 1 < len {
-            pos = pos + 2
-        }
-    }
-
-    result
-}
-
-/// Returns the numeric value of a hex digit byte.
-func hexDigitValue(b: UInt8) -> Int64 {
-    let v = Int64(from: b);
-    if v >= 48 and v <= 57 { return v - 48 }
-    if v >= 65 and v <= 70 { return v - 55 }
-    if v >= 97 and v <= 102 { return v - 87 }
-    0
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
 /// Sends all bytes of a string over a stream.
 func sendAllString[S](stream: S, s: String) -> Result[(), IoError] where S: Writable {
     var mutStream = stream;
-    let len = s.byteCount;
-    if len == 0 {
+    if s.byteCount == 0 {
         return .Ok(())
     }
-
-    var buf = Array[UInt8](capacity: len);
-    var i: Int64 = 0;
-    while i < len {
-        buf.append(s.bytes(unchecked: i));
-        i = i + 1
-    }
-
-    sendAllBytes(mutStream, buf)
+    sendAllBytes(mutStream, stringToBytes(s))
 }
 
 /// Sends all bytes of a buffer over a stream.

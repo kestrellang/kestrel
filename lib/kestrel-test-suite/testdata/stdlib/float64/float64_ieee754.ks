@@ -41,7 +41,7 @@ module Test
 
             // nextUp and nextDown should be inverses near 1.0
             let roundTrip = one.nextUp().nextDown();
-            if roundTrip.equals(one) == false { return 8 }
+            if roundTrip.isEqual(to: one) == false { return 8 }
 
             // remainder: IEEE 754 remainder of 5.0 / 3.0 = -1.0
             let fiveF: std.numeric.Float64 = 5.0;

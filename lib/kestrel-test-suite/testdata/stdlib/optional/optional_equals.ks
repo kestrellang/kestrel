@@ -11,19 +11,19 @@ module Test
             let none2: std.result.Optional[std.numeric.Int64] = .None;
 
             // Some(42) == Some(42)
-            if a.equals(b) == false { return 1 }
+            if a.isEqual(to: b) == false { return 1 }
 
             // Some(42) != Some(99)
-            if a.equals(c) { return 2 }
+            if a.isEqual(to: c) { return 2 }
 
             // Some(42) != None
-            if a.equals(none1) { return 3 }
+            if a.isEqual(to: none1) { return 3 }
 
             // None != Some(42)
-            if none1.equals(a) { return 4 }
+            if none1.isEqual(to: a) { return 4 }
 
             // None == None
-            if none1.equals(none2) == false { return 5 }
+            if none1.isEqual(to: none2) == false { return 5 }
 
             0
         }

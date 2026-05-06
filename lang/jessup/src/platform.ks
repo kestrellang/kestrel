@@ -51,9 +51,9 @@ public func detectPlatform() -> Result[Platform, JessupError] {
 
     // Map OS
     var mappedOs = "";
-    if os.equals("Darwin") {
+    if os == "Darwin" {
         mappedOs = "apple-darwin"
-    } else if os.equals("Linux") {
+    } else if os == "Linux" {
         mappedOs = "unknown-linux"
     } else {
         var errMsg = String();
@@ -64,9 +64,9 @@ public func detectPlatform() -> Result[Platform, JessupError] {
 
     // Map architecture
     var mappedArch = "";
-    if arch.equals("arm64") or arch.equals("aarch64") {
+    if arch == "arm64" or arch == "aarch64" {
         mappedArch = "aarch64"
-    } else if arch.equals("x86_64") {
+    } else if arch == "x86_64" {
         mappedArch = "x86_64"
     } else {
         var errMsg = String();
@@ -92,7 +92,7 @@ func trimWhitespace(s: String) -> String {
         if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {
-            return s.substringBytes(from: 0, to: end)
+            return s.asSlice().subslice(from: 0, to: end).toOwned()
         }
     }
     ""

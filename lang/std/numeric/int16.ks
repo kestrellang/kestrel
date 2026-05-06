@@ -5,7 +5,7 @@ module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
-    Equatable, Comparable, Ordering, Bool, Matchable, Hash, Hasher,
+    Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
     Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
@@ -13,8 +13,8 @@ import std.core.(
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
 )
-import std.text.(String, Formattable, FormatOptions)
-import std.memory.(Slice, Pointer)
+import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.memory.(ArraySlice, Pointer)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 16-bit signed integer.
@@ -53,7 +53,7 @@ public struct Int16:
     Equatable,
     Matchable,
     Formattable,
-    Hash,
+    Hashable,
     Addable,
     Subtractable,
     Multipliable,
@@ -288,14 +288,14 @@ public struct Int16:
     /// # Examples
     ///
     /// ```
-    /// (42).equals(42);  // true
-    /// 42 == 42;          // true
+    /// (42).isEqual(to: 42);  // true
+    /// 42 == 42;               // true
     /// ```
-    public func equals(other: Int16) -> Bool {
+    public func isEqual(to other: Int16) -> Bool {
         Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
     }
 
-    /// Pattern-matching hook for `Matchable`. Identical to `equals`.
+    /// Pattern-matching hook for `Matchable`. Identical to `isEqual`.
     public func matches(other: Int16) -> Bool {
         Bool(boolLiteral: lang.i16_eq(self.raw, other.raw))
     }
@@ -345,7 +345,7 @@ public struct Int16:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int16]().size))
+        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int16]().size))
     }
 
     // ========================================================================
@@ -984,16 +984,8 @@ public struct Int16:
     // ========================================================================
 
     // Formattable
-    /// Renders the integer to a `String`, honouring the supplied
+    /// Formats the integer directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements the `Formattable` protocol.
-    ///
-    /// Recognised options:
-    /// - `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-    /// - `width` — minimum output width; shorter values are padded.
-    /// - `fill` / `alignment` — padding character and side.
-    /// - `sign` — `.Negative` (default), `.Always`, or `.Space`.
-    /// - `uppercase` — uppercase hex digits.
-    /// - `alternate` — emit the `0b` / `0o` / `0x` prefix.
     ///
     /// # Examples
     ///
@@ -1006,105 +998,66 @@ public struct Int16:
     /// (42).format(.{width: .Some(5), fill: '0'});     // "00042"
     /// (-42).format(.{sign: .Always});                 // "-42"
     /// ```
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         var n = self;
         let isNegative = n < 0;
         if isNegative {
             n = n.negate()
         }
 
-        // Get radix (default 10)
         var radix: Int64 = options.radix;
         if radix < 2 or radix > 36 {
             radix = 10
         }
 
-        // Build digits in reverse order
+        // Build digits in reverse order (need random access to reverse)
         var digits = String();
         if n == Int16.zero {
-            digits.appendByte(48)  // '0'
+            digits.appendByte(48)
         } else {
             let radixVal: Int16 = Int16(from: radix);
             while n != Int16.zero {
                 let digit: Int16 = n % radixVal;
                 let digitVal: Int64 = Int64(from: digit);
                 let charCode: Int64 = if digitVal < 10 {
-                    digitVal + 48  // '0'-'9'
+                    digitVal + 48
                 } else if options.uppercase {
-                    digitVal - 10 + 65  // 'A'-'Z'
+                    digitVal - 10 + 65
                 } else {
-                    digitVal - 10 + 97  // 'a'-'z'
+                    digitVal - 10 + 97
                 };
                 digits.appendByte(UInt8(from: charCode));
                 n = n / radixVal
             }
         }
 
-        // Build result string
+        // Build content: sign + prefix + reversed digits
         var result = String();
 
-        // Add sign prefix
         if isNegative {
-            result.appendByte(45)  // '-'
+            result.appendChar('-')
         } else if options.sign == .Always {
-            result.appendByte(43)  // '+'
+            result.appendChar('+')
         } else if options.sign == .Space {
-            result.appendByte(32)  // ' '
+            result.appendChar(' ')
         }
 
-        // Add alternate form prefix (always lowercase, even with uppercase digits)
         if options.alternate {
             if radix == 2 {
-                result.appendByte(48);  // '0'
-                result.appendByte(98)   // 'b'
+                result.append("0b")
             } else if radix == 8 {
-                result.appendByte(48);  // '0'
-                result.appendByte(111)  // 'o'
+                result.append("0o")
             } else if radix == 16 {
-                result.appendByte(48);  // '0'
-                result.appendByte(120)  // 'x'
+                result.append("0x")
             }
         }
 
-        // Append digits in correct order (reverse)
         var i = digits.byteCount - 1;
         while i >= 0 {
             result.appendByte(digits.bytes(unchecked: i));
             i = i - 1
         }
 
-        // Apply width and alignment padding
-        if let .Some(width) = options.width {
-            let currentLen = result.byteCount;
-            if width > currentLen {
-                let padding = width - currentLen;
-                var padLeft: Int64 = 0;
-                var padRight: Int64 = 0;
-
-                if options.alignment == .Left {
-                    padRight = padding
-                } else if options.alignment == .Right {
-                    padLeft = padding
-                } else {
-                    // Center
-                    padLeft = padding / 2;
-                    padRight = padding - padLeft
-                }
-
-                var padded = String();
-                while padLeft > 0 {
-                    padded.appendChar(options.fill);
-                    padLeft = padLeft - 1
-                }
-                padded.append(result);
-                while padRight > 0 {
-                    padded.appendChar(options.fill);
-                    padRight = padRight - 1
-                }
-                return padded
-            }
-        }
-
-        result
+        _writePadded(into: writer, result, options)
     }}
 

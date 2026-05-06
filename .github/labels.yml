@@ -1,0 +1,65 @@
+# Declarative label list. Single source of truth — sync-labels.yml applies this
+# to the repo on every push to main. See docs/contributing/git.md for the
+# full label policy.
+
+# Type — one per issue, set by template.
+- name: bug
+  color: d73a4a
+  description: Something isn't working
+- name: feature
+  color: a2eeef
+  description: New functionality
+- name: refactor
+  color: 5319e7
+  description: Internal restructuring, no behavior change
+- name: chore
+  color: cfd3d7
+  description: Tooling, dependencies, docs, CI
+
+# Area — mirrors the Project's Area field.
+- name: parser
+  color: 0e8a16
+  description: Lexer, parser, syntax tree
+- name: name-res
+  color: 0e8a16
+  description: Name resolution and scope
+- name: type-infer
+  color: 0e8a16
+  description: Type inference and the constraint solver
+- name: mir
+  color: 0e8a16
+  description: MIR and MIR lowering
+- name: codegen
+  color: 0e8a16
+  description: Code generation backends
+- name: stdlib
+  color: fbca04
+  description: Standard library
+- name: lsp
+  color: 1d76db
+  description: Language server
+- name: tooling
+  color: 1d76db
+  description: CLI, build, package manager, tests
+- name: docs
+  color: 0075ca
+  description: Documentation
+
+# Workflow signals — see git.md for application/removal rules.
+- name: triage
+  color: e4b400
+  description: Awaiting triage
+- name: breaking
+  color: b60205
+  description: Breaking change
+- name: wontfix
+  color: ffffff
+  description: Will not be addressed
+
+# GitHub defaults worth keeping for community discoverability.
+- name: good first issue
+  color: 7057ff
+  description: Good for newcomers
+- name: help wanted
+  color: 008672
+  description: Extra attention is needed

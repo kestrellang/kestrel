@@ -4,6 +4,8 @@
 module Main
 
 func testMultilineRawString() -> lang.str {
-    """hello
-world"""
+    #"""
+    hello
+    world
+    """#
 }

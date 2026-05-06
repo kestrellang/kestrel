@@ -1,4 +1,4 @@
-// HTTP response type
+/// HTTP response returned by Swoop requests.
 
 module swoop.response
 
@@ -13,7 +13,16 @@ import swoop.error.(SwoopError)
 // RESPONSE
 // ============================================================================
 
-/// An HTTP response returned by Swoop.
+/// An HTTP response with status, headers, and body (as both string and bytes).
+///
+/// # Examples
+///
+/// ```
+/// let res = try Swoop().fetch("http://example.com");
+/// if res.status.isSuccess() {
+///     println(res.body);
+/// }
+/// ```
 public struct Response: Cloneable {
     public var status: StatusCode
     public var headers: Headers
@@ -37,10 +46,15 @@ public struct Response: Cloneable {
 // ============================================================================
 
 extend Response {
-    /// Parses the response body as a JSON Value.
-    public func json() -> Result[Value, DeserializeError] {
-        quill.json.Json.decode(self.body)
-    }
+    /// Parses the response body as a JSON `Value`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let res = try Swoop().fetch("http://api.example.com/data");
+    /// let json = try res.json();
+    /// ```
+    public func json() -> Result[Value, DeserializeError] = quill.json.Json.decode(self.body)
 }
 
 // ============================================================================
@@ -48,9 +62,15 @@ extend Response {
 // ============================================================================
 
 extend Response {
-    /// Returns an error if the status code is not 2xx (success).
-    /// On success, returns the response unchanged.
-    /// On failure, the SwoopError contains the status code.
+    /// Returns the response if the status is 2xx, or a `SwoopError`
+    /// containing the status code otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let res = try Swoop().fetch(url);
+    /// let validated = try res.validate();
+    /// ```
     public func validate() -> Result[Response, SwoopError] {
         if self.status.isSuccess() {
             .Ok(self)

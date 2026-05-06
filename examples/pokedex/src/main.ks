@@ -60,7 +60,7 @@ func handlePokemon(req: Request, ctx: Ctx) -> Response {
     var url = String();
     url.append(ctx.pokeApiBase);
     url.append("/api/v2/pokemon/");
-    url.append(id.format());
+    url.append(id.formatted());
 
     match Swoop().fetch(url) {
         .Ok(res) => {

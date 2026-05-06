@@ -140,6 +140,12 @@ pub struct InferCtx<'a> {
     /// `solve_associated` to substitute the extension's free TypeParams when
     /// projecting through an `extend ConcreteType: Proto[FreeParams]` binding.
     pub(crate) witness_protocol_args: HashMap<(TyVar, Entity), Vec<TyVar>>,
+
+    /// Per-loop type variable for break targets. `break` unifies `()` with
+    /// the innermost (or label-matched) entry; the loop expr returns the
+    /// type variable. If no break is reachable the var stays unconstrained
+    /// and defaults to Never via never-fallback.
+    pub(crate) loop_break_tys: Vec<(Option<String>, TyVar)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -189,6 +195,7 @@ impl<'a> InferCtx<'a> {
             expected_dict_entry: None,
             wildcard_tvars: HashSet::new(),
             witness_protocol_args: HashMap::new(),
+            loop_break_tys: Vec::new(),
         }
     }
 

@@ -333,7 +333,7 @@ public func listDir(path: String) -> Array[String] {
         let cstr = CString(raw: namePtr.cast[UInt8]());
         let name = String(from: cstr);
 
-        if name.equals(".") or name.equals("..") {
+        if name.isEqual(to: ".") or name.isEqual(to: "..") {
             // skip
         } else {
             result.append(name)

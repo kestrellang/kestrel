@@ -4,7 +4,7 @@
 module Main
 
 func test(cond: lang.i1) -> lang.i64 {
-    while cond {
+    while cond { // ERROR: type mismatch
         return 1
     }
-} // ERROR
+}

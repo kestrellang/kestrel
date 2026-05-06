@@ -160,7 +160,7 @@ See the `debug` skill for the full protocol. The headline rules:
 
 ## Committing and opening a PR
 
-See [Git](git.md) for the full branching model. Before you commit:
+See [Workflow](git.md) for the full branching model and release cadence. Before you commit:
 
 ```bash
 cargo fmt

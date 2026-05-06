@@ -15,8 +15,8 @@ use kestrel_hir_lower::{
     LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
 };
 use kestrel_name_res::{
-    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution,
-    expand_protocol_closure_in_place,
+    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeMemberSource, TypeMembersByName,
+    TypeResolution, expand_protocol_closure_in_place,
 };
 use kestrel_span::Span;
 
@@ -239,61 +239,69 @@ impl TypeResolver for WorldResolver<'_> {
         };
         let entity = &entity;
 
-        // Search direct children by name
-        let candidates = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-            parent: *entity,
+        // Discover every type-side candidate by name in one pass: direct
+        // children, own-extension members, and conformed-protocol-extension
+        // defaults (transitively, via parent protocols). Provenance lets us
+        // partition by priority below.
+        let type_members = self.ctx.query(TypeMembersByName {
+            type_entity: *entity,
             name: name.to_string(),
             context: self.body_owner,
+            root: self.root,
         });
 
-        // Also search extensions of the concrete type
+        // Direct + own-extension candidates compete equally; protocol-extension
+        // defaults are held back as fallback (see below).
+        let mut all_candidates: Vec<Entity> = Vec::new();
+        let mut candidate_extensions: Vec<(Entity, Entity)> = Vec::new();
+        for tm in &type_members {
+            match tm.source {
+                TypeMemberSource::Direct => {
+                    all_candidates.push(tm.entity);
+                },
+                TypeMemberSource::Extension(ext) => {
+                    all_candidates.push(tm.entity);
+                    candidate_extensions.push((tm.entity, ext));
+                },
+                TypeMemberSource::ProtocolExtension { .. } => { /* fallback */ },
+            }
+        }
+
+        // `extensions` is still needed downstream for the "exists but hidden"
+        // probe (visibility error reporting) and for the init/subscript
+        // NodeKind fallbacks below.
         let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
             target: *entity,
             root: self.root,
         });
-        let mut all_candidates = candidates;
-        // Track which extension each candidate came from (for solver-side filtering)
-        let mut candidate_extensions: Vec<(Entity, Entity)> = Vec::new(); // (candidate, extension)
-        for ext in &extensions {
-            let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                parent: *ext,
-                name: name.to_string(),
-                context: self.body_owner,
-            });
-            for &child in &ext_children {
-                candidate_extensions.push((child, *ext));
-            }
-            all_candidates.extend(ext_children);
-        }
 
-        // Fallback: search protocol extensions for default method implementations.
-        // E.g., `lessThan` lives in `extend Comparable { ... }`, not in the protocol
-        // itself. We only look at extension-provided members (not the abstract
-        // requirements themselves) to avoid ambiguity with the default impl.
-        //
-        // Multiple protocol extensions may provide the same method (e.g. notEquals
-        // from both extend Equatable and extend Comparable). These are equivalent
-        // default implementations, so we deduplicate by label signature.
-        if all_candidates.is_empty() {
-            let protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
-                entity: *entity,
-                root: self.root,
-            });
-            let mut seen_signatures = std::collections::HashSet::new();
-            for proto in &protocols {
-                let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
-                    protocol: *proto,
-                    name: name.to_string(),
-                    context: self.body_owner,
-                    root: self.root,
-                });
-                for m in members {
-                    let Some(ext) = m.extension else { continue };
-                    let sig = self.label_signature(m.entity);
-                    if seen_signatures.insert(sig) {
-                        all_candidates.push(m.entity);
-                        candidate_extensions.push((m.entity, ext));
-                    }
+        // Protocol-extension defaults (e.g. `lessThan` from `extend Comparable`,
+        // or `isEqual` from `extend Slice[T] where T: Equatable` reached via
+        // Array's `Slice` conformance) are a fallback. They fire only when no
+        // direct/own-ext candidate matches the call's labels — preserving
+        // overload precedence so `Slice.sorted()` can fall through to the
+        // protocol default when `Array` only declares `sorted(by:)` /
+        // `sorted(byKey:)` (different signatures), but a direct overload that
+        // does match wins.
+        let arg_labels_for_fallback: Vec<Option<&str>> =
+            _args.iter().map(|a| a.label.as_deref()).collect();
+        let direct_label_match = !all_candidates.is_empty()
+            && all_candidates
+                .iter()
+                .any(|&c| self.matches_labels(c, &arg_labels_for_fallback));
+        if !direct_label_match {
+            let mut seen_signatures: std::collections::HashSet<_> = all_candidates
+                .iter()
+                .map(|&c| self.label_signature(c))
+                .collect();
+            for tm in &type_members {
+                let TypeMemberSource::ProtocolExtension { extension, .. } = tm.source else {
+                    continue;
+                };
+                let sig = self.label_signature(tm.entity);
+                if seen_signatures.insert(sig) {
+                    all_candidates.push(tm.entity);
+                    candidate_extensions.push((tm.entity, extension));
                 }
             }
         }
@@ -319,40 +327,10 @@ impl TypeResolver for WorldResolver<'_> {
             }
         }
 
-        // Initializers have no Name component, so VisibleChildrenByName won't
-        // find them. Search by NodeKind::Initializer when looking for "init".
-        if all_candidates.is_empty() && name == "init" {
-            for &child in self.ctx.children_of(*entity) {
-                if self.ctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer) {
-                    all_candidates.push(child);
-                }
-            }
-            // Also search extensions (e.g., extend Array: ExpressibleByArrayLiteral { init(...) })
-            for ext in &extensions {
-                for &child in self.ctx.children_of(*ext) {
-                    if self.ctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer) {
-                        all_candidates.push(child);
-                    }
-                }
-            }
-        }
-
-        // Subscripts have no Name component (like initializers).
-        // Search by NodeKind::Subscript when resolving a subscript call.
-        if all_candidates.is_empty() && name == "subscript" {
-            for &child in self.ctx.children_of(*entity) {
-                if self.ctx.get::<NodeKind>(child) == Some(&NodeKind::Subscript) {
-                    all_candidates.push(child);
-                }
-            }
-            for ext in &extensions {
-                for &child in self.ctx.children_of(*ext) {
-                    if self.ctx.get::<NodeKind>(child) == Some(&NodeKind::Subscript) {
-                        all_candidates.push(child);
-                    }
-                }
-            }
-        }
+        // (Initializers and subscripts are nameless but `TypeMembersByName`
+        // recognizes the keyword sentinels `"init"` / `"subscript"`, so the
+        // discovery above already covers them on direct + own-extension +
+        // protocol-extension targets.)
 
         // Filter out static members (we're resolving on an instance)
         let instance_candidates: Vec<Entity> = all_candidates

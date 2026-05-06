@@ -10,8 +10,8 @@ module flock.main
 
 import clutch.os.(getArgv)
 import clutch.command.(Command)
-import clutch.arg.(Arg)
-import clutch.matches.(ArgMatches)
+import clutch.argument.(Argument)
+import clutch.matches.(ArgumentMatches)
 import clutch.error.(ParseError)
 import flock.error.(FlockError)
 import flock.manifest.(Manifest, BuildConfig, parseManifest)
@@ -31,50 +31,31 @@ import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
 func main() {
     let argv = getArgv();
 
-    // Set up CLI
-    var cmd = Command(name: "flock");
-    cmd.setAbout(text: "Package manager for Kestrel");
-    cmd.setVersion(ver: "0.1.0");
+    var cmd = Command("flock");
+    cmd = cmd.about("Package manager for Kestrel");
+    cmd = cmd.version("0.1.0");
+    cmd = cmd.subcommand(Command("build").about("Build the current package"));
+    cmd = cmd.subcommand(Command("run").about("Build and run the current package"));
+    cmd = cmd.subcommand(Command("check").about("Type-check the current package"));
+    cmd = cmd.subcommand(Command("init").about("Create a new flock.toml in the current directory"));
+    cmd = cmd.subcommand(Command("publish").about("Publish a package to the registry"));
+    cmd = cmd.subcommand(Command("update").about("Update dependencies (re-resolve and rewrite flock.lock)"));
 
-    var buildCmd = Command(name: "build");
-    buildCmd.setAbout(text: "Build the current package");
-    cmd.addSubcommand(sub: buildCmd);
-
-    var runCmd = Command(name: "run");
-    runCmd.setAbout(text: "Build and run the current package");
-    cmd.addSubcommand(sub: runCmd);
-
-    var checkCmd = Command(name: "check");
-    checkCmd.setAbout(text: "Type-check the current package");
-    cmd.addSubcommand(sub: checkCmd);
-
-    var initCmd = Command(name: "init");
-    initCmd.setAbout(text: "Create a new flock.toml in the current directory");
-    cmd.addSubcommand(sub: initCmd);
-
-    var publishCmd = Command(name: "publish");
-    publishCmd.setAbout(text: "Publish a package to the registry");
-    cmd.addSubcommand(sub: publishCmd);
-
-    var updateCmd = Command(name: "update");
-    updateCmd.setAbout(text: "Update dependencies (re-resolve and rewrite flock.lock)");
-    cmd.addSubcommand(sub: updateCmd);
-
-    match cmd.parse(tokens: argv) {
+    match cmd.parse(from: argv) {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
-                    if sub.equals("build") {
+                    if sub == "build" {
                         handleBuild()
-                    } else if sub.equals("run") {
+                    } else if sub == "run" {
                         handleRun()
-                    } else if sub.equals("check") {
+                    } else if sub == "check" {
                         handleCheck()
-                    } else if sub.equals("init") {
+                    } else if sub == "init" {
                         handleInit()
-                    } else if sub.equals("publish") {
+                    } else if sub == "publish" {
                         handlePublish()
-                    } else if sub.equals("update") {
+                    } else if sub == "update" {
                         handleUpdate()
                     }
                 },
@@ -256,7 +237,22 @@ func handlePublish() {
         return
     }
 
-    // Upload via curl
+    // Generate docs (best-effort — publish continues without docs)
+    var docsDir = String(); docsDir.append("/tmp/flock-docs-"); docsDir.append(name); docsDir.append("-"); docsDir.append(version);
+    let sourceDir = joinPath(base: cwd, rel: manifest.package.source);
+    var docCmd = String(); docCmd.append("kestrel-doc --src "); docCmd.append(quoteArg(sourceDir)); docCmd.append(" --out "); docCmd.append(quoteArg(docsDir)); docCmd.append(" --bundle --format json");
+    let docExit = spawn(docCmd);
+    var hasDocs = false;
+    if docExit == 0 {
+        var docsPath = String(); docsPath.append(docsDir); docsPath.append("/docs.json");
+        if fileExists(docsPath) {
+            hasDocs = true
+        }
+    } else {
+        let _ = eprintln("Note: docs not generated (kestrel-doc not available or source has errors)");
+    }
+
+    // Upload archive via curl
     var url = String(); url.append(regUrl); url.append("/api/v1/packages/"); url.append(org); url.append("/"); url.append(name); url.append("/"); url.append(version);
     var curlCmd = String(); curlCmd.append("curl -s -X PUT "); curlCmd.append(quoteArg(url)); curlCmd.append(" -H \"Authorization: Bearer "); curlCmd.append(token); curlCmd.append("\" -H \"Content-Type: application/gzip\" --data-binary @"); curlCmd.append(archivePath);
     var pubMsg = String(); pubMsg.append("Publishing "); pubMsg.append(org); pubMsg.append("/"); pubMsg.append(name); pubMsg.append("@"); pubMsg.append(version); pubMsg.append(" to "); pubMsg.append(regUrl); pubMsg.append("...");
@@ -265,9 +261,21 @@ func handlePublish() {
     let output = captureOutput(curlCmd);
     let _ = println(output);
 
+    // Upload docs if generated
+    if hasDocs {
+        var docsPath = String(); docsPath.append(docsDir); docsPath.append("/docs.json");
+        var docsUrl = String(); docsUrl.append(regUrl); docsUrl.append("/api/v1/packages/"); docsUrl.append(org); docsUrl.append("/"); docsUrl.append(name); docsUrl.append("/"); docsUrl.append(version); docsUrl.append("/docs");
+        var docsCurlCmd = String(); docsCurlCmd.append("curl -s -X PUT "); docsCurlCmd.append(quoteArg(docsUrl)); docsCurlCmd.append(" -H \"Authorization: Bearer "); docsCurlCmd.append(token); docsCurlCmd.append("\" -H \"Content-Type: application/json\" --data-binary @"); docsCurlCmd.append(docsPath);
+        let _ = println("Uploading documentation...");
+        let docsOutput = captureOutput(docsCurlCmd);
+        let _ = println(docsOutput);
+    }
+
     // Clean up
     var rmCmd = String(); rmCmd.append("rm -f "); rmCmd.append(archivePath);
     let _ = spawn(rmCmd);
+    var rmDocsCmd = String(); rmDocsCmd.append("rm -rf "); rmDocsCmd.append(docsDir);
+    let _ = spawn(rmDocsCmd);
 }
 
 func handleUpdate() {
@@ -459,16 +467,16 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
                     let flag = flags(unchecked: j);
                     // Parse -l, -L, and -framework flags from command output
                     if flag.starts(with: "-l") {
-                        allLinkLibs.append(flag.substringBytes(from: 2, to: flag.byteCount))
+                        allLinkLibs.append(flag.asSlice().subslice(from: 2, to: flag.byteCount).toOwned())
                     } else if flag.starts(with: "-L") {
-                        allLinkPaths.append(flag.substringBytes(from: 2, to: flag.byteCount))
+                        allLinkPaths.append(flag.asSlice().subslice(from: 2, to: flag.byteCount).toOwned())
                     } else if flag.starts(with: "-framework") {
                         // -framework is usually followed by the name as next arg
                         // but sometimes it's -framework<Name>
                     }
                     j = j + 1;
                     // Handle "-framework Name" as two separate tokens
-                    if flag.equals("-framework") and j < flags.count {
+                    if flag == "-framework" and j < flags.count {
                         allFrameworks.append(flags(unchecked: j));
                         j = j + 1
                     }
@@ -503,7 +511,7 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
     while i < sorted.count {
         let node = sorted(unchecked: i);
         // Skip the root package itself
-        if not node.name.equals(manifest.package.name) {
+        if node.name != manifest.package.name {
             let isRegistry = isRegistryDep(name: node.name);
             let src = if isRegistry { "registry" } else { "path" };
             var entryPath: Optional[String] = .None;
@@ -548,7 +556,7 @@ func splitWhitespace(s: String) -> Array[String] {
         let isSpace = b == 32 or b == 9 or b == 10 or b == 13;
         if isSpace {
             if start >= 0 {
-                result.append(s.substringBytes(from: start, to: i));
+                result.append(s.asSlice().subslice(from: start, to: i).toOwned());
                 start = -1
             }
         } else {
@@ -560,7 +568,7 @@ func splitWhitespace(s: String) -> Array[String] {
     }
 
     if start >= 0 {
-        result.append(s.substringBytes(from: start, to: len))
+        result.append(s.asSlice().subslice(from: start, to: len).toOwned())
     }
 
     result
@@ -597,12 +605,12 @@ func lastPathComponent(path: String) -> String {
     var i = end - 1;
     while i >= 0 {
         if path.bytes(unchecked: i) == 47 { // '/'
-            return path.substringBytes(from: i + 1, to: end)
+            return path.asSlice().subslice(from: i + 1, to: end).toOwned()
         }
         i = i - 1
     }
 
-    path.substringBytes(from: 0, to: end)
+    path.asSlice().subslice(from: 0, to: end).toOwned()
 }
 
 /// Trims leading and trailing whitespace (spaces, tabs, newlines) from a string.
@@ -626,5 +634,5 @@ func trimWhitespace(s: String) -> String {
             break
         }
     }
-    s.substringBytes(from: start, to: end)
+    s.asSlice().subslice(from: start, to: end).toOwned()
 }

@@ -83,7 +83,7 @@ public struct LockFile: Cloneable {
         var i: Int64 = 0;
         while i < self.packages.count {
             let entry = self.packages(unchecked: i);
-            if entry.name.equals(name) {
+            if entry.name == name {
                 return .Some(entry)
             }
             i = i + 1

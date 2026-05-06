@@ -634,21 +634,31 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     self.ctx.register_name(static_entity);
                     Value::Place(Place::Global(static_entity))
                 } else if is_callable {
-                    // Computed property: emit a getter call
+                    // Computed property: emit a getter call. Protocol-default
+                    // getters (`var count: Int64 { ... }` in `extend Slice[T]`)
+                    // route through the witness so monomorphization resolves
+                    // the protocol's type params from the witness binding —
+                    // prepending the receiver's args here would double-count
+                    // them and trip the dispatch arity check.
                     let getter_entity = resolved.unwrap();
                     self.ctx.register_name(getter_entity);
                     let receiver_ty = self.resolve_expr_type(*base);
                     let base_val = self.lower_expr(*base);
                     let result_ty = self.resolve_expr_type(expr_id);
-
-                    // Pass receiver as Ref (borrowing getter)
                     let receiver_arg = CallArg::borrow(base_val);
-                    let type_args = self.resolve_type_args(expr_id);
-                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
+                    let method_type_args = self.resolve_type_args(expr_id);
 
-                    // Use method callee so self_type is set — monomorphization
-                    // needs self_type to mangle the name correctly
-                    let callee = Callee::method(getter_entity, type_args, receiver_ty);
+                    let callee = if let Some(protocol) =
+                        self.find_protocol_for_method(getter_entity)
+                    {
+                        self.ctx.register_name(protocol);
+                        let method_key = self.witness_method_key_of(getter_entity);
+                        Callee::witness(protocol, method_key, receiver_ty, method_type_args)
+                    } else {
+                        let type_args =
+                            self.prepend_receiver_type_args(&receiver_ty, method_type_args);
+                        Callee::method(getter_entity, type_args, receiver_ty)
+                    };
                     self.emit_call(callee, vec![receiver_arg], result_ty)
                 } else {
                     // Stored field: direct place access
@@ -1084,6 +1094,76 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// call site. For witness calls, receiver information flows in via
     /// `Callee::Witness::self_type`; for direct calls, inherited struct
     /// type params are prepended to the method type args.
+    /// Materialize a `String` value from a literal byte sequence using the
+    /// type's `init(stringLiteral:length:)` — the same path string-literal
+    /// expressions take. Falls back to a raw string immediate if the init
+    /// can't be resolved (only happens before stdlib is loaded).
+    fn materialize_string_literal_value(&mut self, content: &str, string_ty: MirTy) -> Value {
+        if let MirTy::Named { entity, .. } = &string_ty
+            && let Some(init_entity) = self.find_string_literal_init(*entity)
+        {
+            let ptr_val = Value::Immediate(Immediate::string_ptr(content.to_string()));
+            let len_val = Value::Immediate(Immediate::i64(content.len() as i64));
+            self.ctx.register_name(init_entity);
+            let call_args = vec![CallArg::copy(ptr_val), CallArg::copy(len_val)];
+            let callee = Callee::method(init_entity, vec![], string_ty.clone());
+            return self.emit_call_maybe_init(callee, call_args, string_ty);
+        }
+        Value::Immediate(Immediate::string(content.to_string()))
+    }
+
+    /// Emit a witness-dispatched `Matchable.matches(other:)` call for a
+    /// `String` scrutinee against a string literal. Returns the resulting
+    /// `Bool` value, suitable for `Terminator::branch`.
+    fn emit_string_literal_match_test(
+        &mut self,
+        scrutinee_place: &Place,
+        string_ty: MirTy,
+        literal: &str,
+    ) -> Value {
+        let lit_value = self.materialize_string_literal_value(literal, string_ty.clone());
+
+        let proto_entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Matchable,
+            root: self.ctx.root,
+        });
+        let bool_entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Bool,
+            root: self.ctx.root,
+        });
+        let bool_ty = bool_entity
+            .map(|e| MirTy::Named {
+                entity: e,
+                type_args: vec![],
+            })
+            .unwrap_or(MirTy::Bool);
+
+        let Some(proto) = proto_entity else {
+            // Stdlib didn't define Matchable — leave a constant false so
+            // codegen still produces a valid module.
+            return Value::Immediate(Immediate::bool(false));
+        };
+        self.ctx.register_name(proto);
+
+        // `matches(other: Self)` — single-name param, so the label is None
+        // (Kestrel: single-name = positional; two-name = labeled).
+        let method_key = WitnessMethodKey::new("matches".to_string(), vec![None]);
+        let callee = Callee::witness(proto, method_key, string_ty.clone(), vec![]);
+
+        let receiver_arg = if string_ty.is_trivially_copyable() {
+            CallArg::copy(Value::Place(scrutinee_place.clone()))
+        } else {
+            CallArg::borrow(Value::Place(scrutinee_place.clone()))
+        };
+        let lit_arg = if string_ty.is_trivially_copyable() {
+            CallArg::copy(lit_value)
+        } else {
+            CallArg::borrow(lit_value)
+        };
+
+        self.emit_call(callee, vec![receiver_arg, lit_arg], bool_ty)
+    }
+
     fn emit_method_dispatch(
         &mut self,
         resolved_entity: Entity,
@@ -2269,6 +2349,32 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 type_args = self.infer_parent_type_args(func_entity, expr_id, callee_expr);
             }
 
+            // Receiver-prepend rules for the typed-resolution branch:
+            //   - Init: emit_call_maybe_init allocates and prepends self.
+            //   - Subscript / computed-property: callee_expr IS the receiver,
+            //     so we lower it and prepend it as the first arg.
+            //   - Plain function call: no receiver.
+            // This applies to BOTH the protocol-witness and direct-call arms
+            // below — a protocol-extension subscript still needs its receiver,
+            // even though dispatch goes through a witness.
+            let has_receiver = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Callable>(func_entity)
+                .is_some_and(|c| c.receiver.is_some());
+            let is_init = self.is_init_function(func_entity).is_some();
+            let mut call_args = call_args;
+            if has_receiver && !is_init {
+                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let receiver_val = self.lower_expr(callee_expr);
+                let receiver_arg = if receiver_ty.is_trivially_copyable() {
+                    CallArg::copy(receiver_val)
+                } else {
+                    CallArg::borrow(receiver_val)
+                };
+                call_args.insert(0, receiver_arg);
+            }
+
             // Protocol method → Witness dispatch
             if let Some(protocol) = self.find_protocol_for_method(func_entity) {
                 let method_key = self.witness_method_key_of(func_entity);
@@ -2282,27 +2388,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 return self.emit_call_maybe_init(callee, call_args, result_ty);
             }
 
-            // If the resolved function has a receiver (subscript/computed property call),
-            // the callee expression is the receiver — add it as the first arg
-            let mut call_args = call_args;
-            let has_receiver = self
-                .ctx
-                .world
-                .get::<kestrel_ast_builder::Callable>(func_entity)
-                .is_some_and(|c| c.receiver.is_some());
-            // Init functions handle their own self-allocation via emit_call_maybe_init
-            let is_init = self.is_init_function(func_entity).is_some();
             if has_receiver && !is_init {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
-                let receiver_val = self.lower_expr(callee_expr);
-                let receiver_arg = if receiver_ty.is_trivially_copyable() {
-                    CallArg::copy(receiver_val)
-                } else {
-                    CallArg::borrow(receiver_val)
-                };
                 let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
                 let callee = Callee::method(func_entity, type_args, receiver_ty);
-                call_args.insert(0, receiver_arg);
                 return self.emit_call(callee, call_args, result_ty);
             }
 
@@ -3750,7 +3839,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         match tree {
             DecisionTree::Switch {
                 path,
-                ty: _,
+                ty,
                 cases,
                 default,
             } => {
@@ -3783,6 +3872,61 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
                     self.switch_to_block(false_block);
                     self.emit_decision_tree(&cases[1].1, scrutinee, arms, result_local, join_block);
+                    return;
+                }
+
+                // String-literal switches can't lower to a `SwitchTerminator`
+                // — there's no native string equality in the backend. Emit a
+                // fall-through chain of `Matchable.matches` calls instead. Each
+                // arm becomes one `if scrut.matches(literal) { sub } else next`.
+                if cases
+                    .iter()
+                    .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
+                {
+                    let test_ty = lower_resolved_ty(self.ctx, ty);
+                    for (ctor, subtree) in cases.iter() {
+                        let Constructor::StringLiteral(lit) = ctor else {
+                            // Mixed string+non-string cases shouldn't happen
+                            // (decision-tree compiler keeps constructors of the
+                            // same type together); skip defensively.
+                            continue;
+                        };
+                        let cmp = self.emit_string_literal_match_test(
+                            &test_place,
+                            test_ty.clone(),
+                            lit,
+                        );
+                        let hit_block = self.new_block();
+                        let miss_block = self.new_block();
+                        self.set_terminator(Terminator::branch(cmp, hit_block, miss_block));
+
+                        self.switch_to_block(hit_block);
+                        self.emit_decision_tree(
+                            subtree,
+                            scrutinee,
+                            arms,
+                            result_local,
+                            join_block,
+                        );
+
+                        self.switch_to_block(miss_block);
+                    }
+                    // Fall-through: emit the default subtree (if any) or a
+                    // trap. Exhaustiveness should guarantee a default for
+                    // `String` since it's `NonExhaustive`.
+                    if let Some(def_tree) = default {
+                        self.emit_decision_tree(
+                            def_tree,
+                            scrutinee,
+                            arms,
+                            result_local,
+                            join_block,
+                        );
+                    } else {
+                        self.set_terminator(Terminator::panic(
+                            "match failure: non-exhaustive string patterns",
+                        ));
+                    }
                     return;
                 }
 

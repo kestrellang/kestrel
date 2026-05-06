@@ -6,7 +6,7 @@ protocol Comparable {
     func compare(other: Self)
 }
 protocol Equatable {
-    func equals(other: Self)
+    func isEqual(to other: Self)
 }
 protocol Iterator {
     type Item

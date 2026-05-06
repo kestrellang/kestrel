@@ -37,5 +37,5 @@ func main() -> lang.i64 {
     var bag = Bag();
     bag.items.append("hello");
     let got = firstItem(bag);
-    if got.equals("hello") { 0 } else { 1 }
+    if got.isEqual(to: "hello") { 0 } else { 1 }
 }

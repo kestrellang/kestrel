@@ -45,7 +45,7 @@ module Test
             var rng3b = std.numeric.Lcg64(seed: 999);
             arr4.shuffle(using: rng3b);
 
-            if arr3.equals(arr4) == false { return 14 }
+            if arr3.isEqual(to: arr4) == false { return 14 }
 
             0
         }

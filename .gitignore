@@ -30,5 +30,9 @@ examples/weather/weather
 
 **/flock.lock
 
-# Separate repos living inside the monorepo checkout
+# Separate repos living inside the monorepo checkout — match both
+# directory and file/symlink forms so a stray `ln -s` can't be staged.
+/external
 /external/
+
+.wrangler

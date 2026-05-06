@@ -19,7 +19,7 @@ module Test
             // ---- clone() ----
             let original: std.text.String = "hello";
             let cloned = original.clone();
-            if cloned.equals("hello") == false { return 4 }
+            if cloned.isEqual(to: "hello") == false { return 4 }
 
             // clone is COW - mutating clone doesn't affect original
             var mClone = original.clone();
@@ -31,7 +31,7 @@ module Test
             let s1: std.text.String = "hello";
             let s2: std.text.String = " world";
             let combined = s1.add(s2);
-            if combined.equals("hello world") == false { return 7 }
+            if combined.isEqual(to: "hello world") == false { return 7 }
             // Originals unchanged
             if s1.byteCount != 5 { return 8 }
             if s2.byteCount != 6 { return 9 }

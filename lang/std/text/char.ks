@@ -2,20 +2,16 @@
 
 module std.text
 
-import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hash, Hasher, RangeMatchable)
+import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hashable, Hasher, RangeMatchable)
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
-import std.text.(String)
+import std.memory.(ArraySlice, Pointer)
+import std.text.(String, StringBuilder, Formattable, FormatOptions)
 import std.text.unicode as unicode
 
 // ============================================================================
 // TYPE ALIASES
-// ============================================================================
-
-/// One byte of UTF-8 (or any other) encoded text — alias for `UInt8`.
-public type Byte = UInt8
-
 // ============================================================================
 // CHAR
 // ============================================================================
@@ -33,7 +29,7 @@ public type Byte = UInt8
 ///
 /// ```
 /// let a: Char = 'a';
-/// a.isAlphabetic();    // true
+/// a.isAsciiLetter;    // true
 /// a.utf8Length();      // 1
 /// let smile: Char = '\u{1F600}';
 /// smile.utf8Length();  // 4
@@ -43,7 +39,7 @@ public type Byte = UInt8
 ///
 /// A single `UInt32` holding the scalar value. Comparison and hashing
 /// operate on that integer directly.
-public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hash, RangeMatchable {
+public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, Hashable, RangeMatchable {
     private var _value: UInt32
 
     // ========================================================================
@@ -65,6 +61,15 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// ```
     public init(value: UInt32) {
         self._value = value;
+    }
+
+    /// @name Validated
+    /// Returns a `Char` if the value is a valid Unicode scalar, `.None` otherwise.
+    /// Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
+    public static func validated(value: UInt32) -> Char? {
+        if value > UInt32(intLiteral: 0x10FFFF) { return .None }
+        if value >= UInt32(intLiteral: 0xD800) and value <= UInt32(intLiteral: 0xDFFF) { return .None }
+        .Some(Char(value))
     }
 
     /// @name Char Literal
@@ -112,10 +117,10 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'A'.isAscii();          // true
-    /// '\u{00E9}'.isAscii();   // false (é)
+    /// 'A'.isAscii;          // true
+    /// '\u{00E9}'.isAscii;   // false (é)
     /// ```
-    public func isAscii() -> Bool {
+    public var isAscii: Bool {
         self < '\u{80}'
     }
 
@@ -128,11 +133,11 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'A'.isAlphabetic();         // true
-    /// '\u{00E9}'.isAlphabetic();  // false (é — non-ASCII)
-    /// '7'.isAlphabetic();         // false
+    /// 'A'.isAsciiLetter;         // true
+    /// '\u{00E9}'.isAsciiLetter;  // false (é — non-ASCII)
+    /// '7'.isAsciiLetter;         // false
     /// ```
-    public func isAlphabetic() -> Bool {
+    public var isAsciiLetter: Bool {
         (self >= 'A' and self <= 'Z') or (self >= 'a' and self <= 'z')
     }
 
@@ -145,27 +150,27 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// '7'.isDigit();   // true
-    /// 'a'.isDigit();   // false
+    /// '7'.isAsciiDigit;   // true
+    /// 'a'.isAsciiDigit;   // false
     /// ```
-    public func isDigit() -> Bool {
+    public var isAsciiDigit: Bool {
         self >= '0' and self <= '9'
     }
 
     /// Returns true for ASCII letters and ASCII digits.
     ///
-    /// Composition of `isAlphabetic` and `isDigit`; same ASCII-only
+    /// Composition of `isAsciiLetter` and `isAsciiDigit`; same ASCII-only
     /// caveats apply.
     ///
     /// # Examples
     ///
     /// ```
-    /// 'a'.isAlphanumeric();  // true
-    /// '7'.isAlphanumeric();  // true
-    /// '_'.isAlphanumeric();  // false
+    /// 'a'.isAsciiAlphanumeric;  // true
+    /// '7'.isAsciiAlphanumeric;  // true
+    /// '_'.isAsciiAlphanumeric;  // false
     /// ```
-    public func isAlphanumeric() -> Bool {
-        self.isAlphabetic() or self.isDigit()
+    public var isAsciiAlphanumeric: Bool {
+        self.isAsciiLetter or self.isAsciiDigit
     }
 
     /// Returns true for the common ASCII whitespace set: space, tab, LF, CR, form feed.
@@ -177,12 +182,12 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// ' '.isWhitespace();    // true
-    /// '\t'.isWhitespace();   // true
-    /// '\n'.isWhitespace();   // true
-    /// 'a'.isWhitespace();    // false
+    /// ' '.isWhitespace;    // true
+    /// '\t'.isWhitespace;   // true
+    /// '\n'.isWhitespace;   // true
+    /// 'a'.isWhitespace;    // false
     /// ```
-    public func isWhitespace() -> Bool {
+    public var isWhitespace: Bool {
         self == ' ' or self == '\t' or self == '\n' or self == '\r' or self == '\x0C'
     }
 
@@ -194,11 +199,11 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// '\n'.isControl();     // true
-    /// '\x7F'.isControl();   // true
-    /// 'a'.isControl();      // false
+    /// '\n'.isControl;     // true
+    /// '\x7F'.isControl;   // true
+    /// 'a'.isControl;      // false
     /// ```
-    public func isControl() -> Bool {
+    public var isControl: Bool {
         self < ' ' or self == '\x7F'
     }
 
@@ -210,11 +215,11 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'A'.isUppercase();         // true
-    /// 'a'.isUppercase();         // false
-    /// '\u{00C9}'.isUppercase();  // false (É — non-ASCII)
+    /// 'A'.isAsciiUppercase;         // true
+    /// 'a'.isAsciiUppercase;         // false
+    /// '\u{00C9}'.isAsciiUppercase;  // false (É — non-ASCII)
     /// ```
-    public func isUppercase() -> Bool {
+    public var isAsciiUppercase: Bool {
         self >= 'A' and self <= 'Z'
     }
 
@@ -226,10 +231,10 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'a'.isLowercase();   // true
-    /// 'A'.isLowercase();   // false
+    /// 'a'.isAsciiLowercase;   // true
+    /// 'A'.isAsciiLowercase;   // false
     /// ```
-    public func isLowercase() -> Bool {
+    public var isAsciiLowercase: Bool {
         self >= 'a' and self <= 'z'
     }
 
@@ -373,7 +378,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// Returns the numeric value `0`–`9` for ASCII digits, otherwise `None`.
     ///
     /// Inverse of `fromDigit`. Non-ASCII digit characters return `None`
-    /// — match `isDigit` semantics.
+    /// — match `isAsciiDigit` semantics.
     ///
     /// # Examples
     ///
@@ -382,7 +387,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// 'a'.digitValue();  // None
     /// ```
     public func digitValue() -> UInt32? {
-        if self.isDigit() {
+        if self.isAsciiDigit {
             let zero: Char = '0';
             .Some(self.value() - zero.value())
         } else {
@@ -420,14 +425,14 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// # Examples
     ///
     /// ```
-    /// 'a'.equals('a');  // true
-    /// 'a'.equals('A');  // false
+    /// 'a'.isEqual(to: 'a');  // true
+    /// 'a'.isEqual(to: 'A');  // false
     /// ```
-    public func equals(other: Char) -> Bool {
+    public func isEqual(to other: Char) -> Bool {
         self._value == other._value
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     public func matches(other: Char) -> Bool {
         self._value == other._value
     }
@@ -455,7 +460,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
@@ -471,6 +476,21 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// Returns true if `self < bound`. Used by `RangeMatchable` for half-open patterns.
     public func isBelow(bound: Char) -> Bool {
         self.compare(bound) == Ordering.Less
+    }
+
+    /// Converts this code point to an owned `String`.
+    public func toString() -> String {
+        var s = String();
+        s.appendChar(self);
+        s
+    }
+}
+
+// -- Formattable conformance -------------------------------------------------
+
+extend Char: Formattable {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        writer.appendChar(self)
     }
 }
 
@@ -492,7 +512,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 /// ```
 /// let g = Grapheme(char: 'a');
 /// g.charCount();   // 1
-/// g.isAscii();     // true
+/// g.isAscii;     // true
 /// g.utf8Length();  // 1
 /// ```
 ///
@@ -567,18 +587,13 @@ public struct Grapheme: Equatable, Cloneable {
 
     /// Returns a deep copy of this grapheme.
     public func clone() -> Grapheme {
-        if let .Some(r) = self._rest {
-            var copy = Array[Char]();
-            copy.append(self._first);
-            let rn = r.count;
-            var i: Int64 = 0;
-            while i < rn {
-                copy.append(r(unchecked: i));
-                i = i + 1
+        match self._rest {
+            .None => Grapheme(char: self._first),
+            .Some(r) => {
+                var g = Grapheme(char: self._first);
+                g._rest = .Some(r.clone());
+                g
             }
-            Grapheme(chars: copy)
-        } else {
-            Grapheme(char: self._first)
         }
     }
 
@@ -586,18 +601,15 @@ public struct Grapheme: Equatable, Cloneable {
     // ACCESSORS
     // ========================================================================
 
-    /// Returns the constituent code points in scalar order.
+    /// The constituent code points in scalar order.
     ///
-    /// Materializes a fresh `Array[Char]` on every call.
-    public func chars() -> Array[Char] {
+    /// Materializes a fresh `Array[Char]` on every access.
+    public var chars: Array[Char] {
         var arr = Array[Char]();
         arr.append(self._first);
         if let .Some(r) = self._rest {
-            let n = r.count;
-            var i: Int64 = 0;
-            while i < n {
-                arr.append(r(unchecked: i));
-                i = i + 1
+            for c in r {
+                arr.append(c)
             }
         }
         arr
@@ -614,22 +626,17 @@ public struct Grapheme: Equatable, Cloneable {
 
     /// Returns the first `Char` of the cluster.
     ///
-    /// Always `.Some` — every grapheme has at least one code point.
-    /// Useful as a cheap "what kind of grapheme is this?" check
-    /// (alphabetic, digit, emoji-base, …) without inspecting the full
-    /// cluster.
-    public func firstChar() -> Char? {
-        .Some(self._first)
-    }
+    /// The first code point of this grapheme cluster.
+    public var firstChar: Char { self._first }
 
     /// Returns true iff the cluster is exactly one ASCII `Char`.
     ///
     /// A single-`Char` non-ASCII grapheme (e.g. `é` as the precomposed
     /// `U+00E9`) returns `false`. Multi-`Char` clusters always return
     /// `false` even if every component is ASCII.
-    public func isAscii() -> Bool {
+    public var isAscii: Bool {
         match self._rest {
-            .None => self._first.isAscii(),
+            .None => self._first.isAscii,
             .Some(_) => false
         }
     }
@@ -667,10 +674,10 @@ public struct Grapheme: Equatable, Cloneable {
     /// ```
     /// let a = Grapheme(char: 'a');
     /// let b = Grapheme(char: 'a');
-    /// a.equals(b);  // true
+    /// a.isEqual(to: b);  // true
     /// ```
-    public func equals(other: Grapheme) -> Bool {
-        if self._first.equals(other._first) == false {
+    public func isEqual(to other: Grapheme) -> Bool {
+        if self._first.isEqual(to: other._first) == false {
             return false
         }
         match (self._rest, other._rest) {
@@ -682,7 +689,7 @@ public struct Grapheme: Equatable, Cloneable {
                 }
                 var i: Int64 = 0;
                 while i < an {
-                    if a(unchecked: i).equals(b(unchecked: i)) == false {
+                    if a(unchecked: i).isEqual(to: b(unchecked: i)) == false {
                         return false
                     }
                     i = i + 1
@@ -694,63 +701,42 @@ public struct Grapheme: Equatable, Cloneable {
     }
 }
 
+// -- Grapheme: Comparable, Hashable, Formattable ---------------------------------
+
+extend Grapheme: Comparable {
+    public func compare(other: Grapheme) -> Ordering {
+        let myChars = self.chars;
+        let otherChars = other.chars;
+        let minLen = if myChars.count < otherChars.count { myChars.count } else { otherChars.count };
+        for (i, c) in myChars.iter().enumerate() {
+            if i >= minLen { break }
+            let cmp = c.compare(otherChars(unchecked: i));
+            if cmp != .Equal { return cmp }
+        }
+        myChars.count.compare(otherChars.count)
+    }
+}
+
+extend Grapheme: Hashable {
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        for c in self.chars {
+            c.hash(into: hasher)
+        }
+    }
+}
+
+extend Grapheme: Formattable {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        for c in self.chars {
+            writer.appendChar(c)
+        }
+    }
+}
+
 // ============================================================================
 // ASCII CONSTANTS
 // ============================================================================
 
-/// Namespace of common ASCII punctuation and whitespace characters.
-///
-/// Static factories rather than constants because Kestrel does not yet
-/// have non-trivial `static let` initialisation; calls are cheap and
-/// fully constant-folded.
-///
-/// # Examples
-///
-/// ```
-/// AsciiChars.space() == ' ';        // true
-/// AsciiChars.newline() == '\n';     // true
-/// AsciiChars.colon() == ':';        // true
-/// ```
-public struct AsciiChars {
-    /// The space character `' '` (`U+0020`).
-    public static func space() -> Char { ' ' }
-
-    /// The newline character `'\n'` (`U+000A`, line feed).
-    public static func newline() -> Char { '\n' }
-
-    /// The carriage return character `'\r'` (`U+000D`).
-    public static func carriageReturn() -> Char { '\r' }
-
-    /// The horizontal tab character `'\t'` (`U+0009`).
-    public static func tab() -> Char { '\t' }
-
-    /// The null character `'\0'` (`U+0000`).
-    public static func nul() -> Char { '\0' }
-
-    /// The forward-slash character `'/'`.
-    public static func slash() -> Char { '/' }
-
-    /// The backslash character `'\\'`.
-    public static func backslash() -> Char { '\\' }
-
-    /// The period character `'.'`.
-    public static func dot() -> Char { '.' }
-
-    /// The comma character `','`.
-    public static func comma() -> Char { ',' }
-
-    /// The colon character `':'`.
-    public static func colon() -> Char { ':' }
-
-    /// The semicolon character `';'`.
-    public static func semicolon() -> Char { ';' }
-
-    /// The double-quote character `'"'`.
-    public static func quote() -> Char { '"' }
-
-    /// The single-quote / apostrophe character `'\''`.
-    public static func apostrophe() -> Char { '\'' }
-}
 
 // ============================================================================
 // UTF-8 DECODING RESULT

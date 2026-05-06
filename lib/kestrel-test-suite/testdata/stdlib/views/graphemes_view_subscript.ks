@@ -8,14 +8,14 @@ module Test
 
             // ---- view(i) ----
             let g0 = s.graphemes(0);
-            if g0.firstChar().unwrap().equals('a') == false { return 1 }
+            if g0.firstChar.isEqual(to: 'a') == false { return 1 }
             let g4 = s.graphemes(4);
-            if g4.firstChar().unwrap().equals('e') == false { return 2 }
+            if g4.firstChar.isEqual(to: 'e') == false { return 2 }
 
             // ---- view(checked: i) ----
             let gc = s.graphemes(checked: 2);
             if gc.isNone() { return 3 }
-            if gc.unwrap().firstChar().unwrap().equals('c') == false { return 4 }
+            if gc.unwrap().firstChar.isEqual(to: 'c') == false { return 4 }
 
             let gOob = s.graphemes(checked: 100);
             if gOob.isSome() { return 5 }
@@ -25,13 +25,13 @@ module Test
 
             // ---- view(clamped: i) on non-empty view ----
             let gcl = s.graphemes(clamped: 2);
-            if gcl.unwrap().firstChar().unwrap().equals('c') == false { return 7 }
+            if gcl.unwrap().firstChar.isEqual(to: 'c') == false { return 7 }
 
             let gNegClamp = s.graphemes(clamped: -10);
-            if gNegClamp.unwrap().firstChar().unwrap().equals('a') == false { return 8 }
+            if gNegClamp.unwrap().firstChar.isEqual(to: 'a') == false { return 8 }
 
             let gOverClamp = s.graphemes(clamped: 100);
-            if gOverClamp.unwrap().firstChar().unwrap().equals('e') == false { return 9 }
+            if gOverClamp.unwrap().firstChar.isEqual(to: 'e') == false { return 9 }
 
             // ---- view(clamped:) on empty view returns None ----
             let empty = std.text.String();
@@ -41,21 +41,21 @@ module Test
             // ---- range subscripts yield GraphemesView ----
             // Range[Int64]
             let sub = s.graphemes(std.core.Range[std.numeric.Int64](0, 3));
-            if sub.toString().equals("abc") == false { return 11 }
+            if sub.toString().isEqual(to: "abc") == false { return 11 }
 
             let subMid = s.graphemes(std.core.Range[std.numeric.Int64](1, 4));
-            if subMid.toString().equals("bcd") == false { return 12 }
+            if subMid.toString().isEqual(to: "bcd") == false { return 12 }
 
             // graphemes.substring convenience (Range)
-            if s.graphemes.substring(std.core.Range[std.numeric.Int64](1, 4)).equals("bcd") == false { return 13 }
+            if s.graphemes.substring(std.core.Range[std.numeric.Int64](1, 4)).isEqual(to: "bcd") == false { return 13 }
 
             // graphemes.substring convenience (ClosedRange)
-            if s.graphemes.substring(std.core.ClosedRange[std.numeric.Int64](1, 3)).equals("bcd") == false { return 20 }
+            if s.graphemes.substring(std.core.ClosedRange[std.numeric.Int64](1, 3)).isEqual(to: "bcd") == false { return 20 }
 
             // checked range - valid
             let subChecked = s.graphemes(checked: std.core.Range[std.numeric.Int64](0, 5));
             if subChecked.isNone() { return 14 }
-            if subChecked.unwrap().toString().equals("abcde") == false { return 15 }
+            if subChecked.unwrap().toString().isEqual(to: "abcde") == false { return 15 }
 
             // checked range - out of bounds
             let subOob = s.graphemes(checked: std.core.Range[std.numeric.Int64](0, 100));
@@ -67,11 +67,11 @@ module Test
 
             // clamped range
             let subClamp = s.graphemes(clamped: std.core.Range[std.numeric.Int64](-5, 100));
-            if subClamp.toString().equals("abcde") == false { return 18 }
+            if subClamp.toString().isEqual(to: "abcde") == false { return 18 }
 
             // ClosedRange[Int64]
             let subClosed = s.graphemes(std.core.ClosedRange[std.numeric.Int64](1, 3));
-            if subClosed.toString().equals("bcd") == false { return 19 }
+            if subClosed.toString().isEqual(to: "bcd") == false { return 19 }
 
             0
         }

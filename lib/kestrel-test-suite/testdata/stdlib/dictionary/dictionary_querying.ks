@@ -33,19 +33,19 @@ module Test
             let hasHugeValue = dict.contains(matching: { (k, v) in v > 100 });
             if hasHugeValue { return 4 }
 
-            // Test all(satisfy:) - true case
-            let allPositive = dict.all(satisfying: { (k, v) in v > 0 });
+            // Test all(matching:) - true case
+            let allPositive = dict.all(matching: { (k, v) in v > 0 });
             if allPositive == false { return 5 }
 
-            // Test all(satisfy:) - false case
-            let allBig = dict.all(satisfying: { (k, v) in v > 15 });
+            // Test all(matching:) - false case
+            let allBig = dict.all(matching: { (k, v) in v > 15 });
             if allBig { return 6 }
 
-            // Test any(satisfy:)
-            let anyTwenty = dict.any(satisfying: { (k, v) in v == 20 });
+            // Test any(matching:)
+            let anyTwenty = dict.any(matching: { (k, v) in v == 20 });
             if anyTwenty == false { return 7 }
 
-            let anyHundred = dict.any(satisfying: { (k, v) in v == 100 });
+            let anyHundred = dict.any(matching: { (k, v) in v == 100 });
             if anyHundred { return 8 }
 
             // Test countWhere()
@@ -63,9 +63,9 @@ module Test
             let notFound = dict.first(matching: { (k, v) in v == 999 });
             if notFound.isSome() { return 13 }
 
-            // Test all(satisfy:) on empty dictionary - vacuous truth
+            // Test all(matching:) on empty dictionary - vacuous truth
             var emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let vacuousAll = emptyDict.all(satisfying: { (k, v) in false });
+            let vacuousAll = emptyDict.all(matching: { (k, v) in false });
             if vacuousAll == false { return 14 }
 
             0

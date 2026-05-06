@@ -48,11 +48,11 @@ Reserve the full suite for pre-commit validation. Every edit-verify cycle on `--
 cargo test --release -p kestrel-test-suite --no-run
 ```
 
-After the release rebuild, a new triage run picks up the change (source edits invalidate the build hash → fresh rows).
+After the release rebuild, a new triage run picks up the change.
 
 ## Results Are Cached Per Build
 
-Triage keys results by build hash. Running `triage <pattern>` with no source change returns the same results — it won't re-execute already-recorded rows. To force re-run, edit a source file (the build hash changes) or use `triage cancel <build_id>` on the prior rows.
+Triage keys results by a build hash that covers **both the compiled test binary and the `.ks` testdata files**. Editing Rust source (after rebuild) or any `.ks` file under `lib/kestrel-test-suite/testdata/` (or stdlib `.ks` files) changes the hash and produces fresh rows. With no source change, `triage <pattern>` returns the cached results and won't re-execute. To force a re-run without editing, use `triage cancel <build_id>` on the prior rows.
 
 ## Patterns
 
@@ -97,7 +97,7 @@ Use default batching unless isolating a crash, hang, or flaky test. Default `-j`
 
 - `triage` always builds before scheduling; this can take a few seconds.
 - Any current-build row counts as done, including `canceled`, `skipped`, or `hung`.
-- Source edits create a new build hash and a fresh set of rows.
+- Source edits — Rust *or* `.ks` test/stdlib files — create a new build hash and a fresh set of rows.
 - Multiple agents can run triage concurrently; total parallelism is the sum of all `-j` values.
 - `.triage/triage.db` is the source of truth; logs live under `.triage/logs/`.
 - `kestrel dump diagnostics` does NOT include analyzer diagnostics — the compiler CLI only emits codespan-level diagnostics. Analyzer output (E005, E302, etc.) only surfaces via the test harness. To verify an analyzer change, run the target test(s) through `triage`.

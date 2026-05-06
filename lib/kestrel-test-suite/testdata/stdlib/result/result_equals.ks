@@ -12,22 +12,22 @@ module Test
             let err3: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(10);
 
             // Ok(42) == Ok(42)
-            if ok1.equals(ok2) == false { return 1 }
+            if ok1.isEqual(to: ok2) == false { return 1 }
 
             // Ok(42) != Ok(99)
-            if ok1.equals(ok3) { return 2 }
+            if ok1.isEqual(to: ok3) { return 2 }
 
             // Err(5) == Err(5)
-            if err1.equals(err2) == false { return 3 }
+            if err1.isEqual(to: err2) == false { return 3 }
 
             // Err(5) != Err(10)
-            if err1.equals(err3) { return 4 }
+            if err1.isEqual(to: err3) { return 4 }
 
             // Ok(42) != Err(5)
-            if ok1.equals(err1) { return 5 }
+            if ok1.isEqual(to: err1) { return 5 }
 
             // Err(5) != Ok(42)
-            if err1.equals(ok1) { return 6 }
+            if err1.isEqual(to: ok1) { return 6 }
 
             0
         }

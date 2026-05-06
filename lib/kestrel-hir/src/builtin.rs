@@ -236,8 +236,9 @@ pub enum Builtin {
     DefaultStringInterpolationAppendLiteral,
     DefaultStringInterpolationAppendInterpolation,
     DefaultStringInterpolationBuild,
+    FormatOptions,
     FormattableProtocol,
-    FormattableFormatMethod,
+    FormattableFormatIntoMethod,
 }
 
 impl Builtin {
@@ -418,8 +419,9 @@ impl Builtin {
                 "DefaultStringInterpolationAppendInterpolation"
             },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
-            Self::FormattableFormatMethod => "FormattableFormat",
+            Self::FormattableFormatIntoMethod => "FormattableFormatInto",
         }
     }
 
@@ -596,8 +598,9 @@ impl Builtin {
                 Some(Self::DefaultStringInterpolationAppendInterpolation)
             },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
-            "FormattableFormat" => Some(Self::FormattableFormatMethod),
+            "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
             _ => None,
         }
@@ -759,13 +762,13 @@ impl Builtin {
             Self::ArrayStruct | Self::SliceStruct => BuiltinKind::Struct,
 
             // String interpolation
-            Self::DefaultStringInterpolation => BuiltinKind::Struct,
+            Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,
             Self::DefaultStringInterpolationInit
             | Self::DefaultStringInterpolationAppendLiteral
             | Self::DefaultStringInterpolationAppendInterpolation
             | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
-            Self::FormattableFormatMethod => BuiltinKind::ProtocolMethod,
+            Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
 
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,

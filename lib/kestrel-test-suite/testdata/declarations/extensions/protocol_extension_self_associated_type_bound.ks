@@ -3,7 +3,7 @@
 module Test
 
 protocol Equatable {
-    func equals(other: Self)
+    func isEqual(to other: Self)
 }
 protocol Iterator {
     type Item

@@ -109,7 +109,7 @@ public struct Range[T]: Equatable, Iterable where T: Steppable, T: Comparable {
 
     /// Equal when both bounds match. Useful for range-keyed lookups and
     /// tests, not a structural property of the iteration order.
-    public func equals(other: Range[T]) -> Bool {
+    public func isEqual(to other: Range[T]) -> Bool {
         self.start == other.start and self.end == other.end
     }
 
@@ -200,7 +200,7 @@ public struct ClosedRange[T]: Equatable, Iterable where T: Steppable, T: Compara
     }
 
     /// Equal when both bounds match.
-    public func equals(other: ClosedRange[T]) -> Bool {
+    public func isEqual(to other: ClosedRange[T]) -> Bool {
         self.start == other.start and self.end == other.end
     }
 

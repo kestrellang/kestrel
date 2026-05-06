@@ -99,6 +99,9 @@ pub enum SugarKind {
     /// `ProtocolCall(lhs, AddAssign, "addAssign", [rhs])`, or `HirExpr::Error`
     /// if the AST-level place check rejected the LHS at desugar time.
     CompoundAssign,
+    /// `"hello \(name)!"` — `inner` is the Block containing the
+    /// DefaultStringInterpolation init/append/build sequence.
+    StringInterpolation,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -454,6 +457,17 @@ pub enum EscapeErrorKind {
         value: String,
         reason: UnicodeEscapeErrorReason,
     },
+    /// A line in a multi-line string body has less indentation than the
+    /// closing `"""` delimiter.
+    MultilineUnderIndented,
+    /// Multi-line string opener `"""` must be followed immediately by a
+    /// newline.
+    MultilineMissingLeadingNewline,
+    /// Multi-line string closer `"""` must be on its own line (only
+    /// whitespace before it on that line).
+    MultilineMissingTrailingNewline,
+    /// String literal has no closing delimiter.
+    UnterminatedString,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -575,14 +589,14 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     (
         BinaryOp::Eq,
         Builtin::EqualsOperatorProtocol,
-        "equals",
-        None,
+        "isEqual",
+        Some("to"),
     ),
     (
         BinaryOp::Ne,
         Builtin::NotEqualsOperatorProtocol,
-        "notEquals",
-        None,
+        "isNotEqual",
+        Some("to"),
     ),
     (
         BinaryOp::Lt,

@@ -4,7 +4,7 @@
 module Main
 
 func test() -> lang.i64 {
-    while true {
+    while true { // ERROR: type mismatch
         loop {
             let inner: lang.i64 = 42;
             break;

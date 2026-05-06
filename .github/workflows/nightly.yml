@@ -1,6 +1,7 @@
 name: Nightly Release
 
 on:
+  workflow_dispatch:
   push:
     branches: [nightly]
 
@@ -51,6 +52,9 @@ jobs:
       - name: Build kestrel language server
         run: cargo build --release -p kestrel-lsp
 
+      - name: Build kestrel-doc
+        run: cargo build --release -p kestrel-doc
+
       - name: Bootstrap flock
         run: bash lang/flock/bootstrap.sh
 
@@ -72,6 +76,7 @@ jobs:
 
           cp target/release/kestrel "$STAGING/bin/"
           cp target/release/kestrel-lsp "$STAGING/bin/"
+          cp target/release/kestrel-doc "$STAGING/bin/"
           cp lang/flock/flock "$STAGING/bin/"
           cp -r lang/std "$STAGING/lib/std"
 

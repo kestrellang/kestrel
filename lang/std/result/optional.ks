@@ -2,11 +2,11 @@
 
 module std.result
 
-import std.core.(Equatable, Comparable, Ordering, Hash, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
-import std.text.(String, FormatOptions, Formattable)
+import std.core.(Equatable, Comparable, Ordering, Hashable, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
+import std.text.(String, StringBuilder, FormatOptions, Formattable)
 import std.result.(Result)
 import std.numeric.(Int64, UInt8)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 import std.iter.(Iterator)
 
 /// A type-safe stand-in for nullable references — either `Some(value)` or
@@ -472,12 +472,12 @@ public enum Optional[T] {
     ///
     /// ```
     /// var opt = Some(42);
-    /// opt.takeIf { it > 0 };    // Some(42); opt is now None
+    /// opt.take(matching: { it > 0 });    // Some(42); opt is now None
     ///
     /// var opt2 = Some(42);
-    /// opt2.takeIf { it < 0 };   // None;     opt2 is still Some(42)
+    /// opt2.take(matching: { it < 0 });   // None;     opt2 is still Some(42)
     /// ```
-    public mutating func takeIf(predicate: (T) -> Bool) -> Optional[T] {
+    public mutating func take(matching predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
                 if predicate(value) {
@@ -520,7 +520,7 @@ public enum Optional[T] {
 // ============================================================================
 
 /// Equatable when the inner type is — `None == None` is true, `Some(a) ==
-/// Some(b)` defers to `T.equals`, and a present value is never equal to
+/// Some(b)` defers to `T.isEqual`, and a present value is never equal to
 /// `None`.
 extend Optional[T]: Equatable where T: Equatable {
 
@@ -534,7 +534,7 @@ extend Optional[T]: Equatable where T: Equatable {
     /// Some(1) == None;      // false
     /// None == None;         // true
     /// ```
-    public func equals(other: Optional[T]) -> Bool {
+    public func isEqual(to other: Optional[T]) -> Bool {
         match (self, other) {
             (.Some(a), .Some(b)) => a == b,
             (.None, .None) => true,
@@ -596,7 +596,7 @@ extend Optional[T]: Comparable where T: Comparable {
 
 /// Hashable when the inner type is. The discriminant is mixed in first so
 /// `None` and `Some(0)` hash to different values.
-extend Optional[T]: Hash where T: Hash {
+extend Optional[T]: Hashable where T: Hashable {
 
     /// Mixes a one-byte tag (`0` for `None`, `1` for `Some`) into the
     /// hasher, then defers to `T.hash` for the payload.
@@ -605,13 +605,13 @@ extend Optional[T]: Hash where T: Hash {
             .Some(value) => {
                 // Write 1 to indicate Some
                 let marker: Int64 = 1;
-                hasher.write(Slice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8));
+                hasher.write(ArraySlice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8));
                 value.hash(into: hasher)
             },
             .None => {
                 // Write 0 to indicate None
                 let marker: Int64 = 0;
-                hasher.write(Slice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8))
+                hasher.write(ArraySlice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8))
             }
         }
     }
@@ -706,10 +706,14 @@ extend Optional[T]: Formattable where T: Formattable {
 
     /// Renders `Some(...)` or `None`, forwarding `options` to the inner
     /// `format` for the payload.
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         match self {
-            .Some(value) => "Some(" + value.format(options) + ")",
-            .None => "None"
+            .Some(value) => {
+                writer.append("Some(");
+                value.format(into: writer, options);
+                writer.appendChar(')')
+            },
+            .None => writer.append("None")
         }
     }
 }

@@ -5,13 +5,13 @@ module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
 import std.numeric.(UInt64, Int64)
 
 /// Protocol for types whose values can be compared for equality.
 ///
 /// `Equatable` is the semantic counterpart to the raw `Equal[Self]`
-/// operator protocol: conformers implement `equals` returning `Bool`, and a
+/// operator protocol: conformers implement `isEqual` returning `Bool`, and a
 /// blanket extension below derives both `==` and `!=`. Most types should
 /// reach for `Equatable` rather than `Equal` directly — the `Bool`
 /// associated-type binding is wired up automatically.
@@ -22,7 +22,7 @@ import std.numeric.(UInt64, Int64)
 /// public struct Point: Equatable {
 ///     public var x: Int64
 ///     public var y: Int64
-///     public func equals(other: Point) -> Bool {
+///     public func isEqual(to other: Point) -> Bool {
 ///         self.x == other.x and self.y == other.y
 ///     }
 /// }
@@ -31,9 +31,9 @@ import std.numeric.(UInt64, Int64)
 /// ```
 public protocol Equatable {
     /// Returns `true` iff `self` and `other` are considered equal. Should
-    /// be reflexive, symmetric, and transitive — `Hash` requires equal
+    /// be reflexive, symmetric, and transitive — `Hashable` requires equal
     /// values to hash equal, so don't drift from those laws.
-    func equals(other: Self) -> Bool
+    func isEqual(to other: Self) -> Bool
 }
 
 /// Protocol enabling `match` against custom types via the `case` pattern.
@@ -77,7 +77,7 @@ public protocol RangeMatchable[Bound = Self] {
 /// compiler has already verified. A conformer may assume `0 <= index <
 /// matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 /// own bounds checks; the conformance is unsafe to satisfy if those
-/// invariants don't hold. `Array[T]` and `Slice[T]` are the canonical
+/// invariants don't hold. `Array[T]` and `ArraySlice[T]` are the canonical
 /// conformers.
 @builtin(.ArrayMatchable)
 public protocol ArrayMatchable {
@@ -95,19 +95,19 @@ public protocol ArrayMatchable {
     /// Returns the slice `[from, to)`. Caller guarantees
     /// `0 <= from <= to <= matchLength()`.
     @builtin(.ArrayMatchableMatchSlice)
-    func matchSlice(from: Int64, to: Int64) -> Slice[Element]
+    func matchSlice(from: Int64, to: Int64) -> ArraySlice[Element]
 }
 
 /// Blanket extension giving every `Equatable` type the `==` and `!=`
-/// operators with `Bool` results. Implements `notEquals` in terms of
-/// `equals` so conformers only need to write the equality method.
+/// operators with `Bool` results. Implements `isNotEqual` in terms of
+/// `isEqual` so conformers only need to write the equality method.
 extend Equatable: Equal[Self], NotEqual[Self] {
     type Equal.Output = Bool
     type NotEqual.Output = Bool
 
-    /// Default `!=` derived from `equals`.
-    public func notEquals(other: Self) -> Bool {
-        if self.equals(other) { false } else { true }
+    /// Default `!=` derived from `isEqual`.
+    public func isNotEqual(to other: Self) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
     }
 }
 
@@ -125,7 +125,7 @@ extend Equatable: Equal[Self], NotEqual[Self] {
 /// public struct Version: Comparable {
 ///     public var major: Int64
 ///     public var minor: Int64
-///     public func equals(other: Version) -> Bool {
+///     public func isEqual(to other: Version) -> Bool {
 ///         self.major == other.major and self.minor == other.minor
 ///     }
 ///     public func compare(other: Version) -> Ordering {
@@ -173,7 +173,7 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
 
     /// `!=` derived from `compare`. Shadows the `Equatable` default with
     /// a single dispatch.
-    public func notEquals(other: Self) -> Bool {
+    public func isNotEqual(to other: Self) -> Bool {
         self.compare(other) != Ordering.Equal
     }
 }
@@ -202,7 +202,7 @@ extend Comparable: RangeMatchable[Self] {
 
 /// Protocol for types whose values can be hashed.
 ///
-/// `Hash` extends `Equatable`: the contract is that `a == b` implies
+/// `Hashable` extends `Equatable`: the contract is that `a == b` implies
 /// `a.hash(into:)` and `b.hash(into:)` feed the same bytes to the hasher.
 /// Violating this breaks `Set` and `Dictionary` — equal lookups won't
 /// land on the equal stored value. The hasher is generic so the same
@@ -211,29 +211,29 @@ extend Comparable: RangeMatchable[Self] {
 /// # Examples
 ///
 /// ```
-/// public struct Tag: Hash {
+/// public struct Tag: Hashable {
 ///     public var name: String
-///     public func equals(other: Tag) -> Bool { self.name == other.name }
+///     public func isEqual(to other: Tag) -> Bool { self.name == other.name }
 ///     public func hash[H](mutating into hasher: H) where H: Hasher {
 ///         self.name.hash(into: hasher)
 ///     }
 /// }
 /// ```
-public protocol Hash: Equatable {
+public protocol Hashable: Equatable {
     /// Feeds this value's bytes into `hasher`. Must be deterministic
-    /// across calls and consistent with `equals`.
+    /// across calls and consistent with `isEqual`.
     func hash[H](mutating into hasher: H) where H: Hasher
 }
 
-/// Protocol for hash algorithm implementations consumed by `Hash`.
+/// Protocol for hash algorithm implementations consumed by `Hashable`.
 ///
-/// The contract is the same as Rust / Swift: `Hash`-conforming types
+/// The contract is the same as Rust / Swift: `Hashable`-conforming types
 /// `write` their bytes into the hasher; the hasher accumulates state
 /// and emits a `UInt64` digest on `finish()`. Used by `Set`,
 /// `Dictionary`, and any structure that wants stable hashes.
 public protocol Hasher {
     /// Mixes `bytes` into the running hash state.
-    mutating func write(bytes: Slice[UInt8])
+    mutating func write(bytes: ArraySlice[UInt8])
     /// Returns the finalised hash. After calling `finish` the hasher's
     /// state is unspecified — don't reuse it.
     mutating func finish() -> UInt64

@@ -27,11 +27,11 @@ module Test
             // ---- fromDigit() ----
             let c0 = std.text.Char.fromDigit(0);
             if c0.isNone() { return 8 }
-            if c0.unwrap().equals('0') == false { return 9 }
+            if c0.unwrap().isEqual(to: '0') == false { return 9 }
 
             let c7 = std.text.Char.fromDigit(7);
             if c7.isNone() { return 10 }
-            if c7.unwrap().equals('7') == false { return 11 }
+            if c7.unwrap().isEqual(to: '7') == false { return 11 }
 
             // Out of range returns None
             let c10 = std.text.Char.fromDigit(10);

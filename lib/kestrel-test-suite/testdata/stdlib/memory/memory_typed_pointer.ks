@@ -39,8 +39,8 @@ module Test
             if arr(unchecked: 1) != 999 { return 8 }
 
             // Test equals
-            if ptr.equals(ptr) == false { return 9 }
-            if ptr.equals(ptr1) { return 10 }
+            if ptr.isEqual(to: ptr) == false { return 9 }
+            if ptr.isEqual(to: ptr1) { return 10 }
 
             // Test asRaw
             let raw = ptr.asRaw();

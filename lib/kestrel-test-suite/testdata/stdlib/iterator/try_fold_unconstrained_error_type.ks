@@ -10,7 +10,7 @@
 module Test
 
 func main() -> lang.i64 {
-    let result = [1, 2, 3, 4].iter().tryFold(initial: 0, combine: { (acc, x) in // ERROR: cannot infer type parameter
+    let result = [1, 2, 3, 4].iter().tryFold(from: 0, combining: { (acc, x) in // ERROR: cannot infer type parameter
         .Ok(acc + x)
     });
     match result {

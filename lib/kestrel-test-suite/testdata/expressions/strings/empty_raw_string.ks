@@ -4,5 +4,5 @@
 module Main
 
 func testEmptyRawString() -> lang.str {
-    """"""
+    #""#
 }

@@ -2,7 +2,7 @@
 
 module std.core
 
-import std.text.(String, FormatOptions, Formattable)
+import std.text.(String, StringBuilder, FormatOptions, Formattable)
 
 /// The three-valued result of a `Comparable.compare()` call.
 ///
@@ -39,7 +39,7 @@ public enum Ordering: Equatable, Formattable {
     case Greater
 
     /// Equality on the orderings themselves: same variant ⇒ equal.
-    public func equals(other: Ordering) -> Bool {
+    public func isEqual(to other: Ordering) -> Bool {
         match (self, other) {
             (.Less, .Less) => true,
             (.Equal, .Equal) => true,
@@ -48,10 +48,8 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Inverse of `equals`.
-    public func notEquals(other: Ordering) -> Bool {
-        if self.equals(other) { false } else { true }
-    }
+    // isNotEqual: provided by extend Equatable: Equal[Self], NotEqual[Self]
+    // in std.core.protocols.
 
     /// Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting
     /// in reverse without writing a second comparator.
@@ -97,12 +95,17 @@ public enum Ordering: Equatable, Formattable {
 
     /// Renders as `"Less"`, `"Equal"`, or `"Greater"`. With `debug` set,
     /// prefixes with the type name (`"Ordering.Less"`).
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         let value = match self {
             .Less => "Less",
             .Equal => "Equal",
             .Greater => "Greater"
         };
-        if options.debug { "Ordering." + value } else { value }
+        if options.debug {
+            writer.append("Ordering.");
+            writer.append(value)
+        } else {
+            writer.append(value)
+        }
     }
 }

@@ -15,19 +15,19 @@ module Test
             // init(intLiteral:)
             let fromInt: std.numeric.Float64 = 42;
             let expected42: std.numeric.Float64 = 42.0;
-            if fromInt.equals(expected42) == false { return 3 }
+            if fromInt.isEqual(to: expected42) == false { return 3 }
 
             // init(from: Int64)
             let intVal: std.numeric.Int64 = 100;
             let fromInt64 = std.numeric.Float64(from: intVal);
             let expected100: std.numeric.Float64 = 100.0;
-            if fromInt64.equals(expected100) == false { return 4 }
+            if fromInt64.isEqual(to: expected100) == false { return 4 }
 
             // init(from: Float32)
             let f32val: std.numeric.Float32 = 2.5;
             let fromF32 = std.numeric.Float64(from: f32val);
             let expected25: std.numeric.Float64 = 2.5;
-            if fromF32.equals(expected25) == false { return 5 }
+            if fromF32.isEqual(to: expected25) == false { return 5 }
 
             // zero
             let z = std.numeric.Float64.zero;
@@ -36,7 +36,7 @@ module Test
             // one
             let one = std.numeric.Float64.one;
             let expectedOne: std.numeric.Float64 = 1.0;
-            if one.equals(expectedOne) == false { return 7 }
+            if one.isEqual(to: expectedOne) == false { return 7 }
 
             // pi - check approximate value
             let pi = std.numeric.Float64.pi;

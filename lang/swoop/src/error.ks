@@ -1,11 +1,6 @@
-// Swoop error types
+/// Error types for Swoop HTTP requests.
 
 module swoop.error
-
-
-// ============================================================================
-// ERROR TYPES
-// ============================================================================
 
 /// The kind of error that occurred during an HTTP request.
 public enum SwoopErrorKind: Cloneable {
@@ -51,51 +46,17 @@ public struct SwoopError: Cloneable {
     /// Returns a human-readable description of the error.
     public func description() -> String {
         match self.kind {
-            .ConnectionFailed(msg) => {
-                var s = String();
-                s.append("connection failed: ");
-                s.append(msg);
-                s
-            },
+            .ConnectionFailed(msg) => "connection failed: " + msg,
             .Timeout => "request timed out",
-            .InvalidUrl(msg) => {
-                var s = String();
-                s.append("invalid URL: ");
-                s.append(msg);
-                s
-            },
-            .HttpError(code) => {
-                var s = String();
-                s.append("HTTP error: status ");
-                s.append(code.format());
-                s
-            },
-            .InvalidResponse(msg) => {
-                var s = String();
-                s.append("invalid response: ");
-                s.append(msg);
-                s
-            }
+            .InvalidUrl(msg) => "invalid URL: " + msg,
+            .HttpError(code) => "HTTP error: status " + code.format(),
+            .InvalidResponse(msg) => "invalid response: " + msg
         }
     }
 
-    public static func connectionFailed(message: String) -> SwoopError {
-        SwoopError(SwoopErrorKind.ConnectionFailed(message))
-    }
-
-    public static func timeout() -> SwoopError {
-        SwoopError(SwoopErrorKind.Timeout)
-    }
-
-    public static func invalidUrl(message: String) -> SwoopError {
-        SwoopError(SwoopErrorKind.InvalidUrl(message))
-    }
-
-    public static func httpError(code: Int64) -> SwoopError {
-        SwoopError(SwoopErrorKind.HttpError(code))
-    }
-
-    public static func invalidResponse(message: String) -> SwoopError {
-        SwoopError(SwoopErrorKind.InvalidResponse(message))
-    }
+    public static func connectionFailed(message: String) -> SwoopError = SwoopError(SwoopErrorKind.ConnectionFailed(message))
+    public static func timeout() -> SwoopError = SwoopError(SwoopErrorKind.Timeout)
+    public static func invalidUrl(message: String) -> SwoopError = SwoopError(SwoopErrorKind.InvalidUrl(message))
+    public static func httpError(code: Int64) -> SwoopError = SwoopError(SwoopErrorKind.HttpError(code))
+    public static func invalidResponse(message: String) -> SwoopError = SwoopError(SwoopErrorKind.InvalidResponse(message))
 }

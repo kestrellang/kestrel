@@ -155,6 +155,15 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         chmodLsp.append(lspBin);
         let _ = spawn(chmodLsp);
     }
+    var docBin = String();
+    docBin.append(tcDir);
+    docBin.append("/bin/kestrel-doc");
+    if fileExists(docBin) {
+        var chmodDoc = String();
+        chmodDoc.append("chmod +x ");
+        chmodDoc.append(docBin);
+        let _ = spawn(chmodDoc);
+    }
 
     var installedMsg = String();
     installedMsg.append("Installed ");
@@ -216,6 +225,11 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
     rmLsp.append(binPath);
     rmLsp.append("/kestrel-lsp");
     let _ = spawn(rmLsp);
+    var rmDoc = String();
+    rmDoc.append("rm -f ");
+    rmDoc.append(binPath);
+    rmDoc.append("/kestrel-doc");
+    let _ = spawn(rmDoc);
 
     var lnKestrel = String();
     lnKestrel.append("ln -s ");
@@ -242,6 +256,18 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
         lnLsp.append(binPath);
         lnLsp.append("/kestrel-lsp");
         let _ = spawn(lnLsp);
+    }
+    var docBin = String();
+    docBin.append(tcDir);
+    docBin.append("/bin/kestrel-doc");
+    if fileExists(docBin) {
+        var lnDoc = String();
+        lnDoc.append("ln -s ");
+        lnDoc.append(docBin);
+        lnDoc.append(" ");
+        lnDoc.append(binPath);
+        lnDoc.append("/kestrel-doc");
+        let _ = spawn(lnDoc);
     }
 
     // Update config with the channel name
@@ -295,7 +321,7 @@ public func listToolchains() -> Result[(), JessupError] {
         let name = entries(unchecked: i);
         // Skip hidden files
         if name.byteCount > 0 and name.bytes(unchecked: 0) != 46 {
-            if name.equals(activeChannel) {
+            if name == activeChannel {
                 var activeMsg = String();
                 activeMsg.append("  ");
                 activeMsg.append(name);
@@ -341,7 +367,7 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
 
     // Check if this is the active toolchain
     let config = readConfig();
-    if config.defaultChannel.equals(toolchainName) {
+    if config.defaultChannel == toolchainName {
         let _ = println("Warning: removing the active toolchain. Run 'jessup default <version>' to set a new default.");
         // Remove symlinks
         match binDir() {
@@ -361,6 +387,11 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
                 rmLsp.append(bp);
                 rmLsp.append("/kestrel-lsp");
                 let _ = spawn(rmLsp);
+                var rmDoc = String();
+                rmDoc.append("rm -f ");
+                rmDoc.append(bp);
+                rmDoc.append("/kestrel-doc");
+                let _ = spawn(rmDoc);
             },
             .Err(_) => {}
         }
@@ -476,7 +507,7 @@ public func updateToolchains() -> Result[(), JessupError] {
                     updated = true;
                     // Re-link if this was the active toolchain
                     let config = readConfig();
-                    if config.defaultChannel.equals(name) {
+                    if config.defaultChannel == name {
                         match setDefault(toolchainName: newName) {
                             .Ok(_) => {},
                             .Err(e) => {
@@ -592,7 +623,7 @@ public func selfUpdate() -> Result[(), JessupError] {
 /// e.g., "stable" + "v1.0.0" -> "stable-1.0.0"
 /// e.g., "nightly" + "nightly" -> "nightly-2026-03-02"
 func toolchainDirName(channel channel: String, tag tag: String) -> String {
-    if channel.equals("nightly") {
+    if channel == "nightly" {
         // Use current date for nightly
         let date = captureOutput("date +%Y-%m-%d");
         let trimmed = trimTrailingNewline(date);
@@ -600,12 +631,12 @@ func toolchainDirName(channel channel: String, tag tag: String) -> String {
         s.append("nightly-");
         s.append(trimmed);
         s
-    } else if channel.equals("stable") {
+    } else if channel == "stable" {
         // Strip leading 'v' from tag if present
         if tag.byteCount > 0 and tag.bytes(unchecked: 0) == 118 {
             var s = String();
             s.append("stable-");
-            s.append(tag.substringBytes(from: 1, to: tag.byteCount));
+            s.append(tag.asSlice().subslice(from: 1, to: tag.byteCount).toOwned());
             s
         } else {
             var s = String();
@@ -627,7 +658,7 @@ func trimTrailingNewline(s: String) -> String {
         if b == 10 or b == 13 {
             end = end - 1
         } else {
-            return s.substringBytes(from: 0, to: end)
+            return s.asSlice().subslice(from: 0, to: end).toOwned()
         }
     }
     ""

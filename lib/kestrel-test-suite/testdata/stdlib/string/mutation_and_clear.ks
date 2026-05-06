@@ -9,15 +9,14 @@ module Test
             s.appendChar('H');
             s.appendChar('i');
             if s.byteCount != 2 { return 1 }
-            if s.equals("Hi") == false { return 2 }
+            if s.isEqual(to: "Hi") == false { return 2 }
 
-            // Test appendByte
+            // Test appendChar
             var s2 = std.text.String();
-            // Append ASCII 'A' (65)
-            s2.appendByte(65);
-            s2.appendByte(66);
+            s2.appendChar('A');
+            s2.appendChar('B');
             if s2.byteCount != 2 { return 3 }
-            if s2.equals("AB") == false { return 4 }
+            if s2.isEqual(to: "AB") == false { return 4 }
 
             // Test clear()
             var s3: std.text.String = "hello world";

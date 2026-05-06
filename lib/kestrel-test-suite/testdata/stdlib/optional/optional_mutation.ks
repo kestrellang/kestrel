@@ -28,22 +28,22 @@ module Test
             if oldNone.isSome() { return 7 }
             if opt4.unwrap() != 50 { return 8 }
 
-            // Test takeIf - predicate true, takes value
+            // Test take(matching:) - predicate true, takes value
             var opt5: std.result.Optional[std.numeric.Int64] = .Some(42);
-            let takenIf = opt5.takeIf({ (x) in x > 0 });
+            let takenIf = opt5.take(matching:{ (x) in x > 0 });
             if takenIf.unwrap() != 42 { return 9 }
             if opt5.isSome() { return 10 }
 
-            // Test takeIf - predicate false, leaves value
+            // Test take(matching:) - predicate false, leaves value
             var opt6: std.result.Optional[std.numeric.Int64] = .Some(42);
-            let notTaken = opt6.takeIf({ (x) in x < 0 });
+            let notTaken = opt6.take(matching:{ (x) in x < 0 });
             if notTaken.isSome() { return 11 }
             if opt6.isNone() { return 12 }
             if opt6.unwrap() != 42 { return 13 }
 
-            // Test takeIf on None
+            // Test take(matching:) on None
             var opt7: std.result.Optional[std.numeric.Int64] = .None;
-            let takeIfNone = opt7.takeIf({ (x) in x > 0 });
+            let takeIfNone = opt7.take(matching:{ (x) in x > 0 });
             if takeIfNone.isSome() { return 14 }
 
             0

@@ -36,7 +36,7 @@ public func isIsoDate(s: String) -> Bool {
         if i == 4 or i == 7 {
             if c != '-' { return false }
         } else {
-            if not c.isDigit() { return false }
+            if not c.isAsciiDigit { return false }
         };
         i = i + 1
     }

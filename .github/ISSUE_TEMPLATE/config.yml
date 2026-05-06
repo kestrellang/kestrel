@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Roadmap and version themes
+    url: https://github.com/kestrellang/kestrel/blob/main/ROADMAP.md
+    about: Long-term direction, phase rationale, and what each version is about. File issues against the templates here for actionable work.
+  - name: Active task board
+    url: https://github.com/orgs/kestrellang/projects
+    about: See what's in flight, what's planned for the current and next train cycles.

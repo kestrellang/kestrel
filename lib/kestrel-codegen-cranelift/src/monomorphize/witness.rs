@@ -87,14 +87,14 @@ pub fn resolve_witness_call(
         },
         MethodSource::Extension { .. } => {
             // Protocol-extension default (`extend Proto { default impl }`):
-            // the implementation lives in the protocol's extension and its
-            // type_params are method-only. The implementing type's params
-            // (witness.type_params) flow in through `Self` / parent_self
-            // at the dispatch site, not via type-arg prepending. Prepending
-            // them would push the call-site's method type args past the
-            // truncate cap, leaving K bound to the implementing type's
-            // first param instead of the actual K argument.
-            type_args.extend(concrete_method_type_args.iter().cloned());
+            // the implementation function's `type_params` mirror the protocol's
+            // (inherited via `collect_inherited_type_params` when the extension
+            // targets a protocol), followed by the method's own params. So the
+            // call-site's `method_type_args` — already laid out as
+            // `[proto_args.., method_args..]` — feeds straight through. The
+            // implementing type's params (witness.type_params) flow in via
+            // `Self`/`parent_self` at the dispatch site, not here.
+            type_args.extend(method_type_args.iter().cloned());
         },
     }
 

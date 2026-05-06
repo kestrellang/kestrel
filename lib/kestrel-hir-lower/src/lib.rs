@@ -12,6 +12,7 @@
 mod ctx;
 mod desugar;
 mod expr;
+pub mod format_spec;
 pub mod literal;
 pub(crate) mod pat;
 mod stmt;

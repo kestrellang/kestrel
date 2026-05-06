@@ -12,6 +12,8 @@
 
 use clap::{Parser, ValueEnum};
 use kestrel_compiler::Compiler;
+use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -47,6 +49,18 @@ struct Cli {
     /// is the Context7/LLM-friendly form. Defaults to emitting both.
     #[arg(long, value_enum, default_value_t = Format::Both)]
     format: Format,
+
+    /// Emit a single bundled `docs.json` instead of one file per module.
+    /// The output contains `{"index": …, "modules": {"path": …, …}}`.
+    /// Useful for uploading package docs to the registry in one shot.
+    #[arg(long, default_value_t = false)]
+    bundle: bool,
+}
+
+#[derive(Serialize)]
+struct BundledDocs {
+    index: kestrel_doc::ModuleIndex,
+    modules: HashMap<String, kestrel_doc::ModulePage>,
 }
 
 fn main() -> ExitCode {
@@ -70,16 +84,32 @@ fn main() -> ExitCode {
             eprintln!("error: failed to create {:?}: {}", cli.out, e);
             return ExitCode::FAILURE;
         }
-        let index_path = cli.out.join("index.json");
-        if let Err(e) = write_json(&index_path, &index) {
-            eprintln!("error: writing {:?}: {}", index_path, e);
-            return ExitCode::FAILURE;
-        }
-        for page in &pages {
-            let page_path = cli.out.join(format!("{}.json", page.path));
-            if let Err(e) = write_json(&page_path, page) {
-                eprintln!("error: writing {:?}: {}", page_path, e);
+
+        if cli.bundle {
+            let bundled = BundledDocs {
+                index: index.clone(),
+                modules: pages
+                    .iter()
+                    .map(|p| (p.path.clone(), p.clone()))
+                    .collect(),
+            };
+            let bundle_path = cli.out.join("docs.json");
+            if let Err(e) = write_json(&bundle_path, &bundled) {
+                eprintln!("error: writing {:?}: {}", bundle_path, e);
                 return ExitCode::FAILURE;
+            }
+        } else {
+            let index_path = cli.out.join("index.json");
+            if let Err(e) = write_json(&index_path, &index) {
+                eprintln!("error: writing {:?}: {}", index_path, e);
+                return ExitCode::FAILURE;
+            }
+            for page in &pages {
+                let page_path = cli.out.join(format!("{}.json", page.path));
+                if let Err(e) = write_json(&page_path, page) {
+                    eprintln!("error: writing {:?}: {}", page_path, e);
+                    return ExitCode::FAILURE;
+                }
             }
         }
     }

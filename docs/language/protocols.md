@@ -455,9 +455,9 @@ protocol ExpressibleByBoolLiteral {
     init(boolLiteral value: Bool)
 }
 
-@builtin(.ExpressibleByNilLiteral)
-protocol ExpressibleByNilLiteral {
-    init(nilLiteral value: ())
+@builtin(.ExpressibleByNullLiteral)
+protocol ExpressibleByNullLiteral {
+    init()
 }
 ```
 
@@ -775,7 +775,7 @@ builtin_feature =
     | "ExpressibleByFloatLiteral"
     | "ExpressibleByStringLiteral"
     | "ExpressibleByBoolLiteral"
-    | "ExpressibleByNilLiteral"
+    | "ExpressibleByNullLiteral"
 ```
 
 ## Examples

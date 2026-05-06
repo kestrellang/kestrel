@@ -9,20 +9,20 @@ module Test
             // ---- bytes(Range) - default subscript with range yields BytesView ----
             let sub = s.bytes(std.core.Range[std.numeric.Int64](0, 5));
             if sub.count != 5 { return 1 }
-            if sub.toString().equals("hello") == false { return 2 }
+            if sub.toString().isEqual(to: "hello") == false { return 2 }
 
             let sub2 = s.bytes(std.core.Range[std.numeric.Int64](6, 11));
-            if sub2.toString().equals("world") == false { return 3 }
+            if sub2.toString().isEqual(to: "world") == false { return 3 }
 
             // ---- bytes.substring convenience (Range) ----
-            if s.bytes.substring(std.core.Range[std.numeric.Int64](0, 5)).equals("hello") == false { return 4 }
+            if s.bytes.substring(std.core.Range[std.numeric.Int64](0, 5)).isEqual(to: "hello") == false { return 4 }
             // ---- bytes.substring convenience (ClosedRange) ----
-            if s.bytes.substring(std.core.ClosedRange[std.numeric.Int64](6, 10)).equals("world") == false { return 13 }
+            if s.bytes.substring(std.core.ClosedRange[std.numeric.Int64](6, 10)).isEqual(to: "world") == false { return 13 }
 
             // ---- bytes(checked: Range) ----
             let checked = s.bytes(checked: std.core.Range[std.numeric.Int64](0, 5));
             if checked.isNone() { return 5 }
-            if checked.unwrap().toString().equals("hello") == false { return 6 }
+            if checked.unwrap().toString().isEqual(to: "hello") == false { return 6 }
 
             // Out of bounds returns None
             let oob = s.bytes(checked: std.core.Range[std.numeric.Int64](0, 100));

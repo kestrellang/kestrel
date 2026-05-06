@@ -326,7 +326,7 @@ match list {
         // node is the whole Cons value, head is just the first element
         process(node, head)
     },
-    .Nil => handleEmpty()
+    .Empty => handleEmpty()
 }
 
 match opt {

@@ -52,8 +52,8 @@ module Test
             let l1 = std.memory.Layout(size: 8, alignment: 8);
             let l2 = std.memory.Layout(size: 8, alignment: 8);
             let l3 = std.memory.Layout(size: 16, alignment: 8);
-            if l1.equals(l2) == false { return 13 }
-            if l1.equals(l3) { return 14 }
+            if l1.isEqual(to: l2) == false { return 13 }
+            if l1.isEqual(to: l3) { return 14 }
 
             0
         }

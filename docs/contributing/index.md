@@ -14,7 +14,7 @@ Welcome. This guide orients new contributors to the Kestrel compiler — the act
 | Follow a step-by-step guide for common tasks | [Workflows](workflows.md) |
 | Work on the type system, inference, generics | [Type Inference](type-inference.md) |
 | Understand or change how symbols are mangled | [Mangling](mangling.md) |
-| Branches, PRs, issues | [Git](git.md) |
+| Branches, the release train, the Project board, PRs, issues | [Workflow](git.md) |
 
 ## Codebase overview
 
@@ -98,4 +98,4 @@ This enables `debug_trace!` output from the compiler (member resolution, method 
 
 - `.claude/skills/` holds deeper skill documents for specialized topics (hECS internals, the inference pipeline, debugging playbook, etc.).
 - Each lib crate's `AGENTS.md` and `docs/` folder is the first stop for that crate's nuances.
-- File an issue before starting non-trivial work (see [Git](git.md)).
+- File an issue before starting non-trivial work (see [Workflow](git.md)).

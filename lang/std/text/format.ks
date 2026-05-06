@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
 import std.numeric.(Int64)
-import std.text.(String, Char)
+import std.text.(String, Char, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
 
@@ -41,16 +41,16 @@ public enum Alignment: Equatable, Matchable {
     /// Returns true if both cases are the same variant.
     ///
     /// Equality is structural — there are no payloads. Used by the
-    /// `Equatable` conformance so `FormatOptions.equals` can fall through
+    /// `Equatable` conformance so `FormatOptions.isEqual` can fall through
     /// without payload comparisons.
     ///
     /// # Examples
     ///
     /// ```
-    /// Alignment.Left.equals(.Left);    // true
-    /// Alignment.Left.equals(.Center);  // false
+    /// Alignment.Left.isEqual(to: .Left);    // true
+    /// Alignment.Left.isEqual(to: .Center);  // false
     /// ```
-    public func equals(other: Alignment) -> Bool {
+    public func isEqual(to other: Alignment) -> Bool {
         match (self, other) {
             (.Left, .Left) => true,
             (.Right, .Right) => true,
@@ -59,7 +59,7 @@ public enum Alignment: Equatable, Matchable {
         }
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     ///
     /// Lets `Alignment` appear in `match` patterns against another value.
     ///
@@ -69,7 +69,7 @@ public enum Alignment: Equatable, Matchable {
     /// Alignment.Right.matches(.Right);  // true
     /// ```
     public func matches(other: Alignment) -> Bool {
-        self.equals(other)
+        self.isEqual(to: other)
     }
 }
 
@@ -102,15 +102,15 @@ public enum Sign: Equatable, Matchable {
     /// Returns true if both cases are the same variant.
     ///
     /// Used by `Equatable` to lift case identity into a `Bool` for
-    /// composite comparisons (see `FormatOptions.equals`).
+    /// composite comparisons (see `FormatOptions.isEqual`).
     ///
     /// # Examples
     ///
     /// ```
-    /// Sign.Always.equals(.Always);     // true
-    /// Sign.Negative.equals(.Always);   // false
+    /// Sign.Always.isEqual(to: .Always);     // true
+    /// Sign.Negative.isEqual(to: .Always);   // false
     /// ```
-    public func equals(other: Sign) -> Bool {
+    public func isEqual(to other: Sign) -> Bool {
         match (self, other) {
             (.Negative, .Negative) => true,
             (.Always, .Always) => true,
@@ -119,7 +119,7 @@ public enum Sign: Equatable, Matchable {
         }
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     ///
     /// # Examples
     ///
@@ -127,7 +127,7 @@ public enum Sign: Equatable, Matchable {
     /// Sign.Space.matches(.Space);  // true
     /// ```
     public func matches(other: Sign) -> Bool {
-        self.equals(other)
+        self.isEqual(to: other)
     }
 }
 
@@ -170,10 +170,10 @@ public enum FloatStyle: Equatable, Matchable {
     /// # Examples
     ///
     /// ```
-    /// FloatStyle.Fixed.equals(.Fixed);       // true
-    /// FloatStyle.Fixed.equals(.Scientific);  // false
+    /// FloatStyle.Fixed.isEqual(to: .Fixed);       // true
+    /// FloatStyle.Fixed.isEqual(to: .Scientific);  // false
     /// ```
-    public func equals(other: FloatStyle) -> Bool {
+    public func isEqual(to other: FloatStyle) -> Bool {
         match (self, other) {
             (.Auto, .Auto) => true,
             (.Fixed, .Fixed) => true,
@@ -184,7 +184,7 @@ public enum FloatStyle: Equatable, Matchable {
         }
     }
 
-    /// Pattern-match form of equality — delegates to `equals`.
+    /// Pattern-match form of equality — delegates to `isEqual`.
     ///
     /// # Examples
     ///
@@ -192,7 +192,7 @@ public enum FloatStyle: Equatable, Matchable {
     /// FloatStyle.Auto.matches(.Auto);  // true
     /// ```
     public func matches(other: FloatStyle) -> Bool {
-        self.equals(other)
+        self.isEqual(to: other)
     }
 }
 
@@ -235,6 +235,7 @@ public enum FloatStyle: Equatable, Matchable {
 /// A flat record of independent fields — no validation across them. Each
 /// formatter is responsible for ignoring fields outside its domain and
 /// applying its own defaults when an option is absent.
+@builtin(.FormatOptions)
 public struct FormatOptions: Equatable {
     /// Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.
     public var width: Int64?
@@ -321,19 +322,22 @@ public struct FormatOptions: Equatable {
     /// ```
     /// let a = FormatOptions();
     /// let b = FormatOptions();
-    /// a.equals(b);  // true
+    /// a.isEqual(to: b);  // true
     /// var c = FormatOptions();
     /// c.alternate = true;
-    /// a.equals(c);  // false
+    /// a.isEqual(to: c);  // false
     /// ```
-    public func equals(other: FormatOptions) -> Bool {
-        if self.alignment.equals(other.alignment) == false { return false }
+    public func isEqual(to other: FormatOptions) -> Bool {
+        if self.alignment.isEqual(to: other.alignment) == false { return false }
         if self.radix != other.radix { return false }
         if self.uppercase != other.uppercase { return false }
-        if self.sign.equals(other.sign) == false { return false }
+        if self.sign.isEqual(to: other.sign) == false { return false }
         if self.alternate != other.alternate { return false }
-        if self.floatStyle.equals(other.floatStyle) == false { return false }
+        if self.floatStyle.isEqual(to: other.floatStyle) == false { return false }
         if self.debug != other.debug { return false }
+        if self.fill.isEqual(to: other.fill) == false { return false }
+        if self.width.isEqual(to: other.width) == false { return false }
+        if self.precision.isEqual(to: other.precision) == false { return false }
         true
     }
 }
@@ -361,12 +365,64 @@ public struct FormatOptions: Equatable {
 /// ```
 @builtin(.FormattableProtocol)
 public protocol Formattable {
-    /// Returns this value rendered as a `String` under the supplied options.
+    /// Writes this value's formatted representation directly into `writer`.
     ///
-    /// Default arg uses `FormatOptions.default()` so unsuffixed calls
-    /// behave like the bare `"\{expr}"` interpolation form.
-    @builtin(.FormattableFormat)
-    func format(options: FormatOptions = FormatOptions.default()) -> String
+    /// This is the kernel method — all formatting ultimately bottoms out
+    /// here. The convenience `format(options:) -> String` in the protocol
+    /// extension calls this under the hood.
+    @builtin(.FormattableFormatInto)
+    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default())
+}
+
+extend Formattable {
+    /// Returns this value rendered as a `String`.
+    ///
+    /// Convenience wrapper: creates a `StringBuilder`, calls
+    /// `format(into:)`, and returns the built string. Uses a distinct
+    /// name to avoid overload-resolution ambiguity with `format(into:)`.
+    public func formatted(options: FormatOptions = FormatOptions.default()) -> String {
+        var b = StringBuilder();
+        self.format(into: b, options);
+        b.build()
+    }
+}
+
+// ============================================================================
+// PADDING HELPER
+// ============================================================================
+
+/// Writes `content` into `writer` with width/alignment/fill padding applied.
+/// Used by String, integer, and float `format(into:)` implementations.
+public func _writePadded(mutating into writer: StringBuilder, content: String, options: FormatOptions) {
+    if let .Some(width) = options.width {
+        let currentLen = content.chars.count;
+        if width > currentLen {
+            let padding = width - currentLen;
+            var padLeft: Int64 = 0;
+            var padRight: Int64 = 0;
+
+            if options.alignment == .Left {
+                padRight = padding
+            } else if options.alignment == .Right {
+                padLeft = padding
+            } else {
+                padLeft = padding / 2;
+                padRight = padding - padLeft
+            }
+
+            while padLeft > 0 {
+                writer.appendChar(options.fill);
+                padLeft = padLeft - 1
+            }
+            writer.append(content);
+            while padRight > 0 {
+                writer.appendChar(options.fill);
+                padRight = padRight - 1
+            }
+            return
+        }
+    }
+    writer.append(content)
 }
 
 // ============================================================================
@@ -443,18 +499,17 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 ///
 /// # Representation
 ///
-/// A single `Array[String]` of accumulated parts. Empty literal pieces
-/// are dropped on append.
+/// A single `StringBuilder` that accumulates all literal and formatted
+/// bytes in one buffer. Pre-sized using the compiler's capacity hints.
 @builtin(.DefaultStringInterpolation)
 public struct DefaultStringInterpolation: Interpolatable, Cloneable {
-    private var parts: Array[String]
+    private var builder: StringBuilder
 
     /// @name With Capacity
-    /// Constructs an empty accumulator.
+    /// Constructs an empty accumulator pre-sized from compile-time hints.
     ///
-    /// The capacity arguments are ignored by the default implementation
-    /// — `Array[String]` grows on demand and the per-part cost dominates
-    /// the per-byte cost. Custom implementations may use them.
+    /// `literalCapacity` is the exact byte count of static segments;
+    /// `interpolationCount` estimates ~16 bytes per hole.
     ///
     /// # Examples
     ///
@@ -464,46 +519,31 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     /// ```
     @builtin(.DefaultStringInterpolationInit)
     public init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64) {
-        self.parts = [];
+        self.builder = StringBuilder(capacity: literalCapacity + interpolationCount * 16);
     }
 
-    /// Returns a shallow copy with cloned `parts`.
-    ///
-    /// `String` is COW so the part clone is itself shallow; mutating
-    /// either copy after this call does not affect the other.
+    /// Returns a copy with a cloned builder buffer.
     public func clone() -> DefaultStringInterpolation {
         var c = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
-        c.parts = self.parts.clone();
+        c.builder = self.builder.clone();
         c
     }
 
-    /// Records one static literal segment.
-    ///
-    /// Empty literals are dropped — they would force `build()` to do
-    /// extra work without changing the result. Non-empty literals are
-    /// appended verbatim with no copying beyond the `String`'s own COW.
+    /// Appends a static literal segment directly into the buffer.
     @builtin(.DefaultStringInterpolationAppendLiteral)
     public mutating func appendLiteral(literal: String) {
         if literal.isEmpty == false {
-            self.parts.append(literal);
+            self.builder.append(literal);
         }
     }
 
-    /// Records one interpolation hole, eagerly formatted with `options`.
-    ///
-    /// Calls `value.format(options)` immediately so the resulting
-    /// `String` is what gets stored — `value` is not retained past this
-    /// call. Default `options` matches `FormatOptions.default()`.
+    /// Formats one interpolation hole directly into the buffer.
     @builtin(.DefaultStringInterpolationAppendInterpolation)
     public mutating func appendInterpolation[T](value: T, options: FormatOptions = FormatOptions.default()) where T: Formattable {
-        self.parts.append(value.format(options));
+        value.format(into: self.builder, options);
     }
 
-    /// Concatenates all recorded parts into the final `String`.
-    ///
-    /// Fast paths the zero-part and one-part cases. For the multi-part
-    /// case, computes the exact total byte length first, allocates once
-    /// at that size, then appends — no growth churn.
+    /// Transfers the buffer into a `String` without copying.
     ///
     /// # Examples
     ///
@@ -514,26 +554,7 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     /// acc.build();  // "ab"
     /// ```
     @builtin(.DefaultStringInterpolationBuild)
-    public func build() -> String {
-        let partsCount = self.parts.count;
-        if partsCount == 0 {
-            return ""
-        }
-        if partsCount == 1 {
-            return self.parts(unchecked: 0)
-        }
-        var totalBytes: Int64 = 0;
-        var j: Int64 = 0;
-        while j < partsCount {
-            totalBytes = totalBytes + self.parts(unchecked: j).byteCount;
-            j = j + 1;
-        }
-        var result = String(capacity: totalBytes);
-        var i: Int64 = 0;
-        while i < partsCount {
-            result.append(self.parts(unchecked: i));
-            i = i + 1;
-        }
-        result
+    public mutating func build() -> String {
+        self.builder.build()
     }
 }

@@ -134,14 +134,14 @@ public func parseVersion(s s: String) -> Result[Version, FlockError] {
 
 /// Parses a version constraint string like "^1.2.3", "~1.2.3", "1.2.3", or "*".
 public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError] {
-    let trimmed = s.trimmed();
+    let trimmed = s.trimmed().toOwned();
 
-    if trimmed.equals("*") {
+    if trimmed == "*" {
         return .Ok(VersionConstraint.Any)
     }
 
     if trimmed.starts(with: "^") {
-        let versionStr = trimmed.substringBytes(from: 1, to: trimmed.byteCount);
+        let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.byteCount).toOwned();
         match parseVersion(s: versionStr) {
             .Ok(v) => return .Ok(VersionConstraint.Compatible(v)),
             .Err(e) => return .Err(e)
@@ -149,7 +149,7 @@ public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError
     }
 
     if trimmed.starts(with: "~") {
-        let versionStr = trimmed.substringBytes(from: 1, to: trimmed.byteCount);
+        let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.byteCount).toOwned();
         match parseVersion(s: versionStr) {
             .Ok(v) => return .Ok(VersionConstraint.TildeCompat(v)),
             .Err(e) => return .Err(e)
@@ -177,7 +177,7 @@ func splitOnDot(s: String) -> Array[String] {
     while i < len {
         let byte = s.bytes(unchecked: i);
         if byte == 46 { // '.'
-            result.append(s.substringBytes(from: start, to: i));
+            result.append(s.asSlice().subslice(from: start, to: i).toOwned());
             start = i + 1
         }
         i = i + 1
@@ -185,7 +185,7 @@ func splitOnDot(s: String) -> Array[String] {
 
     // Add the last segment
     if start <= len {
-        result.append(s.substringBytes(from: start, to: len))
+        result.append(s.asSlice().subslice(from: start, to: len).toOwned())
     }
 
     result

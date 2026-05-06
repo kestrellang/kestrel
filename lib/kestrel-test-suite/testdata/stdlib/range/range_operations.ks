@@ -21,24 +21,24 @@ module Test
             if r.contains(9) { return 6 }
 
             // isEmpty - non-empty range
-            if r.isEmpty() { return 7 }
+            if r.isEmpty { return 7 }
 
             // isEmpty - empty range (start >= end)
             let emptyRange = std.core.Range[std.numeric.Int64](5, 5);
-            if emptyRange.isEmpty() == false { return 8 }
+            if emptyRange.isEmpty == false { return 8 }
 
             let reverseRange = std.core.Range[std.numeric.Int64](8, 2);
-            if reverseRange.isEmpty() == false { return 9 }
+            if reverseRange.isEmpty == false { return 9 }
 
             // equals
             let r2 = std.core.Range[std.numeric.Int64](2, 8);
-            if r.equals(r2) == false { return 10 }
+            if r.isEqual(to: r2) == false { return 10 }
 
             let r3 = std.core.Range[std.numeric.Int64](2, 9);
-            if r.equals(r3) { return 11 }
+            if r.isEqual(to: r3) { return 11 }
 
             let r4 = std.core.Range[std.numeric.Int64](3, 8);
-            if r.equals(r4) { return 12 }
+            if r.isEqual(to: r4) { return 12 }
 
             0
         }

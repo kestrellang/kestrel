@@ -772,16 +772,23 @@ impl LowerCtx<'_> {
 
     // ===== Interpolated strings =====
 
-    /// Desugar interpolated string to String concatenation.
-    /// `"hello \(name)!"` → `"hello " + name.format() + "!"`
-    ///
-    /// For simplicity, we desugar to a chain of add operations.
+    /// Desugar `"hello \(name)!"` to a DefaultStringInterpolation builder sequence:
+    /// ```text
+    /// {
+    ///     var $dsi = DefaultStringInterpolation(literalCapacity: 6, interpolationCount: 1)
+    ///     $dsi.appendLiteral(literal: "hello ")
+    ///     $dsi.appendInterpolation(value: name)
+    ///     $dsi.appendLiteral(literal: "!")
+    ///     $dsi.build()
+    /// }
+    /// ```
     pub(crate) fn desugar_interpolated_string(
         &mut self,
         body: &AstBody,
         parts: &[StringPart],
         span: &Span,
     ) -> HirExprId {
+        // Empty interpolated string → plain empty string literal
         if parts.is_empty() {
             return self.alloc_expr(HirExpr::Literal {
                 value: HirLiteral::String {
@@ -792,74 +799,367 @@ impl LowerCtx<'_> {
             });
         }
 
-        // Convert each part to an expression
-        let mut exprs: Vec<HirExprId> = Vec::new();
-
-        for part in parts {
-            match part {
-                StringPart::Literal(text) => {
-                    if !text.is_empty() {
-                        // The parser currently emits the full interpolated string
-                        // as a single token, so this `text` may contain unparsed
-                        // `\(...)` interpolation syntax + surrounding quotes (see
-                        // ast-builder/lower.rs `lower_interpolated_string` fallback).
-                        // Skip escape decoding here — flagging `\(` as invalid
-                        // would be wrong, and decoding `\n` etc. inside an opaque
-                        // unparsed blob isn't meaningful. When the parser is taught
-                        // to split interpolations, decode the structured parts.
-                        exprs.push(self.alloc_expr(HirExpr::Literal {
-                            value: HirLiteral::String {
-                                value: text.clone(),
-                                escape_errors: Vec::new(),
-                            },
-                            span: span.clone(),
-                        }));
-                    }
-                },
-                StringPart::Interpolation { expr, format: _ } => {
-                    let lowered = self.lower_expr(body, *expr);
-                    // Call .description() on the interpolated expression
-                    let formatted = self.alloc_expr(HirExpr::MethodCall {
-                        receiver: lowered,
-                        method: HirName::name("description"),
-                        type_args: None,
-                        args: Vec::new(),
-                        span: span.clone(),
-                    });
-                    exprs.push(formatted);
-                },
-            }
-        }
-
-        // Chain with + operator (Addable protocol)
-        if exprs.is_empty() {
-            return self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::String {
-                    value: String::new(),
-                    escape_errors: Vec::new(),
-                },
+        // Resolve the DefaultStringInterpolation struct builtin
+        let Some(dsi_struct) = self.resolve_builtin(Builtin::DefaultStringInterpolation) else {
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_message("string interpolation requires the standard library")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())]),
+            );
+            let err = self.alloc_expr(HirExpr::Error { span: span.clone() });
+            return self.alloc_expr(HirExpr::Sugar {
+                kind: SugarKind::StringInterpolation,
+                inner: err,
                 span: span.clone(),
             });
-        }
+        };
 
-        let mut result = exprs[0];
-        for &next in &exprs[1..] {
-            if let Some(protocol) = self.resolve_builtin(Builtin::AddOperatorProtocol) {
-                result = self.alloc_expr(HirExpr::ProtocolCall {
-                    receiver: result,
-                    protocol,
-                    method: HirName::name("add"),
-                    type_args: None,
-                    args: vec![HirCallArg {
-                        label: None,
-                        value: next,
-                    }],
-                    span: span.clone(),
-                });
+        // Pre-compute capacity hints
+        let mut literal_capacity: i64 = 0;
+        let mut interpolation_count: i64 = 0;
+        for part in parts {
+            match part {
+                StringPart::Literal(text) => literal_capacity += text.len() as i64,
+                StringPart::Interpolation { .. } => interpolation_count += 1,
             }
         }
 
-        result
+        let mut stmts: Vec<HirStmtId> = Vec::new();
+
+        // var $dsi = DefaultStringInterpolation(literalCapacity: N, interpolationCount: M)
+        let dsi_local = self.define_local("$dsi", true, span.clone());
+        let dsi_type_ref = self.alloc_expr(HirExpr::Def(dsi_struct, Vec::new(), span.clone()));
+        let lit_cap = self.alloc_expr(HirExpr::Literal {
+            value: HirLiteral::Integer(literal_capacity),
+            span: span.clone(),
+        });
+        let interp_count = self.alloc_expr(HirExpr::Literal {
+            value: HirLiteral::Integer(interpolation_count),
+            span: span.clone(),
+        });
+        let init_call = self.alloc_expr(HirExpr::Call {
+            callee: dsi_type_ref,
+            args: vec![
+                HirCallArg {
+                    label: Some("literalCapacity".to_string()),
+                    value: lit_cap,
+                },
+                HirCallArg {
+                    label: Some("interpolationCount".to_string()),
+                    value: interp_count,
+                },
+            ],
+            span: span.clone(),
+        });
+        stmts.push(self.alloc_stmt(HirStmt::Let {
+            local: dsi_local,
+            ty: None,
+            value: Some(init_call),
+            span: span.clone(),
+        }));
+
+        // For each part, emit appendLiteral or appendInterpolation
+        for part in parts {
+            let dsi_ref = self.alloc_expr(HirExpr::Local(dsi_local, span.clone()));
+            match part {
+                StringPart::Literal(text) => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let str_lit = self.alloc_expr(HirExpr::Literal {
+                        value: HirLiteral::String {
+                            value: text.clone(),
+                            escape_errors: Vec::new(),
+                        },
+                        span: span.clone(),
+                    });
+                    let append = self.alloc_expr(HirExpr::MethodCall {
+                        receiver: dsi_ref,
+                        method: HirName::name("appendLiteral"),
+                        type_args: None,
+                        args: vec![HirCallArg {
+                            label: None,
+                            value: str_lit,
+                        }],
+                        span: span.clone(),
+                    });
+                    stmts.push(self.alloc_stmt(HirStmt::Expr {
+                        expr: append,
+                        span: span.clone(),
+                    }));
+                },
+                StringPart::Interpolation { expr, format } => {
+                    let lowered = self.lower_expr(body, *expr);
+
+                    let mut args = vec![HirCallArg {
+                        label: None,
+                        value: lowered,
+                    }];
+
+                    // If format spec is present, parse it and build FormatOptions
+                    if let Some(spec_str) = format {
+                        if let Some(opts_expr) =
+                            self.build_format_options_from_spec(spec_str, span)
+                        {
+                            args.push(HirCallArg {
+                                label: None,
+                                value: opts_expr,
+                            });
+                        }
+                    }
+
+                    let append = self.alloc_expr(HirExpr::MethodCall {
+                        receiver: dsi_ref,
+                        method: HirName::name("appendInterpolation"),
+                        type_args: None,
+                        args,
+                        span: span.clone(),
+                    });
+                    stmts.push(self.alloc_stmt(HirStmt::Expr {
+                        expr: append,
+                        span: span.clone(),
+                    }));
+                },
+            }
+        }
+
+        // Tail expression: $dsi.build()
+        let dsi_ref = self.alloc_expr(HirExpr::Local(dsi_local, span.clone()));
+        let build_call = self.alloc_expr(HirExpr::MethodCall {
+            receiver: dsi_ref,
+            method: HirName::name("build"),
+            type_args: None,
+            args: Vec::new(),
+            span: span.clone(),
+        });
+
+        let block = self.alloc_expr(HirExpr::Block {
+            body: HirBlock {
+                stmts,
+                tail_expr: Some(build_call),
+            },
+            span: span.clone(),
+        });
+
+        self.alloc_expr(HirExpr::Sugar {
+            kind: SugarKind::StringInterpolation,
+            inner: block,
+            span: span.clone(),
+        })
+    }
+
+    /// Build a FormatOptions expression from a format spec string.
+    /// Returns None if the spec can't be parsed or the builtin isn't available.
+    ///
+    /// Emits a block: `{ var $opts = FormatOptions(); $opts.radix = 16; ... ; $opts }`
+    fn build_format_options_from_spec(
+        &mut self,
+        spec: &str,
+        span: &Span,
+    ) -> Option<HirExprId> {
+        use crate::format_spec::{self, Alignment, FormatType, SignMode};
+
+        let parsed = match format_spec::parse_format_spec(spec) {
+            Ok(s) => s,
+            Err(e) => {
+                self.ctx.accumulate(
+                    Diagnostic::error()
+                        .with_message(format!("invalid format specifier: {e}"))
+                        .with_labels(vec![Label::primary(span.file_id, span.range())]),
+                );
+                return None;
+            },
+        };
+
+        let fo_entity = self.resolve_builtin(Builtin::FormatOptions)?;
+
+        let mut stmts: Vec<HirStmtId> = Vec::new();
+
+        // var $opts = FormatOptions()
+        let opts_local = self.define_local("$opts", true, span.clone());
+        let fo_ref = self.alloc_expr(HirExpr::Def(fo_entity, Vec::new(), span.clone()));
+        let init_call = self.alloc_expr(HirExpr::Call {
+            callee: fo_ref,
+            args: Vec::new(),
+            span: span.clone(),
+        });
+        stmts.push(self.alloc_stmt(HirStmt::Let {
+            local: opts_local,
+            ty: None,
+            value: Some(init_call),
+            span: span.clone(),
+        }));
+
+        // Helper: emit `$opts.field = value`
+        let assign_field = |this: &mut Self,
+                                stmts: &mut Vec<HirStmtId>,
+                                name: &str,
+                                value: HirExprId| {
+            let target_base = this.alloc_expr(HirExpr::Local(opts_local, span.clone()));
+            let target = this.alloc_expr(HirExpr::Field {
+                base: target_base,
+                name: HirName::name(name),
+                span: span.clone(),
+            });
+            let assign = this.alloc_expr(HirExpr::Assign {
+                target,
+                value,
+                span: span.clone(),
+            });
+            stmts.push(this.alloc_stmt(HirStmt::Expr {
+                expr: assign,
+                span: span.clone(),
+            }));
+        };
+
+        // width: Int64? — only if specified
+        if let Some(w) = parsed.width {
+            let int_lit = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Integer(w as i64),
+                span: span.clone(),
+            });
+            let some_val = self.alloc_expr(HirExpr::ImplicitMember {
+                name: HirName::name("Some"),
+                args: Some(vec![HirCallArg {
+                    label: None,
+                    value: int_lit,
+                }]),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "width", some_val);
+        }
+
+        // precision: Int64? — only if specified
+        if let Some(p) = parsed.precision {
+            let int_lit = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Integer(p as i64),
+                span: span.clone(),
+            });
+            let some_val = self.alloc_expr(HirExpr::ImplicitMember {
+                name: HirName::name("Some"),
+                args: Some(vec![HirCallArg {
+                    label: None,
+                    value: int_lit,
+                }]),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "precision", some_val);
+        }
+
+        // alignment — only if non-default (Left)
+        if parsed.alignment != Alignment::Left {
+            let variant = match parsed.alignment {
+                Alignment::Right => "Right",
+                Alignment::Center => "Center",
+                Alignment::Left => unreachable!(),
+            };
+            let val = self.alloc_expr(HirExpr::ImplicitMember {
+                name: HirName::name(variant),
+                args: None,
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "alignment", val);
+        }
+
+        // fill — only if non-default (' ')
+        if parsed.fill != ' ' {
+            let val = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Char(parsed.fill as u32),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "fill", val);
+        }
+
+        // radix — determined by format type
+        let radix: i64 = match parsed.format_type {
+            FormatType::Binary => 2,
+            FormatType::Octal => 8,
+            FormatType::Hex | FormatType::HexUpper => 16,
+            _ => 10,
+        };
+        if radix != 10 {
+            let val = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Integer(radix),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "radix", val);
+        }
+
+        // uppercase
+        if matches!(parsed.format_type, FormatType::HexUpper) {
+            let val = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Bool(true),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "uppercase", val);
+        }
+
+        // sign — only if non-default (Negative)
+        if parsed.sign != SignMode::Negative {
+            let variant = match parsed.sign {
+                SignMode::Always => "Always",
+                SignMode::Space => "Space",
+                SignMode::Negative => unreachable!(),
+            };
+            let val = self.alloc_expr(HirExpr::ImplicitMember {
+                name: HirName::name(variant),
+                args: None,
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "sign", val);
+        }
+
+        // alternate
+        if parsed.alternate {
+            let val = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Bool(true),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "alternate", val);
+        }
+
+        // floatStyle — only if non-default (Auto)
+        let float_variant = match parsed.format_type {
+            FormatType::Fixed => Some("Fixed"),
+            FormatType::Scientific => Some("Scientific"),
+            FormatType::ScientificUpper => Some("ScientificUpper"),
+            FormatType::Percent => Some("Percent"),
+            _ => None,
+        };
+        if let Some(variant) = float_variant {
+            let val = self.alloc_expr(HirExpr::ImplicitMember {
+                name: HirName::name(variant),
+                args: None,
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "floatStyle", val);
+        }
+
+        // debug
+        if matches!(parsed.format_type, FormatType::Debug) {
+            let val = self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Bool(true),
+                span: span.clone(),
+            });
+            assign_field(self, &mut stmts, "debug", val);
+        }
+
+        // If no non-default fields were set, skip the block entirely
+        if stmts.len() == 1 {
+            // Only the Let stmt — return the init directly
+            return Some(init_call);
+        }
+
+        // Tail: $opts
+        let opts_ref = self.alloc_expr(HirExpr::Local(opts_local, span.clone()));
+
+        Some(self.alloc_expr(HirExpr::Block {
+            body: HirBlock {
+                stmts,
+                tail_expr: Some(opts_ref),
+            },
+            span: span.clone(),
+        }))
     }
 
     // ===== Builtin resolution helper =====

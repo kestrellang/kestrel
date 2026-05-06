@@ -7,7 +7,7 @@ func findValue(pairs: Array[(String, String)], name: String) -> String? {
     var i: Int64 = 0;
     while i < pairs.count {
         let pair = pairs(unchecked: i);
-        if pair.0.equals(name) {
+        if pair.0.isEqual(to: name) {
             return .Some(pair.1)
         }
         i = i + 1
@@ -23,13 +23,13 @@ func main() -> lang.i64 {
 
     let ct = findValue(headers, "Content-Type");
     match ct {
-        .Some(v) => if v.equals("text/html") == false { return 1 },
+        .Some(v) => if v.isEqual(to: "text/html") == false { return 1 },
         .None => return 2
     }
 
     let host = findValue(headers, "Host");
     match host {
-        .Some(v) => if v.equals("example.com") == false { return 3 },
+        .Some(v) => if v.isEqual(to: "example.com") == false { return 3 },
         .None => return 4
     }
 

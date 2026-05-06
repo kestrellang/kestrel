@@ -59,11 +59,11 @@ public enum GraphemeBreakProperty: Equatable, Matchable {
     case LVT
 
     /// Equality by ordinal — same variant, same value.
-    public func equals(other: GraphemeBreakProperty) -> Bool {
+    public func isEqual(to other: GraphemeBreakProperty) -> Bool {
         self.ordinal() == other.ordinal()
     }
 
-    /// Match form of `equals` for use in pattern matching.
+    /// Match form of `isEqual` for use in pattern matching.
     public func matches(other: GraphemeBreakProperty) -> Bool {
         self.ordinal() == other.ordinal()
     }

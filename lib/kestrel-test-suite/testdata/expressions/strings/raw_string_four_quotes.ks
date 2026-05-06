@@ -1,8 +1,10 @@
 // test: diagnostics
 // stdlib: false
 
+// Pound escalation: `##"..."##` lets the body contain `"#` literally,
+// which a single-pound `#"..."#` form cannot.
 module Main
 
-func testFourQuoteRawString() -> lang.str {
-    """"three quotes """ inside""""
+func testEscalatedRawString() -> lang.str {
+    ##"contains "# literal"##
 }

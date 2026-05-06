@@ -4,5 +4,5 @@
 module Main
 
 func testRawStringBackslash() -> lang.str {
-    """hello\\nworld"""
+    #"hello\nworld"#
 }

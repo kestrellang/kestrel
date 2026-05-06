@@ -4,5 +4,5 @@
 module Main
 
 func testRawStringWithQuotes() -> lang.str {
-    """he said "hi" to me"""
+    #"he said "hi" to me"#
 }

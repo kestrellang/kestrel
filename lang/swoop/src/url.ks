@@ -1,7 +1,7 @@
-// Client-side URL parsing
-//
-// Parses full URLs like "http://host:port/path?query" into components.
-// The existing http.url module only handles request paths (/path?query).
+/// Client-side URL parsing — full URLs like `http://host:port/path?query`.
+///
+/// The `http.url` module handles request paths (`/path?query`); this
+/// module adds scheme, host, and port for client-side use.
 
 module swoop.url
 
@@ -13,6 +13,17 @@ import http.wire.(parseDecimal)
 // ============================================================================
 
 /// A parsed client URL with scheme, host, port, path, and query string.
+///
+/// # Examples
+///
+/// ```
+/// let url = try parseClientUrl("https://api.example.com:8443/v1/users?page=1");
+/// url.scheme;       // "https"
+/// url.host;         // "api.example.com"
+/// url.port;         // 8443
+/// url.path;         // "/v1/users"
+/// url.queryString;  // "page=1"
+/// ```
 public struct ClientUrl: Cloneable {
     public var scheme: String
     public var host: String
@@ -42,8 +53,7 @@ public struct ClientUrl: Cloneable {
     }
 
     public func clone() -> ClientUrl {
-        var c = ClientUrl(self.scheme.clone(), self.host.clone(), self.port, self.path.clone(), self.queryString.clone());
-        c
+        ClientUrl(self.scheme.clone(), self.host.clone(), self.port, self.path.clone(), self.queryString.clone())
     }
 
     /// Returns "host" or "host:port" for the Host header.
@@ -102,45 +112,38 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     }
 
     // Extract host:port portion
-    let hostPort = raw.substringBytes(from: afterScheme, to: pathStart);
+    let rawSlice = raw.asSlice();
+    let hostPort = rawSlice.subslice(from: afterScheme, to: pathStart).toOwned();
     if hostPort.byteCount == 0 {
         return .Err(SwoopError.invalidUrl("missing host"))
     }
 
-    // Split host and port on ':'
     var host = hostPort;
     var port = defaultPort;
-    match hostPort.find(":") {
-        .Some(colonIdx) => {
-            host = hostPort.substringBytes(from: 0, to: colonIdx);
-            let portStr = hostPort.substringBytes(from: colonIdx + 1, to: hostPort.byteCount);
-            let port64 = parseDecimal(portStr);
-            if port64 > 0 and port64 <= 65535 {
-                port = UInt16(from: port64)
-            } else {
-                return .Err(SwoopError.invalidUrl("invalid port"))
-            }
-        },
-        .None => {}
+    let hpSlice = hostPort.asSlice();
+    if let .Some(colonIdx) = hostPort.firstIndex(of: ":") {
+        host = hpSlice.subslice(from: hpSlice.start, to: colonIdx.value).toOwned();
+        let portStr = hpSlice.subslice(from: colonIdx.value + 1, to: hpSlice.end).toOwned();
+        let port64 = parseDecimal(portStr);
+        if port64 > 0 and port64 <= 65535 {
+            port = UInt16(from: port64)
+        } else {
+            return .Err(SwoopError.invalidUrl("invalid port"))
+        }
     }
 
-    // Extract path and query string
     var path = "/";
     var queryString = String();
     if pathStart < len {
-        let remainder = raw.substringBytes(from: pathStart, to: len);
-        match remainder.find("?") {
-            .Some(qIdx) => {
-                path = remainder.substringBytes(from: 0, to: qIdx);
-                queryString = remainder.substringBytes(from: qIdx + 1, to: remainder.byteCount)
-            },
-            .None => {
-                path = remainder
-            }
+        let remainder = rawSlice.subslice(from: pathStart, to: len).toOwned();
+        let remSlice = remainder.asSlice();
+        if let .Some(qIdx) = remainder.firstIndex(of: "?") {
+            path = remSlice.subslice(from: remSlice.start, to: qIdx.value).toOwned();
+            queryString = remSlice.subslice(from: qIdx.value + 1, to: remSlice.end).toOwned()
+        } else {
+            path = remainder
         }
     }
 
     .Ok(ClientUrl(scheme, host, port, path, queryString))
 }
-
-// parseDecimal imported from http.wire

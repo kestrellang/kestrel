@@ -14,10 +14,10 @@ module Test
             if f.matches(t) { return 4 }
 
             // Test format - default formatting
-            let trueStr = t.format();
+            let trueStr = t.formatted();
             if trueStr != "true" { return 5 }
 
-            let falseStr = f.format();
+            let falseStr = f.formatted();
             if falseStr != "false" { return 6 }
 
             0

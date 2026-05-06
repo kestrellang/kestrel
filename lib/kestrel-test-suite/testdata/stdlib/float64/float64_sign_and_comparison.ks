@@ -10,11 +10,11 @@ module Test
 
             // sign
             let posSign = pos.sign;
-            if posSign.equals(1.0) == false { return 1 }
+            if posSign.isEqual(to: 1.0) == false { return 1 }
             let negSign = neg.sign;
-            if negSign.equals(-1.0) == false { return 2 }
+            if negSign.isEqual(to: -1.0) == false { return 2 }
             let zeroSign = zero.sign;
-            if zeroSign.equals(0.0) == false { return 3 }
+            if zeroSign.isEqual(to: 0.0) == false { return 3 }
 
             // isPositive
             if pos.isPositive == false { return 4 }
@@ -34,12 +34,12 @@ module Test
             let a: std.numeric.Float64 = 1.5;
             let b: std.numeric.Float64 = 1.5;
             let c: std.numeric.Float64 = 2.5;
-            if a.equals(b) == false { return 12 }
-            if a.equals(c) { return 13 }
+            if a.isEqual(to: b) == false { return 12 }
+            if a.isEqual(to: c) { return 13 }
 
             // NaN not equal to itself
             let nan = std.numeric.Float64.nan;
-            if nan.equals(nan) { return 14 }
+            if nan.isEqual(to: nan) { return 14 }
 
             // compare
             let one: std.numeric.Float64 = 1.0;

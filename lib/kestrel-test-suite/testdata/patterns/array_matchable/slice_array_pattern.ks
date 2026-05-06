@@ -3,9 +3,9 @@
 
 module Test
 
-import std.memory.Slice
+import std.memory.ArraySlice
 
-func sliceFirst(s: Slice[lang.i64]) -> lang.i64 {
+func sliceFirst(s: ArraySlice[lang.i64]) -> lang.i64 {
     match s {
         [first, ..] => first,
         _ => 0

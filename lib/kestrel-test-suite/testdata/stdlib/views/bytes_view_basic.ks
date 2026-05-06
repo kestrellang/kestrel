@@ -9,12 +9,12 @@ module Test
             // ---- bytes.count ----
             if s.bytes.count != 5 { return 1 }
 
-            // ---- bytes.isEmpty() ----
-            if s.bytes.isEmpty() { return 2 }
+            // ---- bytes.isEmpty ----
+            if s.bytes.isEmpty { return 2 }
 
             // Empty string bytes view
             let empty = std.text.String();
-            if empty.bytes.isEmpty() == false { return 3 }
+            if empty.bytes.isEmpty == false { return 3 }
             if empty.bytes.count != 0 { return 4 }
 
             // ---- bytes(checked:) ----

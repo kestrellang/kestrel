@@ -10,7 +10,7 @@ struct Formatter {
 
     public subscript[F](value: F) -> String where F: Formattable {
         get {
-            value.format()
+            value.formatted()
         }
     }
 }

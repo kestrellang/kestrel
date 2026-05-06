@@ -13,7 +13,7 @@ module Test
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
-            let slice = std.memory.Slice[std.numeric.UInt8](pointer: buf.asPointer(), count: 3);
+            let slice = std.memory.ArraySlice[std.numeric.UInt8](pointer: buf.asPointer(), count: 3);
 
             // Read should return Ok(0) immediately (EOF)
             let result = empty.read(into: slice);

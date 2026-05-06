@@ -4,5 +4,5 @@
 module Main
 
 func testRawString() -> lang.str {
-    """hello world"""
+    #"hello world"#
 }

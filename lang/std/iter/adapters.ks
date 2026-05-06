@@ -720,7 +720,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
-    public init(inner inner: I, inspecting inspector: (I.Item) -> ()) {
+    public init(inner inner: I, inspector inspector: (I.Item) -> ()) {
         self.inner = inner;
         self.inspector = inspector;
     }

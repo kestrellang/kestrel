@@ -2,7 +2,6 @@
 name = "sdl_pong"
 version = "0.1.0"
 description = "SDL2 pong game"
-source = "."
 
 [build]
 c-sources = ["sdl_helpers.c"]
