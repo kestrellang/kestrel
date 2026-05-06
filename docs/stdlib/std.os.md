@@ -17,7 +17,7 @@ empty string if `popen` fails.
 ### Examples
 
 ```
-let branch = captureOutput(command: "git rev-parse --abbrev-ref HEAD");
+let branch = captureOutput("git rev-parse --abbrev-ref HEAD");
 // "main"
 ```
 
@@ -43,7 +43,7 @@ Returns `Err(IoError)` on any libc failure; `errno` is captured.
 ### Examples
 
 ```
-chmod(path: "/tmp/script.sh", mode: Int32(intLiteral: 0o755));
+chmod("/tmp/script.sh", Int32(intLiteral: 0o755));
 ```
 
 _Defined in `lang/std/os/fs.ks`._
@@ -66,7 +66,7 @@ errors, `>128` typically encodes a fatal signal).
 ### Examples
 
 ```
-exit(code: 0);   // success — does not return
+exit(0);   // success — does not return
 ```
 
 _Defined in `lang/std/os/proc.ks`._
@@ -87,7 +87,7 @@ follow up with `isFile` / `isDirectory`.
 ### Examples
 
 ```
-if fileExists(path: "/tmp/foo") {
+if fileExists("/tmp/foo") {
     // ...
 }
 ```
@@ -154,8 +154,8 @@ nonexistent paths or any non-directory file type.
 ### Examples
 
 ```
-isDirectory(path: "/tmp");      // true
-isDirectory(path: "/etc/hosts"); // false
+isDirectory("/tmp");      // true
+isDirectory("/etc/hosts"); // false
 ```
 
 _Defined in `lang/std/os/fs.ks`._
@@ -190,7 +190,7 @@ distinguish "empty directory" from "open failed".
 ### Examples
 
 ```
-for entry in listDir(path: "/tmp") {
+for entry in listDir("/tmp") {
     print(entry);
 }
 ```
@@ -218,7 +218,7 @@ surfaced via the error's `kind`. Common cases: `EEXIST` (path exists),
 ### Examples
 
 ```
-match mkdir(path: "/tmp/foo") {
+match mkdir("/tmp/foo") {
     .Ok(_)  => print("created"),
     .Err(e) => print(e.message)
 }
@@ -248,7 +248,7 @@ Forwards any `mkdir` failure verbatim. Specific to this function:
 ### Examples
 
 ```
-mkdirAll(path: "/tmp/foo/bar/baz");  // creates all three levels
+mkdirAll("/tmp/foo/bar/baz");  // creates all three levels
 ```
 
 _Defined in `lang/std/os/fs.ks`._
@@ -371,7 +371,7 @@ captured output, use `captureOutput`.
 ### Examples
 
 ```
-let code = spawn(command: "ls -la");
+let code = spawn("ls -la");
 if code != 0 {
     print("ls failed");
 }

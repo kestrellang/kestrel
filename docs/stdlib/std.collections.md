@@ -6,6 +6,74 @@
 public struct Array[T] { /* private fields */ }
 ```
 
+A dynamic, growable, contiguous-buffer array with copy-on-write storage.
+
+`Array[T]` is the standard ordered-collection type. It supports
+constant-time random access, amortized constant-time `append`, and
+arbitrary-position insert/remove via shifting. Storage is shared between
+copies until one of them mutates, at which point that copy lazily clones
+the buffer (see "Memory Model" below). For non-owning views over an
+existing buffer use `ArraySlice[T]`; for fixed-size or set-like collections
+see `ArraySlice[T]`, `Set`, or `Dictionary`.
+
+### Examples
+
+```
+let evens = [2, 4, 6, 8];
+var names = Array[String]();
+names.append("Alice");
+names.append("Bob");
+
+let copy = names;      // O(1) — shares storage with `names`
+names.append("Carol"); // O(1) clone happens here, `copy` is unchanged
+
+for n in names.iter() { ... }
+let pivot = names.partition(by: { (n) in n.count > 3 });
+```
+
+### Indexing
+
+The default subscript `arr(i)` panics on out-of-bounds. Variants exist
+for every common policy: `arr(checked: i)` returns `T?`,
+`arr(unchecked: i)` skips the bounds check (UB on OOB),
+`arr(wrapped: i)` wraps with modulo (and supports negative indices),
+and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
+same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
+`arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
+`SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
+types share each label; the result type varies (`T?` vs `ArraySlice[T]`
+for `clamped:`).
+
+### Capacity & Reallocation
+
+`count` is the number of elements; `capacity` is how many can fit
+without reallocating. When `append` would exceed capacity the buffer
+doubles (starting from 4 if previously zero). Use
+`reserveCapacity(minimumCapacity:)` to pre-allocate, and
+`shrinkToFit()` to release excess.
+
+### Representation
+
+Holds a single `CowBox[ArrayStorage[T]]` field. The storage is a
+`(ptr, len, cap)` triple over a heap-allocated buffer.
+
+### Memory Model
+
+Reference-counted storage with copy-on-write *value* semantics. Copying
+an `Array` is O(1) and shares the buffer; the next mutation on a shared
+`Array` triggers `makeUnique()`, which deep-clones the buffer so the
+mutation is invisible to other copies. The user-visible behavior is
+indistinguishable from deep-copying on assignment.
+
+### Guarantees
+
+- Elements are stored contiguously and are accessible via `asPointer()`
+  for FFI; the pointer is invalidated by any mutation that may
+  reallocate.
+- `count <= capacity` always.
+- Iteration order is insertion order.
+- Operations marked O(1) are amortized; growth is geometric.
+
 _Defined in `lang/std/collections/array.ks`._
 
 ### Members
@@ -29,66 +97,6 @@ Panics if allocation fails.
 ```
 // Triggered by the array-literal syntax:
 let arr: Array[Int64] = [10, 20, 30];
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### subscript `Checked Index`
-
-```kestrel
-public subscript[I](checked: I) -> I.ArrayYield? { get }
-```
-
-Reads at `index`, returning `None` on out-of-bounds.
-
-The non-panicking counterpart to `arr(i)`. Read-only; for fallible
-writes pattern-match the result and assign through the default
-subscript. Single-element indexes return `T?`; range indexes
-return `Slice[T]?`. Prefer this when `index` may come from
-untrusted input.
-
-##### Examples
-
-```
-let arr = [10, 20, 30];
-arr(checked: 0);       // Some(10)
-arr(checked: 5);       // None
-arr(checked: 0..<2);   // Some(Slice[10, 20])
-arr(checked: 0..<10);  // None
-
-if let .Some(v) = arr(checked: i) {
-    // ...
-}
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### subscript `Clamping`
-
-```kestrel
-public subscript[I](clamped: I) -> I.ArrayClampedYield { get set }
-```
-
-Reads or writes at `index` with bounds saturated to `[0, count)`.
-
-Never panics on out-of-bounds. For `Int64`, indices below `0`
-clamp up and indices `>= count` clamp down; an empty array yields
-`None`. For `Range[Int64]`, both endpoints clamp into `[0, count]`
-and the result is a (possibly empty) `Slice[T]`. Compare
-`arr(wrapped: i)`, which wraps instead of saturating.
-
-##### Examples
-
-```
-let arr = [10, 20, 30];
-arr(clamped: -5);          // Some(10) — clamped to first
-arr(clamped: 100);         // Some(30) — clamped to last
-arr(clamped: 1);           // Some(20) — in range
-[](clamped: 0);            // None     — empty array
-
-arr(clamped: -5..<100);    // Slice over the whole array
-arr(clamped: -5..<1);      // Slice[10]
-arr(clamped: 10..<20);     // empty Slice (both clamp to 3)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -162,41 +170,17 @@ let collected = Array(from: lines.iter());  // exhausts the iterator
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### subscript `Indexed`
+#### initializer `From Storage`
 
 ```kestrel
-public subscript[I](I) -> I.ArrayYield { get set }
+init(storage: CowBox[ArrayStorage[T]])
 ```
 
-Reads or writes at `index`, panicking on out-of-bounds.
+Wraps an existing storage box in a new `Array`.
 
-The default subscript: trades safety for ergonomics. Dispatches via
-the `ArrayIndex[T]` protocol — `Int64` reads/writes a single
-element, `Range[Int64]` and `ClosedRange[Int64]` read or replace a
-`Slice[T]`. Range writes require the source slice's length to
-match the range's length and panic otherwise. Use
-`arr(checked: i)` for an `Optional` instead of a panic, or
-`arr(unchecked: i)` to skip the bounds check entirely. Setters
-trigger COW; if storage is shared the buffer is cloned before the
-write lands.
-
-##### Errors
-
-Panics with `"Array index out of bounds"` (Int64) or
-`"Array range out of bounds"` (Range / ClosedRange) if the access
-falls outside `[0, count)`. Range writes also panic if the source
-slice's length doesn't match the range's length.
-
-##### Examples
-
-```
-var arr = [10, 20, 30, 40, 50];
-arr(0);                        // 10
-arr(1) = 25;                   // [10, 25, 30, 40, 50]
-arr(1..<4);                    // Slice[25, 30, 40]
-arr(1..<4) = otherSlice3;      // splice in three elements
-arr(5);                        // PANIC: index out of bounds
-```
+Module-internal — used by `clone()`, `ArrayBuilder.build()`, and
+other `std.collections` code that constructs arrays from raw
+storage.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -248,36 +232,6 @@ let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### subscript `Unchecked Index`
-
-```kestrel
-public subscript[I](unchecked: I) -> I.ArrayYield { get set }
-```
-
-Reads or writes at `index` without a bounds check.
-
-The fastest accessor; intended for hot loops where the index has
-already been validated (e.g. inside `0..<count`). Setters trigger
-COW. Range writes still panic on length mismatch — that's a
-definitional check, not a bounds check.
-
-##### Safety
-
-Undefined behavior if the access is out of range. Always validate
-before calling.
-
-##### Examples
-
-```
-let arr = [10, 20, 30];
-for i in arr.indices {
-    let v = arr(unchecked: i);   // safe — i is in range
-}
-let s = arr(unchecked: 0..<2);   // Slice[10, 20]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### initializer `With Capacity`
 
 ```kestrel
@@ -296,76 +250,6 @@ like `init()` (no allocation). Panics if allocation fails.
 var arr = Array[Int64](capacity: 1000);
 arr.count;     // 0
 arr.capacity;  // >= 1000 — no reallocation for first 1000 appends
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### subscript `Wrapping`
-
-```kestrel
-public subscript[I](wrapped: I) -> I.ArrayWrappedYield { get set }
-```
-
-Reads or writes at `index` using modulo-wrapping indexing.
-
-Negative indices count from the end (`-1` is the last element);
-positive indices `>= count` wrap to the start. The only failure
-mode is an empty array, which yields `None` (and no-ops on the
-setter). Compare `arr(clamped: i)`, which saturates instead of
-wrapping.
-
-##### Examples
-
-```
-let arr = [10, 20, 30];
-arr(wrapped: -1);  // Some(30) — last element
-arr(wrapped: -2);  // Some(20) — second to last
-arr(wrapped:  3);  // Some(10) — wraps to index 0
-arr(wrapped:  4);  // Some(20) — wraps to index 1
-[](wrapped: 0);    // None     — empty array
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `all`
-
-```kestrel
-public func all(matching: (T) -> Bool) -> Bool
-```
-
-`true` when every element satisfies `predicate` (vacuously true
-for an empty array).
-
-Short-circuits on the first failure. The dual is
-`any(matching:)`.
-
-##### Examples
-
-```
-[2, 4, 6].all(matching: { (x) in x % 2 == 0 });  // true
-[2, 3, 6].all(matching: { (x) in x % 2 == 0 });  // false
-[].all(matching: { (x) in false });              // true (vacuous)
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `any`
-
-```kestrel
-public func any(matching: (T) -> Bool) -> Bool
-```
-
-`true` when at least one element satisfies `predicate` (always
-`false` for an empty array).
-
-Short-circuits on the first match. The dual is `all(matching:)`.
-
-##### Examples
-
-```
-[1, 2, 3].any(matching: { (x) in x > 2 });  // true
-[1, 2, 3].any(matching: { (x) in x > 5 });  // false
-[].any(matching: { (x) in true });          // false (empty)
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -434,85 +318,7 @@ rather than to an exact target — for sized sources like another
 
 ```
 var arr = [1, 2];
-arr.appendFrom(iterable: 3..<6);  // [1, 2, 3, 4, 5]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `asPointer`
-
-```kestrel
-public func asPointer() -> Pointer[T]
-```
-
-Returns a raw pointer to the contiguous element buffer.
-
-Intended for FFI or low-level memory work. Any operation that may
-reallocate (`append`, `insert`, `reserveCapacity`, `shrinkToFit`,
-or any mutation through a shared `Array` that triggers COW)
-invalidates the pointer. For a higher-level borrowed view, use
-`asSlice()`.
-
-##### Safety
-
-The pointer outlives the array no further than the next mutation.
-Reading past `count` is undefined behavior; writing through the
-pointer skips COW and may silently mutate other `Array` copies
-that share the same storage.
-
-##### Examples
-
-```
-let p = arr.asPointer();
-c_sum(p, arr.count);   // pass to a C function
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> Slice[T]
-```
-
-Returns a `Slice[T]` over the entire array.
-
-The slice borrows the array's buffer; reallocation invalidates
-it. For a sub-range, use a range subscript such as `arr(0..<n)`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3];
-let slice = arr.asSlice();  // Slice over [1, 2, 3]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `binarySearch`
-
-```kestrel
-public func binarySearch(T) -> Int64?
-```
-
-Returns the index of `element` via binary search, or `None`.
-
-O(log n). When the array contains duplicates, *which* matching
-index is returned is unspecified. For unsorted data use
-`firstIndex(of:)` instead.
-
-##### Safety
-
-The array must be sorted in ascending order (per `isSorted()`).
-Calling this on an unsorted array does not crash, but the result
-is meaningless (false negatives become possible).
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 4, 5];
-arr.binarySearch(element: 3);  // Some(2)
-arr.binarySearch(element: 6);  // None
+arr.appendFrom(3..<6);  // [1, 2, 3, 4, 5]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -524,49 +330,6 @@ public var capacity: Int64 { get }
 ```
 
 The number of elements the buffer can hold without reallocating.
-
-Always `>= count`. When `append` would push `count` past
-`capacity` the buffer doubles (or jumps from 0 to 4). Use
-`reserveCapacity(...)` to pre-grow and `shrinkToFit()` to release
-excess. The exact value after `init(capacity:)` may exceed the
-requested amount because allocation rounds up.
-
-##### Examples
-
-```
-let arr = Array[Int64](capacity: 10);
-arr.capacity;  // >= 10
-arr.count;     // 0
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `chunks`
-
-```kestrel
-public func chunks(of: Int64) -> ChunksIterator[T]
-```
-
-Returns a `ChunksIterator[T]` over non-overlapping `size`-sized
-`Slice[T]`s.
-
-The final chunk may be shorter when `count` is not divisible by
-`size`. For overlapping fixed-size views, use `windows(of:)`. The
-produced iterator borrows the array's buffer.
-
-##### Errors
-
-Panics with `"Array.chunks: size must be positive"` if `size <= 0`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 4, 5];
-for chunk in arr.chunks(of: 2) {
-    // yields Slice[1,2], Slice[3,4], Slice[5]
-}
-arr.chunks(of: 0);  // PANIC
-```
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -591,67 +354,6 @@ arr.capacity;   // unchanged
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `contains`
-
-```kestrel
-public func contains(T) -> Bool
-```
-
-`true` if the array contains an element equal to `element`.
-
-Linear scan; short-circuits on the first match. For predicate-
-based searching see `any(matching:)` or `firstIndex(matching:)`.
-
-##### Examples
-
-```
-[1, 2, 3].contains(element: 2);  // true
-[1, 2, 3].contains(element: 5);  // false
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-The number of elements currently in the array. Read-only; O(1).
-
-Reflects only initialized elements, not capacity. To check
-emptiness without comparing to zero, prefer `isEmpty`.
-
-##### Examples
-
-```
-[1, 2, 3].count;  // 3
-[].count;         // 0
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `countItems`
-
-```kestrel
-public func countItems(matching: (T) -> Bool) -> Int64
-```
-
-Returns the number of elements for which `predicate` is true.
-
-Linear scan, no short-circuit. For just a presence check use
-`any(matching:)`; for a yes/no on every element,
-`all(matching:)`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].countItems(matching: { (x) in x % 2 == 0 });  // 2
-[].countItems(matching: { (x) in true });                     // 0
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `dedup`
 
 ```kestrel
@@ -661,7 +363,7 @@ public mutating func dedup()
 Removes runs of consecutive equal elements, in place.
 
 Only adjacent duplicates collapse — non-adjacent equal values are
-kept. To deduplicate globally, `sort()` first or, for `Hash`
+kept. To deduplicate globally, `sort()` first or, for `Hashable`
 elements, use the `unique()` / `removeDuplicates()` extension
 methods. The non-mutating variant is `deduped()`.
 
@@ -695,162 +397,6 @@ duplicates collapse.
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `drop`
-
-```kestrel
-public func drop(first: Int64) -> Slice[T]
-```
-
-Returns a `Slice[T]` with the first `count` elements skipped.
-
-Complement of `prefix(count:)`. Borrows the array's buffer.
-
-##### Errors
-
-Panics with `"Array.drop(first:): count exceeds array length"` if
-`count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].drop(first: 2);  // Slice[3, 4, 5]
-[1, 2].drop(first: 2);           // empty Slice
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `drop`
-
-```kestrel
-public func drop(last: Int64) -> Slice[T]
-```
-
-Returns a `Slice[T]` with the last `count` elements skipped.
-
-Complement of `suffix(count:)`. Borrows the array's buffer.
-
-##### Errors
-
-Panics with `"Array.drop(last:): count exceeds array length"` if
-`count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].drop(last: 2);  // Slice[1, 2, 3]
-[1, 2].drop(last: 2);           // empty Slice
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `ends`
-
-```kestrel
-public func ends(with: Array[T]) -> Bool
-```
-
-`true` if the array's trailing elements match `suffix` exactly.
-
-An empty suffix always matches; a suffix longer than the array
-never matches. Mirror of `starts(with:)`.
-
-##### Examples
-
-```
-[1, 2, 3].ends(with: [2, 3]);  // true
-[1, 2, 3].ends(with: [1, 2]);  // false
-[1, 2, 3].ends(with: []);      // true (vacuous)
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `first`
-
-```kestrel
-public func first() -> T?
-```
-
-Returns the first element, or `None` if the array is empty.
-
-O(1). Read-only — to remove the first element use `popFirst()`.
-To find the first element matching a predicate, see
-`first(matching:)`.
-
-##### Examples
-
-```
-[1, 2, 3].first();  // Some(1)
-[].first();         // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `first`
-
-```kestrel
-public func first(matching: (T) -> Bool) -> T?
-```
-
-Returns the first element matching `predicate`, or `None`.
-
-Wraps `firstIndex(matching:)` and reads the element at the
-returned index. For just the index, use `firstIndex(matching:)`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 4, 5];
-arr.first(matching: { (x) in x > 3 });   // Some(4)
-arr.first(matching: { (x) in x > 99 });  // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public func firstIndex(matching: (T) -> Bool) -> Int64?
-```
-
-Returns the index of the first element matching `predicate`, or
-`None`.
-
-Linear scan from the front; short-circuits on the first match.
-To get the element instead of the index, use `first(matching:)`.
-For value-based search on `Equatable` arrays, use
-`firstIndex(of:)`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 4, 5];
-arr.firstIndex(matching: { (x) in x > 3 });   // Some(3)
-arr.firstIndex(matching: { (x) in x > 10 });  // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public func firstIndex(of: T) -> Int64?
-```
-
-Returns the index of the first element equal to `element`, or
-`None`.
-
-Wraps `firstIndex(matching:)` with `equals(element)`. The mirror
-is `lastIndex(of:)`.
-
-##### Examples
-
-```
-[1, 2, 3, 2].firstIndex(of: 2);  // Some(1)
-[1, 2, 3].firstIndex(of: 5);     // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `flatten`
 
 ```kestrel
@@ -876,30 +422,6 @@ mixed.flatten();   // [1, 2, 3]
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### field `indices`
-
-```kestrel
-public var indices: Range[Int64] { get }
-```
-
-The valid index range `0..<count` as a `Range[Int64]`.
-
-Convenient for index-based iteration or for passing to
-`arr(range:)`. The range is empty for an empty array.
-
-##### Examples
-
-```
-let arr = [10, 20, 30];
-arr.indices;  // 0..<3
-
-for i in arr.indices {
-        print(arr(i));
-}
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `insert`
 
 ```kestrel
@@ -911,7 +433,7 @@ Inserts `element` at `index`, shifting later elements right by one.
 O(n) in the number of elements after `index`. `index == count`
 behaves like `append`. Triggers COW and may reallocate. For bulk
 insertion at one location, prefer
-`replaceSubrange(range: i..<i, with: ...)`.
+`replaceSubrange(i..<i, with: ...)`.
 
 ##### Errors
 
@@ -922,78 +444,10 @@ or `index > count`.
 
 ```
 var arr = [1, 3];
-arr.insert(element: 2, at: 1);  // [1, 2, 3]
-arr.insert(element: 0, at: 0);  // [0, 1, 2, 3]
-arr.insert(element: 4, at: 4);  // [0, 1, 2, 3, 4]  — append-equivalent
-arr.insert(element: 9, at: 99); // PANIC
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### field `isEmpty`
-
-```kestrel
-public var isEmpty: Bool { get }
-```
-
-`true` when the array has no elements; equivalent to `count == 0`.
-
-Reads more naturally than the comparison and is preferred in
-guards and predicates.
-
-##### Examples
-
-```
-[].isEmpty;                // true
-[1].isEmpty;               // false
-Array[Int64]().isEmpty;    // true
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `isSorted`
-
-```kestrel
-public func isSorted() -> Bool
-```
-
-`true` if the array is sorted in non-decreasing (ascending) order.
-
-Equal adjacent elements are allowed. Empty and single-element
-arrays are vacuously sorted. Useful as a precondition for
-`binarySearch(element:)`.
-
-##### Examples
-
-```
-[1, 2, 3].isSorted();  // true
-[1, 3, 2].isSorted();  // false
-[1, 1, 1].isSorted();  // true (equal adjacents allowed)
-[].isSorted();         // true (vacuous)
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `isValidIndex`
-
-```kestrel
-public func isValidIndex(Int64) -> Bool
-```
-
-`true` if `index` is in `[0, count)`.
-
-Equivalent to `index >= 0 and index < count`. Pair with
-`arr(unchecked: i)` to skip a redundant bounds check after you've
-already validated the index.
-
-##### Examples
-
-```
-let arr = [1, 2, 3];
-arr.isValidIndex(index: 0);   // true
-arr.isValidIndex(index: 2);   // true
-arr.isValidIndex(index: 3);   // false
-arr.isValidIndex(index: -1);  // false
+arr.insert(2, at: 1);  // [1, 2, 3]
+arr.insert(0, at: 0);  // [0, 1, 2, 3]
+arr.insert(4, at: 4);  // [0, 1, 2, 3, 4]  — append-equivalent
+arr.insert(9, at: 99); // PANIC
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1015,134 +469,10 @@ debug form (`"[1, 2, 3]"`), use `format()` directly.
 ##### Examples
 
 ```
-[1, 2, 3].joined(separator: ", ");  // "1, 2, 3"
-[1, 2, 3].joined();                 // "123"
-["a", "b"].joined(separator: "-");  // "a-b"
-[].joined(separator: ", ");         // ""
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `last`
-
-```kestrel
-public func last() -> T?
-```
-
-Returns the last element, or `None` if the array is empty.
-
-O(1). Read-only — to remove the last element use `pop()`. To find
-the last element matching a predicate, see `last(matching:)`.
-
-##### Examples
-
-```
-[1, 2, 3].last();  // Some(3)
-[].last();         // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `last`
-
-```kestrel
-public func last(matching: (T) -> Bool) -> T?
-```
-
-Returns the last element matching `predicate`, or `None`.
-
-Wraps `lastIndex(matching:)`. For just the index, use
-`lastIndex(matching:)`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 2, 1];
-arr.last(matching: { (x) in x > 1 });  // Some(2) — the second 2
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `lastIndex`
-
-```kestrel
-public func lastIndex(matching: (T) -> Bool) -> Int64?
-```
-
-Returns the index of the last element matching `predicate`, or
-`None`.
-
-Linear scan from the back; short-circuits on the first match. The
-mirror of `firstIndex(matching:)`. For value-based search on
-`Equatable` arrays, use `lastIndex(of:)`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 2, 1];
-arr.lastIndex(matching: { (x) in x == 2 });   // Some(3)
-arr.lastIndex(matching: { (x) in x == 99 });  // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `lastIndex`
-
-```kestrel
-public func lastIndex(of: T) -> Int64?
-```
-
-Returns the index of the last element equal to `element`, or
-`None`.
-
-Wraps `lastIndex(matching:)` with `equals(element)`. The mirror
-is `firstIndex(of:)`.
-
-##### Examples
-
-```
-[1, 2, 3, 2].lastIndex(of: 2);  // Some(3)
-[1, 2, 3].lastIndex(of: 5);     // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `max`
-
-```kestrel
-public func max() -> T?
-```
-
-Returns the largest element, or `None` if the array is empty.
-
-Single linear pass; ties go to the first occurrence. Pair with
-`min()` for the lower bound.
-
-##### Examples
-
-```
-[3, 1, 4].max();  // Some(4)
-[].max();         // None
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `min`
-
-```kestrel
-public func min() -> T?
-```
-
-Returns the smallest element, or `None` if the array is empty.
-
-Single linear pass; ties go to the first occurrence. Pair with
-`max()` for the upper bound.
-
-##### Examples
-
-```
-[3, 1, 4].min();  // Some(1)
-[].min();         // None
+[1, 2, 3].joined(", ");  // "1, 2, 3"
+[1, 2, 3].joined();       // "123"
+["a", "b"].joined("-");   // "a-b"
+[].joined(", ");          // ""
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1244,33 +574,6 @@ arr.popFirst();  // Some(2), arr is [3]
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `prefix`
-
-```kestrel
-public func prefix(Int64) -> Slice[T]
-```
-
-Returns a `Slice[T]` over the first `count` elements.
-
-Borrows the array's buffer; reallocation invalidates it. Pair
-with `drop(first:)` to get the complementary suffix. For the
-trailing elements, see `suffix(count:)`.
-
-##### Errors
-
-Panics with `"Array.prefix: count exceeds array length"` if
-`count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].prefix(count: 3);  // Slice[1, 2, 3]
-[1, 2].prefix(count: 0);           // empty Slice
-[1, 2].prefix(count: 9);           // PANIC
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `remove`
 
 ```kestrel
@@ -1316,8 +619,8 @@ occurrence in one pass, use `removeAll(element:)`.
 
 ```
 var arr = [1, 2, 3, 2];
-arr.remove(element: 2);  // true; arr is [1, 3, 2]
-arr.remove(element: 5);  // false; arr unchanged
+arr.remove(2);  // true; arr is [1, 3, 2]
+arr.remove(5);  // false; arr unchanged
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1361,7 +664,7 @@ use `remove(element:)`.
 
 ```
 var arr = [1, 2, 3, 2, 4, 2];
-arr.removeAll(element: 2);  // [1, 3, 4]
+arr.removeAll(2);  // [1, 3, 4]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1409,8 +712,8 @@ Panics with `"Array.removeSubrange: range out of bounds"` if
 
 ```
 var arr = [1, 2, 3, 4, 5];
-arr.removeSubrange(range: 1..<4);  // arr is [1, 5]
-arr.removeSubrange(range: 0..<0);  // no-op
+arr.removeSubrange(1..<4);  // arr is [1, 5]
+arr.removeSubrange(0..<0);  // no-op
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1439,9 +742,9 @@ Panics with `"Array.replaceSubrange: range out of bounds"` if
 
 ```
 var arr = [1, 2, 3, 4, 5];
-arr.replaceSubrange(range: 1..<4, with: [20, 30]);    // [1, 20, 30, 5]
-arr.replaceSubrange(range: 1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
-arr.replaceSubrange(range: 0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
+arr.replaceSubrange(1..<4, with: [20, 30]);    // [1, 20, 30, 5]
+arr.replaceSubrange(1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
+arr.replaceSubrange(0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1463,7 +766,7 @@ reallocations. The opposite operation is `shrinkToFit()`.
 
 ```
 var arr = Array[Int64]();
-arr.reserveCapacity(minimumCapacity: 1000);
+arr.reserveCapacity(1000);
 for i in 0..<1000 {
         arr.append(i);  // no reallocations
 }
@@ -1509,28 +812,6 @@ array, use `reversed()`.
 ```
 var arr = [1, 2, 3];
 arr.reverse();  // [3, 2, 1]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `reversed`
-
-```kestrel
-public func reversed() -> Array[T]
-```
-
-Returns a new array with the elements in reverse order.
-
-Non-mutating. Internally clones via COW (cheap until the next
-mutation) then `reverse()`s the copy. Use `reverse()` if you
-don't need to keep the original ordering.
-
-##### Examples
-
-```
-let arr = [1, 2, 3];
-let rev = arr.reversed();  // [3, 2, 1]
-// arr is still [1, 2, 3]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1679,9 +960,9 @@ public mutating func sort()
 
 Sorts the array in ascending order using the natural `<` ordering.
 
-Stable insertion sort under the hood (see the custom-comparator
-`sort(by:)` for the algorithm). For descending or custom orderings
-pass a comparator to `sort(by:)`. Non-mutating variant: `sorted()`.
+Uses introsort — O(n log n) worst-case. For descending or custom
+orderings pass a comparator to `sort(by:)`. Non-mutating variant:
+`sorted()`.
 
 ##### Examples
 
@@ -1701,9 +982,10 @@ public mutating func sort(by: (T, T) -> Bool)
 Sorts the array in place using a `<`-style comparator.
 
 The comparator returns `true` when its first argument should come
-before the second. Uses insertion sort — O(n²) worst-case but
-stable and excellent for small or nearly-sorted inputs. Pass a
-reversed comparator for descending order.
+before the second. Uses introsort — quicksort with heapsort
+fallback when recursion exceeds 2·log₂(n), and insertion sort for
+partitions ≤ 16 elements. O(n log n) worst-case. Pass a reversed
+comparator for descending order.
 
 ##### Examples
 
@@ -1722,37 +1004,11 @@ public mutating func sort[K](byKey: (T) -> K) where K: Comparable
 
 Sorts the array in place by an extracted `Comparable` key.
 
-Equivalent to `sort(by: { (a, b) in key(a) < key(b) })`. The key
-closure runs O(n²) times in the worst case (insertion sort), so
-keep it cheap. For descending order, pass a comparator to
-`sort(by:)` instead.
-
 ##### Examples
 
 ```
 var people = [Person("Alice", 30), Person("Bob", 25)];
-people.sort(byKey: { (p) in p.age });  // sorted by age ascending
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `sorted`
-
-```kestrel
-public func sorted() -> Array[T]
-```
-
-Returns a new array sorted in ascending order; original unchanged.
-
-Non-mutating mirror of `sort()`. Internally clones via COW then
-sorts the copy.
-
-##### Examples
-
-```
-let arr = [3, 1, 4, 1, 5];
-let sorted = arr.sorted();  // [1, 1, 3, 4, 5]
-// arr is still [3, 1, 4, 1, 5]
+people.sort(byKey: { (p) in p.age });
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1763,17 +1019,13 @@ _Defined in `lang/std/collections/array.ks`._
 public func sorted(by: (T, T) -> Bool) -> Array[T]
 ```
 
-Returns a new array sorted by a custom comparator. Original
-unchanged.
-
-Non-mutating mirror of `sort(by:)`. Useful for one-shot orderings
-such as case-insensitive string sorts.
+Returns a new array sorted by a custom comparator. Original unchanged.
 
 ##### Examples
 
 ```
-let arr = ["apple", "Banana", "cherry"];
-let sorted = arr.sorted(by: { (a, b) in a.lowercase() < b.lowercase() });
+let arr = [3, 1, 2];
+let desc = arr.sorted(by: { (a, b) in a > b });  // [3, 2, 1]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1787,92 +1039,11 @@ public func sorted[K](byKey: (T) -> K) -> Array[T] where K: Comparable
 Returns a new array sorted by an extracted `Comparable` key;
 original unchanged.
 
-Non-mutating mirror of `sort(byKey:)`.
-
 ##### Examples
 
 ```
 let words = ["hi", "hello", "hey"];
-let byLength = words.sorted(byKey: { (w) in w.count });  // ["hi", "hey", "hello"]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `split`
-
-```kestrel
-public func split(T) -> Array[Slice[T]]
-```
-
-Splits the array on each element equal to `separator`, returning
-the in-between runs as `Slice[T]`s.
-
-Separators themselves are dropped, but empty runs (between
-adjacent separators, or before the first / after the last) are
-preserved as empty slices. The result therefore always has length
-`(separatorCount + 1)`. The slices alias the source buffer.
-
-##### Examples
-
-```
-[1, 0, 2, 0, 3].split(separator: 0);
-// [Slice[1], Slice[2], Slice[3]]
-
-[0, 1, 0, 0, 2, 0].split(separator: 0);
-// [Slice[], Slice[1], Slice[], Slice[2], Slice[]]
-
-[1, 2, 3].split(separator: 0);
-// [Slice[1, 2, 3]] — separator not found
-
-[].split(separator: 0);
-// [Slice[]] — empty array yields one empty slice
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `starts`
-
-```kestrel
-public func starts(with: Array[T]) -> Bool
-```
-
-`true` if the array's leading elements match `prefix` exactly.
-
-An empty prefix always matches; a prefix longer than the array
-never matches. Mirror of `ends(with:)`.
-
-##### Examples
-
-```
-[1, 2, 3].starts(with: [1, 2]);     // true
-[1, 2, 3].starts(with: [1, 2, 3]);  // true (full match)
-[1, 2, 3].starts(with: [2, 3]);     // false
-[1, 2].starts(with: [1, 2, 3]);     // false (prefix longer)
-[1, 2, 3].starts(with: []);         // true (vacuous)
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `suffix`
-
-```kestrel
-public func suffix(Int64) -> Slice[T]
-```
-
-Returns a `Slice[T]` over the last `count` elements.
-
-Mirror of `prefix(count:)`. Borrows the array's buffer.
-
-##### Errors
-
-Panics with `"Array.suffix: count exceeds array length"` if
-`count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].suffix(count: 2);  // Slice[4, 5]
-[1, 2].suffix(count: 0);           // empty Slice
+let byLen = words.sorted(byKey: { (w) in w.count });
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1903,57 +1074,25 @@ arr.swap(at: 0, with: 9);  // PANIC
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `unique`
+### Implements `Slice`
+
+#### function `asSlice`
 
 ```kestrel
-public func unique() -> Array[T]
+public func asSlice() -> ArraySlice[T]
 ```
 
-Returns a new array containing each distinct element once, in the
-order of first occurrence.
-
-Currently O(n²) (linear scan per insert). For an O(n) build, push
-the elements through a `Set` first. The in-place mirror is
-`removeDuplicates()`. Compare with `dedup()`, which only collapses
-adjacent duplicates and does not require `Hash`.
-
-##### Examples
-
-```
-[1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
-["a", "a", "b"].unique();      // ["a", "b"]
-```
+Slice protocol kernel — borrows the array's buffer as an ArraySlice.
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `windows`
+#### function `ensureUnique`
 
 ```kestrel
-public func windows(of: Int64) -> WindowsIterator[T]
+public mutating func ensureUnique()
 ```
 
-Returns a `WindowsIterator[T]` over overlapping `size`-sized
-`Slice[T]`s.
-
-Adjacent windows overlap by `size - 1` elements. For
-non-overlapping fixed-size groups, use `chunks(of:)`. The
-produced iterator borrows the array's buffer.
-
-##### Errors
-
-Panics with `"Array.windows: size must be positive"` if
-`size <= 0`, or `"Array.windows: size exceeds array length"` if
-`size > count`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3, 4];
-for window in arr.windows(of: 2) {
-    // yields Slice[1,2], Slice[2,3], Slice[3,4]
-}
-[1, 2].windows(of: 5);  // PANIC: size exceeds array length
-```
+COW write barrier — deep-copies storage if shared.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1972,7 +1111,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = ArrayIterator[T]
+type TargetIterator = ArraySliceIterator[T]
 ```
 
 `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -1982,21 +1121,10 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> ArrayIterator[T]
+public func iter() -> ArraySliceIterator[T]
 ```
 
 Returns a forward iterator over the array's elements.
-
-The returned `ArrayIterator[T]` aliases the array's buffer; do
-not mutate the array while iterating. For grouped views see
-`chunks(of:)` and `windows(of:)`.
-
-##### Examples
-
-```
-for item in arr.iter() { ... }
-let doubled = arr.iter().map({ (x) in x * 2 }).collect();
-```
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -2056,7 +1184,7 @@ public func clone() -> Array[T]
 Returns an `Array[T]` sharing the same storage; the deep copy is
 deferred until either side mutates.
 
-O(1) — just bumps the storage `RcBox`'s refcount. The first
+O(1) — just bumps the storage `CowBox`'s refcount. The first
 mutation on either the original or the clone triggers
 `makeUnique()`, which deep-copies the buffer so the two arrays
 diverge.
@@ -2085,27 +1213,17 @@ _Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Array[T]) -> Bool
+func isEqual(to: Self) -> Bool
 ```
 
-Element-wise equality: arrays are equal iff they have the same
-`count` and every corresponding pair of elements is equal.
+Returns `true` iff `self` and `other` are considered equal. Should
+be reflexive, symmetric, and transitive — `Hashable` requires equal
+values to hash equal, so don't drift from those laws.
 
-Short-circuits on the first mismatch. Order matters —
-`[1, 2, 3]` is not equal to `[3, 2, 1]`.
-
-##### Examples
-
-```
-[1, 2, 3].equals(other: [1, 2, 3]);  // true
-[1, 2, 3].equals(other: [1, 2]);     // false
-[1, 2, 3].equals(other: [3, 2, 1]);  // false
-```
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `ArrayMatchable`
 
@@ -2150,7 +1268,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `matchSlice`
 
 ```kestrel
-public func matchSlice(Int64, Int64) -> Slice[T]
+public func matchSlice(Int64, Int64) -> ArraySlice[T]
 ```
 
 Pattern-matcher hook returning the half-open `[from, to)` slice.
@@ -2160,128 +1278,362 @@ indices are in range.
 
 _Defined in `lang/std/collections/array.ks`._
 
-### Implements `Formattable`
-
-#### function `format`
+## struct `ArrayBuilder`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public struct ArrayBuilder[T] { /* private fields */ }
 ```
 
-Renders the array as `"[" + elements.joined(", ") + "]"`, passing
-`options` through to each element's `format`.
+Write-only buffer for efficient array construction. No COW, no
+`RcBox`, no `isUnique` checks — every append writes directly through
+the pointer.
 
-Empty arrays render as `"[]"`.
-
-##### Examples
-
-```
-[1, 2, 3].format();         // "[1, 2, 3]"
-Array[Int64]().format();    // "[]"
-"\{[1, 2, 3]}";             // "[1, 2, 3]" (via interpolation)
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-## struct `ArrayIterator`
-
-```kestrel
-public struct ArrayIterator[T] { /* private fields */ }
-```
-
-Single-pass forward iterator over the elements of an `Array[T]`.
-
-Produced by `Array.iter()`, walks the underlying storage one element at a
-time and yields owned copies of each element. The iterator holds a raw
-pointer into the array's buffer, so any mutation of the source array
-(which may reallocate) invalidates iteration. Use `chunks(of:)` or
-`windows(of:)` if you need grouped views instead.
+`build()` transfers ownership of the buffer into a new `Array[T]`
+without copying. The builder resets to empty and can be reused.
 
 ### Examples
 
 ```
-let arr = [1, 2, 3];
-var it = arr.iter();
-it.next();  // Some(1)
-it.next();  // Some(2)
-it.next();  // Some(3)
-it.next();  // None
+var b = ArrayBuilder[Int64](capacity: 3);
+b.append(1);
+b.append(2);
+b.append(3);
+let arr = b.build();   // [1, 2, 3], zero-copy
 ```
 
 ### Representation
 
-A `(ptr, remaining)` pair: a `Pointer[T]` advanced on each call and an
-`Int64` count of remaining elements.
+`(ptr: Pointer[T], len: Int64, cap: Int64)`.
 
 ### Memory Model
 
-Value type. The pointer aliases array storage; do not retain an iterator
-across mutations of the source array.
+Owns its buffer directly — no reference counting during
+construction. `build()` donates the buffer to an `Array[T]` and
+leaves the builder empty. `deinit` frees the buffer if `build()`
+was never called.
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/builder.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `Empty`
 
 ```kestrel
-public init(ptr: Pointer[T], remaining: Int64)
+public init()
 ```
 
-Constructs an iterator from a raw pointer and a remaining-count.
+Creates an empty builder with no allocation.
 
-Normally you should not call this directly — use `Array.iter()` instead.
-The pointer must be valid for `remaining` reads of `T`.
+_Defined in `lang/std/collections/builder.ks`._
 
-##### Safety
+#### initializer `With Capacity`
 
-The caller must guarantee `ptr` points to at least `remaining`
-initialized elements of `T` and remains valid for the iterator's
-lifetime.
-
-##### Examples
-
-```
-let it = ArrayIterator(ptr: arr.asPointer(), remaining: arr.count);
+```kestrel
+public init(capacity: Int64)
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+Creates an empty builder with at least `capacity` elements
+preallocated.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### function `append`
+
+```kestrel
+public mutating func append(T)
+```
+
+Appends a single element.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### function `append`
+
+```kestrel
+public mutating func append(contentsOf: ArraySlice[T])
+```
+
+Appends every element of `slice`.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### function `appendFrom`
+
+```kestrel
+public mutating func appendFrom[I](I) where I: Iterable, I.Item == T
+```
+
+Appends every element produced by `iterable`.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### function `build`
+
+```kestrel
+public mutating func build() -> Array[T]
+```
+
+Transfers the buffer into a new `Array[T]` without copying. The
+builder resets to empty and can be reused.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### field `capacity`
+
+```kestrel
+public var capacity: Int64 { get }
+```
+
+Allocated capacity in elements.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### function `clear`
+
+```kestrel
+public mutating func clear()
+```
+
+Resets length to zero, keeping the allocated buffer for reuse.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of elements written so far.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when nothing has been written.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+## struct `ArraySplitIterator`
+
+```kestrel
+public struct ArraySplitIterator[T] where T: Equatable { /* private fields */ }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64, separator: T, done: Bool)
+```
+
+_Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = T
+type Item = ArraySlice[T]
 ```
 
-The element type yielded by `next()` — always `T`.
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 #### function `next`
 
 ```kestrel
-public mutating func next() -> T?
+public mutating func next() -> Optional[ArraySlice[T]]
 ```
 
-Advances the iterator and returns the next element, or `None` when the
-iterator is exhausted.
+_Defined in `lang/std/collections/views.ks`._
 
-Each call reads one element, advances the internal pointer by one,
-and decrements the remaining count. Once `None` is returned the
-iterator stays exhausted.
+## struct `ArraySplitView`
 
-##### Examples
-
-```
-var it = [10, 20].iter();
-it.next();  // Some(10)
-it.next();  // Some(20)
-it.next();  // None
+```kestrel
+public struct ArraySplitView[T] where T: Equatable { /* private fields */ }
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+Multi-pass lazy view over the segments produced by splitting on each
+occurrence of a separator value. (Named `ArraySplitView` to avoid
+collision with `std.text.SplitView`.)
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: ArraySlice[T], separator: T)
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `toArray`
+
+```kestrel
+public func toArray() -> Array[ArraySlice[T]]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ArraySplitIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ArraySplitIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+## struct `ArraySplitWhereIterator`
+
+```kestrel
+public struct ArraySplitWhereIterator[T] { /* private fields */ }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64, predicate: (T) -> Bool, done: Bool)
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[ArraySlice[T]]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+## struct `ArraySplitWhereView`
+
+```kestrel
+public struct ArraySplitWhereView[T] { /* private fields */ }
+```
+
+Multi-pass lazy view over the segments produced by splitting on each
+element matching a predicate. No `Equatable` requirement.
+(Named `ArraySplitWhereView` to avoid collision with
+`std.text.SplitWhereView`.)
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: ArraySlice[T], predicate: (T) -> Bool)
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `toArray`
+
+```kestrel
+public func toArray() -> Array[ArraySlice[T]]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ArraySplitWhereIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ArraySplitWhereIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
 
 ## typealias `ArrayTypeOperator`
 
@@ -2311,98 +1663,130 @@ _Defined in `lang/std/collections/array.ks`._
 public struct ChunksIterator[T] { /* private fields */ }
 ```
 
-Iterator over non-overlapping `Slice[T]` chunks of an `Array[T]`.
-
-Produced by `Array.chunks(of:)`, walks the source buffer in fixed-size
-strides and yields each chunk as a borrowed `Slice[T]`. The last chunk
-may be shorter than `chunkSize` when the array length is not evenly
-divisible. For overlapping windows of a fixed size instead, use
-`WindowsIterator` / `Array.windows(of:)`.
-
-### Examples
-
-```
-let arr = [1, 2, 3, 4, 5];
-for chunk in arr.chunks(of: 2) {
-    // yields: Slice[1, 2], Slice[3, 4], Slice[5]
-}
-```
-
-### Representation
-
-A `(ptr, remaining, chunkSize)` triple: a pointer advanced by one chunk
-per `next()` call, plus the count of unread elements and the requested
-stride.
-
-### Memory Model
-
-Value type. Yielded slices alias the source array's buffer; do not
-retain them across mutations of the array.
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `init`
 
 ```kestrel
 public init(ptr: Pointer[T], remaining: Int64, chunkSize: Int64)
 ```
 
-Constructs a chunks iterator from a pointer, total element count, and
-chunk stride.
-
-Prefer `Array.chunks(of:)` over calling this directly.
-
-##### Safety
-
-`ptr` must point to at least `remaining` initialized elements of
-`T`, and `chunkSize` should be positive.
-
-##### Examples
-
-```
-let it = ChunksIterator(ptr: arr.asPointer(), remaining: arr.count, chunkSize: 2);
-```
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = Slice[T]
+type Item = ArraySlice[T]
 ```
 
-The element type yielded by `next()` — a borrowed `Slice[T]` over
-one chunk.
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 #### function `next`
 
 ```kestrel
-public mutating func next() -> Slice[T]?
+public mutating func next() -> Optional[ArraySlice[T]]
 ```
 
-Returns the next chunk, or `None` when the source is exhausted.
+_Defined in `lang/std/collections/views.ks`._
 
-The returned `Slice[T]` has length `chunkSize`, except for the final
-chunk which may be shorter if the total count was not evenly
-divisible.
+## struct `ChunksView`
 
-##### Examples
-
-```
-var it = [1, 2, 3, 4, 5].chunks(of: 2);
-it.next();  // Some(Slice[1, 2])
-it.next();  // Some(Slice[3, 4])
-it.next();  // Some(Slice[5])     // shorter trailing chunk
-it.next();  // None
+```kestrel
+public struct ChunksView[T] { /* private fields */ }
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+Multi-pass lazy view over non-overlapping `chunkSize`-sized
+`ArraySlice[T]` segments.
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Optional[ArraySlice[T]] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: ArraySlice[T], chunkSize: Int64)
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Optional[ArraySlice[T]] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(Int64) -> ArraySlice[T] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `toArray`
+
+```kestrel
+public func toArray() -> Array[ArraySlice[T]]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ChunksIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ChunksIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
 
 ## struct `DefaultHasher`
 
@@ -2497,7 +1881,7 @@ _Defined in `lang/std/collections/hashing.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(Slice[UInt8])
+public mutating func write(ArraySlice[UInt8])
 ```
 
 Folds every byte of `bytes` into the running hash state.
@@ -2529,13 +1913,543 @@ Builds the default-valued instance.
 
 _Defined in `lang/std/core/protocols.ks`._
 
+## struct `Deque`
+
+```kestrel
+public struct Deque[T] { /* private fields */ }
+```
+
+A double-ended queue backed by a ring buffer with copy-on-write storage.
+
+O(1) amortized `pushBack`/`pushFront`/`popBack`/`popFront` and O(1)
+random access by index. Storage is shared between copies until one
+mutates, at which point the COW barrier fires.
+
+### Examples
+
+```
+var d = Deque[Int64]();
+d.pushBack(1);
+d.pushFront(0);
+d.pushBack(2);
+d.popFront();  // .Some(0)
+d.popBack();   // .Some(2)
+```
+
+### Representation
+
+Holds a `CowBox[DequeStorage[T]]`. The storage is a `(ptr, len, cap,
+head)` quad over a heap-allocated ring buffer.
+
+### Memory Model
+
+Reference-counted storage with copy-on-write value semantics via
+`CowBox`. Copying a `Deque` is O(1); the first mutation on a shared
+copy triggers a deep clone that linearizes the ring buffer.
+
+### Guarantees
+
+- `pushBack`/`pushFront` are O(1) amortized; growth is geometric.
+- `popBack`/`popFront` are O(1).
+- Subscript access is O(1).
+- Iteration order is front-to-back.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+### Members
+
+#### initializer `Empty`
+
+```kestrel
+public init()
+```
+
+Creates an empty deque with no allocation.
+
+No heap memory is allocated until the first `pushBack` or
+`pushFront`. Use `Deque(capacity:)` to pre-allocate when the
+expected size is known.
+
+##### Examples
+
+```
+var d = Deque[Int64]();
+d.isEmpty;  // true
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### initializer `From Iterable`
+
+```kestrel
+public init[I](from: I) where I: Iterable, I.Item == T
+```
+
+Creates a deque by collecting every element from an iterable.
+
+Elements are appended via `pushBack`, so iteration order of the
+source is preserved as front-to-back order in the deque.
+
+##### Examples
+
+```
+let d = Deque[Int64](from: 1..<5);
+d.count;  // 4
+d.first();  // .Some(1)
+d.last();   // .Some(4)
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### subscript `Indexed`
+
+```kestrel
+subscript(Int64) -> T { get set }
+```
+
+O(1) random access by logical index.
+
+Logical index 0 is the front element, `count - 1` is the back.
+The ring-buffer offset is computed internally. Both get and set
+are O(1).
+
+##### Errors
+
+Panics with `"Deque: index out of bounds"` when `index < 0` or
+`index >= count`.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [10, 20, 30]);
+d(0);  // 10
+d(2);  // 30
+d(1) = 99;
+d(1);  // 99
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### initializer `With Capacity`
+
+```kestrel
+public init(capacity: Int64)
+```
+
+Creates an empty deque with at least `capacity` slots reserved.
+
+Allocates a ring buffer that can hold `capacity` elements before
+needing to grow. Passing 0 is equivalent to `Deque()`.
+
+##### Examples
+
+```
+var d = Deque[Int64](capacity: 100);
+d.count;  // 0
+d.capacity;  // 100
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `asSlices`
+
+```kestrel
+public func asSlices() -> (ArraySlice[T], ArraySlice[T])
+```
+
+Returns the two contiguous slices that make up the ring buffer.
+
+If the buffer doesn't wrap, the first slice contains all elements
+and the second is empty. If it wraps, the first slice covers
+head-to-end and the second covers start-to-tail. Useful for
+bulk operations that need pointer-contiguous access without
+copying.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [1, 2, 3]);
+let (a, b) = d.asSlices();
+// non-wrapping: a contains all 3 elements, b is empty
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### field `capacity`
+
+```kestrel
+public var capacity: Int64 { get }
+```
+
+Number of elements the buffer can hold without reallocating.
+
+The deque automatically grows when `count` exceeds `capacity`,
+so this is mainly useful for pre-sizing via `reserveCapacity()`.
+
+##### Examples
+
+```
+var d = Deque[Int64](capacity: 16);
+d.capacity;  // 16
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `clear`
+
+```kestrel
+public mutating func clear()
+```
+
+Removes all elements, retaining allocated capacity.
+
+After calling `clear()`, `count` is 0 and `head` resets to 0, but
+the buffer stays allocated so subsequent pushes avoid reallocation.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [1, 2, 3]);
+d.clear();
+d.isEmpty;  // true
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of elements in the deque.
+
+##### Examples
+
+```
+let d = Deque[Int64](from: [1, 2, 3]);
+d.count;  // 3
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `first`
+
+```kestrel
+public func first() -> T?
+```
+
+Returns the front element without removing it, or `.None` if empty.
+
+O(1). The removing counterpart is `popFront()`.
+
+##### Examples
+
+```
+let d = Deque[Int64](from: [10, 20, 30]);
+d.first();  // .Some(10)
+Deque[Int64]().first();  // .None
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the deque contains no elements.
+
+##### Examples
+
+```
+Deque[Int64]().isEmpty;  // true
+Deque[Int64](from: [1]).isEmpty;  // false
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `last`
+
+```kestrel
+public func last() -> T?
+```
+
+Returns the back element without removing it, or `.None` if empty.
+
+O(1). The removing counterpart is `popBack()`.
+
+##### Examples
+
+```
+let d = Deque[Int64](from: [10, 20, 30]);
+d.last();  // .Some(30)
+Deque[Int64]().last();  // .None
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `popBack`
+
+```kestrel
+public mutating func popBack() -> T?
+```
+
+Removes and returns the back element, or `.None` if empty. O(1).
+
+Retracts the logical tail by one slot. The non-removing mirror
+is `last()`. The front-end counterpart is `popFront()`.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [1, 2, 3]);
+d.popBack();  // .Some(3)
+d.popBack();  // .Some(2)
+d.popBack();  // .Some(1)
+d.popBack();  // .None
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `popFront`
+
+```kestrel
+public mutating func popFront() -> T?
+```
+
+Removes and returns the front element, or `.None` if empty. O(1).
+
+Advances the ring-buffer head by one slot. The non-removing mirror
+is `first()`. The back-end counterpart is `popBack()`.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [1, 2, 3]);
+d.popFront();  // .Some(1)
+d.popFront();  // .Some(2)
+d.popFront();  // .Some(3)
+d.popFront();  // .None
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `pushBack`
+
+```kestrel
+public mutating func pushBack(T)
+```
+
+Appends `element` to the back of the deque. O(1) amortized.
+
+Grows the ring buffer geometrically when full. The counterpart
+for the front end is `pushFront`.
+
+##### Examples
+
+```
+var d = Deque[Int64]();
+d.pushBack(1);
+d.pushBack(2);
+d.popFront();  // .Some(1)
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `pushFront`
+
+```kestrel
+public mutating func pushFront(T)
+```
+
+Prepends `element` to the front of the deque. O(1) amortized.
+
+Grows the ring buffer geometrically when full. The counterpart
+for the back end is `pushBack`.
+
+##### Examples
+
+```
+var d = Deque[Int64]();
+d.pushFront(1);
+d.pushFront(0);
+d.popFront();  // .Some(0)
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `reserveCapacity`
+
+```kestrel
+public mutating func reserveCapacity(minimumCapacity: Int64)
+```
+
+Ensures the buffer can hold at least `capacity` elements without
+reallocating.
+
+If the current capacity already meets or exceeds `capacity`, this
+is a no-op. Otherwise the ring buffer is reallocated and
+linearized. Useful before a burst of `pushBack`/`pushFront` calls
+when the final size is known in advance.
+
+##### Examples
+
+```
+var d = Deque[Int64]();
+d.reserveCapacity(minimumCapacity: 100);
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+`Iterable` element type.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = DequeIterator[T]
+```
+
+`Iterable` iterator type.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> DequeIterator[T]
+```
+
+Returns an iterator that yields elements front-to-back.
+
+The iterator walks the ring buffer from `head` through `count`
+elements, wrapping around the buffer boundary transparently.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [10, 20, 30]);
+for x in d {
+    // yields 10, 20, 30
+}
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> Deque[T]
+```
+
+Returns a shallow copy of this deque. O(1).
+
+The `CowBox` storage is shared until either copy mutates, at
+which point the COW barrier fires a deep clone that linearizes
+the ring buffer.
+
+##### Examples
+
+```
+let d = Deque[Int64](from: [1, 2, 3]);
+var d2 = d.clone();
+d2.pushBack(4);
+d.count;   // 3 -- original unchanged
+d2.count;  // 4
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+## struct `DequeIterator`
+
+```kestrel
+public struct DequeIterator[T] { /* private fields */ }
+```
+
+Iterator over a `Deque[T]`, walking the ring buffer from head through
+`remaining` elements.
+
+Created by `Deque.iter()`. Yields elements front-to-back, wrapping
+around the ring buffer boundary transparently.
+
+### Representation
+
+Holds a raw pointer into the deque's ring buffer, the buffer
+capacity, the current physical position, and a remaining-element
+count. Does not own the storage.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+### Members
+
+#### initializer `From Fields`
+
+```kestrel
+public init(ptr: Pointer[T], cap: Int64, pos: Int64, remaining: Int64)
+```
+
+Constructs an iterator from the ring buffer's raw state.
+
+Called internally by `Deque.iter()`.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+`Iterator` element type.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> T?
+```
+
+Advances the iterator and returns the next element, or `.None`
+when all elements have been consumed.
+
+Handles the ring-buffer wrap-around: when `pos` reaches `cap` it
+resets to 0.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [10, 20]);
+var it = d.iter();
+it.next();  // .Some(10)
+it.next();  // .Some(20)
+it.next();  // .None
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
 ## struct `Dictionary`
 
 ```kestrel
-public struct Dictionary[K, V, H = DefaultHasher] where K: Hash, H: Hasher, H: Defaultable { /* private fields */ }
+public struct Dictionary[K, V, H = DefaultHasher] where K: Hashable, H: Hasher, H: Defaultable { /* private fields */ }
 ```
 
-An unordered hash map keyed by any `K: Hash`, parameterized over the
+An unordered hash map keyed by any `K: Hashable`, parameterized over the
 hasher type `H` (defaults to `DefaultHasher`).
 
 Uses open addressing with linear probing and a 75% load-factor
@@ -2590,7 +2504,7 @@ is invisible to other copies.
 
 ### Guarantees
 
-- Every key satisfies `K: Hash`. The cached hash is computed once
+- Every key satisfies `K: Hashable`. The cached hash is computed once
   per insert and reused on resize.
 - `count <= capacity * 3 / 4` after every mutation (the resize
   threshold).
@@ -2688,11 +2602,11 @@ flat collection. The `keyFunc` runs once per element.
 
 ```
 let words = ["apple", "apricot", "banana", "blueberry"];
-let grouped = Dictionary(grouping: words, by: { (w) in w.chars.first().unwrap() });
+let grouped = Dictionary(grouping: words) { (w) in w.chars.first().unwrap() };
 // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
 
 let nums = [1, 2, 3, 4, 5];
-let parity = Dictionary(grouping: nums, by: { (n) in n % 2 });
+let parity = Dictionary(grouping: nums) { (n) in n % 2 };
 // [0: [2, 4], 1: [1, 3, 5]]
 ```
 
@@ -2864,9 +2778,9 @@ Short-circuits on the first failure. Dual of `any(matching:)`.
 ##### Examples
 
 ```
-["a": 2, "b": 4].all(matching: { (k, v) in v % 2 == 0 });  // true
-["a": 1, "b": 2].all(matching: { (k, v) in v % 2 == 0 });  // false
-[:].all(matching: { (k, v) in false });                    // true (vacuous)
+["a": 2, "b": 4].all { (k, v) in v % 2 == 0 };  // true
+["a": 1, "b": 2].all { (k, v) in v % 2 == 0 };  // false
+[:].all { (k, v) in false };                    // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2907,8 +2821,8 @@ Short-circuits on the first match.
 ##### Examples
 
 ```
-["a": 1, "b": 5].any(matching: { (k, v) in v > 3 });  // true
-[:].any(matching: { (k, v) in true });                // false (empty)
+["a": 1, "b": 5].any { (k, v) in v > 3 };  // true
+[:].any { (k, v) in true };                // false (empty)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2975,7 +2889,7 @@ pass completes); for fixed transforms that always succeed,
 
 ```
 let dict = ["a": "1", "b": "two", "c": "3"];
-let parsed = dict.compactMapValues(transform: { (s) in Int64.parse(s) });
+let parsed = dict.compactMapValues { (s) in Int64.parse(s) };
 // ["a": 1, "c": 3] — "two" failed to parse
 ```
 
@@ -2995,8 +2909,8 @@ extension's `containsValue(value:)`.
 ##### Examples
 
 ```
-["a": 1, "b": 2].contains(key: "a");  // true
-["a": 1, "b": 2].contains(key: "z");  // false
+["a": 1, "b": 2].contains("a");  // true
+["a": 1, "b": 2].contains("z");  // false
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3016,8 +2930,8 @@ for symmetry with `Array`.
 ##### Examples
 
 ```
-["a": 1, "b": 5].contains(matching: { (k, v) in v > 3 });  // true
-["a": 1, "b": 2].contains(matching: { (k, v) in v > 3 });  // false
+["a": 1, "b": 5].contains { (k, v) in v > 3 };  // true
+["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3037,8 +2951,8 @@ set of values, build a `Set[V]` instead.
 ##### Examples
 
 ```
-["a": 1, "b": 2].containsValue(value: 2);  // true
-["a": 1, "b": 2].containsValue(value: 5);  // false
+["a": 1, "b": 2].containsValue(2);  // true
+["a": 1, "b": 2].containsValue(5);  // false
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3079,8 +2993,8 @@ Linear scan, no short-circuit. For just a presence check use
 ##### Examples
 
 ```
-["a": 1, "b": 2, "c": 3].countItems(matching: { (k, v) in v > 1 });  // 2
-[:].countItems(matching: { (k, v) in true });                        // 0
+["a": 1, "b": 2, "c": 3].countItems { (k, v) in v > 1 };  // 2
+[:].countItems { (k, v) in true };                        // 0
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3126,7 +3040,7 @@ dictionary; for in-place filtering use `retain` or
 
 ```
 let dict = ["a": 1, "b": 2, "c": 3];
-let big = dict.filter(matching: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
+let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3148,8 +3062,8 @@ entries. Short-circuits on the first match.
 
 ```
 let dict = ["a": 1, "b": 5, "c": 3];
-dict.first(matching: { (k, v) in v > 2 });  // Some entry with v > 2
-dict.first(matching: { (k, v) in v > 99 }); // None
+dict.first { (k, v) in v > 2 };  // Some entry with v > 2
+dict.first { (k, v) in v > 99 }; // None
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3192,8 +3106,8 @@ transform-based updates see `update(...)` and `upsert(...)`.
 
 ```
 var dict = ["a": 1];
-dict.insert(key: "b", value: 2);  // None;     dict = ["a": 1, "b": 2]
-dict.insert(key: "a", value: 9);  // Some(1);  dict = ["a": 9, "b": 2]
+dict.insert("b", 2);  // None;     dict = ["a": 1, "b": 2]
+dict.insert("a", 9);  // Some(1);  dict = ["a": 9, "b": 2]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3259,7 +3173,7 @@ version that drops `None` results see `compactMapValues(...)`.
 
 ```
 let dict = ["a": 1, "b": 2];
-let doubled = dict.mapValues(transform: { (v) in v * 2 });
+let doubled = dict.mapValues { (v) in v * 2 };
 // ["a": 2, "b": 4]
 ```
 
@@ -3284,16 +3198,16 @@ non-mutating variant use `merging(...)`.
 ```
 var a = ["x": 1, "y": 2];
 let b = ["y": 20, "z": 30];
-a.merge(b, uniquingKeysWith: { (old, new) in old + new });
+a.merge(b) { (old, new) in old + new };
 // a == ["x": 1, "y": 22, "z": 30]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
-#### function `mergeFrom`
+#### function `merge`
 
 ```kestrel
-public mutating func mergeFrom[I](I, uniquingKeysWith: (V, V) -> V) where I: Iterable, I.Item == (K, V)
+public mutating func merge[I](from: I, uniquingKeysWith: (V, V) -> V) where I: Iterable, I.Item == (K, V)
 ```
 
 Merges every `(key, value)` pair from an arbitrary iterable into
@@ -3307,7 +3221,7 @@ streamed sources.
 
 ```
 var dict = ["a": 1];
-dict.mergeFrom(pairs: [("b", 2), ("c", 3)], uniquingKeysWith: { (_, new) in new });
+dict.merge(from: [("b", 2), ("c", 3)]) { (_, new) in new };
 // dict == ["a": 1, "b": 2, "c": 3]
 ```
 
@@ -3330,7 +3244,7 @@ Non-mutating mirror of `merge(...)`. Internally clones via COW
 ```
 let a = ["x": 1, "y": 2];
 let b = ["y": 20, "z": 30];
-let merged = a.merging(other: b, uniquingKeysWith: { (_, new) in new });
+let merged = a.merging(b) { (_, new) in new };
 // merged == ["x": 1, "y": 20, "z": 30]
 // a is unchanged
 ```
@@ -3353,8 +3267,8 @@ resize. Triggers COW only when an entry is actually removed.
 
 ```
 var dict = ["a": 1, "b": 2];
-dict.remove(key: "a");  // Some(1); dict = ["b": 2]
-dict.remove(key: "z");  // None;    dict unchanged
+dict.remove("a");  // Some(1); dict = ["b": 2]
+dict.remove("z");  // None;    dict unchanged
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3375,7 +3289,7 @@ the negated predicate. Same tombstone caveat applies — consider
 
 ```
 var dict = ["a": 1, "b": 2, "c": 3];
-dict.removeAll(matching: { (k, v) in v < 2 });  // ["b": 2, "c": 3]
+dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3398,7 +3312,7 @@ The opposite operation is `shrinkToFit()`.
 
 ```
 var dict = Dictionary[String, Int64]();
-dict.reserveCapacity(minimumCapacity: 1000);
+dict.reserveCapacity(1000);
 // No reallocations for the first ~750 inserts.
 ```
 
@@ -3421,7 +3335,7 @@ afterwards if you've removed a large fraction. The mirror is
 
 ```
 var dict = ["a": 1, "b": 2, "c": 3];
-dict.retain(matching: { (k, v) in v > 1 });  // ["b": 2, "c": 3]
+dict.retain { (k, v) in v > 1 };  // ["b": 2, "c": 3]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3488,8 +3402,8 @@ hash is recomputed.
 
 ```
 var dict = ["a": 1, "b": 2];
-dict.update(key: "a", with: { (v) in v * 10 });  // true;  dict("a") == Some(10)
-dict.update(key: "z", with: { (v) in v * 10 });  // false; dict unchanged
+dict.update("a") { (v) in v * 10 };  // true;  dict("a") == Some(10)
+dict.update("z") { (v) in v * 10 };  // false; dict unchanged
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3512,8 +3426,8 @@ variant see `update(...)`.
 
 ```
 var counts: [String: Int64] = [:];
-counts.upsert(key: "apple", default: 0, with: { (n) in n + 1 });
-counts.upsert(key: "apple", default: 0, with: { (n) in n + 1 });
+counts.upsert("apple", default: 0) { (n) in n + 1 };
+counts.upsert("apple", default: 0) { (n) in n + 1 };
 counts("apple");  // Some(2)
 ```
 
@@ -3616,10 +3530,10 @@ _Defined in `lang/std/collections/dictionary.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Dictionary[K, V, H]) -> Bool
+public func isEqual(to: Dictionary[K, V, H]) -> Bool
 ```
 
 Order-independent equality: dictionaries are equal iff they have
@@ -3632,9 +3546,9 @@ matter — only the multiset of `(key, value)` pairs does.
 ##### Examples
 
 ```
-["a": 1, "b": 2].equals(other: ["b": 2, "a": 1]);  // true
-["a": 1].equals(other: ["a": 2]);                  // false
-["a": 1].equals(other: [:]);                       // false
+["a": 1, "b": 2].isEqual(to: ["b": 2, "a": 1]);  // true
+["a": 1].isEqual(to: ["a": 2]);                  // false
+["a": 1].isEqual(to: [:]);                       // false
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3644,7 +3558,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
@@ -3668,7 +3582,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 type Key = K
 ```
 
-Key type for the literal protocol — equals `K`.
+Key type for the literal protocol — matches `K`.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3688,7 +3602,7 @@ _Defined in `lang/std/core/literals.ks`._
 type Value = V
 ```
 
-Value type for the literal protocol — equals `V`.
+Value type for the literal protocol — matches `V`.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3832,10 +3746,344 @@ func tally(of words: [String: Int64]) -> Int64 { ... }
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+## struct `Heap`
+
+```kestrel
+public struct Heap[T] where T: Comparable { /* private fields */ }
+```
+
+Binary min-heap backed by `Array[T]`.
+
+O(log n) `push`/`pop`, O(1) `peek` at the minimum element. Builds
+from an existing array in O(n) via Floyd's heapify. Iteration yields
+elements in storage order (NOT sorted order).
+
+### Examples
+
+```
+var h = Heap[Int64]();
+h.push(5);
+h.push(1);
+h.push(3);
+h.peek();   // .Some(1)
+h.pop();    // .Some(1)
+h.pop();    // .Some(3)
+```
+
+### Representation
+
+A single `Array[T]` field in standard binary-heap layout: the minimum
+lives at index 0, children of node `i` are at `2i + 1` and `2i + 2`.
+
+### Memory Model
+
+Delegates storage to `Array[T]`, inheriting its COW value semantics.
+Copying a `Heap` is O(1); the first mutation on a shared copy triggers
+the array's copy-on-write barrier.
+
+### Guarantees
+
+- `peek()` always returns the minimum element.
+- After `pop()`, the next-smallest element becomes the new minimum.
+- Iteration order is unspecified (internal heap layout).
+
+_Defined in `lang/std/collections/heap.ks`._
+
+### Members
+
+#### initializer `Empty`
+
+```kestrel
+public init()
+```
+
+Creates an empty min-heap with no allocation.
+
+No heap memory is allocated until the first `push`. Use
+`Heap(capacity:)` to pre-allocate when the expected size is known.
+
+##### Examples
+
+```
+var h = Heap[Int64]();
+h.isEmpty;  // true
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### initializer `From Data`
+
+```kestrel
+init(data: Array[T])
+```
+
+Internal constructor that wraps an existing array as the heap's
+backing store. Used by `clone()` to avoid a redundant heapify.
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### initializer `From Iterable`
+
+```kestrel
+public init[I](from: I) where I: Iterable, I.Item == T
+```
+
+Builds a min-heap by collecting elements then heapifying in O(n).
+
+All elements are first appended to the backing array, then
+Floyd's algorithm establishes the heap invariant in a single
+bottom-up pass. This is faster than pushing elements one at a
+time (O(n) vs O(n log n)).
+
+##### Examples
+
+```
+let h = Heap(from: [5, 3, 1, 4, 2]);
+h.peek();   // .Some(1)
+h.count;    // 5
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### initializer `With Capacity`
+
+```kestrel
+public init(capacity: Int64)
+```
+
+Creates an empty min-heap with at least `capacity` slots reserved.
+
+Pre-allocates the backing array so that up to `capacity` elements
+can be pushed without triggering a reallocation.
+
+##### Examples
+
+```
+var h = Heap[Int64](capacity: 100);
+h.count;  // 0
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### function `clear`
+
+```kestrel
+public mutating func clear()
+```
+
+Removes all elements, retaining allocated capacity.
+
+After calling `clear()`, `count` is 0 but the backing array keeps
+its buffer so subsequent `push` calls avoid reallocation.
+
+##### Examples
+
+```
+var h = Heap(from: [3, 1, 2]);
+h.clear();
+h.isEmpty;  // true
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of elements in the heap.
+
+##### Examples
+
+```
+let h = Heap(from: [3, 1, 2]);
+h.count;  // 3
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the heap contains no elements.
+
+##### Examples
+
+```
+Heap[Int64]().isEmpty;  // true
+Heap(from: [1]).isEmpty;  // false
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### function `peek`
+
+```kestrel
+public func peek() -> T?
+```
+
+Returns the minimum element without removing it. O(1).
+
+Returns `.None` on an empty heap. The removing counterpart is
+`pop()`.
+
+##### Examples
+
+```
+let h = Heap(from: [3, 1, 2]);
+h.peek();  // .Some(1)
+Heap[Int64]().peek();  // .None
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### function `pop`
+
+```kestrel
+public mutating func pop() -> T?
+```
+
+Removes and returns the minimum element, or `.None` if empty. O(log n).
+
+Swaps the root with the last element, removes the last, then sifts
+the new root down to restore the heap invariant. The non-removing
+mirror is `peek()`.
+
+##### Examples
+
+```
+var h = Heap(from: [3, 1, 2]);
+h.pop();  // .Some(1)
+h.pop();  // .Some(2)
+h.pop();  // .Some(3)
+h.pop();  // .None
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### function `push`
+
+```kestrel
+public mutating func push(T)
+```
+
+Inserts `element`, maintaining the min-heap invariant. O(log n).
+
+The element is appended to the backing array then sifted up to
+restore the heap property. Amortized O(log n) because the array
+may occasionally grow its buffer.
+
+##### Examples
+
+```
+var h = Heap[Int64]();
+h.push(3);
+h.push(1);
+h.peek();  // .Some(1)
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### function `reserveCapacity`
+
+```kestrel
+public mutating func reserveCapacity(minimumCapacity: Int64)
+```
+
+Ensures the backing array can hold at least `capacity` elements
+without reallocating.
+
+If the current capacity already meets or exceeds `capacity`, this
+is a no-op. Otherwise the backing array grows to accommodate the
+requested number of slots.
+
+##### Examples
+
+```
+var h = Heap[Int64]();
+h.reserveCapacity(minimumCapacity: 100);
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+`Iterable` element type.
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ArraySliceIterator[T]
+```
+
+`Iterable` iterator type — reuses the backing array's iterator.
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ArraySliceIterator[T]
+```
+
+Returns an iterator over elements in storage order (NOT sorted).
+
+The iteration order reflects the internal heap layout, not the
+sorted order. To consume elements smallest-first, use `pop()` in
+a loop instead.
+
+##### Examples
+
+```
+let h = Heap(from: [5, 3, 1]);
+var iter = h.iter();
+// yields elements in heap-array order, not 1, 3, 5
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> Heap[T]
+```
+
+Returns a shallow copy of this heap. O(1).
+
+The backing array's copy-on-write semantics mean the actual deep
+copy is deferred until the first mutation on either the original
+or the clone.
+
+##### Examples
+
+```
+let h = Heap(from: [3, 1, 2]);
+var h2 = h.clone();
+h2.push(0);
+h.peek();   // .Some(1) -- original unchanged
+h2.peek();  // .Some(0)
+```
+
+_Defined in `lang/std/collections/heap.ks`._
+
 ## struct `KeysIterator`
 
 ```kestrel
-public struct KeysIterator[K, V] where K: Hash { /* private fields */ }
+public struct KeysIterator[K, V] where K: Hashable { /* private fields */ }
 ```
 
 Single-pass iterator yielding only the keys of a dictionary.
@@ -3912,7 +4160,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 ## struct `KeysView`
 
 ```kestrel
-public struct KeysView[K, V] where K: Hash { /* private fields */ }
+public struct KeysView[K, V] where K: Hashable { /* private fields */ }
 ```
 
 Lazy `Iterable` view over the keys of a dictionary.
@@ -3988,10 +4236,141 @@ the bucket array.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+## struct `ReversedSliceIterator`
+
+```kestrel
+public struct ReversedSliceIterator[T] { /* private fields */ }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64)
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+## struct `ReversedView`
+
+```kestrel
+public struct ReversedView[T] { /* private fields */ }
+```
+
+Multi-pass lazy view that iterates a contiguous collection
+back-to-front without allocating.
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Optional[T] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Optional[T] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(Int64) -> T { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `toArray`
+
+```kestrel
+public func toArray() -> Array[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ReversedSliceIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ReversedSliceIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
 ## struct `Set`
 
 ```kestrel
-public struct Set[T, H = DefaultHasher] where T: Hash, H: Hasher, H: Defaultable { /* private fields */ }
+public struct Set[T, H = DefaultHasher] where T: Hashable, H: Hasher, H: Defaultable { /* private fields */ }
 ```
 
 An unordered hash set of unique elements, parameterized over the
@@ -4015,9 +4394,9 @@ fruits.remove("banana");
 
 let a: Set = [1, 2, 3];
 let b: Set = [3, 4, 5];
-a.union(other: b);          // {1, 2, 3, 4, 5}
-a.intersection(other: b);   // {3}
-a.isSubset(of: b);          // false
+a.union(b);                  // {1, 2, 3, 4, 5}
+a.intersection(b);           // {3}
+a.isSubset(of: b);           // false
 ```
 
 ### Set Literals
@@ -4033,7 +4412,7 @@ let strings: Set[String] = ["a", "b", "c"];
 
 ### Hashing
 
-Each element's hash is computed via `T: Hash` and stored in the
+Each element's hash is computed via `T: Hashable` and stored in the
 underlying dictionary's bucket. Swap the hasher type by writing
 `Set[T, SipHasher]` etc.; the default `DefaultHasher` is FNV-1a
 (see `DefaultHasher` for caveats around adversarial inputs).
@@ -4052,7 +4431,7 @@ the change is invisible to other copies.
 
 ### Guarantees
 
-- Elements are unique by `Hash`/`Equatable` equality.
+- Elements are unique by `Hashable`/`Equatable` equality.
 - Iteration order is **not** specified.
 - Operations marked O(1) are amortized; the underlying dictionary
   resizes geometrically.
@@ -4192,14 +4571,14 @@ public func all(matching: (T) -> Bool) -> Bool
 true for empty sets).
 
 Short-circuits on the first failure. Dual of
-`any(matching:)`.
+`any { ... }`.
 
 ##### Examples
 
 ```
-Set([2, 4, 6]).all(matching: { (x) in x % 2 == 0 });  // true
-Set([1, 2, 4]).all(matching: { (x) in x % 2 == 0 });  // false
-Set[Int64]().all(matching: { (x) in false });         // true (vacuous)
+Set([2, 4, 6]).all { (x) in x % 2 == 0 };  // true
+Set([1, 2, 4]).all { (x) in x % 2 == 0 };  // false
+Set[Int64]().all { (x) in false };           // true (vacuous)
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4212,15 +4591,15 @@ public func any(matching: (T) -> Bool) -> Bool
 
 `true` when at least one element satisfies `predicate`.
 
-Alias for `contains(matching:)` — both names exist so
+Alias for `contains { ... }` — both names exist so
 predicate-style code reads naturally regardless of context.
 Short-circuits.
 
 ##### Examples
 
 ```
-Set([1, 2, 3]).any(matching: { (x) in x > 2 });  // true
-Set[Int64]().any(matching: { (x) in true });     // false (empty)
+Set([1, 2, 3]).any { (x) in x > 2 };  // true
+Set[Int64]().any { (x) in true };     // false (empty)
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4271,21 +4650,21 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `compactMap`
 
 ```kestrel
-public func compactMap[U]((T) -> U?) -> Set[U, H] where U: Hash
+public func compactMap[U]((T) -> U?) -> Set[U, H] where U: Hashable
 ```
 
 Returns a new set with each element run through `transform`,
 dropping any `None` results.
 
 Useful for parse-or-skip patterns. Same uniqueness caveat as
-`map(transform:)` — collisions in the transformed values
+`map(...)` — collisions in the transformed values
 collapse.
 
 ##### Examples
 
 ```
 let set: Set = ["1", "two", "3"];
-let nums = set.compactMap(transform: { (s) in Int64.parse(s) });
+let nums = set.compactMap { (s) in Int64.parse(s) };
 // {1, 3}  — "two" failed to parse
 ```
 
@@ -4300,7 +4679,7 @@ public func contains(T) -> Bool
 `true` if `element` is a member of the set; O(1) average.
 
 Forwards to the dictionary's key lookup. For predicate-based
-search use `contains(matching:)`.
+search use `contains { ... }`.
 
 ##### Examples
 
@@ -4321,14 +4700,14 @@ public func contains(matching: (T) -> Bool) -> Bool
 `true` if any element satisfies `predicate`.
 
 Linear scan; short-circuits on the first match. `false` for
-empty sets. The aliased shape `any(matching:)` exists for
+empty sets. The aliased shape `any { ... }` exists for
 symmetry with `Array`.
 
 ##### Examples
 
 ```
-Set([1, 2, 3]).contains(matching: { (x) in x > 2 });  // true
-Set([1, 2, 3]).contains(matching: { (x) in x > 5 });  // false
+Set([1, 2, 3]).contains { (x) in x > 2 };  // true
+Set([1, 2, 3]).contains { (x) in x > 5 };  // false
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4361,14 +4740,14 @@ public func countItems(matching: (T) -> Bool) -> Int64
 Returns the number of elements for which `predicate` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(matching:)`; for a yes/no on every element,
-`all(matching:)`.
+`any { ... }`; for a yes/no on every element,
+`all { ... }`.
 
 ##### Examples
 
 ```
-Set([1, 2, 3, 4, 5]).countItems(matching: { (x) in x % 2 == 0 });  // 2
-Set[Int64]().countItems(matching: { (x) in true });                // 0
+Set([1, 2, 3, 4, 5]).countItems { (x) in x % 2 == 0 };  // 2
+Set[Int64]().countItems { (x) in true };                // 0
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4416,7 +4795,7 @@ public func difference(Set[T, H]) -> Set[T, H]
 Returns a new set of every element in `self` that is **not**
 in `other` — the set difference, "self minus other".
 
-Non-mutating mirror of `formDifference(other:)`. Order of
+Non-mutating mirror of `formDifference(...)`. Order of
 arguments matters: `a.difference(b)` is generally not equal
 to `b.difference(a)`.
 
@@ -4425,8 +4804,8 @@ to `b.difference(a)`.
 ```
 let a: Set = [1, 2, 3];
 let b: Set = [2, 3, 4];
-a.difference(other: b);  // {1}
-b.difference(other: a);  // {4}
+a.difference(b);  // {1}
+b.difference(a);  // {4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4440,15 +4819,15 @@ public func filter(matching: (T) -> Bool) -> Set[T, H]
 Returns a new set containing only elements for which
 `predicate` is true.
 
-Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+Non-mutating mirror of `retain { ... }`. Allocates a fresh
 set; for in-place filtering use `retain` or
-`removeAll(matching:)`.
+`removeAll { ... }`.
 
 ##### Examples
 
 ```
 let set: Set = [1, 2, 3, 4, 5];
-let evens = set.filter(matching: { (x) in x % 2 == 0 });  // {2, 4}
+let evens = set.filter { (x) in x % 2 == 0 };  // {2, 4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4469,8 +4848,8 @@ elements. Short-circuits on the first match.
 
 ```
 let set: Set = [1, 2, 3, 4, 5];
-set.first(matching: { (x) in x > 3 });   // Some(4) or Some(5)
-set.first(matching: { (x) in x > 99 });  // None
+set.first { (x) in x > 3 };   // Some(4) or Some(5)
+set.first { (x) in x > 99 };  // None
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4478,7 +4857,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U]((T) -> Set[U, H]) -> Set[U, H] where U: Hash
+public func flatMap[U]((T) -> Set[U, H]) -> Set[U, H] where U: Hashable
 ```
 
 Returns a new set formed by unioning every set produced by
@@ -4492,7 +4871,7 @@ across sub-sets collapse, as with all set operations.
 
 ```
 let set: Set = [1, 2];
-let expanded = set.flatMap(transform: { (x) in Set([x, x * 10]) });
+let expanded = set.flatMap { (x) in Set([x, x * 10]) };
 // {1, 10, 2, 20}
 ```
 
@@ -4507,7 +4886,7 @@ public mutating func formDifference(Set[T, H])
 In-place difference: removes every element of `self` that **is**
 in `other`.
 
-Mutating mirror of `difference(other:)`. The result is "self
+Mutating mirror of `difference(...)`. The result is "self
 minus other".
 
 ##### Examples
@@ -4515,7 +4894,7 @@ minus other".
 ```
 var a: Set = [1, 2, 3];
 let b: Set = [2, 3, 4];
-a.formDifference(other: b);  // a == {1}
+a.formDifference(b);  // a == {1}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4529,7 +4908,7 @@ public mutating func formIntersection(Set[T, H])
 In-place intersection: removes every element of `self` that
 is **not** in `other`.
 
-Mutating mirror of `intersection(other:)`. Iterates over
+Mutating mirror of `intersection(...)`. Iterates over
 `self`, so the cost scales with `self.count`, not
 `other.count`.
 
@@ -4538,7 +4917,7 @@ Mutating mirror of `intersection(other:)`. Iterates over
 ```
 var a: Set = [1, 2, 3];
 let b: Set = [2, 3, 4];
-a.formIntersection(other: b);  // a == {2, 3}
+a.formIntersection(b);  // a == {2, 3}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4552,7 +4931,7 @@ public mutating func formSymmetricDifference(Set[T, H])
 In-place symmetric difference: keeps elements in exactly one
 of `self` or `other`.
 
-Mutating mirror of `symmetricDifference(other:)`. Two passes:
+Mutating mirror of `symmetricDifference(...)`. Two passes:
 removes shared elements, then inserts elements unique to
 `other`.
 
@@ -4561,7 +4940,7 @@ removes shared elements, then inserts elements unique to
 ```
 var a: Set = [1, 2, 3];
 let b: Set = [2, 3, 4];
-a.formSymmetricDifference(other: b);  // a == {1, 4}
+a.formSymmetricDifference(b);  // a == {1, 4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4574,7 +4953,7 @@ public mutating func formUnion(Set[T, H])
 
 In-place union: adds every element of `other` to `self`.
 
-Mutating mirror of `union(other:)`. For multi-source unions,
+Mutating mirror of `union(...)`. For multi-source unions,
 chain calls or use `insert(contentsOf:)` over the elements.
 
 ##### Examples
@@ -4582,7 +4961,7 @@ chain calls or use `insert(contentsOf:)` over the elements.
 ```
 var a: Set = [1, 2];
 let b: Set = [2, 3];
-a.formUnion(other: b);  // a == {1, 2, 3}
+a.formUnion(b);  // a == {1, 2, 3}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4631,7 +5010,7 @@ Inserts every element produced by an iterable; duplicates
 collapse silently.
 
 Sugar for "insert in a loop". For union with another `Set`,
-prefer `formUnion(other:)` — it's the same semantically but
+prefer `formUnion(...)` — it's the same semantically but
 reads more naturally.
 
 ##### Examples
@@ -4653,7 +5032,7 @@ public func intersection(Set[T, H]) -> Set[T, H]
 Returns a new set containing only elements present in both
 `self` and `other`.
 
-Non-mutating mirror of `formIntersection(other:)`. For
+Non-mutating mirror of `formIntersection(...)`. For
 efficiency, iterates over `self`; pass the smaller set as the
 receiver if it matters.
 
@@ -4662,7 +5041,7 @@ receiver if it matters.
 ```
 let a: Set = [1, 2, 3];
 let b: Set = [2, 3, 4];
-a.intersection(other: b);  // {2, 3}
+a.intersection(b);  // {2, 3}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4804,7 +5183,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U]((T) -> U) -> Set[U, H] where U: Hash
+public func map[U]((T) -> U) -> Set[U, H] where U: Hashable
 ```
 
 Returns a new set with each element run through `transform`.
@@ -4812,17 +5191,17 @@ Returns a new set with each element run through `transform`.
 **Cardinality may shrink**: if `transform` maps two distinct
 elements to the same output, the result holds only one copy
 (sets are unique). For an `Optional`-aware variant that drops
-`None`, use `compactMap(transform:)`.
+`None`, use `compactMap(...)`.
 
 ##### Examples
 
 ```
 let set: Set = [1, 2, 3];
-let doubled = set.map(transform: { (x) in x * 2 });
+let doubled = set.map { (x) in x * 2 };
 // {2, 4, 6}
 
 let words: Set = ["Hello", "WORLD"];
-let lower = words.map(transform: { (s) in s.lowercase() });
+let lower = words.map { (s) in s.lowercase() };
 // {"hello", "world"} — even though both originals lowercase to distinct strings
 ```
 
@@ -4899,13 +5278,13 @@ public mutating func removeAll(matching: (T) -> Bool)
 
 Removes every element for which `predicate` is true.
 
-Inverse of `retain(matching:)`. Same two-pass structure.
+Inverse of `retain { ... }`. Same two-pass structure.
 
 ##### Examples
 
 ```
 var set: Set = [1, 2, 3, 4, 5];
-set.removeAll(matching: { (x) in x % 2 == 0 });  // {1, 3, 5}
+set.removeAll { (x) in x % 2 == 0 };  // {1, 3, 5}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -4944,13 +5323,13 @@ Keeps only elements for which `predicate` is true.
 
 Two-pass implementation: collects elements to remove, then
 deletes each. Stable in iteration semantics (set is unordered
-anyway). Mirror is `removeAll(matching:)`.
+anyway). Mirror is `removeAll { ... }`.
 
 ##### Examples
 
 ```
 var set: Set = [1, 2, 3, 4, 5];
-set.retain(matching: { (x) in x % 2 == 0 });  // {2, 4}
+set.retain { (x) in x % 2 == 0 };  // {2, 4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -5026,8 +5405,8 @@ public func symmetricDifference(Set[T, H]) -> Set[T, H]
 Returns a new set of elements in exactly one of `self` or
 `other`.
 
-Non-mutating mirror of `formSymmetricDifference(other:)`.
-Equivalent to `union(other:) - intersection(other:)`. The
+Non-mutating mirror of `formSymmetricDifference(...)`.
+Equivalent to `union(...) - intersection(...)`. The
 operation is commutative — order of arguments doesn't change
 the result.
 
@@ -5036,7 +5415,7 @@ the result.
 ```
 let a: Set = [1, 2, 3];
 let b: Set = [2, 3, 4];
-a.symmetricDifference(other: b);  // {1, 4}
+a.symmetricDifference(b);  // {1, 4}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -5072,7 +5451,7 @@ public func union(Set[T, H]) -> Set[T, H]
 Returns a new set containing every element from `self` and
 `other`.
 
-Non-mutating mirror of `formUnion(other:)`. Internally clones
+Non-mutating mirror of `formUnion(...)`. Internally clones
 `self` (cheap COW) and adds `other` into the copy.
 
 ##### Examples
@@ -5080,7 +5459,7 @@ Non-mutating mirror of `formUnion(other:)`. Internally clones
 ```
 let a: Set = [1, 2, 3];
 let b: Set = [3, 4, 5];
-a.union(other: b);  // {1, 2, 3, 4, 5}
+a.union(b);  // {1, 2, 3, 4, 5}
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -5156,10 +5535,10 @@ _Defined in `lang/std/collections/set.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Set[T, H]) -> Bool
+public func isEqual(to: Set[T, H]) -> Bool
 ```
 
 `true` when `self` and `other` contain exactly the same
@@ -5172,8 +5551,8 @@ at the count check.
 ##### Examples
 
 ```
-Set([1, 2, 3]).equals(other: Set([3, 2, 1]));  // true
-Set([1, 2]).equals(other: Set([1, 2, 3]));     // false
+Set([1, 2, 3]).isEqual(to: Set([3, 2, 1]));  // true
+Set([1, 2]).isEqual(to: Set([1, 2, 3]));     // false
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -5183,7 +5562,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders the set as `"{" + elements.joined(", ") + "}"`,
@@ -5214,7 +5593,7 @@ _Defined in `lang/std/core/literals.ks`._
 ## struct `SetIterator`
 
 ```kestrel
-public struct SetIterator[T, H = DefaultHasher] where T: Hash, H: Hasher, H: Defaultable { /* private fields */ }
+public struct SetIterator[T, H = DefaultHasher] where T: Hashable, H: Hasher, H: Defaultable { /* private fields */ }
 ```
 
 Single-pass forward iterator over the elements of a `Set[T, H]`.
@@ -5290,10 +5669,904 @@ it.next();  // None
 
 _Defined in `lang/std/collections/set.ks`._
 
+## protocol `Slice`
+
+```kestrel
+public protocol Slice[T]
+```
+
+Shared read-only protocol for contiguous collections.
+
+`Slice[T]` is the contiguous-collection counterpart to `Str` in
+`std.text`: one kernel method (`asSlice`), all read-only logic in a
+protocol extension. Both `Array[T]` and `ArraySlice[T]` conform, so
+generic code constrained to `S: Slice[T]` accepts either without
+overloading.
+
+### Examples
+
+```
+func sum[S](s: S) -> Int64 where S: Slice[Int64] {
+    var total: Int64 = 0;
+    for elem in s { total = total + elem }
+    total
+}
+sum([1, 2, 3]);              // works with Array
+sum([1, 2, 3].asSlice());    // works with ArraySlice
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Members
+
+#### function `all`
+
+```kestrel
+public func all(matching: (T) -> Bool) -> Bool
+```
+
+`true` when every element satisfies `predicate`. O(n).
+
+Short-circuits on the first failure. Vacuously true for empty
+collections.
+
+##### Examples
+
+```
+[2, 4, 6].all(matching: { it % 2 == 0 });  // true
+[2, 3, 6].all(matching: { it % 2 == 0 });  // false
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `any`
+
+```kestrel
+public func any(matching: (T) -> Bool) -> Bool
+```
+
+`true` when at least one element satisfies `predicate`. O(n).
+
+Short-circuits on the first match. Always `false` for empty
+collections.
+
+##### Examples
+
+```
+[1, 2, 3].any(matching: { it > 2 });  // true
+[1, 2, 3].any(matching: { it > 5 });  // false
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `asPointer`
+
+```kestrel
+public func asPointer() -> Pointer[T]
+```
+
+Pointer to the first element. The pointer aliases the collection's
+buffer; do not outlive the source or mutate through it.
+
+##### Safety
+
+Reading past `count` is undefined behavior.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `asSlice`
+
+```kestrel
+func asSlice() -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `binarySearch`
+
+```kestrel
+public func binarySearch(T) -> Int64?
+```
+
+Binary search for `element`. Returns its index or `None`. O(log n).
+
+When duplicates exist, which index is returned is unspecified.
+
+##### Safety
+
+The collection must be sorted in ascending order. Calling on
+unsorted data won't crash but may produce false negatives.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].binarySearch(3);  // Some(2)
+[1, 2, 3, 4, 5].binarySearch(6);  // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `chunks`
+
+```kestrel
+public func chunks(of: Int64) -> ChunksView[T]
+```
+
+Multi-pass lazy view over non-overlapping `size`-sized chunks.
+
+The trailing chunk may be shorter than `size`. Multi-pass: query
+`count`, index with `view.get(i)`, and iterate repeatedly without
+re-creating the view.
+
+##### Errors
+
+Panics if `size <= 0`.
+
+##### Examples
+
+```
+let v = [1, 2, 3, 4, 5].chunks(of: 2);
+v.count;          // 3
+v.get(2);          // ArraySlice[5]
+for c in v { ... }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[U]((T) -> Optional[U]) -> Array[U]
+```
+
+Maps every element through `transform`, dropping `.None` results.
+O(n).
+
+##### Examples
+
+```
+["1", "x", "3"].compactMap { Int64.parse(it) };  // [1, 3]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(T) -> Bool
+```
+
+`true` if the collection contains `element`. O(n).
+
+Linear scan; short-circuits on the first match.
+
+##### Examples
+
+```
+[1, 2, 3].contains(2);  // true
+[1, 2, 3].contains(5);  // false
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Element count. O(1).
+
+##### Examples
+
+```
+[1, 2, 3].count;  // 3
+[].count;          // 0
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `countItems`
+
+```kestrel
+public func countItems(matching: (T) -> Bool) -> Int64
+```
+
+Number of elements for which `predicate` is true. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].countItems(matching: { it % 2 == 0 });  // 2
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `drop`
+
+```kestrel
+public func drop(first: Int64) -> ArraySlice[T]
+```
+
+Returns a slice with the first `count` elements skipped. O(1).
+
+Complement of `prefix`.
+
+##### Errors
+
+Panics if `count > self.count`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].drop(first: 2);  // ArraySlice[3, 4, 5]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `drop`
+
+```kestrel
+public func drop(last: Int64) -> ArraySlice[T]
+```
+
+Returns a slice with the last `count` elements skipped. O(1).
+
+Complement of `suffix`.
+
+##### Errors
+
+Panics if `count > self.count`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].drop(last: 2);  // ArraySlice[1, 2, 3]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `ends`
+
+```kestrel
+public func ends[S](with: S) -> Bool where S: Slice[T]
+```
+
+`true` if the trailing elements match `suffix`. O(k) where k is
+the suffix length. Accepts any `Slice[T]` conformer.
+
+##### Examples
+
+```
+[1, 2, 3].ends(with: [2, 3]);  // true
+[1, 2, 3].ends(with: [1, 2]);  // false
+[1, 2, 3].ends(with: []);       // true (vacuous)
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `ensureUnique`
+
+```kestrel
+mutating func ensureUnique()
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(matching: (T) -> Bool) -> Array[T]
+```
+
+Returns a new array containing every element matching `predicate`.
+O(n). Result size is unknown; uses geometric growth.
+
+##### Examples
+
+```
+[1, 2, 3, 4].filter(matching: { it % 2 == 0 });  // [2, 4]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `first`
+
+```kestrel
+public func first() -> T?
+```
+
+First element, or `.None` for an empty collection. O(1).
+
+Read-only — to remove the first element from an `Array`, use
+`popFirst()`.
+
+##### Examples
+
+```
+[1, 2, 3].first();  // Some(1)
+[].first();          // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `first`
+
+```kestrel
+public func first(matching: (T) -> Bool) -> T?
+```
+
+First element matching `predicate`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].first(matching: { it > 3 });  // Some(4)
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(matching: (T) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`. O(n).
+
+Short-circuits on the first match. For value-based search on
+`Equatable` collections, use `firstIndex(of:)`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].firstIndex(matching: { it > 3 });   // Some(3)
+[1, 2, 3].firstIndex(matching: { it > 10 });         // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: T) -> Int64?
+```
+
+Index of the first element equal to `element`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2].firstIndex(of: 2);  // Some(1)
+[1, 2, 3].firstIndex(of: 5);      // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U]((T) -> Array[U]) -> Array[U]
+```
+
+Maps every element through `transform` and concatenates the results
+into one flat array. O(n + total_output).
+
+##### Examples
+
+```
+[1, 2, 3].flatMap { [it, it * 10] };  // [1, 10, 2, 20, 3, 30]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
+
+Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
+
+##### Examples
+
+```
+[1, 2, 3].format();  // "[1, 2, 3]"
+[].format();          // "[]"
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### field `indices`
+
+```kestrel
+public var indices: Range[Int64] { get }
+```
+
+Half-open range `0..<count`.
+
+##### Examples
+
+```
+[10, 20, 30].indices;  // 0..<3
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when `count == 0`.
+
+##### Examples
+
+```
+[].isEmpty;   // true
+[1].isEmpty;  // false
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Self) -> Bool
+```
+
+Element-wise equality. O(n).
+
+Short-circuits on the first mismatch. Order matters.
+
+##### Examples
+
+```
+[1, 2, 3].isEqual(to: [1, 2, 3]);  // true
+[1, 2, 3].isEqual(to: [3, 2, 1]);  // false
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public func isSorted() -> Bool
+```
+
+`true` if elements are in non-decreasing order. O(n).
+
+Equal adjacent elements are allowed. Empty and single-element
+collections are vacuously sorted.
+
+##### Examples
+
+```
+[1, 2, 3].isSorted();  // true
+[1, 3, 2].isSorted();  // false
+[1, 1, 1].isSorted();  // true
+[].isSorted();          // true
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `isValidIndex`
+
+```kestrel
+public func isValidIndex(Int64) -> Bool
+```
+
+`true` if `index` is in `[0, count)`.
+
+##### Examples
+
+```
+[10, 20, 30].isValidIndex(2);   // true
+[10, 20, 30].isValidIndex(3);   // false
+[10, 20, 30].isValidIndex(-1);  // false
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `last`
+
+```kestrel
+public func last() -> T?
+```
+
+Last element, or `.None` for an empty collection. O(1).
+
+Read-only — to remove the last element from an `Array`, use
+`pop()`.
+
+##### Examples
+
+```
+[1, 2, 3].last();  // Some(3)
+[].last();          // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `last`
+
+```kestrel
+public func last(matching: (T) -> Bool) -> T?
+```
+
+Last element matching `predicate`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2, 1].last(matching: { it > 1 });  // Some(2)
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(matching: (T) -> Bool) -> Int64?
+```
+
+Index of the last element matching `predicate`, or `None`. O(n).
+
+Scans from the back; short-circuits on the first match.
+
+##### Examples
+
+```
+[1, 2, 3, 2, 1].lastIndex(matching: { it == 2 });  // Some(3)
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: T) -> Int64?
+```
+
+Index of the last element equal to `element`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2].lastIndex(of: 2);  // Some(3)
+[1, 2, 3].lastIndex(of: 5);      // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U]((T) -> U) -> Array[U]
+```
+
+Maps every element through `transform` into a new array. O(n).
+
+Pre-sizes the result buffer to `self.count`, so no growth steps. For
+the lazy version that fuses into a chain, use `iter().map { ... }`.
+
+##### Examples
+
+```
+[1, 2, 3].map { it * 2 };       // [2, 4, 6]
+[1, 2, 3].map { it.format() };  // ["1", "2", "3"]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `max`
+
+```kestrel
+public func max() -> T?
+```
+
+Largest element, or `None` if empty. O(n).
+
+Ties go to the first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4].max();  // Some(4)
+[].max();          // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `min`
+
+```kestrel
+public func min() -> T?
+```
+
+Smallest element, or `None` if empty. O(n).
+
+Ties go to the first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4].min();  // Some(1)
+[].min();          // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `prefix`
+
+```kestrel
+public func prefix(Int64) -> ArraySlice[T]
+```
+
+Returns a slice over the first `count` elements. O(1).
+
+##### Errors
+
+Panics if `count > self.count`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].prefix(3);  // ArraySlice[1, 2, 3]
+[1, 2].prefix(0);            // empty slice
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `reversed`
+
+```kestrel
+public func reversed() -> ReversedView[T]
+```
+
+Multi-pass lazy reversed view. Iterates back-to-front and
+supports indexed access in O(1).
+
+##### Examples
+
+```
+let v = [1, 2, 3].reversed();
+v.first();        // Some(3)
+v.toArray();       // [3, 2, 1] — eager copy
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `sorted`
+
+```kestrel
+public func sorted() -> Array[T]
+```
+
+Returns a new sorted array; original unchanged. O(n log n).
+
+##### Examples
+
+```
+let arr = [3, 1, 4, 1, 5];
+arr.sorted();  // [1, 1, 3, 4, 5]
+// arr is still [3, 1, 4, 1, 5]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(matching: (T) -> Bool) -> ArraySplitWhereView[T]
+```
+
+Multi-pass lazy view over the segments produced by splitting at
+each element matching `predicate`. Matching elements are dropped.
+
+##### Examples
+
+```
+let v = [1, -1, 2, 3, -1, 4].split(matching: { it < 0 });
+for seg in v { ... }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(T) -> ArraySplitView[T]
+```
+
+Multi-pass lazy view over the segments produced by splitting on
+each occurrence of `separator`. Separators are dropped; empty
+runs between adjacent separators are preserved.
+
+Use `view.toArray()` to materialize all segments into an owned
+`Array[ArraySlice[T]]`.
+
+##### Examples
+
+```
+let v = [1, 0, 2, 0, 3].split(separator: 0);
+for seg in v { ... }            // ArraySlice[1], ArraySlice[2], ArraySlice[3]
+v.toArray();                     // eager: 3 segments
+
+[1, 2, 3].split(separator: 0).toArray();
+// [ArraySlice[1, 2, 3]] — separator not found, single segment
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `starts`
+
+```kestrel
+public func starts[S](with: S) -> Bool where S: Slice[T]
+```
+
+`true` if the leading elements match `prefix`. O(k) where k is
+the prefix length. Accepts any `Slice[T]` conformer.
+
+##### Examples
+
+```
+[1, 2, 3].starts(with: [1, 2]);     // true
+[1, 2, 3].starts(with: [2, 3]);     // false
+[1, 2, 3].starts(with: []);          // true (vacuous)
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](I) -> I.SeqOutput { get set }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](checked: I) -> I.SeqOutput? { get }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](unchecked: I) -> I.SeqOutput { get set }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](clamped: I) -> I.SeqClampedOutput { get set }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.SeqWrappedOutput { get set }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `suffix`
+
+```kestrel
+public func suffix(Int64) -> ArraySlice[T]
+```
+
+Returns a slice over the last `count` elements. O(1).
+
+##### Errors
+
+Panics if `count > self.count`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].suffix(2);  // ArraySlice[4, 5]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `unique`
+
+```kestrel
+public func unique() -> Array[T]
+```
+
+Returns a new array with duplicates removed, preserving
+first-occurrence order. O(n²).
+
+For the mutating variant on `Array`, see `removeDuplicates()`.
+
+##### Examples
+
+```
+[1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `windows`
+
+```kestrel
+public func windows(of: Int64) -> WindowsView[T]
+```
+
+Multi-pass lazy view over overlapping `size`-sized sliding
+windows.
+
+Adjacent windows overlap by `size - 1` elements. Empty when the
+source has fewer than `size` elements.
+
+##### Errors
+
+Panics if `size <= 0`.
+
+##### Examples
+
+```
+let v = [1, 2, 3, 4].windows(of: 2);
+v.count;          // 3
+for w in v { ... }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item
+```
+
+The element type that iteration yields.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator
+```
+
+The concrete iterator type returned by `iter()`. Constrained so
+`TargetIterator.Item` matches `Self.Item`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ArraySliceIterator[T]
+```
+
+Forward iterator over the elements.
+
+##### Examples
+
+```
+for item in [1, 2, 3] { ... }
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ## struct `ValuesIterator`
 
 ```kestrel
-public struct ValuesIterator[K, V] where K: Hash { /* private fields */ }
+public struct ValuesIterator[K, V] where K: Hashable { /* private fields */ }
 ```
 
 Single-pass iterator yielding only the values of a dictionary.
@@ -5370,7 +6643,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 ## struct `ValuesView`
 
 ```kestrel
-public struct ValuesView[K, V] where K: Hash { /* private fields */ }
+public struct ValuesView[K, V] where K: Hashable { /* private fields */ }
 ```
 
 Lazy `Iterable` view over the values of a dictionary.
@@ -5452,95 +6725,127 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public struct WindowsIterator[T] { /* private fields */ }
 ```
 
-Iterator over overlapping fixed-size sliding windows of an `Array[T]`.
-
-Produced by `Array.windows(of:)`. Every yielded window has exactly
-`windowSize` elements; the pointer advances by one element per step, so
-adjacent windows overlap by `windowSize - 1` elements. If the array is
-shorter than the window size, no windows are yielded. For
-non-overlapping fixed-size groups, use `ChunksIterator` instead.
-
-### Examples
-
-```
-let arr = [1, 2, 3, 4];
-for window in arr.windows(of: 2) {
-    // yields: Slice[1, 2], Slice[2, 3], Slice[3, 4]
-}
-```
-
-### Representation
-
-A `(ptr, remaining, windowSize)` triple. `remaining` is precomputed at
-construction as `max(totalCount - windowSize + 1, 0)`.
-
-### Memory Model
-
-Value type. Yielded slices alias the source array's buffer; do not
-retain them across mutations of the array.
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `init`
 
 ```kestrel
 public init(ptr: Pointer[T], totalCount: Int64, windowSize: Int64)
 ```
 
-Constructs a windows iterator from a pointer, total element count,
-and window size.
-
-Prefer `Array.windows(of:)` over calling this directly. The window
-count is derived as `max(totalCount - windowSize + 1, 0)`, so a
-`windowSize` larger than `totalCount` yields nothing.
-
-##### Safety
-
-`ptr` must point to at least `totalCount` initialized elements of
-`T` and remain valid for the iterator's lifetime.
-
-##### Examples
-
-```
-let it = WindowsIterator(ptr: arr.asPointer(), totalCount: arr.count, windowSize: 2);
-```
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = Slice[T]
+type Item = ArraySlice[T]
 ```
 
-The element type yielded by `next()` — a borrowed `Slice[T]` over
-one window.
-
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/views.ks`._
 
 #### function `next`
 
 ```kestrel
-public mutating func next() -> Slice[T]?
+public mutating func next() -> Optional[ArraySlice[T]]
 ```
 
-Returns the next window, or `None` when no more full windows fit.
+_Defined in `lang/std/collections/views.ks`._
 
-Each call slides the pointer forward by one element, so consecutive
-windows share `windowSize - 1` elements.
+## struct `WindowsView`
 
-##### Examples
-
-```
-var it = [1, 2, 3].windows(of: 2);
-it.next();  // Some(Slice[1, 2])
-it.next();  // Some(Slice[2, 3])
-it.next();  // None
+```kestrel
+public struct WindowsView[T] { /* private fields */ }
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+Multi-pass lazy view over overlapping fixed-size sliding windows.
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Members
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Optional[ArraySlice[T]] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: ArraySlice[T], windowSize: Int64)
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Optional[ArraySlice[T]] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(Int64) -> ArraySlice[T] { get }
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `toArray`
+
+```kestrel
+public func toArray() -> Array[ArraySlice[T]]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = WindowsIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> WindowsIterator[T]
+```
+
+_Defined in `lang/std/collections/views.ks`._
 

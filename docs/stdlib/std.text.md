@@ -65,23 +65,23 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Alignment) -> Bool
+public func isEqual(to: Alignment) -> Bool
 ```
 
 Returns true if both cases are the same variant.
 
 Equality is structural — there are no payloads. Used by the
-`Equatable` conformance so `FormatOptions.equals` can fall through
+`Equatable` conformance so `FormatOptions.isEqual` can fall through
 without payload comparisons.
 
 ##### Examples
 
 ```
-Alignment.Left.equals(.Left);    // true
-Alignment.Left.equals(.Center);  // false
+Alignment.Left.isEqual(to: .Left);    // true
+Alignment.Left.isEqual(to: .Center);  // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -94,7 +94,7 @@ _Defined in `lang/std/text/format.ks`._
 public func matches(Alignment) -> Bool
 ```
 
-Pattern-match form of equality — delegates to `equals`.
+Pattern-match form of equality — delegates to `isEqual`.
 
 Lets `Alignment` appear in `match` patterns against another value.
 
@@ -105,170 +105,6 @@ Alignment.Right.matches(.Right);  // true
 ```
 
 _Defined in `lang/std/text/format.ks`._
-
-## struct `AsciiChars`
-
-```kestrel
-public struct AsciiChars { /* private fields */ }
-```
-
-Namespace of common ASCII punctuation and whitespace characters.
-
-Static factories rather than constants because Kestrel does not yet
-have non-trivial `static let` initialisation; calls are cheap and
-fully constant-folded.
-
-### Examples
-
-```
-AsciiChars.space() == ' ';        // true
-AsciiChars.newline() == '\n';     // true
-AsciiChars.colon() == ':';        // true
-```
-
-_Defined in `lang/std/text/char.ks`._
-
-### Members
-
-#### function `apostrophe`
-
-```kestrel
-public static func apostrophe() -> Char
-```
-
-The single-quote / apostrophe character `'\''`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `backslash`
-
-```kestrel
-public static func backslash() -> Char
-```
-
-The backslash character `'\\'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `carriageReturn`
-
-```kestrel
-public static func carriageReturn() -> Char
-```
-
-The carriage return character `'\r'` (`U+000D`).
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `colon`
-
-```kestrel
-public static func colon() -> Char
-```
-
-The colon character `':'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `comma`
-
-```kestrel
-public static func comma() -> Char
-```
-
-The comma character `','`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `dot`
-
-```kestrel
-public static func dot() -> Char
-```
-
-The period character `'.'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `newline`
-
-```kestrel
-public static func newline() -> Char
-```
-
-The newline character `'\n'` (`U+000A`, line feed).
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `nul`
-
-```kestrel
-public static func nul() -> Char
-```
-
-The null character `'\0'` (`U+0000`).
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `quote`
-
-```kestrel
-public static func quote() -> Char
-```
-
-The double-quote character `'"'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `semicolon`
-
-```kestrel
-public static func semicolon() -> Char
-```
-
-The semicolon character `';'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `slash`
-
-```kestrel
-public static func slash() -> Char
-```
-
-The forward-slash character `'/'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `space`
-
-```kestrel
-public static func space() -> Char
-```
-
-The space character `' '` (`U+0020`).
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `tab`
-
-```kestrel
-public static func tab() -> Char
-```
-
-The horizontal tab character `'\t'` (`U+0009`).
-
-_Defined in `lang/std/text/char.ks`._
-
-## typealias `Byte`
-
-```kestrel
-public type Byte = UInt8
-```
-
-One byte of UTF-8 (or any other) encoded text — alias for `UInt8`.
-
-_Defined in `lang/std/text/char.ks`._
 
 ## struct `ByteIndex`
 
@@ -301,6 +137,16 @@ Wraps a raw byte offset.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `advance`
+
+```kestrel
+public func advance(by: Int64) -> ByteIndex
+```
+
+Advances by `n` bytes. Pure arithmetic — no string needed.
+
+_Defined in `lang/std/text/slice.ks`._
+
 #### field `value`
 
 ```kestrel
@@ -313,10 +159,10 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(ByteIndex) -> Bool
+public func isEqual(to: ByteIndex) -> Bool
 ```
 
 Returns true if the two indices wrap the same byte offset.
@@ -332,6 +178,40 @@ public func compare(ByteIndex) -> Ordering
 ```
 
 Compares two byte indices by their wrapped offsets.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesIndex`
+
+#### typealias `BytesYield`
+
+```kestrel
+type BytesYield = UInt8
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytes`
+
+```kestrel
+public func readBytes(from: BytesView) -> UInt8
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesChecked`
+
+```kestrel
+public func readBytesChecked(from: BytesView) -> UInt8?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesUnchecked`
+
+```kestrel
+public func readBytesUnchecked(from: BytesView) -> UInt8
+```
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -495,20 +375,14 @@ yield `BytesView` (always valid, possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+public init(slice: StringSlice)
 ```
 
-Constructs a bytes view from a raw pointer and a byte count.
-
-Prefer `someString.bytes` over calling this directly.
-
-##### Safety
-
-`ptr` must point to `length` valid bytes that remain live for as
-long as the view is used.
+Constructs a bytes view backed by the given string slice.
+The view retains shared ownership of the underlying bytes.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -568,6 +442,26 @@ O(1). This is **byte** count, not character count — see
 
 _Defined in `lang/std/text/views.ks`._
 
+#### field `endIndex`
+
+```kestrel
+public var endIndex: ByteIndex { get }
+```
+
+Byte index one past the last byte.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: UInt8) -> ByteIndex?
+```
+
+Returns the index of the first occurrence of `byte`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `isEmpty`
 
 ```kestrel
@@ -575,6 +469,36 @@ public var isEmpty: Bool { get }
 ```
 
 `true` if the view spans zero bytes.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: UInt8) -> ByteIndex?
+```
+
+Returns the index of the last occurrence of `byte`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `slice`
+
+```kestrel
+public func slice(from: ByteIndex, to: ByteIndex) -> StringSlice
+```
+
+Returns a `StringSlice` covering the byte range `[start, end)`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `startIndex`
+
+```kestrel
+public var startIndex: ByteIndex { get }
+```
+
+Byte index of the first byte.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -638,6 +562,16 @@ the view is reusable.
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ## struct `Char`
 
 ```kestrel
@@ -657,7 +591,7 @@ raw byte representation, see `utf8Length()` and the free
 
 ```
 let a: Char = 'a';
-a.isAlphabetic();    // true
+a.isAsciiLetter;    // true
 a.utf8Length();      // 1
 let smile: Char = '\u{1F600}';
 smile.utf8Length();  // 4
@@ -721,7 +655,7 @@ public func digitValue() -> UInt32?
 Returns the numeric value `0`–`9` for ASCII digits, otherwise `None`.
 
 Inverse of `fromDigit`. Non-ASCII digit characters return `None`
-— match `isDigit` semantics.
+— match `isAsciiDigit` semantics.
 
 ##### Examples
 
@@ -745,8 +679,8 @@ Inverse of `digitValue`. Values outside `0..=9` return `None`.
 ##### Examples
 
 ```
-Char.fromDigit(d: 7);   // Some('7')
-Char.fromDigit(d: 12);  // None
+Char.fromDigit(7);   // Some('7')
+Char.fromDigit(12);  // None
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -793,53 +727,10 @@ to avoid silently dropping characters.
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isAlphabetic`
+#### field `isAscii`
 
 ```kestrel
-public func isAlphabetic() -> Bool
-```
-
-Returns true for ASCII letters `A`–`Z` / `a`–`z`.
-
-**ASCII-only.** Non-ASCII letters (e.g. `é`, `Ω`, `日`) return
-`false` even though they are letters in Unicode. For the full
-Unicode test, use the property tables in `std.text.unicode`.
-
-##### Examples
-
-```
-'A'.isAlphabetic();         // true
-'\u{00E9}'.isAlphabetic();  // false (é — non-ASCII)
-'7'.isAlphabetic();         // false
-```
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `isAlphanumeric`
-
-```kestrel
-public func isAlphanumeric() -> Bool
-```
-
-Returns true for ASCII letters and ASCII digits.
-
-Composition of `isAlphabetic` and `isDigit`; same ASCII-only
-caveats apply.
-
-##### Examples
-
-```
-'a'.isAlphanumeric();  // true
-'7'.isAlphanumeric();  // true
-'_'.isAlphanumeric();  // false
-```
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `isAscii`
-
-```kestrel
-public func isAscii() -> Bool
+public var isAscii: Bool { get }
 ```
 
 Returns true if the scalar is in the ASCII range (`< 0x80`).
@@ -851,37 +742,37 @@ or the property tables directly.
 ##### Examples
 
 ```
-'A'.isAscii();          // true
-'\u{00E9}'.isAscii();   // false (é)
+'A'.isAscii;          // true
+'\u{00E9}'.isAscii;   // false (é)
 ```
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isControl`
+#### field `isAsciiAlphanumeric`
 
 ```kestrel
-public func isControl() -> Bool
+public var isAsciiAlphanumeric: Bool { get }
 ```
 
-Returns true for the C0 controls (`< U+0020`) and DEL (`U+007F`).
+Returns true for ASCII letters and ASCII digits.
 
-Does not include the C1 controls (`U+0080`–`U+009F`); add a
-dedicated test if you need them.
+Composition of `isAsciiLetter` and `isAsciiDigit`; same ASCII-only
+caveats apply.
 
 ##### Examples
 
 ```
-'\n'.isControl();     // true
-'\x7F'.isControl();   // true
-'a'.isControl();      // false
+'a'.isAsciiAlphanumeric;  // true
+'7'.isAsciiAlphanumeric;  // true
+'_'.isAsciiAlphanumeric;  // false
 ```
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isDigit`
+#### field `isAsciiDigit`
 
 ```kestrel
-public func isDigit() -> Bool
+public var isAsciiDigit: Bool { get }
 ```
 
 Returns true for the ASCII digits `0`–`9`.
@@ -893,16 +784,38 @@ to numeric value.
 ##### Examples
 
 ```
-'7'.isDigit();   // true
-'a'.isDigit();   // false
+'7'.isAsciiDigit;   // true
+'a'.isAsciiDigit;   // false
 ```
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isLowercase`
+#### field `isAsciiLetter`
 
 ```kestrel
-public func isLowercase() -> Bool
+public var isAsciiLetter: Bool { get }
+```
+
+Returns true for ASCII letters `A`–`Z` / `a`–`z`.
+
+**ASCII-only.** Non-ASCII letters (e.g. `é`, `Ω`, `日`) return
+`false` even though they are letters in Unicode. For the full
+Unicode test, use the property tables in `std.text.unicode`.
+
+##### Examples
+
+```
+'A'.isAsciiLetter;         // true
+'\u{00E9}'.isAsciiLetter;  // false (é — non-ASCII)
+'7'.isAsciiLetter;         // false
+```
+
+_Defined in `lang/std/text/char.ks`._
+
+#### field `isAsciiLowercase`
+
+```kestrel
+public var isAsciiLowercase: Bool { get }
 ```
 
 Returns true for ASCII lowercase letters `a`–`z`.
@@ -913,16 +826,16 @@ general Unicode case tests.
 ##### Examples
 
 ```
-'a'.isLowercase();   // true
-'A'.isLowercase();   // false
+'a'.isAsciiLowercase;   // true
+'A'.isAsciiLowercase;   // false
 ```
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isUppercase`
+#### field `isAsciiUppercase`
 
 ```kestrel
-public func isUppercase() -> Bool
+public var isAsciiUppercase: Bool { get }
 ```
 
 Returns true for ASCII uppercase letters `A`–`Z`.
@@ -933,17 +846,38 @@ general Unicode case tests.
 ##### Examples
 
 ```
-'A'.isUppercase();         // true
-'a'.isUppercase();         // false
-'\u{00C9}'.isUppercase();  // false (É — non-ASCII)
+'A'.isAsciiUppercase;         // true
+'a'.isAsciiUppercase;         // false
+'\u{00C9}'.isAsciiUppercase;  // false (É — non-ASCII)
 ```
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isWhitespace`
+#### field `isControl`
 
 ```kestrel
-public func isWhitespace() -> Bool
+public var isControl: Bool { get }
+```
+
+Returns true for the C0 controls (`< U+0020`) and DEL (`U+007F`).
+
+Does not include the C1 controls (`U+0080`–`U+009F`); add a
+dedicated test if you need them.
+
+##### Examples
+
+```
+'\n'.isControl;     // true
+'\x7F'.isControl;   // true
+'a'.isControl;      // false
+```
+
+_Defined in `lang/std/text/char.ks`._
+
+#### field `isWhitespace`
+
+```kestrel
+public var isWhitespace: Bool { get }
 ```
 
 Returns true for the common ASCII whitespace set: space, tab, LF, CR, form feed.
@@ -955,10 +889,10 @@ whitespace, consult the property tables.
 ##### Examples
 
 ```
-' '.isWhitespace();    // true
-'\t'.isWhitespace();   // true
-'\n'.isWhitespace();   // true
-'a'.isWhitespace();    // false
+' '.isWhitespace;    // true
+'\t'.isWhitespace;   // true
+'\n'.isWhitespace;   // true
+'a'.isWhitespace;    // false
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -1027,6 +961,16 @@ than `Ǳ` (full uppercase).
 
 _Defined in `lang/std/text/char.ks`._
 
+#### function `toString`
+
+```kestrel
+public func toString() -> String
+```
+
+Converts this code point to an owned `String`.
+
+_Defined in `lang/std/text/char.ks`._
+
 #### function `uppercaseExpansion`
 
 ```kestrel
@@ -1092,6 +1036,17 @@ size buffers before calling `encodeUtf8`.
 
 _Defined in `lang/std/text/char.ks`._
 
+#### function `validated`
+
+```kestrel
+public static func validated(UInt32) -> Char?
+```
+
+Returns a `Char` if the value is a valid Unicode scalar, `.None` otherwise.
+Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
+
+_Defined in `lang/std/text/char.ks`._
+
 #### function `value`
 
 ```kestrel
@@ -1114,10 +1069,10 @@ _Defined in `lang/std/text/char.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Char) -> Bool
+public func isEqual(to: Char) -> Bool
 ```
 
 Returns true if both characters are the same Unicode scalar.
@@ -1127,8 +1082,8 @@ Pure scalar-value equality — no case folding, no normalization.
 ##### Examples
 
 ```
-'a'.equals('a');  // true
-'a'.equals('A');  // false
+'a'.isEqual(to: 'a');  // true
+'a'.isEqual(to: 'A');  // false
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -1165,7 +1120,7 @@ _Defined in `lang/std/text/char.ks`._
 public func matches(Char) -> Bool
 ```
 
-Pattern-match form of equality — delegates to `equals`.
+Pattern-match form of equality — delegates to `isEqual`.
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -1181,7 +1136,7 @@ Builds an instance from a character literal.
 
 _Defined in `lang/std/core/literals.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -1228,6 +1183,16 @@ Returns true if `self < bound`. Used by `RangeMatchable` for half-open patterns.
 
 _Defined in `lang/std/text/char.ks`._
 
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
+
+_Defined in `lang/std/text/char.ks`._
+
 ## struct `CharIndex`
 
 ```kestrel
@@ -1259,6 +1224,17 @@ Wraps a pre-resolved byte offset for a character position.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `advance`
+
+```kestrel
+public func advance(by: Int64, from: StringSlice) -> CharIndex
+```
+
+Advances by `n` code points. Requires the source string to
+decode UTF-8 boundaries. O(n) in chars advanced.
+
+_Defined in `lang/std/text/slice.ks`._
+
 #### field `byteOffset`
 
 ```kestrel
@@ -1271,13 +1247,49 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(CharIndex) -> Bool
+public func isEqual(to: CharIndex) -> Bool
 ```
 
 Returns true if the two indices point at the same byte offset.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+public func compare(CharIndex) -> Ordering
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `CharsIndex`
+
+#### typealias `CharsYield`
+
+```kestrel
+type CharsYield = Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readChars`
+
+```kestrel
+public func readChars(from: CharsView) -> Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsChecked`
+
+```kestrel
+public func readCharsChecked(from: CharsView) -> Char?
+```
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1441,20 +1453,14 @@ yield `CharsView` (always valid, possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+public init(slice: StringSlice)
 ```
 
-Constructs a chars view from a raw pointer and a byte length.
-
-Prefer `someString.chars` over calling this directly.
-
-##### Safety
-
-`ptr` must point to `length` valid UTF-8 bytes that remain live
-for the view's lifetime.
+Constructs a chars view backed by the given string slice.
+The view retains shared ownership of the underlying bytes.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1476,6 +1482,138 @@ _Defined in `lang/std/text/views.ks`._
 ```kestrel
 public var count: Int64 { get }
 ```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `endIndex`
+
+```kestrel
+public var endIndex: CharIndex { get }
+```
+
+Char index at the end (one past the last byte).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Char? { get }
+```
+
+The first code point, or `None` if the view is empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: Char) -> CharIndex?
+```
+
+Returns the index of the first occurrence of `c`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(matching: (Char) -> Bool) -> CharIndex?
+```
+
+Returns the index of the first code point matching `predicate`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `index`
+
+```kestrel
+public func index(at: Int64) -> CharIndex?
+```
+
+Resolves the n-th code point to its byte offset. O(n).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `indexedIter`
+
+```kestrel
+public func indexedIter() -> IndexedCharsIterator
+```
+
+Returns an iterator yielding `(CharIndex, Char)` pairs.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when the view spans zero bytes (no code points).
+
+O(1) — checks `byteCount`, not `count`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Char? { get }
+```
+
+The last code point, or `None` if the view is empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: Char) -> CharIndex?
+```
+
+Returns the index of the last occurrence of `c`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(matching: (Char) -> Bool) -> CharIndex?
+```
+
+Returns the index of the last code point matching `predicate`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `reversed`
+
+```kestrel
+public var reversed: ReversedCharsView { get }
+```
+
+A reversed view that iterates code points back-to-front.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `slice`
+
+```kestrel
+public func slice(from: CharIndex, to: CharIndex) -> StringSlice
+```
+
+Returns a `StringSlice` covering `[start, end)` by byte offset.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `startIndex`
+
+```kestrel
+public var startIndex: CharIndex { get }
+```
+
+Char index at byte 0 (the first code point).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1536,6 +1674,16 @@ Each call returns a fresh iterator; the view itself is reusable.
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ## struct `DefaultStringInterpolation`
 
 ```kestrel
@@ -1560,24 +1708,40 @@ acc.build();  // "hello, world"
 
 ### Representation
 
-A single `Array[String]` of accumulated parts. Empty literal pieces
-are dropped on append.
+A single `StringBuilder` that accumulates all literal and formatted
+bytes in one buffer. Pre-sized using the compiler's capacity hints.
 
 _Defined in `lang/std/text/format.ks`._
 
 ### Members
 
+#### initializer `With Capacity`
+
+```kestrel
+public init(literalCapacity: Int64, interpolationCount: Int64)
+```
+
+Constructs an empty accumulator pre-sized from compile-time hints.
+
+`literalCapacity` is the exact byte count of static segments;
+`interpolationCount` estimates ~16 bytes per hole.
+
+##### Examples
+
+```
+var acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
+acc.build();  // ""
+```
+
+_Defined in `lang/std/text/format.ks`._
+
 #### function `build`
 
 ```kestrel
-public func build() -> String
+public mutating func build() -> String
 ```
 
-Concatenates all recorded parts into the final `String`.
-
-Fast paths the zero-part and one-part cases. For the multi-part
-case, computes the exact total byte length first, allocates once
-at that size, then appends — no growth churn.
+Transfers the buffer into a `String` without copying.
 
 ##### Examples
 
@@ -1586,14 +1750,6 @@ var acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
 acc.appendLiteral("a");
 acc.appendLiteral("b");
 acc.build();  // "ab"
-```
-
-_Defined in `lang/std/text/format.ks`._
-
-#### initializer `init`
-
-```kestrel
-public init(literalCapacity: Int64, interpolationCount: Int64)
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -1620,11 +1776,7 @@ _Defined in `lang/std/text/format.ks`._
 public mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
 ```
 
-Records one interpolation hole, eagerly formatted with `options`.
-
-Calls `value.format(options)` immediately so the resulting
-`String` is what gets stored — `value` is not retained past this
-call. Default `options` matches `FormatOptions.default()`.
+Formats one interpolation hole directly into the buffer.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -1634,11 +1786,7 @@ _Defined in `lang/std/text/format.ks`._
 public mutating func appendLiteral(String)
 ```
 
-Records one static literal segment.
-
-Empty literals are dropped — they would force `build()` to do
-extra work without changing the result. Non-empty literals are
-appended verbatim with no copying beyond the `String`'s own COW.
+Appends a static literal segment directly into the buffer.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -1650,10 +1798,7 @@ _Defined in `lang/std/text/format.ks`._
 public func clone() -> DefaultStringInterpolation
 ```
 
-Returns a shallow copy with cloned `parts`.
-
-`String` is COW so the part clone is itself shallow; mutating
-either copy after this call does not affect the other.
+Returns a copy with a cloned builder buffer.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -1789,10 +1934,10 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(FloatStyle) -> Bool
+public func isEqual(to: FloatStyle) -> Bool
 ```
 
 Returns true if both cases are the same variant.
@@ -1802,8 +1947,8 @@ All cases are payload-less, so equality is purely structural.
 ##### Examples
 
 ```
-FloatStyle.Fixed.equals(.Fixed);       // true
-FloatStyle.Fixed.equals(.Scientific);  // false
+FloatStyle.Fixed.isEqual(to: .Fixed);       // true
+FloatStyle.Fixed.isEqual(to: .Scientific);  // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -1816,7 +1961,7 @@ _Defined in `lang/std/text/format.ks`._
 public func matches(FloatStyle) -> Bool
 ```
 
-Pattern-match form of equality — delegates to `equals`.
+Pattern-match form of equality — delegates to `isEqual`.
 
 ##### Examples
 
@@ -2018,10 +2163,10 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(FormatOptions) -> Bool
+public func isEqual(to: FormatOptions) -> Bool
 ```
 
 Returns true if all fields are equal between the two options.
@@ -2035,10 +2180,10 @@ explicitly if needed.
 ```
 let a = FormatOptions();
 let b = FormatOptions();
-a.equals(b);  // true
+a.isEqual(to: b);  // true
 var c = FormatOptions();
 c.alternate = true;
-a.equals(c);  // false
+a.isEqual(to: c);  // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -2074,13 +2219,28 @@ _Defined in `lang/std/text/format.ks`._
 #### function `format`
 
 ```kestrel
-func format(FormatOptions) -> String
+func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Returns this value rendered as a `String` under the supplied options.
+Writes this value's formatted representation directly into `writer`.
 
-Default arg uses `FormatOptions.default()` so unsuffixed calls
-behave like the bare `"\{expr}"` interpolation form.
+This is the kernel method — all formatting ultimately bottoms out
+here. The convenience `format(options:) -> String` in the protocol
+extension calls this under the hood.
+
+_Defined in `lang/std/text/format.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -2104,7 +2264,7 @@ for display).
 ```
 let g = Grapheme(char: 'a');
 g.charCount();   // 1
-g.isAscii();     // true
+g.isAscii;     // true
 g.utf8Length();  // 1
 ```
 
@@ -2172,37 +2332,34 @@ Returns the number of `Char`s in this cluster — `1` for plain ASCII, more for 
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `chars`
+#### field `chars`
 
 ```kestrel
-public func chars() -> Array[Char]
+public var chars: Array[Char] { get }
 ```
 
-Returns the constituent code points in scalar order.
+The constituent code points in scalar order.
 
-Materializes a fresh `Array[Char]` on every call.
+Materializes a fresh `Array[Char]` on every access.
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `firstChar`
+#### field `firstChar`
 
 ```kestrel
-public func firstChar() -> Char?
+public var firstChar: Char { get }
 ```
 
 Returns the first `Char` of the cluster.
 
-Always `.Some` — every grapheme has at least one code point.
-Useful as a cheap "what kind of grapheme is this?" check
-(alphabetic, digit, emoji-base, …) without inspecting the full
-cluster.
+The first code point of this grapheme cluster.
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `isAscii`
+#### field `isAscii`
 
 ```kestrel
-public func isAscii() -> Bool
+public var isAscii: Bool { get }
 ```
 
 Returns true iff the cluster is exactly one ASCII `Char`.
@@ -2228,10 +2385,10 @@ _Defined in `lang/std/text/char.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Grapheme) -> Bool
+public func isEqual(to: Grapheme) -> Bool
 ```
 
 Returns true if the two graphemes are the same length and every `Char` is equal pairwise.
@@ -2246,7 +2403,7 @@ Normalize both sides first if you need that.
 ```
 let a = Grapheme(char: 'a');
 let b = Grapheme(char: 'a');
-a.equals(b);  // true
+a.isEqual(to: b);  // true
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -2260,6 +2417,36 @@ public func clone() -> Grapheme
 ```
 
 Returns a deep copy of this grapheme.
+
+_Defined in `lang/std/text/char.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+public func compare(Grapheme) -> Ordering
+```
+
+_Defined in `lang/std/text/char.ks`._
+
+### Implements `Hashable`
+
+#### function `hash`
+
+```kestrel
+public func hash[H](into: mutating H) where H: Hasher
+```
+
+_Defined in `lang/std/text/char.ks`._
+
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -2293,6 +2480,26 @@ Wraps a pre-resolved byte offset for a grapheme position.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `advance`
+
+```kestrel
+public func advance(by: Int64, from: StringSlice) -> GraphemeIndex
+```
+
+Advances by `n` grapheme clusters. Requires the source slice to
+run the UAX #29 segmenter forward. O(n) in graphemes advanced.
+
+##### Examples
+
+```
+let s = "héllo";
+let idx = s.graphemes.startIndex;    // byte 0
+let next = idx.advance(by: 2, from: s.asSlice());
+// Skipped 'h' (1 byte) and 'é' (2 bytes) → byte 3
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `byteOffset`
 
 ```kestrel
@@ -2305,15 +2512,25 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(GraphemeIndex) -> Bool
+public func isEqual(to: GraphemeIndex) -> Bool
 ```
 
 Returns true if the two indices point at the same byte offset.
 
 _Defined in `lang/std/text/views.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+public func compare(GraphemeIndex) -> Ordering
+```
+
+_Defined in `lang/std/text/slice.ks`._
 
 ## struct `GraphemesIterator`
 
@@ -2461,20 +2678,14 @@ range indexes yield `GraphemesView` (always valid, possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+public init(slice: StringSlice)
 ```
 
-Constructs a graphemes view from a raw pointer and a byte length.
-
-Prefer `someString.graphemes` over calling this directly.
-
-##### Safety
-
-`ptr` must point to `length` valid UTF-8 bytes that remain live
-for the view's lifetime.
+Constructs a graphemes view backed by the given string slice.
+The view retains shared ownership of the underlying bytes.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2500,6 +2711,103 @@ public var count: Int64 { get }
 Number of grapheme clusters. **O(n)** — walks the entire string
 through the UAX #29 segmenter. Cache the result if you need it
 more than once; each access re-walks the string.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `endIndex`
+
+```kestrel
+public var endIndex: GraphemeIndex { get }
+```
+
+Grapheme index at the end (one past the last byte).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Grapheme? { get }
+```
+
+The first grapheme cluster, or `None` if the view is empty.
+
+O(1) in practice — decodes one cluster from the start.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(matching: (Grapheme) -> Bool) -> GraphemeIndex?
+```
+
+Returns the index of the first grapheme matching `predicate`, or `.None`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `index`
+
+```kestrel
+public func index(at: Int64) -> GraphemeIndex?
+```
+
+Resolves the n-th grapheme cluster to its byte offset. O(n) —
+walks the segmenter from the start.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `indexedIter`
+
+```kestrel
+public func indexedIter() -> IndexedGraphemesIterator
+```
+
+Returns an iterator yielding `(GraphemeIndex, Grapheme)` pairs.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when the view spans zero bytes (no graphemes).
+
+O(1) — checks `byteCount`, not `count`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Grapheme? { get }
+```
+
+The last grapheme cluster, or `None` if the view is empty.
+
+O(n) — walks the entire string through the segmenter.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `slice`
+
+```kestrel
+public func slice(from: GraphemeIndex, to: GraphemeIndex) -> StringSlice
+```
+
+Returns a `StringSlice` covering `[start, end)` by byte offset.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `startIndex`
+
+```kestrel
+public var startIndex: GraphemeIndex { get }
+```
+
+Grapheme index at byte 0.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2555,6 +2863,134 @@ public func iter() -> GraphemesIterator
 ```
 
 Returns a `GraphemesIterator` positioned at byte 0.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `IndexedCharsIterator`
+
+```kestrel
+public struct IndexedCharsIterator { /* private fields */ }
+```
+
+Iterator yielding `(CharIndex, Char)` pairs — the byte offset of each
+code point alongside the decoded character. Useful when you need to
+know where each char starts in the buffer.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(ptr: lang.ptr[lang.i8], length: Int64)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = (CharIndex, Char)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> (CharIndex, Char)?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `IndexedGraphemesIterator`
+
+```kestrel
+public struct IndexedGraphemesIterator { /* private fields */ }
+```
+
+Iterator yielding `(GraphemeIndex, Grapheme)` pairs — the byte offset
+of each grapheme cluster alongside the grapheme value.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(inner: GraphemesIterator)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = (GraphemeIndex, Grapheme)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> (GraphemeIndex, Grapheme)?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `IndexedLinesIterator`
+
+```kestrel
+public struct IndexedLinesIterator { /* private fields */ }
+```
+
+Iterator yielding `(LineIndex, String)` pairs — the byte offset of each
+line's start alongside the line content (without terminator).
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(ptr: lang.ptr[lang.i8], length: Int64)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = (LineIndex, String)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> (LineIndex, String)?
+```
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2619,6 +3055,75 @@ called with the empty string; implementors should be cheap in
 that case.
 
 _Defined in `lang/std/text/format.ks`._
+
+## struct `LineIndex`
+
+```kestrel
+public struct LineIndex { /* private fields */ }
+```
+
+A typed wrapper for a line position within a string.
+Stores the byte offset of the line's first byte.
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Members
+
+#### function `advance`
+
+```kestrel
+public func advance(by: Int64, from: StringSlice) -> LineIndex
+```
+
+Advances by `n` lines. Scans for line terminators (`\n`, `\r\n`,
+`\r`) from the current byte offset. O(n) in lines advanced.
+
+##### Examples
+
+```
+let s = "a\nb\nc";
+let idx = s.lines.startIndex;       // byte 0
+let second = idx.advance(by: 1, from: s.asSlice());
+// second.byteOffset == 2 (past "a\n")
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `byteOffset`
+
+```kestrel
+public var byteOffset: Int64
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(Int64)
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: LineIndex) -> Bool
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+public func compare(LineIndex) -> Ordering
+```
+
+_Defined in `lang/std/text/slice.ks`._
 
 ## struct `LinesIterator`
 
@@ -2776,20 +3281,14 @@ range indexes yield `LinesView` (always valid, possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+public init(slice: StringSlice)
 ```
 
-Constructs a lines view from a raw pointer and a byte length.
-
-Prefer `someString.lines` over calling this directly.
-
-##### Safety
-
-`ptr` must point to `length` valid bytes that remain live for
-the view's lifetime.
+Constructs a lines view backed by the given string slice.
+The view retains shared ownership of the underlying bytes.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2816,6 +3315,81 @@ public var count: Int64 { get }
 Number of lines in the view. **O(n)** — walks the buffer
 scanning for terminators. Cache the result if you need it more
 than once.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `endIndex`
+
+```kestrel
+public var endIndex: LineIndex { get }
+```
+
+Line index at the end (one past the last byte).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: String? { get }
+```
+
+The first line (without terminator), or `None` if the view is empty.
+
+O(first line length) — scans for the first terminator.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `index`
+
+```kestrel
+public func index(at: Int64) -> LineIndex?
+```
+
+Resolves the n-th line to its byte offset. O(n) — scans for
+line terminators from the start.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `indexedIter`
+
+```kestrel
+public func indexedIter() -> IndexedLinesIterator
+```
+
+Returns an iterator yielding `(LineIndex, String)` pairs.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when the view spans zero bytes (no lines).
+
+O(1) — checks `byteCount`, not `count`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `slice`
+
+```kestrel
+public func slice(from: LineIndex, to: LineIndex) -> StringSlice
+```
+
+Returns a `StringSlice` covering `[start, end)` by byte offset.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `startIndex`
+
+```kestrel
+public var startIndex: LineIndex { get }
+```
+
+Line index at byte 0.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2873,6 +3447,149 @@ public func iter() -> LinesIterator
 ```
 
 Returns a `LinesIterator` positioned at byte 0.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `ReversedCharsIterator`
+
+```kestrel
+public struct ReversedCharsIterator { /* private fields */ }
+```
+
+Iterator that yields code points back-to-front by walking backward
+through UTF-8 continuation bytes to find each leading byte, then
+decoding forward.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(ptr: lang.ptr[lang.i8], length: Int64)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Char?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `ReversedCharsView`
+
+```kestrel
+public struct ReversedCharsView { /* private fields */ }
+```
+
+A reversed view over the code points in a string. Iterates characters
+back-to-front without allocating.
+
+### Examples
+
+```
+let view = "abc".chars.reversed;
+view.first();    // Some('c')
+view.count;      // 3
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of code points. O(n).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Char? { get }
+```
+
+The first element of the reversed view (= last char of the source).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: StringSlice)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ReversedCharsIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ReversedCharsIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> ReversedCharsView
+```
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2937,22 +3654,22 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Sign) -> Bool
+public func isEqual(to: Sign) -> Bool
 ```
 
 Returns true if both cases are the same variant.
 
 Used by `Equatable` to lift case identity into a `Bool` for
-composite comparisons (see `FormatOptions.equals`).
+composite comparisons (see `FormatOptions.isEqual`).
 
 ##### Examples
 
 ```
-Sign.Always.equals(.Always);     // true
-Sign.Negative.equals(.Always);   // false
+Sign.Always.isEqual(to: .Always);     // true
+Sign.Negative.isEqual(to: .Always);   // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -2965,7 +3682,7 @@ _Defined in `lang/std/text/format.ks`._
 public func matches(Sign) -> Bool
 ```
 
-Pattern-match form of equality — delegates to `equals`.
+Pattern-match form of equality — delegates to `isEqual`.
 
 ##### Examples
 
@@ -2975,156 +3692,1096 @@ Sign.Space.matches(.Space);  // true
 
 _Defined in `lang/std/text/format.ks`._
 
-## struct `SplitIterator`
+## struct `SplitView`
 
 ```kestrel
-public struct SplitIterator { /* private fields */ }
+public struct SplitView { /* private fields */ }
 ```
 
-Iterator that yields the segments produced by splitting a string on a fixed-byte separator.
+Lazy view over the segments of a string split on a fixed separator.
 
-Produced by `String.split(separator:)`. Walks the source byte-by-byte
-looking for an exact match of the separator's bytes (no UTF-8
-awareness needed — the separator itself is UTF-8 so its byte
-pattern can never align inside a multi-byte sequence). The empty
-separator is treated specially: it splits per code point.
+Each segment is a zero-copy `StringSlice` into the original buffer.
+Use `iter()` for one-pass iteration, or `first()`/`last()`/`collect()`
+for targeted access.
 
 ### Examples
 
 ```
-var it = "a,b,c".split(separator: ",");
-it.next();  // Some("a")
-it.next();  // Some("b")
-it.next();  // Some("c")
-it.next();  // None
+let view = "a,b,c".asSlice().split(",");
+view.first();            // Some("a")
+view.count;              // 3
+view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
 ```
 
-### Representation
-
-A `(ptr, length, sepPtr, sepLen, index, done)` record. `done` flips
-once the trailing remainder has been emitted.
-
-### Memory Model
-
-Value type. Borrows both the source and the separator buffers; do
-not retain across mutations of either.
-
-_Defined in `lang/std/text/string.ks`._
+_Defined in `lang/std/text/views.ks`._
 
 ### Members
 
-#### initializer `From Pointers`
+#### function `collect`
 
 ```kestrel
-public init(ptr: Pointer[UInt8], length: Int64, sepPtr: Pointer[UInt8], sepLen: Int64)
+public func collect() -> Array[StringSlice]
 ```
 
-Constructs a split iterator from source and separator byte buffers.
+Collects all segments into an array.
 
-Prefer `someString.split(separator:)` over calling this directly.
+_Defined in `lang/std/text/views.ks`._
 
-##### Safety
+#### field `count`
 
-Both pointers must remain valid for `length` and `sepLen` bytes
-respectively for the iterator's lifetime.
+```kestrel
+public var count: Int64 { get }
+```
 
-_Defined in `lang/std/text/string.ks`._
+Number of segments. O(n) — iterates once to count.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: StringSlice? { get }
+```
+
+The first segment, or `.None` if empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: StringSlice, separator: String)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the source slice is empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: StringSlice? { get }
+```
+
+The last segment, or `.None` if empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = StringSlice
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = SplitViewIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> SplitViewIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> SplitView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `SplitViewIterator`
+
+```kestrel
+public struct SplitViewIterator { /* private fields */ }
+```
+
+Iterator that yields `StringSlice` segments produced by splitting on a
+fixed separator. Zero-copy: each yielded slice is a window into the
+original source buffer.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+public init(slice: StringSlice, separator: String)
+```
+
+_Defined in `lang/std/text/views.ks`._
 
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = String
+type Item = StringSlice
 ```
 
-The element type yielded by `next()` — always `String`.
-
-_Defined in `lang/std/text/string.ks`._
+_Defined in `lang/std/text/views.ks`._
 
 #### function `next`
 
 ```kestrel
-public mutating func next() -> String?
+public mutating func next() -> StringSlice?
 ```
 
-Returns the next segment, or `None` when the source is exhausted.
+_Defined in `lang/std/text/views.ks`._
 
-With a non-empty separator, returns each piece between matches
-and finally the trailing remainder. With the empty separator,
-returns one code point per call.
+### Implements `Cloneable`
 
-_Defined in `lang/std/text/string.ks`._
-
-## struct `SplitWhereIterator`
+#### function `clone`
 
 ```kestrel
-public struct SplitWhereIterator { /* private fields */ }
+public func clone() -> SplitViewIterator
 ```
 
-Iterator that splits a string at every code point matching a predicate.
+_Defined in `lang/std/text/views.ks`._
 
-Produced by `String.split(matching:)`. Decodes the source one
-`Char` at a time and breaks the string at each character for which
-the predicate returns `true`; the matching character itself is not
+## struct `SplitWhereView`
+
+```kestrel
+public struct SplitWhereView { /* private fields */ }
+```
+
+Lazy view over the segments of a string split at every code point
+matching a predicate. The matching characters are excluded from segments.
+
+### Examples
+
+```
+let view = "hello world".asSlice().split { (c) in c == Char(" ") };
+view.first();    // Some("hello")
+view.count;      // 2
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### function `collect`
+
+```kestrel
+public func collect() -> Array[StringSlice]
+```
+
+Collects all segments into an array.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of segments. O(n) — iterates once to count.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: StringSlice? { get }
+```
+
+The first segment, or `.None` if empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(slice: StringSlice, matching: (Char) -> Bool)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the source slice is empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: StringSlice? { get }
+```
+
+The last segment, or `.None` if empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = StringSlice
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = SplitWhereViewIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> SplitWhereViewIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> SplitWhereView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `SplitWhereViewIterator`
+
+```kestrel
+public struct SplitWhereViewIterator { /* private fields */ }
+```
+
+Iterator that yields `StringSlice` segments produced by splitting at
+every code point matching a predicate. The matching character is not
 included in any segment.
 
-### Examples
-
-```
-var it = "a1b2c".split(matching: |c| c.isDigit());
-it.next();  // Some("a")
-it.next();  // Some("b")
-it.next();  // Some("c")
-it.next();  // None
-```
-
-### Representation
-
-A `(ptr, length, predicate, index, done)` record.
-
-_Defined in `lang/std/text/string.ks`._
+_Defined in `lang/std/text/views.ks`._
 
 ### Members
 
-#### initializer `From Predicate`
+#### initializer `init`
 
 ```kestrel
-public init(pointer: Pointer[UInt8], length: Int64, matching: (Char) -> Bool)
+public init(slice: StringSlice, matching: (Char) -> Bool)
 ```
 
-Constructs a split-where iterator from a buffer pointer and a `Char` predicate.
-
-Prefer `someString.split(matching:)` over calling this directly.
-
-##### Safety
-
-`ptr` must remain valid for `length` bytes for the iterator's
-lifetime.
-
-_Defined in `lang/std/text/string.ks`._
+_Defined in `lang/std/text/views.ks`._
 
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = String
+type Item = StringSlice
 ```
 
-The element type yielded by `next()` — always `String`.
-
-_Defined in `lang/std/text/string.ks`._
+_Defined in `lang/std/text/views.ks`._
 
 #### function `next`
 
 ```kestrel
-public mutating func next() -> String?
+public mutating func next() -> StringSlice?
 ```
 
-Returns the next segment, or `None` when the source is exhausted.
+_Defined in `lang/std/text/views.ks`._
 
-_Defined in `lang/std/text/string.ks`._
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> SplitWhereViewIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## protocol `Str`
+
+```kestrel
+public protocol Str
+```
+
+Shared read-only protocol for `String` and `StringSlice`.
+
+Requires exactly one method from conformers: `asSlice()`. All
+read-only methods are defined once in `extend Str` and inherited
+by both types automatically.
+
+_Defined in `lang/std/text/str.ks`._
+
+### Members
+
+#### function `asSlice`
+
+```kestrel
+func asSlice() -> StringSlice
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `byteCount`
+
+```kestrel
+public var byteCount: Int64 { get }
+```
+
+Number of UTF-8 bytes. O(1).
+
+##### Examples
+
+```
+"hello".byteCount;       // 5
+"\u{00E9}".byteCount;    // 2 (é is two UTF-8 bytes)
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `bytes`
+
+```kestrel
+public var bytes: BytesView { get }
+```
+
+View over the raw UTF-8 bytes.
+
+##### Examples
+
+```
+"hi".bytes.count;  // 2
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `caseFolded`
+
+```kestrel
+public func caseFolded() -> String
+```
+
+Returns a new string with Unicode case folding applied to
+each code point.
+
+Case folding maps characters to a canonical form suitable
+for case-insensitive comparison. Currently single-char folds
+only (e.g. `A` → `a`); multi-char expansions like `ß` → `ss`
+are not yet supported.
+
+##### Examples
+
+```
+"Hello".caseFolded();  // "hello"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `chars`
+
+```kestrel
+public var chars: CharsView { get }
+```
+
+View over Unicode code points.
+
+##### Examples
+
+```
+"caf\u{00E9}".chars.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(String) -> Bool
+```
+
+Returns true if `substring` appears anywhere in this string.
+
+##### Examples
+
+```
+"hello world".contains(substring: "world");  // true
+"hello world".contains(substring: "xyz");    // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(matching: (Char) -> Bool) -> Bool
+```
+
+Returns true if any code point matches `predicate`.
+
+##### Examples
+
+```
+"abc123".contains(matching: { (c) in c.isAsciiDigit });  // true
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `ends`
+
+```kestrel
+public func ends(with: String) -> Bool
+```
+
+Returns true if this string ends with `suffix`.
+
+Empty suffix always returns true. Comparison is byte-wise.
+
+##### Examples
+
+```
+"hello".ends(with: "llo");  // true
+"hello".ends(with: "xyz");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `equalsCaseInsensitive`
+
+```kestrel
+public func equalsCaseInsensitive(String) -> Bool
+```
+
+Compares two strings for equality after Unicode case folding.
+
+Folds each string to its case-folded form and compares the
+results byte-wise. Not normalization-aware — `é` (`U+00E9`)
+and `e\u{0301}` are still considered different.
+
+##### Examples
+
+```
+"Hello".equalsCaseInsensitive("HELLO");  // true
+"Hello".equalsCaseInsensitive("World");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: String) -> ByteIndex?
+```
+
+Returns the byte index of the first occurrence of `substring`,
+or `None` if not found.
+
+The empty substring matches at the start. Uses `memmem` for
+efficient byte-level search.
+
+##### Examples
+
+```
+"hello world".firstIndex(of: "world");  // Some(ByteIndex(6))
+"hello world".firstIndex(of: "xyz");    // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `graphemes`
+
+```kestrel
+public var graphemes: GraphemesView { get }
+```
+
+View over grapheme clusters (user-perceived characters).
+
+##### Examples
+
+```
+"caf\u{00E9}".graphemes.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the string contains no bytes.
+
+##### Examples
+
+```
+"".isEmpty;       // true
+"hello".isEmpty;  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: String) -> ByteIndex?
+```
+
+Returns the byte index of the last occurrence of `substring`,
+or `None` if not found.
+
+Scans from the left using repeated `memmem` calls, keeping
+the last match position.
+
+##### Examples
+
+```
+"abcabc".lastIndex(of: "abc");  // Some(ByteIndex(3))
+"abcabc".lastIndex(of: "xyz");  // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `lines`
+
+```kestrel
+public var lines: LinesView { get }
+```
+
+View over lines, recognising `\n`, `\r\n`, and `\r`.
+
+##### Examples
+
+```
+"a\nb\nc".lines.count;  // 3
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lowercased`
+
+```kestrel
+public func lowercased() -> String
+```
+
+Returns the lowercase form using full Unicode case mapping.
+
+Locale-independent. Handles multi-character expansions
+(e.g. Turkish dotted I). All-ASCII strings with no uppercase
+letters short-circuit to `toOwned()` (no per-char decode).
+
+##### Examples
+
+```
+"Hello".lowercased();      // "hello"
+"\u{0130}".lowercased();   // "i\u{0307}"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lowercasedAscii`
+
+```kestrel
+public func lowercasedAscii() -> String
+```
+
+Returns a copy with only ASCII letters lowercased; non-ASCII
+bytes pass through unchanged.
+
+Cheap byte-level scan with no Unicode tables. For full
+Unicode case mapping, use `lowercased()`.
+
+##### Examples
+
+```
+"H\u{00E9}LLO".lowercasedAscii();  // "h\u{00E9}llo"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `pad`
+
+```kestrel
+public func pad(leading: Int64, with: Char) -> String
+```
+
+Returns the string padded at the start with `char` so the
+total *code-point* count is at least `length`.
+
+If the string is already at least `length` code points long,
+returns a copy unchanged.
+
+##### Examples
+
+```
+"42".pad(leading: 5, with: '0');  // "00042"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `pad`
+
+```kestrel
+public func pad(trailing: Int64, with: Char) -> String
+```
+
+Returns the string padded at the end with `char` so the
+total *code-point* count is at least `length`.
+
+If the string is already at least `length` code points long,
+returns a copy unchanged.
+
+##### Examples
+
+```
+"42".pad(trailing: 5, with: '.');  // "42..."
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `repeated`
+
+```kestrel
+public func repeated(Int64) -> String
+```
+
+Returns this string concatenated with itself `count` times.
+
+Non-positive `count` returns the empty string. Pre-allocates
+the result buffer for the exact final length.
+
+##### Examples
+
+```
+"ab".repeated(3);  // "ababab"
+"ab".repeated(0);  // ""
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `replaced`
+
+```kestrel
+public func replaced(String, with: String) -> String
+```
+
+Returns a copy with every occurrence of `pattern` replaced
+by `replacement`.
+
+Empty `pattern` is a no-op (returns a copy). Searches
+greedily from the left and skips past each replacement so
+substituted text is not re-matched.
+
+##### Examples
+
+```
+"hello world".replaced("o", with: "0");    // "hell0 w0rld"
+"abcabc".replaced("ab", with: "ABCD");     // "ABCDcABCDc"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(String) -> SplitView
+```
+
+Returns a lazy view that splits on `separator`, yielding
+zero-copy `StringSlice` segments.
+
+The empty separator is special-cased to split per code
+point. Adjacent separators produce empty segments.
+
+##### Examples
+
+```
+"a,b,c".split(",").collect();   // ["a", "b", "c"]
+"a,,b".split(",").count;        // 3 (empty segment preserved)
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(matching: (Char) -> Bool) -> SplitWhereView
+```
+
+Returns a lazy view that splits at every code point matching
+`predicate`, yielding zero-copy `StringSlice` segments.
+
+The matching characters are not included in any segment.
+
+##### Examples
+
+```
+"hello world".split(matching: { (c) in c.isWhitespace }).count;  // 2
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `starts`
+
+```kestrel
+public func starts(with: String) -> Bool
+```
+
+Returns true if this string starts with `prefix`.
+
+Empty prefix always returns true. Comparison is byte-wise.
+
+##### Examples
+
+```
+"hello".starts(with: "hel");  // true
+"hello".starts(with: "xyz");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `titlecased`
+
+```kestrel
+public func titlecased() -> String
+```
+
+Returns the titlecase form using full Unicode case mapping.
+
+Word boundaries are detected by `Char.isWhitespace`; the
+first non-space character of each run is titlecased and the
+rest lowercased.
+
+##### Examples
+
+```
+"hello world".titlecased();  // "Hello World"
+"FOO BAR".titlecased();      // "Foo Bar"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `toOwned`
+
+```kestrel
+public func toOwned() -> String
+```
+
+Copies this string's bytes into a new independent `String`.
+
+For `String`, this is equivalent to `clone()`. For
+`StringSlice`, it copies only the slice's bytes, releasing
+the reference to the source buffer.
+
+##### Examples
+
+```
+let slice = "hello world".asSlice();
+let owned = slice.toOwned();  // independent copy
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmed`
+
+```kestrel
+public func trimmed() -> StringSlice
+```
+
+Returns a zero-copy slice with leading and trailing ASCII
+whitespace removed.
+
+Whitespace characters: space (`' '`), tab (`'\t'`), newline
+(`'\n'`), carriage return (`'\r'`), and form feed (`'\x0C'`).
+The returned `StringSlice` shares the source buffer — no
+allocation occurs.
+
+##### Examples
+
+```
+"  hello  ".trimmed().toOwned();   // "hello"
+"\t\n".trimmed().isEmpty;          // true
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmed`
+
+```kestrel
+public func trimmed(matching: (Char) -> Bool) -> StringSlice
+```
+
+Returns a zero-copy slice with leading and trailing code points
+matching `predicate` removed.
+
+Decodes the source one `Char` at a time. Leading characters
+that satisfy the predicate are skipped; the trailing boundary
+is the last character that does *not* match.
+
+##### Examples
+
+```
+"00042".trimmed(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedEnd`
+
+```kestrel
+public func trimmedEnd() -> StringSlice
+```
+
+Returns a zero-copy slice with trailing whitespace removed.
+
+See `trimmed()` for the whitespace set. Leading whitespace
+is preserved.
+
+##### Examples
+
+```
+"  hello  ".trimmedEnd().toOwned();  // "  hello"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedEnd`
+
+```kestrel
+public func trimmedEnd(matching: (Char) -> Bool) -> StringSlice
+```
+
+Returns a zero-copy slice with trailing code points matching
+`predicate` removed. Leading matches are preserved.
+
+##### Examples
+
+```
+"abc000".trimmedEnd(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedStart`
+
+```kestrel
+public func trimmedStart() -> StringSlice
+```
+
+Returns a zero-copy slice with leading whitespace removed.
+
+See `trimmed()` for the whitespace set. Trailing whitespace
+is preserved.
+
+##### Examples
+
+```
+"  hello  ".trimmedStart().toOwned();  // "hello  "
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedStart`
+
+```kestrel
+public func trimmedStart(matching: (Char) -> Bool) -> StringSlice
+```
+
+Returns a zero-copy slice with leading code points matching
+`predicate` removed. Trailing matches are preserved.
+
+##### Examples
+
+```
+"000abc".trimmedStart(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `uppercased`
+
+```kestrel
+public func uppercased() -> String
+```
+
+Returns the uppercase form using full Unicode case mapping.
+
+Locale-independent. Handles multi-character expansions
+(e.g. `ß` → `SS`). All-ASCII strings with no lowercase
+letters short-circuit to `toOwned()`.
+
+##### Examples
+
+```
+"hello".uppercased();             // "HELLO"
+"stra\u{00DF}e".uppercased();     // "STRASSE"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `uppercasedAscii`
+
+```kestrel
+public func uppercasedAscii() -> String
+```
+
+Returns a copy with only ASCII letters uppercased; non-ASCII
+bytes pass through unchanged.
+
+Cheap byte-level scan with no Unicode tables. For full
+Unicode case mapping, use `uppercased()`.
+
+##### Examples
+
+```
+"h\u{00E9}llo".uppercasedAscii();  // "H\u{00E9}LLO"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item
+```
+
+The element type that iteration yields.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator
+```
+
+The concrete iterator type returned by `iter()`. Constrained so
+`TargetIterator.Item` matches `Self.Item`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> CharsIterator
+```
+
+Returns a `CharsIterator` over the code points.
+
+Required by `Iterable`. Each call returns a fresh iterator;
+the source is reusable.
+
+##### Examples
+
+```
+for c in "abc" { ... }  // iterates 'a', 'b', 'c'
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Self) -> Bool
+```
+
+Returns true if both strings have the same byte sequence.
+
+Pure byte-wise equality — not normalization-aware. For
+case-insensitive comparison, see `equalsCaseInsensitive`.
+
+##### Examples
+
+```
+"abc".isEqual(to: "abc");  // true
+"abc".isEqual(to: "ABC");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+public func compare(Self) -> Ordering
+```
+
+Lexicographic byte-wise comparison.
+
+Returns `Less` / `Equal` / `Greater` according to the first
+differing byte; if one string is a prefix of the other, the
+shorter is less.
+
+##### Examples
+
+```
+"abc".compare("abd");  // Less
+"abc".compare("ab");   // Greater
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+### Implements `Hashable`
+
+#### function `hash`
+
+```kestrel
+public func hash[H](into: mutating H) where H: Hasher
+```
+
+Hashes the byte content into `hasher`.
+
+_Defined in `lang/std/text/str.ks`._
+
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
+
+Formats the string using the given options.
+
+##### Examples
+
+```
+"hi".format(FormatOptions(width: 5));  // "hi   "
+```
+
+_Defined in `lang/std/text/str.ks`._
 
 ## struct `String`
 
@@ -3135,9 +4792,7 @@ public struct String { /* private fields */ }
 A UTF-8 encoded, dynamically sized string with copy-on-write semantics.
 
 `String` is the standard text type. The bytes are always valid
-UTF-8 except after the unsafe internal `appendByte` path, which is
-only intended for callers (such as substring helpers) that already
-know the bytes are valid. Storage is shared between clones via an
+UTF-8. Storage is shared between clones via an
 `RcBox`; mutating a `String` whose storage is referenced elsewhere
 triggers a copy. Three different views (`bytes`, `chars`,
 `graphemes`) plus a `lines` view expose different units of
@@ -3149,7 +4804,7 @@ iteration over the same buffer.
 var s = "hello";
 s.append(", world");
 s.byteCount;            // 12
-s.contains(substring: ",");  // true
+s.contains(",");  // true
 for line in "a\nb".lines { /* ... */ }
 ```
 
@@ -3164,7 +4819,7 @@ anything user-visible (cursor movement, truncation) uses `graphemes`.
 
 ### Representation
 
-A single `RcBox[StringStorage]` field. The storage record carries
+A single `CowBox[StringStorage]` field. The storage record carries
 `(ptr, len, cap)`; the empty string uses a null pointer with both
 counts zero.
 
@@ -3235,6 +4890,38 @@ let s = String(from: cstr);
 ```
 
 _Defined in `lang/std/ffi/cstring.ks`._
+
+#### initializer `From Char Iterable`
+
+```kestrel
+public init[I](from: I) where I: Iterable, I.Item == Char
+```
+
+Builds a string by encoding each character of `chars` as UTF-8.
+
+Mirrors `Array.init(from:)` and `Set.init(from:)` — accepts any
+`Iterable` whose `Item` is `Char`. Useful for materializing the
+result of an iterator chain back into a `String`:
+
+```
+let upper = String(from: "hello".chars.iter().map { it.toUpper() });
+// "HELLO"
+```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### initializer `From Storage`
+
+```kestrel
+init(storage: CowBox[StringStorage])
+```
+
+Wraps an existing `CowBox[StringStorage]` as a new `String`.
+
+Module-internal — used by `clone()`, `StringBuilder.build()`,
+and other std.text code that constructs strings from raw storage.
+
+_Defined in `lang/std/text/string.ks`._
 
 #### initializer `String Literal`
 
@@ -3323,21 +5010,14 @@ _Defined in `lang/std/text/string.ks`._
 #### function `appendByte`
 
 ```kestrel
-public mutating func appendByte(UInt8)
+internal mutating func appendByte(UInt8)
 ```
 
-Appends a raw byte to the buffer.
+Appends a raw byte. Internal — caller ensures UTF-8 validity.
 
-**Unsafe** with respect to the UTF-8 invariant — the caller
-must ensure the resulting byte sequence is still valid UTF-8.
-Used primarily by substring helpers that copy whole UTF-8
-sequences in.
-
-##### Safety
-
-The string must remain valid UTF-8 after the append; do not
-use this to inject continuation bytes into the middle of a
-sequence.
+Do not use to append ASCII characters: prefer `appendChar(c)` or
+`append(other)`. This exists only for low-level UTF-8 plumbing
+inside the stdlib (e.g. an encoder that already produced bytes).
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -3423,128 +5103,6 @@ reusing a buffer in a hot loop.
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `contains`
-
-```kestrel
-public func contains(String) -> Bool
-```
-
-Returns true if `substring` appears anywhere in this string.
-
-Equivalent to `find(substring).isSome()`. The empty substring
-always matches.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `contains`
-
-```kestrel
-public func contains(matching: (Char) -> Bool) -> Bool
-```
-
-Returns true if any code point matches `predicate`.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `ends`
-
-```kestrel
-public func ends(with: String) -> Bool
-```
-
-Returns true if the string ends with `suffix`. O(suffix length).
-
-##### Examples
-
-```
-"hello".ends(with: "lo");  // true
-"hello".ends(with: "he");  // false
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `equalsCaseInsensitive`
-
-```kestrel
-public func equalsCaseInsensitive(String) -> Bool
-```
-
-Compares two strings for equality after Unicode case folding.
-
-Walks both `chars` iterators in lockstep, folding each pair of
-code points before comparing. Note: this is not normalization
-aware — `é` (`U+00E9`) and `e\u{0301}` are still considered
-different. Normalize both sides first if you need that.
-
-##### Examples
-
-```
-"Hello".equalsCaseInsensitive("HELLO");  // true
-"Hello".equalsCaseInsensitive("World");  // false
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `find`
-
-```kestrel
-public func find(String) -> Int64?
-```
-
-Returns the byte offset of the first occurrence of `substring`, or `None`.
-
-Naïve byte-by-byte search; O(n·m) in the worst case where m is
-the substring length. The empty substring matches at offset
-`0`.
-
-##### Examples
-
-```
-"hello".find("ll");      // Some(2)
-"hello".find("xyz");     // None
-"hello".find("");        // Some(0)
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `find`
-
-```kestrel
-public func find(matching: (Char) -> Bool) -> Int64?
-```
-
-Returns the byte offset of the first code point matching `predicate`, or `None`.
-
-Decodes UTF-8 as it scans so the predicate sees real `Char`s
-and the offset returned lands on a valid character boundary.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `first`
-
-```kestrel
-public func first() -> Char?
-```
-
-Returns the first code point, or `None` if the string is empty. O(1) for the common case.
-
-##### Examples
-
-```
-"hi".first();  // Some('h')
-"".first();    // None
-```
-
-_Defined in `lang/std/text/string.ks`._
-
 #### function `fromBytesUnchecked`
 
 ```kestrel
@@ -3585,7 +5143,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `fromUtf8`
 
 ```kestrel
-public static func fromUtf8(Slice[UInt8]) -> String?
+public static func fromUtf8(ArraySlice[UInt8]) -> String?
 ```
 
 Constructs a string by copying validated UTF-8 bytes from `bytes`,
@@ -3606,8 +5164,8 @@ allocation case is unrecoverable.
 ##### Examples
 
 ```
-String.fromUtf8(bytes: "héllo".bytes.asSlice());  // Some("héllo")
-String.fromUtf8(bytes: badSlice);                 // None
+String.fromUtf8("héllo".bytes.asSlice());  // Some("héllo")
+String.fromUtf8(badSlice);                 // None
 ```
 
 _Defined in `lang/std/text/string.ks`._
@@ -3633,27 +5191,6 @@ True if the string holds zero bytes. O(1).
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `last`
-
-```kestrel
-public func last() -> Char?
-```
-
-Returns the last code point, or `None` if the string is empty. O(n).
-
-Has to scan from the start to identify the final UTF-8 sequence
-— there is no way to read backwards through variable-width
-UTF-8 without a separate index.
-
-##### Examples
-
-```
-"hi".last();  // Some('i')
-"".last();    // None
-```
-
-_Defined in `lang/std/text/string.ks`._
-
 #### field `lines`
 
 ```kestrel
@@ -3671,10 +5208,6 @@ public mutating func lowercase()
 ```
 
 Replaces this string with its lowercase form using full Unicode case mapping.
-
-Locale-independent. Handles multi-character expansions
-(rare in lowercasing). Implemented as `self = self.lowercased()`,
-so a transient new buffer is allocated.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -3699,95 +5232,6 @@ s;  // "héllo" — only ASCII letters touched
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `lowercased`
-
-```kestrel
-public func lowercased() -> String
-```
-
-Returns the lowercase form using full Unicode case mapping.
-
-Two fast paths: an all-ASCII string with no uppercase letters
-is returned cloned (no allocation beyond the COW share); an
-all-ASCII string with uppercase letters routes to
-`lowercasedAscii`. The slow path uses the Unicode tables and
-honours multi-char expansions.
-
-##### Examples
-
-```
-"Hello".lowercased();      // "hello"
-"\u{0130}".lowercased();   // "i\u{0307}" (Turkish dotted I expansion)
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `lowercasedAscii`
-
-```kestrel
-public func lowercasedAscii() -> String
-```
-
-Returns a copy with ASCII letters lowercased; non-ASCII bytes pass through unchanged.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `pad`
-
-```kestrel
-public func pad(leading: Int64, with: Char) -> String
-```
-
-Returns the string padded at the start with `char` so the total *code-point* count is `length`.
-
-If the string is already at least `length` code points long,
-returns a clone. Compare with `pad(end:with:)` for trailing
-padding.
-
-##### Examples
-
-```
-"42".pad(start: 5, with: '0');  // "00042"
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `pad`
-
-```kestrel
-public func pad(trailing: Int64, with: Char) -> String
-```
-
-Returns the string padded at the end with `char` so the total *code-point* count is `length`.
-
-##### Examples
-
-```
-"42".pad(end: 5, with: '.');  // "42..."
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `repeated`
-
-```kestrel
-public func repeated(Int64) -> String
-```
-
-Returns this string concatenated with itself `count` times.
-
-Non-positive `count` returns the empty string. Sizes the
-result buffer for the exact final length to avoid growth.
-
-##### Examples
-
-```
-"ab".repeated(count: 3);  // "ababab"
-"ab".repeated(count: 0);  // ""
-```
-
-_Defined in `lang/std/text/string.ks`._
-
 #### function `replace`
 
 ```kestrel
@@ -3796,180 +5240,20 @@ public mutating func replace(String, with: String)
 
 Replaces every occurrence of `pattern` with `replacement`, in place.
 
-Allocates a fresh string under the hood; the in-place form is
-for ergonomics, not buffer reuse.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `replaced`
-
-```kestrel
-public func replaced(String, with: String) -> String
-```
-
-Returns a copy with every occurrence of `pattern` replaced by `replacement`.
-
-Empty `pattern` is a no-op (returns a clone). Searches greedily
-from the left and skips past each replacement so substituted
-text is not re-matched.
-
-##### Examples
-
-```
-"hello world".replaced("o", with: "0");      // "hell0 w0rld"
-"abcabc".replaced("ab", with: "ABCD");       // "ABCDcABCDc"
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `reverseFind`
-
-```kestrel
-public func reverseFind(String) -> Int64?
-```
-
-Returns the byte offset of the *last* occurrence of `substring`, or `None`.
-
-Scans from the right but with the same naïve byte comparison
-as `find`. The empty substring matches at offset `byteCount`.
-
-##### Examples
-
-```
-"abcabc".reverseFind("abc");  // Some(3)
-"abcabc".reverseFind("");     // Some(6)
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `split`
-
-```kestrel
-public func split(String) -> SplitIterator
-```
-
-Returns an iterator that splits this string on `separator` (byte-exact).
-
-The empty separator is special-cased to split per code point.
-See `SplitIterator` for the iteration shape.
-
-##### Examples
-
-```
-var parts = Array[String]();
-for p in "a,b,c".split(separator: ",") { parts.append(p); }
-parts.count;  // 3
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `split`
-
-```kestrel
-public func split(matching: (Char) -> Bool) -> SplitWhereIterator
-```
-
-Returns an iterator that splits at every code point matching `predicate`.
-
-The matching characters are not included in any segment.
-
-##### Examples
-
-```
-var parts = Array[String]();
-for p in "a 1 b 2 c".split(matching: |c| c.isDigit() or c.isWhitespace()) {
-    if p.isEmpty == false { parts.append(p); }
-}
-// parts: ["a", "b", "c"]
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `starts`
-
-```kestrel
-public func starts(with: String) -> Bool
-```
-
-Returns true if the string begins with `prefix`. O(prefix length).
-
-##### Examples
-
-```
-"hello".starts(with: "he");   // true
-"hello".starts(with: "lo");   // false
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `substring`
-
-```kestrel
-public func substring[I](I) -> String where I: CharsSubstringIndex
-```
-
-Returns the substring covering code points in `range`. Defaults
-to **chars** semantics — use `self.graphemes.substring(range)`
-for grapheme-cluster slicing or `self.bytes.substring(range)`
-(or `substringBytes`) for raw byte ranges. Accepts any range
-type that conforms to `std.text.CharsSubstringIndex`
-(`Range[Int64]` and `ClosedRange[Int64]` today).
-
-Equivalent to `self.chars.substring(range)`. Panics on
-out-of-bounds.
-
-##### Examples
-
-```
-"héllo".substring(0..<4);   // "héll"
-"héllo".substring(0..=3);   // "héll"
-```
-
 _Defined in `lang/std/text/string.ks`._
 
 #### function `substringBytes`
 
 ```kestrel
-public func substringBytes(from: Int64, to: Int64) -> String
+internal func substringBytes(from: Int64, to: Int64) -> String
 ```
 
-Returns the substring spanning byte indices `[start, end)`.
+Internal substring by byte range. Returns empty for invalid ranges.
 
-Out-of-range, inverted, or empty ranges return the empty
-string rather than panicking. The caller is responsible for
-ensuring the bounds fall on UTF-8 boundaries — use
-`s.bytes(checked: range)` for a validated alternative.
-
-##### Examples
-
-```
-"hello".substringBytes(from: 1, to: 4);   // "ell"
-"hello".substringBytes(from: 4, to: 1);   // ""    (inverted)
-"hello".substringBytes(from: 0, to: 99);  // ""    (out of range)
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `titlecased`
-
-```kestrel
-public func titlecased() -> String
-```
-
-Returns the titlecase form using full Unicode case mapping.
-
-Word boundaries are detected by `Char.isWhitespace`; the first
-non-space character of each run is titlecased and the rest
-lowercased. This is a coarse model — it doesn't handle
-hyphenated names or apostrophe-internal capitals — but works
-for plain whitespace-separated text.
-
-##### Examples
-
-```
-"hello world".titlecased();  // "Hello World"
-"FOO BAR".titlecased();      // "Foo Bar"
-```
+Do not use for per-character slicing in a loop — each call copies
+`end - start` bytes, so walking the string yields O(N²) behaviour.
+For iteration, use `decodeUtf8` with a running byte offset, or the
+`chars()` / `bytes()` views.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -4010,10 +5294,9 @@ public mutating func trim()
 
 Removes leading and trailing ASCII whitespace in place.
 
-Recognises space, tab, LF, CR — same set as `Char.isWhitespace`
-minus form feed (which `Char.isWhitespace` accepts but the
-trim helpers do not). For Unicode-aware trimming, use the
-`(matching:)` overloads with a custom predicate. Non-mutating
+Recognises the same whitespace set as `Char.isWhitespace`:
+space, tab, LF, CR, form feed. For Unicode-aware trimming, use
+the `(matching:)` overloads with a custom predicate. Non-mutating
 mirrors live under `trimmed*`.
 
 ##### Examples
@@ -4038,7 +5321,7 @@ Removes leading and trailing code points matching `predicate`, in place.
 
 ```
 var s = "***hi***";
-s.trim(matching: |c| c == '*');
+s.trim { (c) in c == '*' };
 s;  // "hi"
 ```
 
@@ -4062,10 +5345,6 @@ public mutating func trimEnd(matching: (Char) -> Bool)
 
 Removes trailing code points matching `predicate`, in place.
 
-Implemented by a forward scan that tracks the byte offset of
-the last non-matching character — UTF-8 is awkward to walk
-backwards without a side index.
-
 _Defined in `lang/std/text/string.ks`._
 
 #### function `trimStart`
@@ -4085,68 +5364,6 @@ public mutating func trimStart(matching: (Char) -> Bool)
 ```
 
 Removes leading code points matching `predicate`, in place.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `trimmed`
-
-```kestrel
-public func trimmed() -> String
-```
-
-Returns a copy with leading and trailing ASCII whitespace removed.
-
-Non-mutating mirror of `trim()`.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `trimmed`
-
-```kestrel
-public func trimmed(matching: (Char) -> Bool) -> String
-```
-
-Returns a copy with leading and trailing code points matching `predicate` removed.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `trimmedEnd`
-
-```kestrel
-public func trimmedEnd() -> String
-```
-
-Returns a copy with trailing ASCII whitespace removed.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `trimmedEnd`
-
-```kestrel
-public func trimmedEnd(matching: (Char) -> Bool) -> String
-```
-
-Returns a copy with trailing code points matching `predicate` removed.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `trimmedStart`
-
-```kestrel
-public func trimmedStart() -> String
-```
-
-Returns a copy with leading ASCII whitespace removed.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `trimmedStart`
-
-```kestrel
-public func trimmedStart(matching: (Char) -> Bool) -> String
-```
-
-Returns a copy with leading code points matching `predicate` removed.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -4173,33 +5390,16 @@ Uppercases ASCII letters in place; non-ASCII bytes are left untouched.
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `uppercased`
+### Implements `Str`
+
+#### function `asSlice`
 
 ```kestrel
-public func uppercased() -> String
+public func asSlice() -> StringSlice
 ```
 
-Returns the uppercase form using full Unicode case mapping.
-
-Symmetric to `lowercased`; the same ASCII fast paths apply.
-Multi-char expansions (e.g. `ß` → `SS`) are honoured.
-
-##### Examples
-
-```
-"hello".uppercased();      // "HELLO"
-"stra\u{00DF}e".uppercased();  // "STRASSE" (ß expands to SS)
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `uppercasedAscii`
-
-```kestrel
-public func uppercasedAscii() -> String
-```
-
-Returns a copy with ASCII letters uppercased; non-ASCII bytes pass through unchanged.
+Returns a `StringSlice` covering this string's entire buffer.
+Shares storage via refcount — zero-copy.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -4218,7 +5418,7 @@ _Defined in `lang/std/text/string.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = StringIterator
+type TargetIterator = CharsIterator
 ```
 
 The iterator type returned by `iter()`.
@@ -4228,10 +5428,10 @@ _Defined in `lang/std/text/string.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> StringIterator
+public func iter() -> CharsIterator
 ```
 
-Returns a `StringIterator` over the code points starting at byte 0.
+Returns a `CharsIterator` over the code points starting at byte 0.
 
 Required by `Iterable`. Each call returns a fresh iterator;
 the string itself is reusable.
@@ -4240,10 +5440,10 @@ _Defined in `lang/std/text/string.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(String) -> Bool
+public func isEqual(to: String) -> Bool
 ```
 
 Returns true if both strings have the same byte sequence.
@@ -4254,9 +5454,24 @@ case-insensitive comparison, see `equalsCaseInsensitive`.
 ##### Examples
 
 ```
-"abc".equals("abc");  // true
-"abc".equals("ABC");  // false
+"abc".isEqual(to: "abc");  // true
+"abc".isEqual(to: "ABC");  // false
 ```
+
+_Defined in `lang/std/text/string.ks`._
+
+### Implements `Matchable`
+
+#### function `matches`
+
+```kestrel
+public func matches(String) -> Bool
+```
+
+Pattern-match form of `isEqual`: each `case "literal" =>` arm
+dispatches through here. Cost is `O(len)` per arm because the
+compiler emits one call per literal — past a handful of arms,
+E316 will suggest an `if/else if` chain instead.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -4296,8 +5511,7 @@ public func clone() -> String
 
 Returns a shallow clone — storage is shared until either side mutates.
 
-O(1). Mutation triggers `makeUnique` which performs a deep
-copy.
+O(1). Mutation triggers a deep copy via `CowBox.write()`.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -4306,7 +5520,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders this string under the supplied `FormatOptions`.
@@ -4323,11 +5537,11 @@ alignment purposes (display width still depends on font).
 var opts = FormatOptions();
 opts.width = .Some(10);
 opts.alignment = .Left;
-"test".format(options: opts);   // "test      "
+"test".format(opts);   // "test      "
 opts.alignment = .Right;
-"test".format(options: opts);   // "      test"
+"test".format(opts);   // "      test"
 opts.alignment = .Center;
-"test".format(options: opts);   // "   test   "
+"test".format(opts);   // "   test   "
 ```
 
 _Defined in `lang/std/text/string.ks`._
@@ -4378,7 +5592,7 @@ Builds an instance from a string literal.
 
 _Defined in `lang/std/core/literals.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -4417,61 +5631,405 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
-## struct `StringIterator`
+## struct `StringBuilder`
 
 ```kestrel
-public struct StringIterator { /* private fields */ }
+public struct StringBuilder { /* private fields */ }
 ```
 
-Single-pass forward iterator over the Unicode code points of a `String`.
+Write-only buffer for efficient string construction. No COW, no
+RcBox, no `isUnique` checks — every append writes directly.
 
-Produced by `String.iter()`. Decodes one UTF-8 character at a time,
-advancing the cursor by the encoded byte length. On invalid UTF-8
-the iterator returns `None` and skips one byte so the next call
-can make progress; this differs from `CharsIterator` which yields
-`U+FFFD` on bad input.
+`build()` transfers ownership of the buffer into a new `String`
+without copying. The builder resets to empty and can be reused.
 
 ### Examples
 
 ```
-var it = "hi".iter();
-it.next();  // Some('h')
-it.next();  // Some('i')
-it.next();  // None
+var b = StringBuilder();
+b.append("hello");
+b.appendChar(' ');
+b.append("world");
+let s = b.build();   // "hello world", zero-copy
 ```
 
 ### Representation
 
-A `(ptr, length, index)` triple. `index` advances in variable-width
-steps according to the UTF-8 encoding.
+`(ptr: Pointer[UInt8], len: Int64, cap: Int64)`.
 
 ### Memory Model
 
-Value type. The pointer aliases the source string's storage; do not
-retain across mutations of the source `String`.
+Owns its buffer directly. `build()` donates the buffer to a
+`String`; the builder is left empty. `deinit` frees the buffer
+if `build()` was never called.
 
-_Defined in `lang/std/text/string.ks`._
+_Defined in `lang/std/text/builder.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `Empty`
 
 ```kestrel
-public init(ptr: Pointer[UInt8], length: Int64)
+public init()
 ```
 
-Constructs a string iterator from a buffer pointer and total byte count.
+Creates an empty builder with no allocation.
 
-Prefer `someString.iter()` over calling this directly.
+_Defined in `lang/std/text/builder.ks`._
 
-##### Safety
+#### initializer `With Capacity`
 
-`ptr` must point to `length` valid UTF-8 bytes that remain live
-for the iterator's lifetime.
+```kestrel
+public init(capacity: Int64)
+```
 
-_Defined in `lang/std/text/string.ks`._
+Creates an empty builder with at least `capacity` bytes preallocated.
 
-### Implements `Iterator`
+_Defined in `lang/std/text/builder.ks`._
+
+#### function `append`
+
+```kestrel
+public mutating func append[S](S) where S: Str
+```
+
+Appends the UTF-8 bytes of `other` to this builder. Accepts any
+type conforming to `Str` — `String`, `StringSlice`, etc.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### function `appendByte`
+
+```kestrel
+public mutating func appendByte(UInt8)
+```
+
+Appends a raw byte. Caller must ensure UTF-8 validity.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### function `appendBytes`
+
+```kestrel
+public mutating func appendBytes(ptr: Pointer[UInt8], count: Int64)
+```
+
+Appends `count` bytes from `ptr`. Caller must ensure UTF-8 validity.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### function `appendChar`
+
+```kestrel
+public mutating func appendChar(Char)
+```
+
+Appends a single code point, encoding it as UTF-8.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### function `build`
+
+```kestrel
+public mutating func build() -> String
+```
+
+Transfers the buffer into a new `String` without copying.
+The builder resets to empty and can be reused.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### field `byteCount`
+
+```kestrel
+public var byteCount: Int64 { get }
+```
+
+Number of bytes written so far.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### function `clear`
+
+```kestrel
+public mutating func clear()
+```
+
+Resets length to zero, keeping the allocated buffer for reuse.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when nothing has been written.
+
+_Defined in `lang/std/text/builder.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> StringBuilder
+```
+
+Returns a copy with its own buffer.
+
+_Defined in `lang/std/text/builder.ks`._
+
+## protocol `StringIndex`
+
+```kestrel
+public protocol StringIndex
+```
+
+Protocol for typed string indices. Each index wraps a pre-resolved
+byte offset; the type tag determines what unit the index addresses
+and what the subscript returns.
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Members
+
+#### typealias `Yield`
+
+```kestrel
+type Yield
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### function `read`
+
+```kestrel
+func read(from: StringSlice) -> Yield
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+func isEqual(to: Self) -> Bool
+```
+
+Returns `true` iff `self` and `other` are considered equal. Should
+be reflexive, symmetric, and transitive — `Hashable` requires equal
+values to hash equal, so don't drift from those laws.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+func compare(Self) -> Ordering
+```
+
+Returns the ordering of `self` relative to `other`. Must be a
+total order — for any `a`, `b`, `c` exactly one of `Less`,
+`Equal`, `Greater` holds, and the order is transitive.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+## struct `StringSlice`
+
+```kestrel
+public struct StringSlice { /* private fields */ }
+```
+
+An immutable window into a `String`'s UTF-8 bytes with shared
+ownership. The central read-only abstraction of the text library.
+
+Zero-cost to create from a String (share the RcBox, cover the
+whole range). Zero-cost to narrow (adjust start/end). Keeps the
+source alive as long as the slice exists.
+
+### Examples
+
+```
+let s = "hello, world";
+let slice = s.asSlice();
+slice.byteCount;              // 12
+slice.toOwned();               // "hello, world"
+```
+
+### Representation
+
+`(source: RcBox[StringStorage], start: Int64, end: Int64)`.
+
+### Memory Model
+
+Shared ownership via `RcBox`. The source string's buffer stays
+alive as long as any slice references it. Call `.toOwned()` to
+copy just the slice's bytes into an independent `String`.
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Members
+
+#### initializer `From Source`
+
+```kestrel
+public init(source: RcBox[StringStorage], start: Int64, end: Int64)
+```
+
+Creates a slice covering `[start, end)` in the given storage.
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### function `_rawPtr`
+
+```kestrel
+func _rawPtr() -> Pointer[UInt8]
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### function `_readByte`
+
+```kestrel
+func _readByte(at: Int64) -> UInt8
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### field `byteCount`
+
+```kestrel
+public var byteCount: Int64 { get }
+```
+
+Number of UTF-8 bytes in this slice. O(1).
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### field `end`
+
+```kestrel
+public var end: Int64
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the slice covers zero bytes.
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### field `source`
+
+```kestrel
+var source: RcBox[StringStorage]
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### field `start`
+
+```kestrel
+public var start: Int64
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### function `subslice`
+
+```kestrel
+public func subslice(from: Int64, to: Int64) -> StringSlice
+```
+
+Returns a sub-slice covering `[newStart, newEnd)` relative to
+the source buffer (absolute byte offsets, not relative to this
+slice's start).
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### function `toOwned`
+
+```kestrel
+public func toOwned() -> String
+```
+
+Copies just this slice's bytes into a new independent `String`.
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Str`
+
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> StringSlice
+```
+
+Returns self — StringSlice is already a slice.
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: StringSlice) -> Bool
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Comparable`
+
+#### function `compare`
+
+```kestrel
+public func compare(StringSlice) -> Ordering
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Hashable`
+
+#### function `hash`
+
+```kestrel
+public func hash[H](into: mutating H) where H: Hasher
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> StringSlice
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+### Implements `Iterable`
 
 #### typealias `Item`
 
@@ -4479,22 +6037,25 @@ _Defined in `lang/std/text/string.ks`._
 type Item = Char
 ```
 
-The element type yielded by `next()` — always `Char`.
+_Defined in `lang/std/text/slice.ks`._
 
-_Defined in `lang/std/text/string.ks`._
-
-#### function `next`
+#### typealias `TargetIterator`
 
 ```kestrel
-public mutating func next() -> Char?
+type TargetIterator = CharsIterator
 ```
 
-Returns the next code point, or `None` when the buffer is exhausted.
+_Defined in `lang/std/text/slice.ks`._
 
-On invalid UTF-8 the iterator returns `None` and advances by one
-byte to guarantee forward progress on subsequent calls.
+#### function `iter`
 
-_Defined in `lang/std/text/string.ks`._
+```kestrel
+public func iter() -> CharsIterator
+```
+
+Iterates code points in this slice.
+
+_Defined in `lang/std/text/slice.ks`._
 
 ## struct `Utf8DecodeResult`
 
@@ -4559,6 +6120,17 @@ The decoded character.
 
 _Defined in `lang/std/text/char.ks`._
 
+## function `_writePadded`
+
+```kestrel
+public func _writePadded(into: mutating StringBuilder, String, FormatOptions)
+```
+
+Writes `content` into `writer` with width/alignment/fill padding applied.
+Used by String, integer, and float `format(into:)` implementations.
+
+_Defined in `lang/std/text/format.ks`._
+
 ## function `decodeUtf8`
 
 ```kestrel
@@ -4613,8 +6185,8 @@ here.
 
 ```
 // Conceptually, given a buffer `buf` of length 4:
-// encodeUtf8(c: 'a',         ptr: buf, at: 0);  // 1
-// encodeUtf8(c: '\u{1F600}', ptr: buf, at: 0);  // 4
+// encodeUtf8('a',         buf, at: 0);  // 1
+// encodeUtf8('\u{1F600}', buf, at: 0);  // 4
 ```
 
 _Defined in `lang/std/text/char.ks`._

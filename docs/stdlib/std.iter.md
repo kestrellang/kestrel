@@ -208,8 +208,8 @@ Yields elements back-to-front by pulling `nextBack()` instead of
 
 ```
 [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
-[1, 2, 3, 4, 5].iter().rev().take(count: 3).collect();         // [5, 4, 3]
-[1, 2, 3, 4, 5].iter().rev().first(matching: { it % 2 == 0 });            // Some(4)
+[1, 2, 3, 4, 5].iter().rev().take(3).collect();         // [5, 4, 3]
+[1, 2, 3, 4, 5].iter().rev().first { it % 2 == 0 };            // Some(4)
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -763,7 +763,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, inspecting: (I.Item) -> ())
+public init(inner: I, inspector: (I.Item) -> ())
 ```
 
 Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
@@ -1054,9 +1054,9 @@ failure. True for an empty iterator (vacuous truth).
 ##### Examples
 
 ```
-[2, 4, 6].iter().all({ it % 2 == 0 });   // true
-[2, 3, 4].iter().all({ it % 2 == 0 });   // false (stops at 3)
-[].iter().all({ false });                // true (empty)
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1073,9 +1073,9 @@ match. False for an empty iterator.
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().any({ it > 3 });    // true (stops at 4)
-[1, 2, 3].iter().any({ it > 10 });      // false
-[].iter().any({ true });                // false
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1092,7 +1092,7 @@ same `Item` type.
 ##### Examples
 
 ```
-[1, 2].iter().chain(other: [3, 4].iter()).collect();   // [1, 2, 3, 4]
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1109,8 +1109,8 @@ at the end of an adapter chain to materialise the result.
 ##### Examples
 
 ```
-[1, 2, 3].iter().filter({ it > 1 }).collect();   // [2, 3]
-(1..5).iter().map({ it * it }).collect();        // [1, 4, 9, 16]
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1145,8 +1145,8 @@ True if any element equals `element`. Short-circuits.
 ##### Examples
 
 ```
-[1, 2, 3].iter().contains(element: 2);   // true
-[1, 2, 3].iter().contains(element: 5);   // false
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1164,7 +1164,7 @@ types that already know their length, prefer
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).count();   // 2
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1183,7 +1183,7 @@ result is unbounded.
 ##### Examples
 
 ```
-[1, 2, 3].iter().cycle().take(count: 7).collect();
+[1, 2, 3].iter().cycle().take(7).collect();
 // [1, 2, 3, 1, 2, 3, 1]
 ```
 
@@ -1219,7 +1219,7 @@ elements are tested as they're pulled.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().filter({ it % 2 == 0 }).collect();   // [2, 4]
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1238,7 +1238,7 @@ transform itself decides whether the element belongs.
 
 ```
 ["1", "two", "3"].iter()
-    .filterMap({ Int64.parse(it) })
+    .filterMap { Int64.parse(it) }
     .collect();   // [1, 3]
 ```
 
@@ -1256,8 +1256,8 @@ match.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().first(matching: { it > 3 });   // Some(4)
-[1, 2, 3].iter().first(matching: { it > 10 });        // None
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1274,6 +1274,23 @@ terminal.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(matching: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(matching: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(matching: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `flatMap`
 
 ```kestrel
@@ -1287,14 +1304,14 @@ The monadic bind for iterators.
 
 ```
 [[1, 2], [3, 4], [5]].iter()
-    .flatMap({ it.iter() })
+    .flatMap { it.iter() }
     .collect();   // [1, 2, 3, 4, 5]
 ```
 
 ```
 // Conditional expand — drop odd, double even
 [1, 2, 3].iter()
-    .flatMap({ if it % 2 == 0 { [it, it].iter() } else { [].iter() } })
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
     .collect();   // [2, 2]
 ```
 
@@ -1313,7 +1330,7 @@ already-have-iterators counterpart of `flatMap`.
 ##### Examples
 
 ```
-let nested = [[1, 2], [3, 4], [5]].iter().map({ it.iter() });
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
 nested.flatten().collect();   // [1, 2, 3, 4, 5]
 ```
 
@@ -1331,9 +1348,9 @@ Left fold — start at `initial` and walk left to right, applying
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().fold(from: 0,  combining: |acc, x| acc + x);   // 10
-[1, 2, 3].iter().fold(from: 1,  combining: |acc, x| acc * x);      // 6
-[].iter().fold(from: 42,  combining: |acc, x| acc + x);            // 42
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1350,7 +1367,7 @@ Calls `action` on every element, discarding return values. Use
 ##### Examples
 
 ```
-[1, 2, 3].iter().forEach({ print(it) });
+[1, 2, 3].iter().forEach { print(it) };
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1371,7 +1388,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect(inspecting: (Item) -> ()) -> InspectIterator[Self]
+public func inspect((Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -1382,9 +1399,9 @@ instrumenting an adapter chain mid-pipeline.
 
 ```
 [1, 2, 3].iter()
-    .inspect({ print("before filter: \{it}") })
-    .filter({ it > 1 })
-    .inspect({ print("after filter: \{it}") })
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
     .collect();
 ```
 
@@ -1402,7 +1419,7 @@ stay empty; single-element inputs get no separator.
 ##### Examples
 
 ```
-[1, 2, 3].iter().intersperse(separator: 0).collect();
+[1, 2, 3].iter().intersperse(with: 0).collect();
 // [1, 0, 2, 0, 3]
 ```
 
@@ -1423,7 +1440,7 @@ vary by call.
 ```
 var counter = 0;
 [1, 2, 3].iter()
-    .intersperseWith(separator: || { counter += 1; counter * 10 })
+    .intersperseWith { counter += 1; counter * 10 }
     .collect();   // [1, 10, 2, 20, 3]
 ```
 
@@ -1462,9 +1479,9 @@ i.e. they are already in the order `comparator` defines.
 
 ```
 // Descending check
-[5, 4, 3, 2, 1].iter().isSorted(by: |a, b| a >= b);   // true
+[5, 4, 3, 2, 1].iter().isSorted { (a, b) in a >= b };   // true
 // By absolute value
-[-1, 2, -3, 4].iter().isSorted(by: |a, b| a.abs() <= b.abs());   // true
+[-1, 2, -3, 4].iter().isSorted { (a, b) in a.abs() <= b.abs() };   // true
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1482,7 +1499,7 @@ over `isSorted(by:)` for the common "by-key" shape.
 
 ```
 let words = ["a", "bb", "ccc"];
-words.iter().isSorted(byKey: { it.count });   // true
+words.iter().isSorted { it.count };   // true
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1522,8 +1539,8 @@ fires when the downstream pulls a value.
 ##### Examples
 
 ```
-[1, 2, 3].iter().map({ it * 2 }).collect();         // [2, 4, 6]
-["hi", "yo"].iter().map({ it.count }).collect();    // [2, 2]
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1580,7 +1597,7 @@ first occurrence.
 
 ```
 let people = [("Alice", 30), ("Bob", 25), ("Charlie", 35)];
-people.iter().min(byKey: { it.1 });   // Some(("Bob", 25))
+people.iter().min { it.1 };   // Some(("Bob", 25))
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1609,9 +1626,9 @@ everything up to and including it. `None` if `n` is past the end.
 ##### Examples
 
 ```
-[10, 20, 30, 40].iter().nth(n: 2);   // Some(30)
-[10, 20].iter().nth(n: 5);           // None
-[10, 20, 30].iter().nth(n: 0);       // Some(10)
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1633,24 +1650,6 @@ it.peek();   // Some(1) — no consumption
 it.peek();   // Some(1) — still
 it.next();   // Some(1) — now consumed
 it.peek();   // Some(2)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `position`
-
-```kestrel
-public mutating func position(matching: (Item) -> Bool) -> Int64?
-```
-
-Index of the first element matching `predicate`, or `None`.
-Mirror of `find` for positions.
-
-##### Examples
-
-```
-["a", "b", "c"].iter().position({ it == "b" });   // Some(1)
-[1, 2, 3].iter().position({ it > 10 });           // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1687,9 +1686,9 @@ empty iterator.
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().reduce(combining: |a, b| a + b);   // Some(10)
-[5].iter().reduce(combining: |a, b| a + b);            // Some(5)
-[].iter().reduce(combining: |a, b| a + b);             // None
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1709,7 +1708,7 @@ products, and any "carry state along" pattern.
 ```
 // Running sum
 [1, 2, 3, 4].iter()
-    .scan(from: 0, combining: |acc, x| acc + x)
+    .scan(from: 0) { (acc, x) in acc + x }
     .collect();   // [1, 3, 6, 10]
 ```
 
@@ -1726,8 +1725,8 @@ Drops the first `count` elements, then yields the rest.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().skip(count: 2).collect();   // [3, 4, 5]
-[1, 2].iter().skip(count: 10).collect();           // []
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1746,7 +1745,7 @@ predicate). Mirror of `takeWhile`.
 
 ```
 [1, 2, 3, 4, 1, 2].iter()
-    .skipWhile({ it < 3 })
+    .skipWhile { it < 3 }
     .collect();   // [3, 4, 1, 2]
 ```
 
@@ -1765,7 +1764,7 @@ Collects into an `Array[Item]`, sorted ascending. Eager and
 
 ```
 [3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
-[3, 1, 2].iter().filter({ it > 1 }).sorted();          // [2, 3]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1782,7 +1781,7 @@ undefined (the adapter will spin forever).
 ##### Examples
 
 ```
-[0, 1, 2, 3, 4, 5, 6].iter().stepBy(n: 2).collect();   // [0, 2, 4, 6]
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1817,8 +1816,8 @@ more are available.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().take(count: 3).collect();   // [1, 2, 3]
-[1, 2].iter().take(count: 10).collect();           // [1, 2]
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1836,7 +1835,7 @@ stops. The "first failing" element is *not* yielded.
 
 ```
 [1, 2, 3, 4, 1, 2].iter()
-    .takeWhile({ it < 4 })
+    .takeWhile { it < 4 }
     .collect();   // [1, 2, 3]
 ```
 
@@ -1857,20 +1856,20 @@ succeeds, returns `Ok(final accumulator)`.
 ```
 // Stop the moment a parse fails
 ["1", "2", "3"].iter()
-    .tryFold(from: 0,  combining: |acc, s| {
+    .tryFold(from: 0) { (acc, s) in
         match Int64.parse(s) {
             .Some(n) => .Ok(acc + n),
             .None    => .Err("parse error")
         }
-    });   // Ok(6)
+    };   // Ok(6)
 
 ["1", "bad", "3"].iter()
-    .tryFold(from: 0,  combining: |acc, s| {
+    .tryFold(from: 0) { (acc, s) in
         match Int64.parse(s) {
             .Some(n) => .Ok(acc + n),
             .None    => .Err("parse error")
         }
-    });   // Err("parse error")
+    };   // Err("parse error")
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1887,9 +1886,9 @@ public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
 ##### Examples
 
 ```
-files.iter().tryForEach({ (path) in
+files.iter().tryForEach { (path) in
     File.delete(path)   // Result[(), IoError]
-});   // stops on first failure
+};   // stops on first failure
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1927,7 +1926,7 @@ side runs out.
 ```
 let names = ["Alice", "Bob", "Charlie"];
 let ages  = [30, 25, 35];
-names.iter().zip(other: ages.iter()).collect();
+names.iter().zip(ages.iter()).collect();
 // [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
 ```
 

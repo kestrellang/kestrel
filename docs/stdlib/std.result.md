@@ -24,7 +24,7 @@ func find(id: Int64) -> User? {
     null
 }
 
-match find(id: 42) {
+match find(42) {
     .Some(let u) => print(u.name),
     .None        => print("Not found")
 }
@@ -114,9 +114,9 @@ bare value.
 ##### Examples
 
 ```
-Some(42).contains(value: 42);   // true
-Some(42).contains(value: 0);    // false
-None.contains(value: 42);       // false
+Some(42).contains(42);   // true
+Some(42).contains(0);    // false
+None.contains(42);       // false
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -138,7 +138,7 @@ Panics with `message` on `.None` via `fatalError`.
 ##### Examples
 
 ```
-let cfg = loadConfig().expect(message: "Config file required");
+let cfg = loadConfig().expect("Config file required");
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -155,9 +155,9 @@ otherwise.
 ##### Examples
 
 ```
-Some(4).filter({ it % 2 == 0 });   // Some(4)
-Some(3).filter({ it % 2 == 0 });   // None
-None.filter({ it % 2 == 0 });      // None
+Some(4).filter { it % 2 == 0 };   // Some(4)
+Some(3).filter { it % 2 == 0 };   // None
+None.filter { it % 2 == 0 };      // None
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -216,8 +216,8 @@ a chain.
 
 ```
 getUser(id)
-    .inspect({ print("Found: \{it.name}") })
-    .map({ it.email });
+    .inspect { print("Found: \{it.name}") }
+    .map { it.email };
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -261,9 +261,9 @@ True when `.Some(value)` and `predicate(value)` returns `true`.
 ##### Examples
 
 ```
-Some(42).isSomeAnd({ it > 0 });    // true
-Some(-1).isSomeAnd({ it > 0 });    // false
-None.isSomeAnd({ it > 0 });        // false
+Some(42).isSomeAnd { it > 0 };    // true
+Some(-1).isSomeAnd { it > 0 };    // false
+None.isSomeAnd { it > 0 };        // false
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -304,9 +304,9 @@ Functor map — applies `transform` to the wrapped value, leaving
 ##### Examples
 
 ```
-Some(2).map({ it * 2 });           // Some(4)
-None.map({ it * 2 });              // None
-Some("hello").map({ it.len });     // Some(5)
+Some(2).map { it * 2 };           // Some(4)
+None.map { it * 2 };              // None
+Some("hello").map { it.len };     // Some(5)
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -341,8 +341,8 @@ Promotes to `Result`, supplying `error` for the `None` branch.
 ##### Examples
 
 ```
-Some(42).okOr(error: "missing");   // Ok(42)
-None.okOr(error: "missing");       // Err("missing")
+Some(42).okOr("missing");   // Ok(42)
+None.okOr("missing");       // Err("missing")
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -358,8 +358,8 @@ Like `okOr`, but `error()` is only invoked on `None`.
 ##### Examples
 
 ```
-Some(42).okOrElse(|| NotFoundError());   // Ok(42), fn not called
-None.okOrElse(|| NotFoundError());       // Err(NotFoundError())
+Some(42).okOrElse { NotFoundError() };   // Ok(42), fn not called
+None.okOrElse { NotFoundError() };       // Err(NotFoundError())
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -377,9 +377,9 @@ For "use a default scalar" prefer the `??` operator; reach for
 ##### Examples
 
 ```
-Some(1).orElse(|| Some(2));        // Some(1), fn not called
-None.orElse(|| Some(2));           // Some(2)
-None.orElse(|| loadFromCache());   // calls fn
+Some(1).orElse { Some(2) };        // Some(1), fn not called
+None.orElse { Some(2) };           // Some(2)
+None.orElse { loadFromCache() };   // calls fn
 
 // For unwrapping with a default, prefer ??:
 let value = optionalInt ?? 0;
@@ -400,10 +400,10 @@ Stores `value` and returns whatever was there before. Mirror of
 
 ```
 var opt = Some(1);
-opt.replace(value: 2);    // Some(1); opt is now Some(2)
+opt.replace(2);    // Some(1); opt is now Some(2)
 
 var none: Int64? = null;
-none.replace(value: 1);   // None;    none is now Some(1)
+none.replace(1);   // None;    none is now Some(1)
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -421,7 +421,7 @@ right thing.
 ##### Examples
 
 ```
-let opt = Optional.some(value: 42);   // Some(42)
+let opt = Optional.some(42);   // Some(42)
 let opt: Int64? = 42;                 // identical, preferred
 ```
 
@@ -446,10 +446,10 @@ opt.take();   // None;     opt is still None
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `takeIf`
+#### function `take`
 
 ```kestrel
-public mutating func takeIf((T) -> Bool) -> Optional[T]
+public mutating func take(matching: (T) -> Bool) -> Optional[T]
 ```
 
 Conditional `take` — empties `self` and returns the value only when
@@ -460,10 +460,10 @@ and returns `None`.
 
 ```
 var opt = Some(42);
-opt.takeIf({ it > 0 });    // Some(42); opt is now None
+opt.take(matching: { it > 0 });    // Some(42); opt is now None
 
 var opt2 = Some(42);
-opt2.takeIf({ it < 0 });   // None;     opt2 is still Some(42)
+opt2.take(matching: { it < 0 });   // None;     opt2 is still Some(42)
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -480,9 +480,9 @@ evaluated eagerly — use `flatMap` for lazy chaining.
 ##### Examples
 
 ```
-Some(1).then(other: Some("a"));    // Some("a")
-Some(1).then(other: None);         // None
-None.then(other: Some("a"));       // None
+Some(1).then(Some("a"));    // Some("a")
+Some(1).then(None);         // None
+None.then(Some("a"));       // None
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -522,8 +522,8 @@ when the default is expensive to compute or has side effects.
 ##### Examples
 
 ```
-Some(42).unwrap(orElse: || expensiveDefault());   // 42, no call
-None.unwrap(orElse: || expensiveDefault());       // calls fn
+Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
+None.unwrap(orElse: { expensiveDefault() });       // calls fn
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -541,8 +541,8 @@ expensive.
 ##### Examples
 
 ```
-Some(42).unwrapOr(default: 0);   // 42
-None.unwrapOr(default: 0);       // 0
+Some(42).unwrapOr(0);   // 42
+None.unwrapOr(0);       // 0
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -559,10 +559,10 @@ one of `self`/`other` is set, else `None`.
 ##### Examples
 
 ```
-Some(1).xor(other: None);       // Some(1)
-None.xor(other: Some(2));       // Some(2)
-Some(1).xor(other: Some(2));    // None
-None.xor(other: None);          // None
+Some(1).xor(None);       // Some(1)
+None.xor(Some(2));       // Some(2)
+Some(1).xor(Some(2));    // None
+None.xor(None);          // None
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -588,10 +588,10 @@ _Defined in `lang/std/result/optional.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Optional[T]) -> Bool
+public func isEqual(to: Optional[T]) -> Bool
 ```
 
 Structural equality on the optional. Backs `==`.
@@ -628,7 +628,7 @@ Some(2) < Some(1);  // false
 
 _Defined in `lang/std/result/optional.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -707,7 +707,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders `Some(...)` or `None`, forwarding `options` to the inner
@@ -848,7 +848,7 @@ only failure mode.
 
 ```
 func parseAndDouble(s: String) -> Int64 throws ParseError {
-    let n = try Int64.parse(string: s).okOr(error: ParseError());
+    let n = try Int64.parse(s).okOr(ParseError());
     n * 2
 }
 
@@ -1004,8 +1004,8 @@ Functor map on the success branch. `.Err` passes through unchanged.
 ##### Examples
 
 ```
-Ok(2).map({ it * 2 });          // Ok(4)
-Err("oops").map({ it * 2 });    // Err("oops")
+Ok(2).map { it * 2 };          // Ok(4)
+Err("oops").map { it * 2 };    // Err("oops")
 ```
 
 _Defined in `lang/std/result/result.ks`._
@@ -1022,7 +1022,7 @@ specific error type into a more general one.
 ##### Examples
 
 ```
-parse(s).mapErr({ AppError.Parse(it) });
+parse(s).mapErr { AppError.Parse(it) };
 ```
 
 _Defined in `lang/std/result/result.ks`._
@@ -1185,10 +1185,10 @@ _Defined in `lang/std/result/result.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Result[T, E]) -> Bool
+public func isEqual(to: Result[T, E]) -> Bool
 ```
 
 Structural equality on the result. Backs `==`.
@@ -1209,7 +1209,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders `Ok(...)` or `Err(...)`, forwarding `options` to the inner
