@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Hashable, Hasher, Range, ClosedRange, fatalError)
+import std.core.(Bool, Equatable, Comparable, Hashable, Hasher, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(ArraySlice, ArraySliceIterator, Pointer)
@@ -60,6 +60,14 @@ internal protocol SeqWrappable[T] {
     type SeqWrappedOutput
     func readSeqWrapped(from slice: ArraySlice[T]) -> SeqWrappedOutput
     func writeSeqWrapped(to slice: ArraySlice[T], with value: SeqWrappedOutput)
+}
+
+/// Resolves any range-like type to a half-open `Range[Int64]` given a
+/// collection length. Used by `removeSubrange` and `replaceSubrange` so
+/// they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
+/// `RangeThrough` through a single generic parameter.
+public protocol SeqRange {
+    func resolve(count: Int64) -> Range[Int64]
 }
 
 // ============================================================================
@@ -216,6 +224,171 @@ extend ClosedRange[Int64]: SeqIndex[T] {
     }
 }
 
+// Partial range: start.. — slice from start to end of collection
+extend RangeFrom[Int64]: SeqIndex[T] {
+    type SeqOutput = ArraySlice[T]
+
+    public func readSeq(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let start = self.start;
+        let len = slice.count;
+        if start < 0 or start > len {
+            fatalError("Index out of bounds")
+        }
+        ArraySlice(pointer: slice.pointer.offset(by: start), count: len - start)
+    }
+
+    public func readSeqChecked(from slice: ArraySlice[T]) -> ArraySlice[T]? {
+        let start = self.start;
+        let len = slice.count;
+        if start >= 0 and start <= len {
+            .Some(ArraySlice(pointer: slice.pointer.offset(by: start), count: len - start))
+        } else {
+            .None
+        }
+    }
+
+    public func readSeqUnchecked(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let start = self.start;
+        ArraySlice(pointer: slice.pointer.offset(by: start), count: slice.count - start)
+    }
+
+    public func writeSeq(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let start = self.start;
+        let len = slice.count;
+        if start < 0 or start > len {
+            fatalError("Index out of bounds")
+        }
+        let rangeLen = len - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+
+    public func writeSeqUnchecked(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let start = self.start;
+        let rangeLen = slice.count - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+}
+
+// Partial range: ..<end — slice from beginning up to (exclusive) end
+extend RangeUpTo[Int64]: SeqIndex[T] {
+    type SeqOutput = ArraySlice[T]
+
+    public func readSeq(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let end = self.end;
+        if end < 0 or end > slice.count {
+            fatalError("Index out of bounds")
+        }
+        ArraySlice(pointer: slice.pointer, count: end)
+    }
+
+    public func readSeqChecked(from slice: ArraySlice[T]) -> ArraySlice[T]? {
+        let end = self.end;
+        if end >= 0 and end <= slice.count {
+            .Some(ArraySlice(pointer: slice.pointer, count: end))
+        } else {
+            .None
+        }
+    }
+
+    public func readSeqUnchecked(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        ArraySlice(pointer: slice.pointer, count: self.end)
+    }
+
+    public func writeSeq(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let end = self.end;
+        if end < 0 or end > slice.count {
+            fatalError("Index out of bounds")
+        }
+        if value.count != end {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < end {
+            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+
+    public func writeSeqUnchecked(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let end = self.end;
+        if value.count != end {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < end {
+            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+}
+
+// Partial range: ..=end — slice from beginning through (inclusive) end
+extend RangeThrough[Int64]: SeqIndex[T] {
+    type SeqOutput = ArraySlice[T]
+
+    public func readSeq(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > slice.count {
+            fatalError("Index out of bounds")
+        }
+        ArraySlice(pointer: slice.pointer, count: endExclusive)
+    }
+
+    public func readSeqChecked(from slice: ArraySlice[T]) -> ArraySlice[T]? {
+        let endExclusive = self.end + 1;
+        if endExclusive >= 0 and endExclusive <= slice.count {
+            .Some(ArraySlice(pointer: slice.pointer, count: endExclusive))
+        } else {
+            .None
+        }
+    }
+
+    public func readSeqUnchecked(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        ArraySlice(pointer: slice.pointer, count: self.end + 1)
+    }
+
+    public func writeSeq(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > slice.count {
+            fatalError("Index out of bounds")
+        }
+        if value.count != endExclusive {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < endExclusive {
+            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+
+    public func writeSeqUnchecked(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let endExclusive = self.end + 1;
+        if value.count != endExclusive {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < endExclusive {
+            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+}
+
 // ============================================================================
 // SeqClampable CONFORMANCES
 // ============================================================================
@@ -307,6 +480,38 @@ extend Int64: SeqWrappable[T] {
             if idx < 0 { idx = idx + len }
             slice.pointer.offset(by: idx).write(v)
         }
+    }
+}
+
+// ============================================================================
+// SeqRange CONFORMANCES
+// ============================================================================
+
+extend Range[Int64]: SeqRange {
+    public func resolve(count: Int64) -> Range[Int64] { self }
+}
+
+extend ClosedRange[Int64]: SeqRange {
+    public func resolve(count: Int64) -> Range[Int64] {
+        Range[Int64](self.start, self.end + 1)
+    }
+}
+
+extend RangeFrom[Int64]: SeqRange {
+    public func resolve(count: Int64) -> Range[Int64] {
+        Range[Int64](self.start, count)
+    }
+}
+
+extend RangeUpTo[Int64]: SeqRange {
+    public func resolve(count: Int64) -> Range[Int64] {
+        Range[Int64](0, self.end)
+    }
+}
+
+extend RangeThrough[Int64]: SeqRange {
+    public func resolve(count: Int64) -> Range[Int64] {
+        Range[Int64](0, self.end + 1)
     }
 }
 
