@@ -5,6 +5,7 @@ module std.collections
 import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable, fatalError)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hashable)
+import std.collections.(SeqRange)
 import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64)
@@ -902,9 +903,10 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.removeSubrange(1..<4);  // arr is [1, 5]
     /// arr.removeSubrange(0..<0);  // no-op
     /// ```
-    public mutating func removeSubrange(range: Range[Int64]) {
-        let start = range.start;
-        let end = range.end;
+    public mutating func removeSubrange[R](range: R) where R: SeqRange {
+        let resolved = range.resolve(self.count);
+        let start = resolved.start;
+        let end = resolved.end;
         let myLen = self.len();
         if start < 0 or end > myLen or start > end {
             fatalError("Array.removeSubrange: range out of bounds")
@@ -924,6 +926,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         s.len = s.len - removeCount;
         self.storage.setValue(s)
     }
+
 
     /// Removes every element from the array, leaving capacity untouched.
     ///
@@ -1133,9 +1136,10 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.replaceSubrange(1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
     /// arr.replaceSubrange(0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
     /// ```
-    public mutating func replaceSubrange(range: Range[Int64], with replacement: Array[T]) {
-        let start = range.start;
-        let end = range.end;
+    public mutating func replaceSubrange[R](range: R, with replacement: Array[T]) where R: SeqRange {
+        let resolved = range.resolve(self.count);
+        let start = resolved.start;
+        let end = resolved.end;
         let myLen = self.len();
         if start < 0 or end > myLen or start > end {
             fatalError("Array.replaceSubrange: range out of bounds")

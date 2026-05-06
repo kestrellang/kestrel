@@ -11,7 +11,9 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
@@ -81,6 +83,9 @@ public struct UInt8:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
@@ -338,6 +343,21 @@ public struct UInt8:
         ClosedRange[UInt8](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[UInt8] {
+        RangeFrom[UInt8](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[UInt8] {
+        RangeUpTo[UInt8](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[UInt8] {
+        RangeThrough[UInt8](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -367,6 +387,9 @@ public struct UInt8:
     type RightShift.Output = UInt8
     type RangeConstructible.Output = Range[UInt8]
     type ClosedRangeConstructible.Output = ClosedRange[UInt8]
+    type RangeFromConstructible.Output = RangeFrom[UInt8]
+    type RangeUpToConstructible.Output = RangeUpTo[UInt8]
+    type RangeThroughConstructible.Output = RangeThrough[UInt8]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

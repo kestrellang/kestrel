@@ -175,6 +175,12 @@ pub enum Builtin {
     ExclusiveRangeOperatorMethod,
     InclusiveRangeOperatorProtocol,
     InclusiveRangeOperatorMethod,
+    RangeFromOperatorProtocol,
+    RangeFromOperatorMethod,
+    RangeUpToOperatorProtocol,
+    RangeUpToOperatorMethod,
+    RangeThroughOperatorProtocol,
+    RangeThroughOperatorMethod,
 
     // ===== Compound assignment =====
     AddAssignProtocol,
@@ -354,6 +360,12 @@ impl Builtin {
             Self::ExclusiveRangeOperatorMethod => "ExclusiveRangeOperatorMethod",
             Self::InclusiveRangeOperatorProtocol => "ClosedRangeConstructible",
             Self::InclusiveRangeOperatorMethod => "InclusiveRangeOperatorMethod",
+            Self::RangeFromOperatorProtocol => "RangeFromConstructible",
+            Self::RangeFromOperatorMethod => "RangeFromOperatorMethod",
+            Self::RangeUpToOperatorProtocol => "RangeUpToConstructible",
+            Self::RangeUpToOperatorMethod => "RangeUpToOperatorMethod",
+            Self::RangeThroughOperatorProtocol => "RangeThroughConstructible",
+            Self::RangeThroughOperatorMethod => "RangeThroughOperatorMethod",
 
             // Compound assignment
             Self::AddAssignProtocol => "AddAssign",
@@ -533,6 +545,12 @@ impl Builtin {
             "ExclusiveRangeOperatorMethod" => Some(Self::ExclusiveRangeOperatorMethod),
             "InclusiveRangeOperatorProtocol" => Some(Self::InclusiveRangeOperatorProtocol),
             "InclusiveRangeOperatorMethod" => Some(Self::InclusiveRangeOperatorMethod),
+            "RangeFromOperatorProtocol" => Some(Self::RangeFromOperatorProtocol),
+            "RangeFromOperatorMethod" => Some(Self::RangeFromOperatorMethod),
+            "RangeUpToOperatorProtocol" => Some(Self::RangeUpToOperatorProtocol),
+            "RangeUpToOperatorMethod" => Some(Self::RangeUpToOperatorMethod),
+            "RangeThroughOperatorProtocol" => Some(Self::RangeThroughOperatorProtocol),
+            "RangeThroughOperatorMethod" => Some(Self::RangeThroughOperatorMethod),
 
             // Compound assignment
             "AddAssignProtocol" => Some(Self::AddAssignProtocol),
@@ -685,6 +703,9 @@ impl Builtin {
             | Self::CoalesceOperatorProtocol
             | Self::ExclusiveRangeOperatorProtocol
             | Self::InclusiveRangeOperatorProtocol
+            | Self::RangeFromOperatorProtocol
+            | Self::RangeUpToOperatorProtocol
+            | Self::RangeThroughOperatorProtocol
             | Self::AddAssignProtocol
             | Self::SubtractAssignProtocol
             | Self::MultiplyAssignProtocol
@@ -721,6 +742,9 @@ impl Builtin {
             | Self::CoalesceOperatorMethod
             | Self::ExclusiveRangeOperatorMethod
             | Self::InclusiveRangeOperatorMethod
+            | Self::RangeFromOperatorMethod
+            | Self::RangeUpToOperatorMethod
+            | Self::RangeThroughOperatorMethod
             | Self::AddAssignMethod
             | Self::SubtractAssignMethod
             | Self::MultiplyAssignMethod

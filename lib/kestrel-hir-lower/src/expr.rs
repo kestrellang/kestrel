@@ -90,6 +90,7 @@ impl LowerCtx<'_> {
             },
             AstExpr::Postfix { operand, op, span } => match op {
                 PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
+                PostfixOp::RangeFrom => self.desugar_postfix_op(body, &op, operand, &span),
             },
             AstExpr::Binary { .. } => self.lower_binary_with_precedence(body, id),
             AstExpr::Assignment { lhs, rhs, span } => {

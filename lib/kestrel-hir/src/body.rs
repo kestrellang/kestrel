@@ -7,7 +7,7 @@
 //! - Types are resolved to entities (not just names)
 
 use kestrel_ast::arena::{Arena, Idx};
-use kestrel_ast::{BinaryOp, CompoundAssignOp, UnaryOp};
+use kestrel_ast::{BinaryOp, CompoundAssignOp, PostfixOp, UnaryOp};
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
@@ -703,7 +703,24 @@ pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
         Builtin::LogicalNotOperatorProtocol,
         "logicalNot",
     ),
+    (
+        UnaryOp::RangeUpTo,
+        Builtin::RangeUpToOperatorProtocol,
+        "rangeUpTo",
+    ),
+    (
+        UnaryOp::RangeThrough,
+        Builtin::RangeThroughOperatorProtocol,
+        "rangeThrough",
+    ),
 ];
+
+/// (operator, protocol_builtin, method_name)
+pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[(
+    PostfixOp::RangeFrom,
+    Builtin::RangeFromOperatorProtocol,
+    "rangeFrom",
+)];
 
 /// (operator, protocol_builtin, method_name, arg_label)
 ///
@@ -796,6 +813,15 @@ pub fn lookup_short_circuit_op(
 /// Returns `(protocol_builtin, method_name)` or `None` if not found.
 pub fn lookup_unary_op(op: &UnaryOp) -> Option<(Builtin, &'static str)> {
     UNARY_OP_PROTOCOLS
+        .iter()
+        .find(|(o, ..)| o == op)
+        .map(|(_, proto, method)| (*proto, *method))
+}
+
+/// Look up the protocol for a postfix operator.
+/// Returns `(protocol_builtin, method_name)` or `None` if not found.
+pub fn lookup_postfix_op(op: &PostfixOp) -> Option<(Builtin, &'static str)> {
+    POSTFIX_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
         .map(|(_, proto, method)| (*proto, *method))

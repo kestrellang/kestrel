@@ -866,10 +866,19 @@ impl LowerCtx {
             .map(|c| self.lower_expr(&c))
             .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span: span.clone() }));
 
-        // For now, only Unwrap (!) postfix operator
+        let op = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| matches!(t.kind(), SyntaxKind::Bang | SyntaxKind::DotDot))
+            .map(|t| match t.kind() {
+                SyntaxKind::DotDot => PostfixOp::RangeFrom,
+                _ => PostfixOp::Unwrap,
+            })
+            .unwrap_or(PostfixOp::Unwrap);
+
         self.alloc_expr(AstExpr::Postfix {
             operand,
-            op: PostfixOp::Unwrap,
+            op,
             span,
         })
     }
@@ -2102,6 +2111,8 @@ fn token_to_unary_op(kind: SyntaxKind) -> Option<UnaryOp> {
         SyntaxKind::Not => Some(UnaryOp::LogicalNot),
         SyntaxKind::Bang => Some(UnaryOp::BitNot),
         SyntaxKind::Plus => Some(UnaryOp::Pos),
+        SyntaxKind::DotDotLess => Some(UnaryOp::RangeUpTo),
+        SyntaxKind::DotDotEquals => Some(UnaryOp::RangeThrough),
         _ => None,
     }
 }
