@@ -336,17 +336,23 @@ fn check_protocol_requirements(
                 }
 
                 if let Some(impl_method) = matched_impl {
-                    check_method_return_type(
-                        cx,
-                        child,
-                        impl_method,
-                        type_entity,
-                        member.declaring_protocol,
-                        proto_param_subs,
-                        &name,
-                        &proto_name,
-                        diags,
-                    );
+                    // Init return types are derived from the effect ((), ()?, () throws E),
+                    // so skip the structural return type check — check_init_effect validates
+                    // effect compatibility instead. Without this skip, widening (non-failable
+                    // satisfying failable) triggers a spurious E458 for () vs Optional[()].
+                    if !matches!(child_kind, Some(NodeKind::Initializer)) {
+                        check_method_return_type(
+                            cx,
+                            child,
+                            impl_method,
+                            type_entity,
+                            member.declaring_protocol,
+                            proto_param_subs,
+                            &name,
+                            &proto_name,
+                            diags,
+                        );
+                    }
                     check_init_effect(cx, child, impl_method, &proto_name, diags);
                 }
             },

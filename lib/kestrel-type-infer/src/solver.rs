@@ -1663,10 +1663,7 @@ fn solve_call(
         TyKind::Param { .. } => {
             // `T(...)` where T is a generic param → init call on the bound.
             // The init's declared return is () but the actual result is an
-            // instance of the type param. Override via an equal(result, callee).
-            //
-            // TODO: effectful init wrapping for generic calls (T? / T throws E)
-            // requires witness-call path changes in MIR lowering; deferred.
+            // instance of the type param.
             let init_result = ctx.fresh();
             let res = solve_member(
                 ctx,
@@ -1680,7 +1677,13 @@ fn solve_call(
                 &[],
                 span.clone(),
             );
-            ctx.equal(result, callee, span);
+            // Effectful inits: wrap T → T? or T throws E
+            let final_result = if let Some(&init_entity) = ctx.resolutions.get(&expr) {
+                wrap_init_call_result(ctx, init_entity, callee, &[], &span)
+            } else {
+                callee
+            };
+            ctx.equal(result, final_result, span);
             res
         },
         TyKind::Enum { .. } if args.is_empty() => {

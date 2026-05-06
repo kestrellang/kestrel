@@ -1915,6 +1915,33 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         false
     }
 
+    /// Find the InitEffect of an init on a protocol, matching by labels.
+    fn find_protocol_init_effect(
+        &self,
+        protocol: Entity,
+        labels: &[Option<String>],
+    ) -> Option<kestrel_ast_builder::InitEffect> {
+        use kestrel_ast_builder::{Callable, InitEffect, NodeKind};
+        for &child in self.ctx.world.children_of(protocol) {
+            if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Initializer) {
+                continue;
+            }
+            if let Some(callable) = self.ctx.world.get::<Callable>(child) {
+                let child_labels: Vec<Option<&str>> = callable
+                    .params
+                    .iter()
+                    .map(|p| p.label.as_deref())
+                    .collect();
+                let match_labels: Vec<Option<&str>> =
+                    labels.iter().map(|l| l.as_deref()).collect();
+                if child_labels == match_labels {
+                    return self.ctx.world.get::<InitEffect>(child).cloned();
+                }
+            }
+        }
+        None
+    }
+
     /// If a method entity belongs to a protocol (abstract or extension), return the
     /// protocol entity. Both abstract protocol methods and protocol extension methods
     /// need Witness dispatch so the witness table can route to the correct implementation.
@@ -2782,6 +2809,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .world
                     .get::<kestrel_ast_builder::InitEffect>(*func)
                     .cloned(),
+                Callee::Witness {
+                    protocol, method, ..
+                } if method.name == "init" => {
+                    self.find_protocol_init_effect(*protocol, &method.labels)
+                }
                 _ => None,
             };
 
@@ -2894,7 +2926,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
         call_args.insert(0, self_ref);
 
-        // Set self_type on callee for mangling
+        // Set self_type to the inner (unwrapped) type for correct dispatch
         let callee = match callee {
             Callee::Direct {
                 func,
@@ -2904,6 +2936,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 func,
                 type_args,
                 self_type: Some(inner_ty.clone()),
+            },
+            Callee::Witness {
+                protocol,
+                method,
+                method_type_args,
+                ..
+            } => Callee::Witness {
+                protocol,
+                method,
+                self_type: inner_ty.clone(),
+                method_type_args,
             },
             other => other,
         };
