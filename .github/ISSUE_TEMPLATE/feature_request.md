@@ -2,7 +2,7 @@
 name: Feature Request
 about: Propose a new feature for Kestrel
 title: ''
-labels: enhancement, needs-triage
+labels: feature, triage
 assignees: ''
 ---
 

@@ -1,0 +1,28 @@
+name: Sync labels
+
+# Applies .github/labels.yml as the canonical label set. Runs on changes
+# to that file and on manual dispatch. Deletes labels that aren't in the
+# file (so removing a label here removes it everywhere).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/sync-labels.yml
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync labels
+        uses: EndBug/label-sync@v2
+        with:
+          config-file: .github/labels.yml
+          delete-other-labels: true

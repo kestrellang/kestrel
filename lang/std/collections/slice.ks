@@ -38,6 +38,319 @@ public protocol Slice[T]: Iterable {
 }
 
 // ============================================================================
+// UNIFIED INDEX PROTOCOLS
+// ============================================================================
+
+internal protocol SeqIndex[T] {
+    type SeqOutput
+    func readSeq(from slice: ArraySlice[T]) -> SeqOutput
+    func readSeqChecked(from slice: ArraySlice[T]) -> SeqOutput?
+    func readSeqUnchecked(from slice: ArraySlice[T]) -> SeqOutput
+    func writeSeq(to slice: ArraySlice[T], with value: SeqOutput)
+    func writeSeqUnchecked(to slice: ArraySlice[T], with value: SeqOutput)
+}
+
+internal protocol SeqClampable[T] {
+    type SeqClampedOutput
+    func readSeqClamped(from slice: ArraySlice[T]) -> SeqClampedOutput
+    func writeSeqClamped(to slice: ArraySlice[T], with value: SeqClampedOutput)
+}
+
+internal protocol SeqWrappable[T] {
+    type SeqWrappedOutput
+    func readSeqWrapped(from slice: ArraySlice[T]) -> SeqWrappedOutput
+    func writeSeqWrapped(to slice: ArraySlice[T], with value: SeqWrappedOutput)
+}
+
+// ============================================================================
+// SeqIndex CONFORMANCES
+// ============================================================================
+
+extend Int64: SeqIndex[T] {
+    type SeqOutput = T
+
+    public func readSeq(from slice: ArraySlice[T]) -> T {
+        if self < 0 or self >= slice.count {
+            fatalError("Index out of bounds")
+        }
+        slice.pointer.offset(by: self).read()
+    }
+
+    public func readSeqChecked(from slice: ArraySlice[T]) -> T? {
+        if self >= 0 and self < slice.count {
+            .Some(slice.pointer.offset(by: self).read())
+        } else {
+            .None
+        }
+    }
+
+    public func readSeqUnchecked(from slice: ArraySlice[T]) -> T {
+        slice.pointer.offset(by: self).read()
+    }
+
+    public func writeSeq(to slice: ArraySlice[T], with value: T) {
+        if self < 0 or self >= slice.count {
+            fatalError("Index out of bounds")
+        }
+        slice.pointer.offset(by: self).write(value)
+    }
+
+    public func writeSeqUnchecked(to slice: ArraySlice[T], with value: T) {
+        slice.pointer.offset(by: self).write(value)
+    }
+}
+
+extend Range[Int64]: SeqIndex[T] {
+    type SeqOutput = ArraySlice[T]
+
+    public func readSeq(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let start = self.start;
+        let end = self.end;
+        if start < 0 or end > slice.count or start > end {
+            fatalError("Range out of bounds")
+        }
+        ArraySlice(pointer: slice.pointer.offset(by: start), count: end - start)
+    }
+
+    public func readSeqChecked(from slice: ArraySlice[T]) -> ArraySlice[T]? {
+        let start = self.start;
+        let end = self.end;
+        if start >= 0 and end <= slice.count and start <= end {
+            .Some(ArraySlice(pointer: slice.pointer.offset(by: start), count: end - start))
+        } else {
+            .None
+        }
+    }
+
+    public func readSeqUnchecked(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        ArraySlice(pointer: slice.pointer.offset(by: self.start), count: self.end - self.start)
+    }
+
+    public func writeSeq(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let start = self.start;
+        let end = self.end;
+        if start < 0 or end > slice.count or start > end {
+            fatalError("Range out of bounds")
+        }
+        let rangeLen = end - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+
+    public func writeSeqUnchecked(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let start = self.start;
+        let rangeLen = self.end - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+}
+
+extend ClosedRange[Int64]: SeqIndex[T] {
+    type SeqOutput = ArraySlice[T]
+
+    public func readSeq(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let start = self.start;
+        let endExclusive = self.end + 1;
+        if start < 0 or endExclusive > slice.count or start > endExclusive {
+            fatalError("Range out of bounds")
+        }
+        ArraySlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
+    }
+
+    public func readSeqChecked(from slice: ArraySlice[T]) -> ArraySlice[T]? {
+        let start = self.start;
+        let endExclusive = self.end + 1;
+        if start >= 0 and endExclusive <= slice.count and start <= endExclusive {
+            .Some(ArraySlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start))
+        } else {
+            .None
+        }
+    }
+
+    public func readSeqUnchecked(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let start = self.start;
+        let endExclusive = self.end + 1;
+        ArraySlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
+    }
+
+    public func writeSeq(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let start = self.start;
+        let endExclusive = self.end + 1;
+        if start < 0 or endExclusive > slice.count or start > endExclusive {
+            fatalError("Range out of bounds")
+        }
+        let rangeLen = endExclusive - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+
+    public func writeSeqUnchecked(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let start = self.start;
+        let rangeLen = self.end + 1 - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+}
+
+// ============================================================================
+// SeqClampable CONFORMANCES
+// ============================================================================
+
+extend Int64: SeqClampable[T] {
+    type SeqClampedOutput = T?
+
+    public func readSeqClamped(from slice: ArraySlice[T]) -> T? {
+        let len = slice.count;
+        if len == 0 {
+            return .None
+        }
+        var idx = self;
+        if idx < 0 { idx = 0 }
+        if idx >= len { idx = len - 1 }
+        .Some(slice.pointer.offset(by: idx).read())
+    }
+
+    public func writeSeqClamped(to slice: ArraySlice[T], with value: T?) {
+        if let .Some(v) = value {
+            let len = slice.count;
+            if len == 0 {
+                return
+            }
+            var idx = self;
+            if idx < 0 { idx = 0 }
+            if idx >= len { idx = len - 1 }
+            slice.pointer.offset(by: idx).write(v)
+        }
+    }
+}
+
+extend Range[Int64]: SeqClampable[T] {
+    type SeqClampedOutput = ArraySlice[T]
+
+    public func readSeqClamped(from slice: ArraySlice[T]) -> ArraySlice[T] {
+        let len = slice.count;
+        var start = self.start;
+        var end = self.end;
+        if start < 0 { start = 0 }
+        if end > len { end = len }
+        if start > end { start = end }
+        ArraySlice(pointer: slice.pointer.offset(by: start), count: end - start)
+    }
+
+    public func writeSeqClamped(to slice: ArraySlice[T], with value: ArraySlice[T]) {
+        let len = slice.count;
+        var start = self.start;
+        var end = self.end;
+        if start < 0 { start = 0 }
+        if end > len { end = len }
+        if start > end { start = end }
+        let rangeLen = end - start;
+        if value.count != rangeLen {
+            fatalError("Slice length doesn't match clamped range length")
+        }
+        var i = 0;
+        while i < rangeLen {
+            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            i = i + 1;
+        }
+    }
+}
+
+// ============================================================================
+// SeqWrappable CONFORMANCES
+// ============================================================================
+
+extend Int64: SeqWrappable[T] {
+    type SeqWrappedOutput = T?
+
+    public func readSeqWrapped(from slice: ArraySlice[T]) -> T? {
+        let len = slice.count;
+        if len == 0 {
+            return .None
+        }
+        var idx = self % len;
+        if idx < 0 { idx = idx + len }
+        .Some(slice.pointer.offset(by: idx).read())
+    }
+
+    public func writeSeqWrapped(to slice: ArraySlice[T], with value: T?) {
+        if let .Some(v) = value {
+            let len = slice.count;
+            if len == 0 {
+                return
+            }
+            var idx = self % len;
+            if idx < 0 { idx = idx + len }
+            slice.pointer.offset(by: idx).write(v)
+        }
+    }
+}
+
+// ============================================================================
+// UNIFIED SUBSCRIPTS
+// ============================================================================
+
+// Read-only subscripts on the protocol extension. Write subscripts live on
+// Array and ArraySlice directly because the compiler currently mis-resolves
+// the extension's T as the subscript's I inside set blocks (compiler bug).
+
+extend Slice[T] {
+    public subscript[I](checked index: I) -> I.SeqOutput? where I: SeqIndex[T] {
+        get { index.readSeqChecked(from: self.asSlice()) }
+    }
+}
+
+// ArraySlice subscripts — read-write, dispatched through unified SeqIndex
+// protocols. Defined here (std.collections) rather than std.memory so
+// the internal SeqIndex/SeqClampable/SeqWrappable protocols are visible.
+
+extend ArraySlice[T] {
+    public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
+        get { index.readSeq(from: self) }
+        set { index.writeSeq(to: self, with: newValue) }
+    }
+
+    public subscript[I](unchecked index: I) -> I.SeqOutput where I: SeqIndex[T] {
+        get { index.readSeqUnchecked(from: self) }
+        set { index.writeSeqUnchecked(to: self, with: newValue) }
+    }
+
+    public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
+        get { index.readSeqClamped(from: self) }
+        set { index.writeSeqClamped(to: self, with: newValue) }
+    }
+
+    public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {
+        get { index.readSeqWrapped(from: self) }
+        set { index.writeSeqWrapped(to: self, with: newValue) }
+    }
+}
+
+// ============================================================================
 // EXTEND SLICE — Read-Only Methods
 // ============================================================================
 
