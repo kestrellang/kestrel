@@ -14,4 +14,4 @@
 - [x] Move plugin to separate repo
 - [x] Move triage to separate repo
 - [ ] Verify installation end-to-end
-- [ ] Go over libraries
+- [x] Go over libraries

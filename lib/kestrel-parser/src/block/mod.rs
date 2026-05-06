@@ -69,13 +69,16 @@ impl CodeBlock {
     }
 }
 
-/// Raw parsed data for a guard-let statement
-/// Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
+/// Raw parsed data for a guard statement
+/// Supports boolean guards, let-binding guards, and mixed chains:
+///   guard condition else { ... }
+///   guard let .Some(x) = a else { ... }
+///   guard condition, let .Some(x) = a, let .Some(y) = b else { ... }
 #[derive(Debug, Clone)]
 pub struct GuardLetData {
     /// Span of 'guard' keyword
     pub guard_span: Span,
-    /// List of conditions (at least one let-binding, possibly followed by more let-bindings or bool conditions)
+    /// List of conditions (boolean expressions and/or let-bindings, comma-separated)
     pub conditions: Vec<IfCondition>,
     /// Span of 'else' keyword
     pub else_span: Span,
@@ -179,11 +182,11 @@ where
         .boxed()
 }
 
-/// Parser for an inline `guard let ... else { ... }` block item with chain
+/// Parser for an inline `guard ... else { ... }` block item with chain
 /// support. Yields `BlockItem::GuardLet(GuardLetData)`.
 ///
-/// Conditions form a chain starting with at least one `let pattern = expr`,
-/// followed by zero or more comma-separated `let` or boolean conditions.
+/// Conditions form a comma-separated chain of one or more `let pattern = expr`
+/// bindings and/or boolean expressions.
 pub(crate) fn guard_let_block_item_parser<'tokens, P, V>(
     expr: P,
     inline_var_decl: V,
@@ -213,7 +216,8 @@ where
         .clone()
         .or(expr.clone().map(IfCondition::Expr));
 
-    let conditions = let_condition
+    let conditions = single_condition
+        .clone()
         .then(
             skip_trivia()
                 .ignore_then(just(Token::Comma))
@@ -494,8 +498,10 @@ fn code_block_items_parser<'tokens>()
     //   - If statement-like: statement expression (no semicolon needed)
     //   - Otherwise: fail (will be retried as trailing expression)
 
-    // Guard-let statement: guard let pattern = expr, ... else { block }
-    // Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
+    // Guard statement: guard <condition>, ... else { block }
+    // Supports boolean guards, let-binding guards, and mixed chains:
+    //   guard condition else { ... }
+    //   guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
     // The else block is parsed inline to avoid recursive parser types
 
     // Single let condition: let pattern = expr
@@ -521,8 +527,9 @@ fn code_block_items_parser<'tokens>()
         .clone()
         .or(expr_parser().map(IfCondition::Expr));
 
-    // Condition list: first must be let, followed by comma-separated conditions
-    let guard_conditions = guard_let_condition
+    // Condition list: one or more conditions (let-binding or boolean), comma-separated
+    let guard_conditions = guard_single_condition
+        .clone()
         .then(
             skip_trivia()
                 .ignore_then(just(Token::Comma))

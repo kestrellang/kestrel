@@ -55,13 +55,21 @@ impl BodyCheck for ConditionCheckAnalyzer {
         });
 
         // Check all if-expression conditions
-        for (_expr_id, expr) in cx.hir.exprs.iter() {
+        for (expr_id, expr) in cx.hir.exprs.iter() {
             if let HirExpr::If { condition, .. } = expr {
                 // Skip desugared while conditions — checked separately below
                 if cx.hir.while_conditions.contains(condition) {
                     continue;
                 }
-                check_condition(cx, *condition, "if", bool_cond_protocol, &mut diags);
+                // Guard statements desugar to If; use "guard" label for those
+                let kind = if cx.hir.guard_let_stmts.iter().any(|&stmt_id| {
+                    matches!(&cx.hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id)
+                }) {
+                    "guard"
+                } else {
+                    "if"
+                };
+                check_condition(cx, *condition, kind, bool_cond_protocol, &mut diags);
             }
         }
 
