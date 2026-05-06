@@ -31,7 +31,7 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `MapIterator` from `inner` and `transform`. Prefer
     /// `inner.map(transform)`.
-    public init(inner inner: I, mapping transform: (I.Item) -> U) {
+    public init(inner inner: I, as transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -65,7 +65,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
-    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
+    public init(inner inner: I, where predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
     }
@@ -99,7 +99,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
     /// `inner.compactMap()`.
-    public init(inner inner: I, mapping transform: (I.Item) -> U?) {
+    public init(inner inner: I, as transform: (I.Item) -> U?) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -136,7 +136,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.
-    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
+    public init(inner inner: I, where predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.done = false;
@@ -181,7 +181,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
-    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
+    public init(inner inner: I, where predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.doneSkipping = false;
@@ -623,7 +623,7 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 
     /// @name From Source
     /// Builds a `FlatMapIterator` with no inner iterator buffered.
-    public init(inner inner: I, mapping transform: (I.Item) -> U) {
+    public init(inner inner: I, as transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
         self.current = .None;
@@ -828,7 +828,7 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `ScanIterator` seeded with `initial`.
-    public init(inner inner: I, from initial: Acc, combining combine: (Acc, I.Item) -> Acc) {
+    public init(inner inner: I, from initial: Acc, by combine: (Acc, I.Item) -> Acc) {
         self.inner = inner;
         self.state = initial;
         self.combine = combine;

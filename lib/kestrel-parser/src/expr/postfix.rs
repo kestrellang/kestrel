@@ -16,7 +16,7 @@ use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
-use crate::common::{skip_inline_trivia, skip_trivia};
+use crate::common::{identifier_or_keyword, skip_inline_trivia, skip_trivia};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 use super::atom::full_type_args_parser;
@@ -68,7 +68,7 @@ where
     P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
     let labeled = skip_trivia()
-        .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
+        .ignore_then(identifier_or_keyword())
         .then(
             skip_trivia()
                 .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span()))),

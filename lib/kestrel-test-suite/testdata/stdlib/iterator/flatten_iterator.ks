@@ -18,7 +18,7 @@ module Test
             nested.append(inner2);
             nested.append(inner3);
 
-            let flat = nested.iter().map({ (arr) in arr.iter() }).flatten().collect();
+            let flat = nested.iter().map(as: { (arr) in arr.iter() }).flatten().collect();
             if flat.count != 5 { return 1 }
             if flat(unchecked: 0) != 1 { return 2 }
             if flat(unchecked: 4) != 5 { return 3 }

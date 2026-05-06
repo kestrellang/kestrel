@@ -52,7 +52,7 @@ func main() -> lang.i64 {
     if doubled(unchecked: 0) != 2 { return 17 }
     if doubled(unchecked: 4) != 10 { return 18 }
 
-    let evens = arr.filter(matching: { (x) in x % 2 == 0 });
+    let evens = arr.filter(where: { (x) in x % 2 == 0 });
     if evens.count != 2 { return 19 }
     if evens(unchecked: 0) != 2 { return 20 }
     if evens(unchecked: 1) != 4 { return 21 }

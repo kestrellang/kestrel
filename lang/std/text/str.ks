@@ -192,10 +192,10 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "abc123".contains(matching: { (c) in c.isAsciiDigit });  // true
+    /// "abc123".contains(where: { (c) in c.isAsciiDigit });  // true
     /// ```
-    public func contains(matching predicate: (Char) -> Bool) -> Bool {
-        self.chars.firstIndex(matching: predicate).isSome()
+    public func contains(where predicate: (Char) -> Bool) -> Bool {
+        self.chars.firstIndex(where: predicate).isSome()
     }
 
     /// Returns true if this string starts with `prefix`.
@@ -338,10 +338,10 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "hello world".split(matching: { (c) in c.isWhitespace }).count;  // 2
+    /// "hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
     /// ```
-    public func split(matching predicate: (Char) -> Bool) -> SplitWhereView {
-        SplitWhereView(slice: self.asSlice(), matching: predicate)
+    public func split(where predicate: (Char) -> Bool) -> SplitWhereView {
+        SplitWhereView(slice: self.asSlice(), where: predicate)
     }
 
     // -- Trimming (non-mutating) -----------------------------------------------
@@ -461,9 +461,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "00042".trimmed(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
+    /// "00042".trimmed(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
     /// ```
-    public func trimmed(matching predicate: (Char) -> Bool) -> StringSlice {
+    public func trimmed(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
         let myLen = slice.byteCount;
         let basePtr = slice._rawPtr().offset(by: slice.start);
@@ -504,9 +504,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "000abc".trimmedStart(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+    /// "000abc".trimmedStart(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
     /// ```
-    public func trimmedStart(matching predicate: (Char) -> Bool) -> StringSlice {
+    public func trimmedStart(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
         let myLen = slice.byteCount;
         let basePtr = slice._rawPtr().offset(by: slice.start);
@@ -534,9 +534,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "abc000".trimmedEnd(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+    /// "abc000".trimmedEnd(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
     /// ```
-    public func trimmedEnd(matching predicate: (Char) -> Bool) -> StringSlice {
+    public func trimmedEnd(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
         let myLen = slice.byteCount;
         let basePtr = slice._rawPtr().offset(by: slice.start);

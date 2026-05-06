@@ -2007,7 +2007,7 @@ extend CharsView {
     }
 
     /// Returns the index of the first code point matching `predicate`, or `.None`.
-    public func firstIndex(matching predicate: (Char) -> Bool) -> CharIndex? {
+    public func firstIndex(where predicate: (Char) -> Bool) -> CharIndex? {
         var byteIdx: Int64 = 0;
         while byteIdx < self.length {
             let result = decodeUtf8(self.ptr, self.length, at: byteIdx);
@@ -2024,7 +2024,7 @@ extend CharsView {
     }
 
     /// Returns the index of the last code point matching `predicate`, or `.None`.
-    public func lastIndex(matching predicate: (Char) -> Bool) -> CharIndex? {
+    public func lastIndex(where predicate: (Char) -> Bool) -> CharIndex? {
         var lastFound: CharIndex? = .None;
         var byteIdx: Int64 = 0;
         while byteIdx < self.length {
@@ -2044,7 +2044,7 @@ extend CharsView {
 
 extend GraphemesView {
     /// Returns the index of the first grapheme matching `predicate`, or `.None`.
-    public func firstIndex(matching predicate: (Grapheme) -> Bool) -> GraphemeIndex? {
+    public func firstIndex(where predicate: (Grapheme) -> Bool) -> GraphemeIndex? {
         var byteIdx: Int64 = 0;
         var it = self.iter();
         while let .Some(g) = it.next() {
@@ -2640,7 +2640,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     fileprivate var index: Int64
     fileprivate var done: Bool
 
-    public init(slice slice: StringSlice, matching predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, where predicate: (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -2649,7 +2649,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         self.done = false;
     }
 
-    fileprivate init(slice slice: StringSlice, matching predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
+    fileprivate init(slice slice: StringSlice, where predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -2659,7 +2659,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     }
 
     public func clone() -> SplitWhereViewIterator {
-        SplitWhereViewIterator(slice: self.slice.clone(), matching: self.predicate, index: self.index, done: self.done)
+        SplitWhereViewIterator(slice: self.slice.clone(), where: self.predicate, index: self.index, done: self.done)
     }
 
     public mutating func next() -> StringSlice? {
@@ -2708,17 +2708,17 @@ public struct SplitWhereView: Iterable, Cloneable {
     fileprivate var slice: StringSlice
     fileprivate var predicate: (Char) -> Bool
 
-    public init(slice slice: StringSlice, matching predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, where predicate: (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
     }
 
     public func clone() -> SplitWhereView {
-        SplitWhereView(slice: self.slice.clone(), matching: self.predicate)
+        SplitWhereView(slice: self.slice.clone(), where: self.predicate)
     }
 
     public func iter() -> SplitWhereViewIterator {
-        SplitWhereViewIterator(slice: self.slice.clone(), matching: self.predicate)
+        SplitWhereViewIterator(slice: self.slice.clone(), where: self.predicate)
     }
 
     /// True when the source slice is empty.

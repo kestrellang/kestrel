@@ -231,8 +231,8 @@ struct Array[T]: Seq, Cloneable, Defaultable, ExpressibleByArrayLiteral {
     mutating func remove(at: Int64) -> T
     mutating func removeSubrange(range: Range[Int64])
     mutating func clear()
-    mutating func retain(matching: (T) -> Bool)
-    mutating func removeAll(matching: (T) -> Bool)
+    mutating func retain(where: (T) -> Bool)
+    mutating func removeAll(where: (T) -> Bool)
 
     // Reordering
     mutating func swap(at: Int64, with: Int64)

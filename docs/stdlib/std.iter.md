@@ -209,7 +209,7 @@ Yields elements back-to-front by pulling `nextBack()` instead of
 ```
 [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
 [1, 2, 3, 4, 5].iter().rev().take(count: 3).collect();         // [5, 4, 3]
-[1, 2, 3, 4, 5].iter().rev().first(matching: { it % 2 == 0 });            // Some(4)
+[1, 2, 3, 4, 5].iter().rev().first(where: { it % 2 == 0 });            // Some(4)
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -430,7 +430,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, matching: (I.Item) -> Bool)
+public init(inner: I, where: (I.Item) -> Bool)
 ```
 
 Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
@@ -496,7 +496,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, mapping: (I.Item) -> U?)
+public init(inner: I, as: (I.Item) -> U?)
 ```
 
 Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
@@ -561,7 +561,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, mapping: (I.Item) -> U)
+public init(inner: I, as: (I.Item) -> U)
 ```
 
 Builds a `FlatMapIterator` with no inner iterator buffered.
@@ -1045,7 +1045,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `all`
 
 ```kestrel
-public mutating func all(matching: (Item) -> Bool) -> Bool
+public mutating func all(where: (Item) -> Bool) -> Bool
 ```
 
 True if every element satisfies `predicate`. Stops at the first
@@ -1064,7 +1064,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `any`
 
 ```kestrel
-public mutating func any(matching: (Item) -> Bool) -> Bool
+public mutating func any(where: (Item) -> Bool) -> Bool
 ```
 
 True if any element satisfies `predicate`. Stops at the first
@@ -1210,7 +1210,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -1247,7 +1247,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `first`
 
 ```kestrel
-public mutating func first(matching: (Item) -> Bool) -> Item?
+public mutating func first(where: (Item) -> Bool) -> Item?
 ```
 
 First element matching `predicate`, or `None`. Stops at the first
@@ -1256,8 +1256,8 @@ match.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().first(matching: { it > 3 });   // Some(4)
-[1, 2, 3].iter().first(matching: { it > 10 });        // None
+[1, 2, 3, 4, 5].iter().first(where: { it > 3 });   // Some(4)
+[1, 2, 3].iter().first(where: { it > 10 });        // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1322,7 +1322,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `fold`
 
 ```kestrel
-public consuming func fold[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> Acc
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
 ```
 
 Left fold — start at `initial` and walk left to right, applying
@@ -1331,9 +1331,9 @@ Left fold — start at `initial` and walk left to right, applying
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().fold(from: 0,  combining: |acc, x| acc + x);   // 10
-[1, 2, 3].iter().fold(from: 1,  combining: |acc, x| acc * x);      // 6
-[].iter().fold(from: 42,  combining: |acc, x| acc + x);            // 42
+[1, 2, 3, 4].iter().fold(from: 0,  by: |acc, x| acc + x);   // 10
+[1, 2, 3].iter().fold(from: 1,  by: |acc, x| acc * x);      // 6
+[].iter().fold(from: 42,  by: |acc, x| acc + x);            // 42
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1640,7 +1640,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `position`
 
 ```kestrel
-public mutating func position(matching: (Item) -> Bool) -> Int64?
+public mutating func position(where: (Item) -> Bool) -> Int64?
 ```
 
 Index of the first element matching `predicate`, or `None`.
@@ -1677,7 +1677,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `reduce`
 
 ```kestrel
-public consuming func reduce(combining: (Item, Item) -> Item) -> Item?
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
 ```
 
 Like `fold`, but seeds the accumulator with the first element
@@ -1687,9 +1687,9 @@ empty iterator.
 ##### Examples
 
 ```
-[1, 2, 3, 4].iter().reduce(combining: |a, b| a + b);   // Some(10)
-[5].iter().reduce(combining: |a, b| a + b);            // Some(5)
-[].iter().reduce(combining: |a, b| a + b);             // None
+[1, 2, 3, 4].iter().reduce(by: |a, b| a + b);   // Some(10)
+[5].iter().reduce(by: |a, b| a + b);            // Some(5)
+[].iter().reduce(by: |a, b| a + b);             // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1697,7 +1697,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -1709,7 +1709,7 @@ products, and any "carry state along" pattern.
 ```
 // Running sum
 [1, 2, 3, 4].iter()
-    .scan(from: 0, combining: |acc, x| acc + x)
+    .scan(from: 0, by: |acc, x| acc + x)
     .collect();   // [1, 3, 6, 10]
 ```
 
@@ -1735,7 +1735,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(matching: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -1826,7 +1826,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(matching: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -1845,7 +1845,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryFold`
 
 ```kestrel
-public mutating func tryFold[Acc, E](from: Acc, combining: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
 ```
 
 Fold with early exit on `Err`. The combine returns `Result`; the
@@ -1857,7 +1857,7 @@ succeeds, returns `Ok(final accumulator)`.
 ```
 // Stop the moment a parse fails
 ["1", "2", "3"].iter()
-    .tryFold(from: 0,  combining: |acc, s| {
+    .tryFold(from: 0,  by: |acc, s| {
         match Int64.parse(s) {
             .Some(n) => .Ok(acc + n),
             .None    => .Err("parse error")
@@ -1865,7 +1865,7 @@ succeeds, returns `Ok(final accumulator)`.
     });   // Ok(6)
 
 ["1", "bad", "3"].iter()
-    .tryFold(from: 0,  combining: |acc, s| {
+    .tryFold(from: 0,  by: |acc, s| {
         match Int64.parse(s) {
             .Some(n) => .Ok(acc + n),
             .None    => .Err("parse error")
@@ -1993,7 +1993,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, mapping: (I.Item) -> U)
+public init(inner: I, as: (I.Item) -> U)
 ```
 
 Builds a `MapIterator` from `inner` and `transform`. Prefer
@@ -2380,7 +2380,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, from: Acc, combining: (Acc, I.Item) -> Acc)
+public init(inner: I, from: Acc, by: (Acc, I.Item) -> Acc)
 ```
 
 Builds a `ScanIterator` seeded with `initial`.
@@ -2520,7 +2520,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, matching: (I.Item) -> Bool)
+public init(inner: I, where: (I.Item) -> Bool)
 ```
 
 Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
@@ -2733,7 +2733,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, matching: (I.Item) -> Bool)
+public init(inner: I, where: (I.Item) -> Bool)
 ```
 
 Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.

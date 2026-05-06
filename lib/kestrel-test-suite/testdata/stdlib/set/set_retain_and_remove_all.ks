@@ -4,7 +4,7 @@
 module Test
 
         func main() -> lang.i64 {
-            // Test retain(matching:)
+            // Test retain(where:)
             var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(1);
             let _ = s.insert(2);
@@ -12,14 +12,14 @@ module Test
             let _ = s.insert(4);
             let _ = s.insert(5);
 
-            s.retain(matching: { (x) in x % 2 == 0 });
+            s.retain(where: { (x) in x % 2 == 0 });
             if s.count != 2 { return 1 }
             if s.contains(2) == false { return 2 }
             if s.contains(4) == false { return 3 }
             if s.contains(1) { return 4 }
             if s.contains(3) { return 5 }
 
-            // Test removeAll(matching:)
+            // Test removeAll(where:)
             var s2 = std.collections.Set[std.numeric.Int64]();
             let _ = s2.insert(1);
             let _ = s2.insert(2);
@@ -27,7 +27,7 @@ module Test
             let _ = s2.insert(4);
             let _ = s2.insert(5);
 
-            s2.removeAll(matching: { (x) in x % 2 == 0 });
+            s2.removeAll(where: { (x) in x % 2 == 0 });
             if s2.count != 3 { return 6 }
             if s2.contains(1) == false { return 7 }
             if s2.contains(3) == false { return 8 }
