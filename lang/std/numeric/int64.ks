@@ -11,7 +11,9 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
@@ -81,6 +83,9 @@ public struct Int64:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
@@ -337,6 +342,21 @@ public struct Int64:
         ClosedRange[Int64](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[Int64] {
+        RangeFrom[Int64](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[Int64] {
+        RangeUpTo[Int64](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[Int64] {
+        RangeThrough[Int64](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -366,6 +386,9 @@ public struct Int64:
     type RightShift.Output = Int64
     type RangeConstructible.Output = Range[Int64]
     type ClosedRangeConstructible.Output = ClosedRange[Int64]
+    type RangeFromConstructible.Output = RangeFrom[Int64]
+    type RangeUpToConstructible.Output = RangeUpTo[Int64]
+    type RangeThroughConstructible.Output = RangeThrough[Int64]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

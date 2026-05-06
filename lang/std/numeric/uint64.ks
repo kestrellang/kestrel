@@ -11,7 +11,9 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
@@ -81,6 +83,9 @@ public struct UInt64:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
@@ -338,6 +343,21 @@ public struct UInt64:
         ClosedRange[UInt64](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[UInt64] {
+        RangeFrom[UInt64](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[UInt64] {
+        RangeUpTo[UInt64](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[UInt64] {
+        RangeThrough[UInt64](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -367,6 +387,9 @@ public struct UInt64:
     type RightShift.Output = UInt64
     type RangeConstructible.Output = Range[UInt64]
     type ClosedRangeConstructible.Output = ClosedRange[UInt64]
+    type RangeFromConstructible.Output = RangeFrom[UInt64]
+    type RangeUpToConstructible.Output = RangeUpTo[UInt64]
+    type RangeThroughConstructible.Output = RangeThrough[UInt64]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

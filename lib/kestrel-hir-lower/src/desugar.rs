@@ -167,6 +167,43 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
+    // ===== Postfix operators =====
+
+    /// Desugar a postfix operator to a ProtocolCall (e.g. `x..` → `x.rangeFrom()`).
+    pub(crate) fn desugar_postfix_op(
+        &mut self,
+        body: &AstBody,
+        op: &PostfixOp,
+        operand: ExprId,
+        span: &Span,
+    ) -> HirExprId {
+        let lowered_operand = self.lower_expr(body, operand);
+
+        if let Some((proto, method)) = lookup_postfix_op(op)
+            && let Some(protocol) = self.resolve_builtin(proto)
+        {
+            return self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_operand,
+                protocol,
+                method: HirName::name(method),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            });
+        }
+
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "unsupported postfix operator '{}'",
+                    postfix_op_symbol(op)
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
+        self.alloc_expr(HirExpr::Error { span: span.clone() })
+    }
+
     // ===== Compound assignment =====
 
     /// Desugar compound assignment (+=, -=, etc.) to a ProtocolCall, wrapped
@@ -1249,6 +1286,15 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::BitNot => "!",
         UnaryOp::LogicalNot => "not",
         UnaryOp::Pos => "+",
+        UnaryOp::RangeUpTo => "..<",
+        UnaryOp::RangeThrough => "..=",
+    }
+}
+
+fn postfix_op_symbol(op: &PostfixOp) -> &'static str {
+    match op {
+        PostfixOp::Unwrap => "!",
+        PostfixOp::RangeFrom => "..",
     }
 }
 

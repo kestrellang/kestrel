@@ -11,7 +11,9 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
@@ -81,6 +83,9 @@ public struct Int16:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
     Convertible[Int8],
     Convertible[Int32],
     Convertible[Int64],
@@ -337,6 +342,21 @@ public struct Int16:
         ClosedRange[Int16](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[Int16] {
+        RangeFrom[Int16](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[Int16] {
+        RangeUpTo[Int16](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[Int16] {
+        RangeThrough[Int16](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -366,6 +386,9 @@ public struct Int16:
     type RightShift.Output = Int16
     type RangeConstructible.Output = Range[Int16]
     type ClosedRangeConstructible.Output = ClosedRange[Int16]
+    type RangeFromConstructible.Output = RangeFrom[Int16]
+    type RangeUpToConstructible.Output = RangeUpTo[Int16]
+    type RangeThroughConstructible.Output = RangeThrough[Int16]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

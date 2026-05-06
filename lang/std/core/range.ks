@@ -8,6 +8,8 @@ import std.numeric.(Steppable)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 
+// ----- Binary range construction protocols -----
+
 /// Raw protocol backing the half-open `..<` operator (`start..<end`).
 ///
 /// `Output` is the range type produced — usually `Range[Self]`, but
@@ -207,5 +209,183 @@ public struct ClosedRange[T]: Equatable, Iterable where T: Steppable, T: Compara
     /// Returns a fresh iterator over the range.
     public func iter() -> ClosedRangeIterator[T] {
         ClosedRangeIterator(current: self.start, end: self.end, finished: false)
+    }
+}
+
+// ----- Partial range construction protocols -----
+
+/// Protocol backing the postfix `..` operator (`start..`).
+///
+/// `Output` is the range type produced — usually `RangeFrom[Self]`.
+@builtin(.RangeFromOperatorProtocol)
+public protocol RangeFromConstructible {
+    type Output
+
+    /// Builds the partial range `[self, +∞)`.
+    @builtin(.RangeFromOperatorMethod)
+    func rangeFrom() -> Output
+}
+
+/// Protocol backing the prefix `..<` operator (`..<end`).
+///
+/// `Output` is the range type produced — usually `RangeUpTo[Self]`.
+@builtin(.RangeUpToOperatorProtocol)
+public protocol RangeUpToConstructible {
+    type Output
+
+    /// Builds the partial range `(-∞, self)`.
+    @builtin(.RangeUpToOperatorMethod)
+    func rangeUpTo() -> Output
+}
+
+/// Protocol backing the prefix `..=` operator (`..=end`).
+///
+/// `Output` is the range type produced — usually `RangeThrough[Self]`.
+@builtin(.RangeThroughOperatorProtocol)
+public protocol RangeThroughConstructible {
+    type Output
+
+    /// Builds the partial range `(-∞, self]`.
+    @builtin(.RangeThroughOperatorMethod)
+    func rangeThrough() -> Output
+}
+
+// ----- Partial range types -----
+
+/// Iterator over a `RangeFrom[T]`. Yields successive values via
+/// `Steppable.successor()` with no upper bound — callers must `break`.
+///
+/// # Representation
+///
+/// Single value: `current` (next yield).
+public struct RangeFromIterator[T]: Iterator where T: Steppable, T: Comparable {
+    type Item = T
+
+    private var current: T
+
+    /// @name From Start
+    public init(current current: T) {
+        self.current = current;
+    }
+
+    /// Yields the next value. Never returns `.None` — infinite iterator.
+    public mutating func next() -> T? {
+        let value = self.current;
+        self.current = self.current.successor();
+        .Some(value)
+    }
+}
+
+/// Partial range `[start, +∞)` — produced by the postfix `..` operator.
+///
+/// `RangeFrom` is `Iterable` and produces an infinite iterator. Use
+/// `break` to terminate iteration.
+///
+/// # Examples
+///
+/// ```
+/// for i in 0.. {
+///     if i >= 5 { break; }
+///     print(i)
+/// }
+/// (10..).contains(42)   // true
+/// ```
+///
+/// # Representation
+///
+/// Single value: `start`. No heap allocation.
+public struct RangeFrom[T]: Equatable, Iterable where T: Steppable, T: Comparable {
+    type Item = T
+    type TargetIterator = RangeFromIterator[T]
+
+    /// Lower bound — included in the range.
+    public var start: T
+
+    /// @name From Start
+    public init(start: T) {
+        self.start = start;
+    }
+
+    /// Returns `true` iff `value >= start`.
+    public func contains(value: T) -> Bool {
+        value >= self.start
+    }
+
+    /// Structural equality.
+    public func isEqual(to other: RangeFrom[T]) -> Bool {
+        self.start == other.start
+    }
+
+    /// Returns a fresh infinite iterator starting at `start`.
+    public func iter() -> RangeFromIterator[T] {
+        RangeFromIterator(current: self.start)
+    }
+}
+
+/// Partial range `(-∞, end)` — produced by the prefix `..<` operator.
+///
+/// Not `Iterable` — there is no start to iterate from.
+///
+/// # Examples
+///
+/// ```
+/// (..<10).contains(5)    // true
+/// (..<10).contains(10)   // false
+/// ```
+///
+/// # Representation
+///
+/// Single value: `end`. No heap allocation.
+public struct RangeUpTo[T]: Equatable where T: Comparable {
+    /// Upper bound — excluded from the range.
+    public var end: T
+
+    /// @name From End
+    public init(end: T) {
+        self.end = end;
+    }
+
+    /// Returns `true` iff `value < end`.
+    public func contains(value: T) -> Bool {
+        value < self.end
+    }
+
+    /// Structural equality.
+    public func isEqual(to other: RangeUpTo[T]) -> Bool {
+        self.end == other.end
+    }
+}
+
+/// Partial range `(-∞, end]` — produced by the prefix `..=` operator.
+///
+/// Not `Iterable` — there is no start to iterate from.
+///
+/// # Examples
+///
+/// ```
+/// (..=10).contains(10)   // true
+/// (..=10).contains(11)   // false
+/// ```
+///
+/// # Representation
+///
+/// Single value: `end`. No heap allocation.
+public struct RangeThrough[T]: Equatable where T: Comparable {
+    /// Upper bound — included in the range.
+    public var end: T
+
+    /// @name From End
+    public init(end: T) {
+        self.end = end;
+    }
+
+    /// Returns `true` iff `value <= end`.
+    public func contains(value: T) -> Bool {
+        value <= self.end
+    }
+
+    /// Structural equality.
+    public func isEqual(to other: RangeThrough[T]) -> Bool {
+        self.end == other.end
     }
 }

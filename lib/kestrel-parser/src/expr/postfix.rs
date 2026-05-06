@@ -197,7 +197,19 @@ pub(super) fn postfix_bang_parser<'tokens>()
         .boxed()
 }
 
-/// Combined postfix operator parser: call | member-access | postfix-bang.
+/// Parser for the postfix `..` range-from operator.
+pub(super) fn postfix_range_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, PostfixOp, ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::DotDot).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+        .map(|(tok, span)| PostfixOp::PostfixOperator {
+            operator: tok,
+            operator_span: span,
+        })
+        .boxed()
+}
+
+/// Combined postfix operator parser: call | member-access | postfix-bang | postfix-range.
 pub(super) fn postfix_op_parser<'tokens, P>(
     expr: P,
 ) -> impl Parser<'tokens, ParserInput<'tokens>, PostfixOp, ParserExtra<'tokens>> + Clone
@@ -207,6 +219,7 @@ where
     arg_list_parser(expr)
         .or(member_access_parser())
         .or(postfix_bang_parser())
+        .or(postfix_range_parser())
         .boxed()
 }
 

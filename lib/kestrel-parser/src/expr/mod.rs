@@ -223,7 +223,7 @@ enum ElseClauseVariant {
 // `PostfixOp` lives in `postfix.rs` and is imported above.
 
 /// Helper enum for postfix operations in condition expressions
-/// (calls and member access only - no postfix operators like !)
+/// (calls, member access, and postfix range `..`)
 #[derive(Debug, Clone)]
 enum ConditionPostfixOp {
     /// Function call: (args)
@@ -242,6 +242,11 @@ enum ConditionPostfixOp {
     },
     /// Tuple index: .0, .1
     TupleIndex { dot: Span, index: Span },
+    /// Postfix operator (e.g. `..` for range-from)
+    PostfixOperator {
+        operator: Token,
+        operator_span: Span,
+    },
 }
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon).
@@ -701,7 +706,17 @@ pub fn expr_parser<'tokens>()
                             type_args,
                         },
                     })
-            });
+            })
+            .or(postfix::postfix_range_parser().map(|op| match op {
+                PostfixOp::PostfixOperator {
+                    operator,
+                    operator_span,
+                } => ConditionPostfixOp::PostfixOperator {
+                    operator,
+                    operator_span,
+                },
+                _ => unreachable!(),
+            }));
 
         let condition_postfix = condition_primary
             .clone()
@@ -734,6 +749,14 @@ pub fn expr_parser<'tokens>()
                         arguments,
                         commas,
                         rparen,
+                    },
+                    ConditionPostfixOp::PostfixOperator {
+                        operator,
+                        operator_span,
+                    } => ExprVariant::Postfix {
+                        operand: Box::new(acc),
+                        operator,
+                        operator_span,
                     },
                 })
             });
