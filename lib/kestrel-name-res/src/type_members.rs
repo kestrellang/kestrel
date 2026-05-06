@@ -179,14 +179,18 @@ fn collect_type_members(
 }
 
 /// A "member" is anything a type can be queried for: methods (Callable),
-/// fields/properties (Gettable), or type aliases (including qualified
-/// forms like `type Equal.Output = Bool`, which bind an associated type
-/// for a specific protocol the type conforms to).
+/// fields/properties (Gettable), type aliases (including qualified forms
+/// like `type Equal.Output = Bool`, which bind an associated type for a
+/// specific protocol the type conforms to), or enum cases (`.None`-style
+/// implicit member resolution depends on these surfacing).
 fn is_member(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     if ctx.get::<Callable>(entity).is_some() || ctx.get::<Gettable>(entity).is_some() {
         return true;
     }
-    ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias)
+    matches!(
+        ctx.get::<NodeKind>(entity),
+        Some(NodeKind::TypeAlias | NodeKind::EnumCase)
+    )
 }
 
 /// Match an entity against a query name. Mirrors `protocol_members::member_name_matches`:

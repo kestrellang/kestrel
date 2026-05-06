@@ -34,3 +34,5 @@ examples/weather/weather
 # directory and file/symlink forms so a stray `ln -s` can't be staged.
 /external
 /external/
+
+.wrangler

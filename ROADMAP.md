@@ -661,50 +661,57 @@ See [docs/memory-model/](docs/memory-model/) for the memory model specification.
 
 - [x] Doc comments - `///` with structured sections
 
-# Preview 2: Types & Expressiveness (0.16–0.20)
+# Preview 2: Types & Expressiveness (0.16–0.23)
 
-## Version 0.16: Boxing & Existentials
+## Version 0.16: Opaque Types & Language Gaps
 
 - [ ] Opaque types (`some Protocol`)
+- [ ] Computed properties allowed in protocol extensions
+- [ ] Name collisions between methods and computed properties
+- [ ] Keywords as labels
+- [ ] `some` patterns
+- [ ] Null patterns
+- [ ] Chained guards
+- [ ] Normal guard
+- [ ] `Self` constructors
+- [ ] `..n` and `n..` ranges
+- [ ] Optional constructors, throwing constructors
+
+## Version 0.17: Boxing & Existentials
+
 - [ ] Existential types (`any Protocol`)
   - Boxed via `GlobalAllocator`, vtable with drop/size/align + protocol methods
   - `any P` is non-Copyable; `Cloneable` requires `P: Cloneable`
 - [ ] Escaping closures — box captures when closure outlives its frame
 - [ ] Indirect enums — heap-box `indirect case` variant payloads via `GlobalAllocator`
 
-Bugfixes:
-- Computed properties allowed in protocol extensions
-- Name collisions between methods and computed properties
-- Keywords as labels
-- some patterns
-- and in guard
-- normal guard
-- Self constructors
-- ..n and n.. ranges
-- Optional constructors, throwing constructors
-
-## Version 0.17: Derives, Attributes & Sugar
+## Version 0.18: Attribute System
 
 - [ ] Attribute system infrastructure — parsed, propagated through AST/HIR/MIR
 - [ ] Auto-derived protocols — `@derive(Equatable, Hashable, Cloneable, Comparable)`
 - [ ] Built-in attributes — `@inline`, `@deprecated`
+
+## Version 0.19: Expression Sugar
+
 - [ ] Optional chaining
 - [ ] Pipe operator (`|>`)
 - [ ] Placeholder arguments (`_` for partial application)
 
-## Version 0.18: Properties & Conditional Conformance
+## Version 0.20: Properties & Conditional Conformance
 
 - [ ] Lazy properties — `lazy let expensive = compute()`
 - [ ] Property observers — `willSet` / `didSet` blocks
 - [ ] `mutating get` on computed properties and subscripts — lets a getter modify `self` (value types only); call site requires a `var` receiver. Unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)` (removed 2026-04-21 because without `mutating get` the documented "insert default on miss" contract can't be honored). See `test-errors-fixed.md` → "Dictionary `subscript(key:inserting:)` removed".
 - [ ] Conditional conformance — e.g. `Box[T]: Copyable where T: Copyable`
 
-## Version 0.19: Standard Library & Polish
+## Version 0.21: Standard Library & Polish
 
 - [ ] Standard library expansion and depth
-- [ ] Language refinements informed by 0.16–0.18 usage
+- [ ] Improve compiler speed
+- [ ] Speed up stdlib
+- [ ] Language refinements informed by 0.16–0.20 usage
 
-## Version 0.20: Class Runtime (Preview 2 Milestone)
+## Version 0.22: Class Runtime
 
 - [ ] Class declarations with reference semantics
 - [ ] Reference counting with control blocks
@@ -713,46 +720,51 @@ Bugfixes:
 - [ ] `@weak` / `@unowned` reference attributes
 - [ ] `@final` classes
 
-# Preview 3: Concurrency (0.21–0.25)
+## Version 0.23: Refinements (Preview 2 Milestone)
+
+- [ ] Bug fixes and rough edges from 0.16–0.22 usage
+- [ ] Class runtime hardening informed by real-world usage
+- [ ] Documentation and stdlib polish
+- [ ] Stabilization of Preview 2 surface area
+
+# Preview 3: Concurrency
 
 Built on an effects-lite architecture: async, yield, and throw are modeled as
 capabilities provided by handlers. Internal design is compatible with `using`/`given`
 generalization in Preview 4. Prepares the ground for full algebraic effects in 3.0.
 
-## Version 0.21: Generators
+### Generators
 
 - [ ] `generator` / `yield` syntax
 - [ ] CPS / state-machine lowering
 - [ ] Lazy sequences via generator functions
 
-## Version 0.22: Async/Await Foundations
+### Async/Await
 
 - [ ] `async` / `await` syntax
 - [ ] Executor and runtime
 - [ ] `Future` type
 - [ ] Built on generator state-machine infrastructure
 
-## Version 0.23: Atomics & Memory Model
+### Atomics & Memory Model
 
 - [ ] Atomic operations and ordering semantics
 - [ ] Memory model for concurrent access
 - [ ] `send` / `sync` capabilities for thread safety
 
-## Version 0.24: Structured Concurrency & Async Iteration
+### Structured Concurrency & Async Iteration
 
 - [ ] Task groups and cancellation
 - [ ] Async generators and async sequences
 - [ ] Async standard library APIs
 
-## Version 0.25: Concurrency Completeness (Preview 3 Milestone)
+### Concurrency Completeness (Preview 3 Milestone)
 
 - [ ] Actors or concurrency model refinement
 - [ ] Multithreading primitives
 - [ ] Concurrency testing and debugging tools
 
-# Preview 4: Expressiveness & Ecosystem (0.26–0.30)
-
-## Versions 0.26–0.30
+# Preview 4: Expressiveness & Ecosystem
 
 ### Implicits
 
@@ -767,7 +779,7 @@ generalization in Preview 4. Prepares the ground for full algebraic effects in 3
 - [ ] Standard library shape and depth
 - [ ] Ecosystem tooling and refinements
 
-# Release Candidate (0.31–1.0)
+# Release Candidate
 
 - [ ] LLVM backend
 - [ ] WebAssembly target

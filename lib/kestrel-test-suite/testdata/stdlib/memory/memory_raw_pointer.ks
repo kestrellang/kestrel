@@ -4,13 +4,13 @@
 module Test
 
         func main() -> lang.i64 {
-            // Test nilPointer
-            let nil = std.memory.RawPointer.nilPointer();
-            if nil.isNull == false { return 1 }
+            // Test nullPointer
+            let nullPtr = std.memory.RawPointer.nullPointer();
+            if nullPtr.isNull == false { return 1 }
 
-            // Test address of nil pointer is 0
+            // Test address of null pointer is 0
             let zeroAddr: std.numeric.UInt64 = 0;
-            if nil.address != zeroAddr { return 2 }
+            if nullPtr.address != zeroAddr { return 2 }
 
             // Create a non-null pointer from an array
             var arr = std.collections.Array[std.numeric.Int64]();
@@ -28,8 +28,8 @@ module Test
             // Test equals - same pointer should be equal
             if raw.isEqual(to: raw) == false { return 5 }
 
-            // Test equals - nil vs non-nil should not be equal
-            if raw.isEqual(to: nil) { return 6 }
+            // Test equals - null vs non-null should not be equal
+            if raw.isEqual(to: nullPtr) { return 6 }
 
             // Test offset
             let offsetPtr = raw.offset(by: 8);

@@ -13,7 +13,9 @@ use kestrel_hecs::Entity;
 use kestrel_mir::{MethodBinding, MirTy, TypeParamDef, WitnessDef, WitnessMethodKey};
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
 use kestrel_name_res::extensions::ExtensionsFor;
-use kestrel_name_res::{ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers};
+use kestrel_name_res::{
+    ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers, TypeMemberSource, TypeMembersByName,
+};
 
 use crate::context::LowerCtx;
 use crate::ty::{lower_type, resolve_callable_types, resolve_type_annotation};
@@ -200,37 +202,43 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
             // the first one.
             let expected_param_types = expected_param_types_for(ctx, member.entity, &proto_subst);
 
-            // Search the type's own children first
-            if let Some(impl_func) = find_method_by_name(
-                ctx,
+            // Discover type-side candidates (direct children + own extensions)
+            // via the unified TypeMembersByName query. Setter dispatch keys off
+            // the field's base name; the setter resolver finds the Setter child
+            // of the Field below.
+            let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
+            let candidates = ctx.query.query(TypeMembersByName {
                 type_entity,
-                method_name,
-                Some(&method_key.labels),
-                expected_param_types.as_deref(),
-            ) {
-                ctx.register_name(impl_func);
-                witness.bind_method(method_key.clone(), MethodBinding::direct(impl_func, vec![]));
-                continue;
-            }
+                name: lookup_name.to_string(),
+                context: type_entity,
+                root: ctx.root,
+            });
+            let type_side: Vec<Entity> = candidates
+                .iter()
+                .filter(|tm| {
+                    matches!(
+                        tm.source,
+                        TypeMemberSource::Direct | TypeMemberSource::Extension(_)
+                    )
+                })
+                .map(|tm| tm.entity)
+                .collect();
 
-            // Search extensions on the type
-            let mut found = false;
-            for &ext in &extensions {
-                if let Some(impl_func) = find_method_by_name(
+            let impl_func = if method_name.ends_with(".set") {
+                find_setter_among(ctx, &type_side)
+            } else {
+                find_impl_among(
                     ctx,
-                    ext,
+                    &type_side,
                     method_name,
                     Some(&method_key.labels),
                     expected_param_types.as_deref(),
-                ) {
-                    ctx.register_name(impl_func);
-                    witness
-                        .bind_method(method_key.clone(), MethodBinding::direct(impl_func, vec![]));
-                    found = true;
-                    break;
-                }
-            }
-            if found {
+                )
+            };
+
+            if let Some(impl_func) = impl_func {
+                ctx.register_name(impl_func);
+                witness.bind_method(method_key.clone(), MethodBinding::direct(impl_func, vec![]));
                 continue;
             }
 
@@ -358,75 +366,47 @@ fn protocol_member_name(ctx: &LowerCtx, member: &ProtocolMember) -> String {
         })
 }
 
-/// Find a method implementation by name among an entity's children.
+/// Find a method implementation among a list of candidate entities.
 ///
-/// Initializers and subscripts are disambiguated first by parameter labels,
-/// then by parameter types (when `expected_param_types` is provided). Param-
-/// type matching is what distinguishes `init(from: Int8)` from
-/// `init(from: Int16)` so witnesses for `Convertible[Int8]` and
-/// `Convertible[Int16]` pick the right overload.
-fn find_method_by_name(
+/// Two-pass: first with parameter-type matching (distinguishes
+/// `init(from: Int8)` from `init(from: Int16)` so witnesses for
+/// `Convertible[Int8]` vs `[Int16]` pick the right overload), then
+/// label-only as fallback for members whose param types don't exist
+/// in MirTy form (e.g. associated-type params that reference `Self`).
+fn find_impl_among(
     ctx: &mut LowerCtx,
-    parent: Entity,
+    candidates: &[Entity],
     method_name: &str,
     required_labels: Option<&[Option<String>]>,
     expected_param_types: Option<&[MirTy]>,
 ) -> Option<Entity> {
-    // `<name>.set`: locate the Field by its base name, then return its Setter child.
-    if let Some(field_name) = method_name.strip_suffix(".set") {
-        let children: Vec<Entity> = ctx.world.children_of(parent).to_vec();
-        for child in children {
-            let Some(kind) = ctx.world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if *kind != NodeKind::Field {
-                continue;
-            }
-            let name = ctx
-                .world
-                .get::<Name>(child)
-                .map(|n| n.0.as_str())
-                .unwrap_or_default();
-            if name != field_name {
-                continue;
-            }
-            let grandchildren: Vec<Entity> = ctx.world.children_of(child).to_vec();
-            for gc in grandchildren {
-                if ctx.world.get::<NodeKind>(gc) == Some(&NodeKind::Setter) {
-                    return Some(gc);
-                }
-            }
-        }
-        return None;
-    }
-
-    let children: Vec<Entity> = ctx.world.children_of(parent).to_vec();
-
-    // Pass 1: exact match (name + labels + param types). This picks the
-    // right overload when multiple candidates share labels but differ in
-    // parameter types (e.g. `init(from: Int8)` vs `init(from: Int16)`).
-    for child in &children {
-        if matches_candidate(
-            ctx,
-            *child,
-            method_name,
-            required_labels,
-            expected_param_types,
-        ) {
-            return Some(*child);
+    for &c in candidates {
+        if matches_candidate(ctx, c, method_name, required_labels, expected_param_types) {
+            return Some(c);
         }
     }
-
-    // Pass 2: fall back to label-only / name-only matching. Covers members
-    // whose param types don't exist in MirTy form (e.g. associated-type
-    // params that reference the protocol's `Self`), and keeps behavior
-    // unchanged for non-overloaded methods.
-    for child in &children {
-        if matches_candidate(ctx, *child, method_name, required_labels, None) {
-            return Some(*child);
+    for &c in candidates {
+        if matches_candidate(ctx, c, method_name, required_labels, None) {
+            return Some(c);
         }
     }
+    None
+}
 
+/// For setter dispatch (`<field>.set`): pick the Setter child of the first
+/// Field candidate. Field candidates come from `TypeMembersByName` keyed on
+/// the field's base name (Fields carry `Gettable`, so they surface there).
+fn find_setter_among(ctx: &LowerCtx, candidates: &[Entity]) -> Option<Entity> {
+    for &c in candidates {
+        if ctx.world.get::<NodeKind>(c) != Some(&NodeKind::Field) {
+            continue;
+        }
+        for &gc in ctx.world.children_of(c) {
+            if ctx.world.get::<NodeKind>(gc) == Some(&NodeKind::Setter) {
+                return Some(gc);
+            }
+        }
+    }
     None
 }
 

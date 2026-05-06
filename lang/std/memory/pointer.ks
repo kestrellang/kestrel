@@ -20,7 +20,7 @@ import std.collections.(Slice)
 /// # Examples
 ///
 /// ```
-/// let p = RawPointer.nilPointer();
+/// let p = RawPointer.nullPointer();
 /// p.isNull                                // true
 /// let typed: Pointer[Int64] = p.cast[Int64]()
 /// ```
@@ -47,7 +47,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
     }
 
     /// Returns the canonical null pointer.
-    public static func nilPointer() -> RawPointer {
+    public static func nullPointer() -> RawPointer {
         RawPointer(raw: lang.ptr_null())
     }
 

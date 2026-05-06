@@ -2349,6 +2349,32 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 type_args = self.infer_parent_type_args(func_entity, expr_id, callee_expr);
             }
 
+            // Receiver-prepend rules for the typed-resolution branch:
+            //   - Init: emit_call_maybe_init allocates and prepends self.
+            //   - Subscript / computed-property: callee_expr IS the receiver,
+            //     so we lower it and prepend it as the first arg.
+            //   - Plain function call: no receiver.
+            // This applies to BOTH the protocol-witness and direct-call arms
+            // below — a protocol-extension subscript still needs its receiver,
+            // even though dispatch goes through a witness.
+            let has_receiver = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Callable>(func_entity)
+                .is_some_and(|c| c.receiver.is_some());
+            let is_init = self.is_init_function(func_entity).is_some();
+            let mut call_args = call_args;
+            if has_receiver && !is_init {
+                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let receiver_val = self.lower_expr(callee_expr);
+                let receiver_arg = if receiver_ty.is_trivially_copyable() {
+                    CallArg::copy(receiver_val)
+                } else {
+                    CallArg::borrow(receiver_val)
+                };
+                call_args.insert(0, receiver_arg);
+            }
+
             // Protocol method → Witness dispatch
             if let Some(protocol) = self.find_protocol_for_method(func_entity) {
                 let method_key = self.witness_method_key_of(func_entity);
@@ -2362,27 +2388,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 return self.emit_call_maybe_init(callee, call_args, result_ty);
             }
 
-            // If the resolved function has a receiver (subscript/computed property call),
-            // the callee expression is the receiver — add it as the first arg
-            let mut call_args = call_args;
-            let has_receiver = self
-                .ctx
-                .world
-                .get::<kestrel_ast_builder::Callable>(func_entity)
-                .is_some_and(|c| c.receiver.is_some());
-            // Init functions handle their own self-allocation via emit_call_maybe_init
-            let is_init = self.is_init_function(func_entity).is_some();
             if has_receiver && !is_init {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
-                let receiver_val = self.lower_expr(callee_expr);
-                let receiver_arg = if receiver_ty.is_trivially_copyable() {
-                    CallArg::copy(receiver_val)
-                } else {
-                    CallArg::borrow(receiver_val)
-                };
                 let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
                 let callee = Callee::method(func_entity, type_args, receiver_ty);
-                call_args.insert(0, receiver_arg);
                 return self.emit_call(callee, call_args, result_ty);
             }
 
