@@ -457,6 +457,17 @@ pub enum EscapeErrorKind {
         value: String,
         reason: UnicodeEscapeErrorReason,
     },
+    /// A line in a multi-line string body has less indentation than the
+    /// closing `"""` delimiter.
+    MultilineUnderIndented,
+    /// Multi-line string opener `"""` must be followed immediately by a
+    /// newline.
+    MultilineMissingLeadingNewline,
+    /// Multi-line string closer `"""` must be on its own line (only
+    /// whitespace before it on that line).
+    MultilineMissingTrailingNewline,
+    /// String literal has no closing delimiter.
+    UnterminatedString,
 }
 
 #[derive(Clone, Debug, PartialEq)]

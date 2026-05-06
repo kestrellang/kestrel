@@ -9,6 +9,7 @@
 //! Ported from lib1's `process_string_escapes`
 //! (lib/kestrel-semantic-tree-binder/src/body_resolver/expressions.rs).
 
+use kestrel_ast_builder::string_token::{self, MultilineErrorKind};
 use kestrel_hir::body::{EscapeError, EscapeErrorKind, UnicodeEscapeErrorReason};
 use kestrel_span::Span;
 
@@ -275,41 +276,77 @@ fn decode_unicode_escape(
     }
 }
 
-/// Strip surrounding quotes from a string-literal token and decode escapes.
+/// Strip delimiters from a string-literal token and (for cooked forms)
+/// decode escape sequences.
 ///
-/// Handles both regular `"..."` and triple-quoted raw strings `"""..."""`
-/// (or any `n >= 3` quote count). Raw strings skip escape decoding entirely.
+/// Handles all four forms:
+///   - `"..."`         — single-line cooked; strip 1 quote, decode escapes
+///   - `"""\n...\n"""` — multi-line cooked; indent-strip + decode escapes
+///   - `#"..."#`       — single-line raw; strip pounds + 1 quote, no decode
+///   - `#"""\n...\n"""#` — multi-line raw; indent-strip, no decode
+/// Pound count > 1 is supported for both raw forms (`##"..."##`, etc.).
 pub fn decode_string_literal_token(
     raw: &str,
     file_id: usize,
     literal_start: usize,
 ) -> (String, Vec<EscapeError>) {
-    let leading = raw.chars().take_while(|&c| c == '"').count();
-    if leading >= 3 {
-        // Raw string. The empty-raw-string form `""""""` has every char
-        // as a quote, so `leading` over-counts — when all chars are
-        // quotes, half are openers and half are closers.
-        let trailing = raw.chars().rev().take_while(|&c| c == '"').count();
-        let quote_count = if leading == raw.len() && raw.len() % 2 == 0 {
-            raw.len() / 2
-        } else {
-            leading.min(trailing)
-        };
-        if quote_count >= 3 && raw.len() >= quote_count * 2 {
-            // Raw string — no escape processing.
-            return (
-                raw[quote_count..raw.len() - quote_count].to_string(),
-                Vec::new(),
-            );
+    let form = string_token::classify_string_token(raw);
+
+    if form.body_end < form.body_start {
+        // Defensive — classification should never produce a negative body.
+        return (String::new(), Vec::new());
+    }
+
+    let body = &raw[form.body_start..form.body_end];
+    let body_offset_in_token = form.body_start;
+
+    if form.is_multiline {
+        let processed = string_token::process_multiline_body(
+            body,
+            body_offset_in_token,
+            literal_start,
+        );
+        let mut errors: Vec<EscapeError> = processed
+            .errors
+            .into_iter()
+            .map(|e| multiline_error_to_escape(e, file_id))
+            .collect();
+        if form.is_raw {
+            return (processed.value, errors);
         }
+        // Cooked multi-line: decode escapes on the indent-stripped body.
+        // Note: error spans within the decoded body don't map back to the
+        // original source positions byte-for-byte (indent strip changes
+        // offsets), but they at least point to the same token region.
+        let (value, escape_errs) =
+            decode_string(&processed.value, file_id, literal_start + body_offset_in_token + 1);
+        errors.extend(escape_errs);
+        return (value, errors);
     }
 
-    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-        return decode_string(&raw[1..raw.len() - 1], file_id, literal_start + 1);
+    if form.is_raw {
+        // Single-line raw — no escape processing.
+        return (body.to_string(), Vec::new());
     }
 
-    // Malformed token (no closing quote, etc.) — best-effort decode of the body.
-    decode_string(raw, file_id, literal_start)
+    // Single-line cooked.
+    decode_string(body, file_id, literal_start + body_offset_in_token)
+}
+
+fn multiline_error_to_escape(err: string_token::MultilineError, file_id: usize) -> EscapeError {
+    let kind = match err.kind {
+        MultilineErrorKind::ContentUnderIndented => EscapeErrorKind::MultilineUnderIndented,
+        MultilineErrorKind::MissingLeadingNewline => {
+            EscapeErrorKind::MultilineMissingLeadingNewline
+        },
+        MultilineErrorKind::MissingTrailingNewline => {
+            EscapeErrorKind::MultilineMissingTrailingNewline
+        },
+    };
+    EscapeError {
+        span: Span::new(file_id, err.span_start..err.span_end),
+        kind,
+    }
 }
 
 #[cfg(test)]
@@ -406,20 +443,43 @@ mod tests {
     }
 
     #[test]
-    fn raw_string_skips_escapes() {
-        let (s, errs) = decode_string_literal_token("\"\"\"a\\nb\"\"\"", 0, 0);
+    fn pound_raw_string_skips_escapes() {
+        // `#"a\nb"#` — single-line raw; backslash is literal.
+        let (s, errs) = decode_string_literal_token("#\"a\\nb\"#", 0, 0);
         assert_eq!(s, "a\\nb");
         assert!(errs.is_empty());
     }
 
     #[test]
-    fn interpolation_escape_is_passthrough() {
-        // `\(` is interpolation start — plain string path through this decoder
-        // must not flag it (parser doesn't always convert nested strings to
-        // InterpolatedString). Output preserves the source bytes.
-        let (s, errs) = decode_string("a=\\(x)", 0, 0);
-        assert!(errs.is_empty(), "got {:?}", errs);
-        assert_eq!(s, "a=\\(x)");
+    fn multiline_raw_strips_indent_and_keeps_escapes_literal() {
+        // `#"""\n    a\\nb\n    """#` → "a\\nb" (no escape decoding).
+        let raw = "#\"\"\"\n    a\\nb\n    \"\"\"#";
+        let (s, errs) = decode_string_literal_token(raw, 0, 0);
+        assert!(errs.is_empty(), "errors: {:?}", errs);
+        assert_eq!(s, "a\\nb");
+    }
+
+    #[test]
+    fn multiline_cooked_strips_indent_and_decodes_escapes() {
+        // `"""\n    a\nb\n    """` → "a\nb" (escape `\n` decoded to newline).
+        let raw = "\"\"\"\n    a\\nb\n    \"\"\"";
+        let (s, errs) = decode_string_literal_token(raw, 0, 0);
+        assert!(errs.is_empty(), "errors: {:?}", errs);
+        assert_eq!(s, "a\nb");
+    }
+
+    #[test]
+    fn interpolation_escape_in_decoder_is_invalid() {
+        // The AST builder should reroute interpolation-bearing strings to
+        // `InterpolatedString` before they reach this decoder. If `\(` does
+        // arrive here, that's a bug upstream — record an InvalidEscape so
+        // the analyzer surfaces it.
+        let (_, errs) = decode_string("a=\\(x)", 0, 0);
+        assert_eq!(errs.len(), 1);
+        assert!(matches!(
+            &errs[0].kind,
+            EscapeErrorKind::InvalidEscape { sequence } if sequence == "\\("
+        ));
     }
 
     #[test]

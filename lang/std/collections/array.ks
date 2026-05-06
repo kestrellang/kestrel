@@ -599,9 +599,12 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     }
 
     /// @name From Storage
-    /// Wraps an existing storage box in a new `Array`. Used internally by
-    /// `clone()` and other helpers that already have an `RcBox` in hand.
-    private init(storage storage: RcBox[ArrayStorage[T]]) {
+    /// Wraps an existing storage box in a new `Array`.
+    ///
+    /// Module-internal — used by `clone()`, `ArrayBuilder.build()`, and
+    /// other `std.collections` code that constructs arrays from raw
+    /// storage.
+    init(storage storage: RcBox[ArrayStorage[T]]) {
         self.storage = storage;
     }
 
@@ -2197,31 +2200,9 @@ extend ClosedRange[Int64]: ArrayIndex[T] {
 
 /// `Equatable` and value-based search/dedup operations available when the
 /// element type itself is `Equatable`.
-// contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:):
-// provided by extend Slice[T] where T: Equatable
-//
-// isEqual is restated here because the conformance checker requires it on the
-// conforming type itself (it doesn't currently see methods from protocol
-// extensions on transitive conformers).
-
-extend Array[T]: Equatable where T: Equatable {
-    /// Element-wise equality. O(n).
-    public func isEqual(to other: Array[T]) -> Bool {
-        let selfLen = self.len();
-        let otherLen = other.len();
-        if selfLen != otherLen {
-            return false
-        }
-        let selfPtr = self.ptr();
-        let otherPtr = other.ptr();
-        for i in 0..<selfLen {
-            if selfPtr.offset(by: i).read().isEqual(to: otherPtr.offset(by: i).read()) == false {
-                return false
-            }
-        }
-        true
-    }
-}
+// contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:),
+// isEqual: provided by extend Slice[T] where T: Equatable
+extend Array[T]: Equatable where T: Equatable { }
 
 extend Array[T] where T: Equatable {
     /// Removes the first element equal to `element`. Returns whether a

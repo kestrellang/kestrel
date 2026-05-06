@@ -126,6 +126,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E316",
+        name: "many_arm_string_match",
+        default_severity: Severity::Warning,
+        category: Category::Correctness,
+    },
 ];
 
 fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
@@ -150,7 +156,7 @@ impl BodyCheck for MatchPatternAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
-        for (_id, expr) in cx.hir.exprs.iter() {
+        for (match_id, expr) in cx.hir.exprs.iter() {
             let HirExpr::Match {
                 scrutinee,
                 arms,
@@ -177,9 +183,73 @@ impl BodyCheck for MatchPatternAnalyzer {
                 // Or-pattern binding-name consistency.
                 check_or_consistency(cx, arm.pattern, &mut diags);
             }
+
+            // E316: warn on byte-equality-heavy string matches. Each literal
+            // arm becomes a `Matchable.matches` call at runtime, so a long
+            // chain is `O(arms × len)` — past a small threshold an `if/else if`
+            // chain is just as readable and conveys the cost up front.
+            if scrut_ty.is_some_and(|ty| is_string_type(cx, ty)) {
+                let lit_count: usize = arms
+                    .iter()
+                    .map(|arm| count_string_literal_alts(cx, arm.pattern))
+                    .sum();
+                if lit_count > MANY_STRING_ARM_THRESHOLD {
+                    let d = descriptor("E316");
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: d.id,
+                        severity: d.default_severity,
+                        message: format!(
+                            "match on `String` with {} literal arms does byte-equality \
+                             per arm (O(arms × len))",
+                            lit_count
+                        ),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, match_id),
+                            message: "consider an `if`/`else if` chain on `==` instead".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                }
+            }
         }
 
         diags
+    }
+}
+
+/// E316 fires once a match has more than this many string-literal alternatives.
+/// Chosen to allow small finite-tag lookups (status codes, tokens) but flag
+/// switch-table-style use where a pre-built map or `if`-chain communicates
+/// intent better.
+const MANY_STRING_ARM_THRESHOLD: usize = 4;
+
+/// Returns true if `ty` is the stdlib `String` type. Match-by-name uses the
+/// entity's `Name` component (same idiom as `describe_named`/`is_named_enum`).
+fn is_string_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> bool {
+    let ResolvedTy::Named { entity, .. } = ty else {
+        return false;
+    };
+    cx.query
+        .get::<Name>(*entity)
+        .is_some_and(|n| n.0 == "String")
+}
+
+/// Count the number of *string-literal* leaves directly under an arm pattern.
+/// Descends into or-patterns and `@`-bindings (each branch the user wrote
+/// counts as one runtime byte-equality call); other shapes contribute 0.
+fn count_string_literal_alts(cx: &BodyContext<'_>, pat: HirPatId) -> usize {
+    match &cx.hir.pats[pat] {
+        HirPat::Literal {
+            value: HirLiteral::String { .. },
+            ..
+        } => 1,
+        HirPat::Or { alternatives, .. } => alternatives
+            .iter()
+            .map(|&p| count_string_literal_alts(cx, p))
+            .sum(),
+        HirPat::At { subpattern, .. } => count_string_literal_alts(cx, *subpattern),
+        _ => 0,
     }
 }
 

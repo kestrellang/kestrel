@@ -218,6 +218,32 @@ type Handler = (Int64) -> Bool;
 type Pair[T] = (T, T);
 ```
 
+### String Forms
+
+| Form | Multi-line? | Escapes? | Interpolation? |
+|---|---|---|---|
+| `"..."` | no | yes | yes |
+| `"""\n...\n"""` | **yes** (Swift-style indent strip from closing `"""` column) | yes | yes |
+| `#"..."#` | no | no | no |
+| `#"""\n...\n"""#` | yes | no | no |
+| `##"..."##`, `##"""\n...\n"""##`, etc. | escalate pound count to embed `"#`, `"##`, etc. literally | no | no |
+
+Multi-line cooked rules: the opening `"""` must be followed immediately by `\n`; the closing `"""` must be on its own line (only whitespace before it). The closing line's indentation column defines the strip prefix — every content line must start with at least that whitespace, otherwise E704.
+
+`#`-prefixed forms are **fully raw** — no escapes, no interpolation, no `\#(...)` escalator. Use them for embedded source (regex, HTML, CSS, JSON, JS) where backslashes and quotes shouldn't be touched. Pick the smallest pound count whose closer (`"#`, `"##`, …) doesn't appear in the body.
+
+```kestrel
+let html  = ##"<a href="/x" class="big">"##;     // single-line raw
+let regex = #"\d{3}-\d{4}"#;                     // single-line raw
+let block = """
+    line one
+    line two
+    """;                                          // multi-line cooked → "line one\nline two"
+let css   = ##"""
+*{box-sizing:border-box}
+"""##;                                            // multi-line raw
+```
+
 ### String Interpolation
 
 ```kestrel
@@ -228,7 +254,7 @@ let hex = "Code: \(code:08x)";         // zero-pad, width 8, hex
 let debug = "\(value:?)";              // debug format
 ```
 
-Format specifiers: `>` right-align, `<` left-align, `^` center, `0` zero-pad, `x`/`X` hex, `b` binary, `o` octal, `.n` precision. Raw strings (`"""..."""`) do **not** support interpolation.
+Format specifiers: `>` right-align, `<` left-align, `^` center, `0` zero-pad, `x`/`X` hex, `b` binary, `o` octal, `.n` precision. Interpolation works in both single-line and multi-line cooked strings (`"..."` and `"""..."""`); raw forms (`#"..."#` etc.) do **not** support interpolation.
 
 ## Protocols
 

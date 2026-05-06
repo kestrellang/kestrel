@@ -54,6 +54,24 @@
 //!   - Message: "escape sequence is incomplete"
 //!
 //! **Notes:** (none)
+//!
+//! ### E704 — `multiline_string_under_indented` (Error, Correctness)
+//!
+//! Content line of a multi-line string is less indented than the closing
+//! `"""` delimiter. The closing delimiter's column defines the strip prefix.
+//!
+//! ### E705 — `multiline_string_missing_leading_newline` (Error, Correctness)
+//!
+//! Multi-line string opener `"""` must be followed immediately by a newline.
+//!
+//! ### E706 — `multiline_string_missing_trailing_newline` (Error, Correctness)
+//!
+//! Multi-line string closer `"""` must be on its own line, with only
+//! whitespace before it.
+//!
+//! ### E707 — `unterminated_string` (Error, Correctness)
+//!
+//! String literal has no closing delimiter (single- or multi-line).
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -84,6 +102,30 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E703",
         name: "incomplete_escape_sequence",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E704",
+        name: "multiline_string_under_indented",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E705",
+        name: "multiline_string_missing_leading_newline",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E706",
+        name: "multiline_string_missing_trailing_newline",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E707",
+        name: "unterminated_string",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -205,6 +247,57 @@ fn diagnose(err: &EscapeError) -> AnalyzeDiagnostic {
             labels: vec![DiagLabel {
                 span: err.span.clone(),
                 message: "escape sequence is incomplete".into(),
+                is_primary: true,
+            }],
+            notes: vec![],
+        },
+        EscapeErrorKind::MultilineUnderIndented => AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[4].id,
+            severity: DESCRIPTORS[4].default_severity,
+            message: "multi-line string content less indented than closing delimiter".into(),
+            labels: vec![DiagLabel {
+                span: err.span.clone(),
+                message: "this line must start with at least the closing `\"\"\"`'s indentation"
+                    .into(),
+                is_primary: true,
+            }],
+            notes: vec![
+                "the indentation of the closing `\"\"\"` defines the strip prefix; every content line must begin with that prefix"
+                    .into(),
+            ],
+        },
+        EscapeErrorKind::MultilineMissingLeadingNewline => AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[5].id,
+            severity: DESCRIPTORS[5].default_severity,
+            message: "multi-line string opener `\"\"\"` must be followed by a newline".into(),
+            labels: vec![DiagLabel {
+                span: err.span.clone(),
+                message: "expected newline immediately after `\"\"\"`".into(),
+                is_primary: true,
+            }],
+            notes: vec![
+                "use a single-line string `\"...\"` for short content, or move the body onto a new line"
+                    .into(),
+            ],
+        },
+        EscapeErrorKind::MultilineMissingTrailingNewline => AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[6].id,
+            severity: DESCRIPTORS[6].default_severity,
+            message: "multi-line string closer `\"\"\"` must be on its own line".into(),
+            labels: vec![DiagLabel {
+                span: err.span.clone(),
+                message: "only whitespace allowed before the closing `\"\"\"`".into(),
+                is_primary: true,
+            }],
+            notes: vec![],
+        },
+        EscapeErrorKind::UnterminatedString => AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[7].id,
+            severity: DESCRIPTORS[7].default_severity,
+            message: "unterminated string literal".into(),
+            labels: vec![DiagLabel {
+                span: err.span.clone(),
+                message: "no closing delimiter found".into(),
                 is_primary: true,
             }],
             notes: vec![],

@@ -11,6 +11,7 @@ pub mod builders;
 pub mod components;
 pub mod lang_module;
 pub mod lower;
+pub mod string_token;
 
 // Re-export kestrel-ast types for backward compatibility
 pub use kestrel_ast::arena;

@@ -1216,6 +1216,7 @@ name = "kestrel-type-infer"
 version = "0.15.0"
 dependencies = [
  "codespan-reporting",
+ "kestrel-ast",
  "kestrel-ast-builder",
  "kestrel-debug",
  "kestrel-hecs",
@@ -1225,6 +1226,7 @@ dependencies = [
  "kestrel-name-res",
  "kestrel-parser",
  "kestrel-span",
+ "kestrel-syntax-tree",
 ]
 
 [[package]]

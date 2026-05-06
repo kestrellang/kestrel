@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
+import std.core.(Bool, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
 import std.text.(Formattable, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
@@ -177,7 +177,7 @@ struct StringStorage: Cloneable {
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
-public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
+public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
@@ -505,7 +505,11 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
     }
 
     /// Appends a raw byte. Internal — caller ensures UTF-8 validity.
-    mutating func appendByte(byte: UInt8) {
+    ///
+    /// Do not use to append ASCII characters: prefer `appendChar(c)` or
+    /// `append(other)`. This exists only for low-level UTF-8 plumbing
+    /// inside the stdlib (e.g. an encoder that already produced bytes).
+    internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len() + 1);
         var s = self.storage.write();
         s.ptr.offset(by: s.len).write(byte);
@@ -532,6 +536,11 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
     }
 
     /// Internal substring by byte range. Returns empty for invalid ranges.
+    ///
+    /// Do not use for per-character slicing in a loop — each call copies
+    /// `end - start` bytes, so walking the string yields O(N²) behaviour.
+    /// For iteration, use `decodeUtf8` with a running byte offset, or the
+    /// `chars()` / `bytes()` views.
     internal func substringBytes(from start: Int64, to end: Int64) -> String {
         let myLen = self.len();
         if start >= end or start < 0 or end > myLen {
@@ -722,6 +731,14 @@ public struct String: Str, Iterable, Equatable, Comparable, Cloneable, Formattab
             return false
         }
         _bytesEqual(a: self.ptr(), b: other.ptr(), n: myLen)
+    }
+
+    /// Pattern-match form of `isEqual`: each `case "literal" =>` arm
+    /// dispatches through here. Cost is `O(len)` per arm because the
+    /// compiler emits one call per literal — past a handful of arms,
+    /// E316 will suggest an `if/else if` chain instead.
+    public func matches(other: String) -> Bool {
+        self.isEqual(to: other)
     }
 
     /// Lexicographic byte-wise comparison.

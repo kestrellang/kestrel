@@ -42,10 +42,14 @@ use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::{
     ConformingProtocols, ExtensionTargetEntity, ExtensionsFor, ProtocolAssociatedTypes,
-    ProtocolMembers, ResolveTypePath, TypeResolution, extract_ast_type_args,
+    ProtocolMembers, ResolveTypePath, TypeMemberSource, TypeMembers, TypeResolution,
+    extract_ast_type_args,
 };
 use kestrel_type_infer::compare::{AssocBinding, TypeCompareEnv, compare_hir_types};
+use kestrel_type_infer::entailment::constraint_entailed_by;
+use kestrel_type_infer::resolve::WhereClause as ResolvedWhereClause;
 use kestrel_type_infer::result::ResolvedTy;
+use kestrel_type_infer::where_clauses::WhereClausesOf;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -226,8 +230,10 @@ fn check_protocol_requirements(
     let type_name = util::entity_name(cx.query, type_entity);
     let decl_span = util::entity_span(cx.query, decl_entity);
 
-    // Collect all method/type names provided by the type and its extensions
-    let provided = collect_provided_members(cx, type_entity);
+    // Collect all method/type names provided by the type and its extensions,
+    // plus methods from extensions on protocols the type conforms to whose
+    // where clauses are entailed by this conformance's context.
+    let provided = collect_provided_members_for_conformance(cx, type_entity, decl_entity);
 
     let members = cx.query.query(ProtocolMembers {
         protocol,
@@ -1315,6 +1321,249 @@ fn collect_from_entity(
             _ => {},
         }
     }
+}
+
+/// Variant of `collect_provided_members` for conformance-completeness checks.
+///
+/// Uses the unified `TypeMembers` query (single source of truth shared with
+/// name resolution) to discover every candidate member: direct children,
+/// type-extension children, and conformed-protocol-extension children.
+///
+/// For protocol-extension members, applies `constraint_entailed_by` to drop
+/// candidates whose where clauses aren't provable from the conformance
+/// context (`decl_entity`'s where clauses + the struct/enum's own).
+fn collect_provided_members_for_conformance(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    decl_entity: Entity,
+) -> ProvidedMembers {
+    let context_clauses = collect_context_where_clauses(cx, type_entity, decl_entity);
+    let candidates = cx.query.query(TypeMembers {
+        type_entity,
+        root: cx.root,
+    });
+
+    let mut methods: HashMap<String, Vec<Entity>> = HashMap::new();
+    let mut type_aliases = HashSet::new();
+    let mut fields = HashMap::new();
+
+    // Cache protocol→type-param substitutions per protocol so we don't
+    // rebuild them for every extension on the same protocol.
+    let mut subs_cache: HashMap<Entity, HashMap<Entity, ResolvedTy>> = HashMap::new();
+
+    for member in candidates {
+        if let TypeMemberSource::ProtocolExtension {
+            protocol, extension,
+        } = member.source
+        {
+            let subs = subs_cache.entry(protocol).or_insert_with(|| {
+                build_protocol_param_substitution(cx, type_entity, protocol)
+            });
+            if !extension_clauses_entailed(cx, extension, subs, &context_clauses) {
+                continue;
+            }
+        }
+        bin_member(cx, member.entity, &mut methods, &mut type_aliases, &mut fields);
+    }
+
+    ProvidedMembers {
+        methods,
+        type_aliases,
+        fields,
+    }
+}
+
+/// True if every where clause on `extension` (substituted via `proto_subs`
+/// from the protocol's type params to the conforming type's bindings) is
+/// entailed by `context_clauses`. Empty extension clauses always entail.
+fn extension_clauses_entailed(
+    cx: &CompilationContext<'_>,
+    extension: Entity,
+    proto_subs: &HashMap<Entity, ResolvedTy>,
+    context_clauses: &[ResolvedWhereClause],
+) -> bool {
+    let ext_clauses = cx.query.query(WhereClausesOf {
+        entity: extension,
+        root: cx.root,
+    });
+    ext_clauses.iter().all(|c| {
+        let Some(substituted) = substitute_clause(c, proto_subs) else {
+            // Substitution failed (e.g., bound to a concrete type — would
+            // need a full conforms-to query to verify). Reject.
+            return false;
+        };
+        constraint_entailed_by(cx.query, cx.root, &substituted, context_clauses)
+    })
+}
+
+/// Apply `proto_subs` (protocol-param → conforming-type binding) to a where
+/// clause. Returns None if a referenced param maps to a non-`Param` binding
+/// (concrete type), since the entailment check only handles param-to-param.
+fn substitute_clause(
+    clause: &ResolvedWhereClause,
+    proto_subs: &HashMap<Entity, ResolvedTy>,
+) -> Option<ResolvedWhereClause> {
+    match clause {
+        ResolvedWhereClause::Bound {
+            param,
+            protocol,
+            protocol_type_args,
+        } => {
+            let new_param = match proto_subs.get(param) {
+                Some(ResolvedTy::Param { entity }) => *entity,
+                Some(_) => return None,
+                None => *param,
+            };
+            Some(ResolvedWhereClause::Bound {
+                param: new_param,
+                protocol: *protocol,
+                protocol_type_args: protocol_type_args.clone(),
+            })
+        },
+        // Equality clauses passed through unchanged; entailment treats them
+        // conservatively (always rejects). Substitution would only matter
+        // once entailment is generalized.
+        other => Some(other.clone()),
+    }
+}
+
+/// Build a map: protocol's type param entity → the conforming type's binding,
+/// from the conformance declaration's AST type (e.g. `Slice[T]` in
+/// `struct Array[T]: Slice[T]` binds `Slice`'s `T` to `Array`'s `T`).
+/// Empty if the protocol has no type params or no conformance is found.
+fn build_protocol_param_substitution(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    proto: Entity,
+) -> HashMap<Entity, ResolvedTy> {
+    let proto_params = cx
+        .query
+        .get::<TypeParams>(proto)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    if proto_params.is_empty() {
+        return HashMap::new();
+    }
+    let Some((conformance_ast, conformance_decl)) =
+        find_conformance_declaration(cx, type_entity, proto)
+    else {
+        return HashMap::new();
+    };
+    let subs =
+        build_proto_param_subs(cx, type_entity, proto, &conformance_ast, conformance_decl);
+    subs.into_iter().collect()
+}
+
+/// Find the AstType + decl entity that declares `type_entity`'s conformance
+/// to `target_proto`. Looks at the type itself first, then any extensions on
+/// it that add conformances.
+fn find_conformance_declaration(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    target_proto: Entity,
+) -> Option<(AstType, Entity)> {
+    let mut search = vec![type_entity];
+    let extensions = cx.query.query(ExtensionsFor {
+        target: type_entity,
+        root: cx.root,
+    });
+    search.extend(extensions);
+    for &decl in &search {
+        let Some(conformances) = cx.query.get::<Conformances>(decl) else {
+            continue;
+        };
+        for item in &conformances.0 {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                continue;
+            };
+            if resolve_conformance(cx, ast_ty, decl) == Some(target_proto) {
+                return Some((ast_ty.clone(), decl));
+            }
+        }
+    }
+    None
+}
+
+/// Bin a single discovered member into the appropriate `ProvidedMembers`
+/// bucket by `NodeKind`. Mirrors the per-child logic in `collect_from_entity`.
+fn bin_member(
+    cx: &CompilationContext<'_>,
+    entity: Entity,
+    methods: &mut HashMap<String, Vec<Entity>>,
+    type_aliases: &mut HashSet<String>,
+    fields: &mut HashMap<String, Entity>,
+) {
+    let name = member_lookup_name(cx, entity);
+    match cx.query.get::<NodeKind>(entity) {
+        Some(NodeKind::Function | NodeKind::Subscript | NodeKind::Initializer) => {
+            if let Some(name) = name {
+                methods.entry(name).or_default().push(entity);
+            }
+        },
+        Some(NodeKind::TypeAlias) => {
+            // Only count type aliases with a binding (concrete RHS).
+            if let Some(name) = name
+                && cx.query.get::<TypeAnnotation>(entity).is_some()
+            {
+                type_aliases.insert(name);
+            }
+        },
+        Some(NodeKind::Field) => {
+            if let Some(name) = name {
+                fields.insert(name, entity);
+            }
+        },
+        _ => {},
+    }
+}
+
+/// Where clauses considered in scope for a conformance check: those on the
+/// conformance decl plus those on the struct/enum itself. Clause params are
+/// normalized to the struct's type-param entities — the conformance decl
+/// (e.g. `extend Array[T]: Equatable where T: Equatable`) declares its own
+/// `T` distinct from the struct's `T`, so we map decl's params positionally
+/// onto the struct's params before returning.
+fn collect_context_where_clauses(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    decl_entity: Entity,
+) -> Vec<ResolvedWhereClause> {
+    let mut clauses = cx.query.query(WhereClausesOf {
+        entity: decl_entity,
+        root: cx.root,
+    });
+    if decl_entity != type_entity {
+        // Normalize decl's type params → struct's type params positionally.
+        let decl_params: Vec<Entity> = cx
+            .query
+            .get::<TypeParams>(decl_entity)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        let struct_params: Vec<Entity> = cx
+            .query
+            .get::<TypeParams>(type_entity)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        let decl_to_struct: HashMap<Entity, Entity> = decl_params
+            .iter()
+            .zip(struct_params.iter())
+            .map(|(&d, &s)| (d, s))
+            .collect();
+        for clause in &mut clauses {
+            if let ResolvedWhereClause::Bound { param, .. } = clause
+                && let Some(&mapped) = decl_to_struct.get(param)
+            {
+                *param = mapped;
+            }
+        }
+
+        let from_struct = cx.query.query(WhereClausesOf {
+            entity: type_entity,
+            root: cx.root,
+        });
+        clauses.extend(from_struct);
+    }
+    clauses
 }
 
 /// Resolve a conformance AstType to a protocol entity.

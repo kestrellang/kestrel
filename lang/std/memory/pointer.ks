@@ -399,7 +399,9 @@ extend ArraySlice[T]: Slice[T], Iterable {
     public func asSlice() -> ArraySlice[T] { self }
 }
 
-/// Element-wise equality when the element type is `Equatable`.
+/// Element-wise equality when the element type is `Equatable`. `isEqual`
+/// is supplied by `extend Slice[T] where T: Equatable` in
+/// `std.collections.slice`.
 ///
 /// # Examples
 ///
@@ -411,20 +413,7 @@ extend ArraySlice[T]: Slice[T], Iterable {
 /// let c = [4, 5, 6].asSlice();
 /// a == c;  // false (same length, different elements)
 /// ```
-extend ArraySlice[T]: Equatable where T: Equatable {
-    /// Compares element-by-element. Short-circuits on the first mismatch.
-    public func isEqual(to other: ArraySlice[T]) -> Bool {
-        if self.len != other.len {
-            return false
-        }
-        for i in 0..<self.len {
-            if self.ptr.offset(by: i).read().isEqual(to: other.ptr.offset(by: i).read()) == false {
-                return false
-            }
-        }
-        true
-    }
-}
+extend ArraySlice[T]: Equatable where T: Equatable { }
 
 /// Forward iterator over an `ArraySlice[T]`. Holds a moving pointer and a
 /// remaining count; advancing reads through the pointer.

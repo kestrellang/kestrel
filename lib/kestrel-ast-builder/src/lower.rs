@@ -307,11 +307,19 @@ impl LowerCtx {
             SyntaxKind::ExprString => {
                 // Parser only promotes top-level strings to ExprInterpolatedString.
                 // Re-check here so nested strings (inside calls etc.) get caught.
-                if let Some(text) = first_token_text(&node)
-                    && text.len() >= 2
-                    && string_contains_interpolation(&text[1..text.len() - 1])
-                {
-                    self.lower_interpolated_string_from_token(&text, &node)
+                // The body span depends on whether this is single-line `"..."`
+                // or multi-line `"""..."""`, so route through `classify`.
+                if let Some(text) = first_token_text(&node) {
+                    let form = crate::string_token::classify_string_token(&text);
+                    if form.body_end > form.body_start
+                        && string_contains_interpolation(
+                            &text[form.body_start..form.body_end],
+                        )
+                    {
+                        self.lower_interpolated_string_from_token(&text, &node)
+                    } else {
+                        self.lower_literal(&node, AstLiteral::String)
+                    }
                 } else {
                     self.lower_literal(&node, AstLiteral::String)
                 }
@@ -473,16 +481,31 @@ impl LowerCtx {
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
 
-    /// Parse a raw string token (e.g. `"hello \(name)!"`) into an
-    /// `InterpolatedString` AST node. Used when the parser left this as a
-    /// plain `ExprString` because it only promotes top-level expressions.
+    /// Parse a string token (e.g. `"hello \(name)!"` or
+    /// `"""\n  hello \(name)\n  """`) into an `InterpolatedString` AST node.
+    /// Used when the parser left this as a plain `ExprString` because it
+    /// only promotes top-level expressions.
     fn lower_interpolated_string_from_token(
         &mut self,
         token_text: &str,
         node: &SyntaxNode,
     ) -> ExprId {
         let span = self.span(node);
-        let inner = &token_text[1..token_text.len() - 1];
+        let form = crate::string_token::classify_string_token(token_text);
+        let body = &token_text[form.body_start..form.body_end];
+
+        // Multi-line cooked: indent-strip + `\r\n` normalize, then split.
+        // We swallow indent errors here for now — the non-interpolated path
+        // (HIR-lower's `decode_string_literal_token`) reports them; surfacing
+        // them through the interpolation pipeline would require new
+        // diagnostic plumbing in `LowerCtx`.
+        let processed_owned;
+        let inner: &str = if form.is_multiline {
+            processed_owned = crate::string_token::process_multiline_body(body, 0, 0).value;
+            &processed_owned
+        } else {
+            body
+        };
 
         let mut parts = Vec::new();
         let mut chars = inner.char_indices().peekable();

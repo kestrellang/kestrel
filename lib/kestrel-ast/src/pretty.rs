@@ -620,9 +620,11 @@ fn format_literal(lit: &AstLiteral) -> String {
     match lit {
         AstLiteral::Integer(s) => s.clone(),
         AstLiteral::Float(s) => s.clone(),
-        AstLiteral::String(s) => format!("\"{s}\""),
-        AstLiteral::RawString(s) => format!("r\"{s}\""),
-        AstLiteral::Char(s) => format!("'{s}'"),
+        // String / RawString / Char carry the full source token text
+        // (including delimiters), so we emit them verbatim.
+        AstLiteral::String(s) => s.clone(),
+        AstLiteral::RawString(s) => s.clone(),
+        AstLiteral::Char(s) => s.clone(),
         AstLiteral::Bool(b) => b.to_string(),
         AstLiteral::Null => "null".into(),
         AstLiteral::Unit => "()".into(),

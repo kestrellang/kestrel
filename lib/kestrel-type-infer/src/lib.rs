@@ -12,6 +12,7 @@
 pub mod compare;
 pub mod constraint;
 pub mod ctx;
+pub mod entailment;
 pub mod error;
 pub mod generate;
 pub mod resolve;

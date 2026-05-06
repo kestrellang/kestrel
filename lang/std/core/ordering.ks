@@ -48,10 +48,8 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Inverse of `isEqual`.
-    public func isNotEqual(to other: Ordering) -> Bool {
-        if self.isEqual(to: other) { false } else { true }
-    }
+    // isNotEqual: provided by extend Equatable: Equal[Self], NotEqual[Self]
+    // in std.core.protocols.
 
     /// Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting
     /// in reverse without writing a second comparator.

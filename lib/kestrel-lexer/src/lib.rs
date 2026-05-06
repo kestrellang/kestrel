@@ -20,88 +20,84 @@ fn is_valid_identifier(lex: &mut logos::Lexer<Token>) -> bool {
     chars.all(|c| c.is_xid_continue())
 }
 
-/// Parse a raw string literal that starts with 3+ quotes and ends with the same number.
-/// The token has already matched the initial `"""`, so we need to:
-/// 1. Count any additional opening quotes (consecutive quotes at the start of remainder)
-/// 2. Determine the total quote count for this raw string
-/// 3. Find the matching closing quotes
+/// Parse a pound-prefixed raw string. The regex matches `#+"` (one or more
+/// pounds + one quote). The slice consumed so far is `#`...`#"` (N pounds +
+/// 1 quote). We then peek the remainder to determine single-line vs
+/// multi-line and to find the matching closer (`"` + N pounds for
+/// single-line, `"""` + N pounds for multi-line).
 ///
-/// For `""""content""""` (4-quote raw string):
-/// - regex matches `"""`
-/// - remainder is `"content""""`
-/// - 1 more quote at start → quote_count = 4
-/// - Content starts after that extra quote
-/// - We scan until we find 4 consecutive quotes
+/// Forms:
+/// - `#"..."#`  — single-line raw, N=1 pound
+/// - `##"..."##` — single-line raw, N=2 pounds (lets you embed `"#`)
+/// - `#"""\n...\n"""#` — multi-line raw
 ///
-/// For `""""""` (empty 3-quote raw string):
-/// - regex matches `"""`
-/// - remainder is `"""`
-/// - If those 3 quotes are immediately followed by non-quote or EOF, they are closing quotes
-/// - quote_count = 3, empty content
-fn parse_raw_string(lex: &mut logos::Lexer<Token>) -> bool {
+/// 3+ consecutive quotes after the pound prefix → multi-line opener; 1 or 2
+/// → single-line opener.
+fn parse_pound_string(lex: &mut logos::Lexer<Token>) -> bool {
+    let slice = lex.slice();
+    let pound_count = slice.chars().take_while(|&c| c == '#').count();
     let remainder = lex.remainder();
-    let mut chars = remainder.chars().peekable();
-    let mut offset = 0;
 
-    // Count consecutive quotes at the start (these are additional opening quotes)
-    let mut additional_quotes = 0;
-    while chars.peek() == Some(&'"') {
-        // Look ahead: if this quote followed by (additional_quotes + 3) more quotes
-        // would give us exactly quote_count closing quotes, we should stop counting.
-        // The heuristic: if the next non-quote char comes right after, these aren't opening quotes.
+    // Peek for additional opening quotes (the regex matched 1 quote already).
+    let extra_open_quotes = remainder.chars().take_while(|&c| c == '"').count();
+    let total_open_quotes = 1 + extra_open_quotes;
 
-        // For now, use simple heuristic: if we see N quotes followed by non-quote or EOF,
-        // and N >= 3 (the initial match), then N total quotes form an empty raw string.
-        // Otherwise, continue counting as opening quotes.
-
-        // Actually, let's use a different approach: peek ahead to see if stopping now
-        // would result in a valid closing sequence immediately.
-        let peek_chars = remainder[additional_quotes..].chars();
-        let mut consecutive = 0;
-        for c in peek_chars.clone() {
-            if c == '"' {
-                consecutive += 1;
-            } else {
-                break;
-            }
-        }
-
-        // If we're at a point where the remaining quotes (after additional_quotes additional opening)
-        // exactly equals the quote count we'd need, it's an empty string
-        let potential_quote_count = 3 + additional_quotes;
-        if consecutive == potential_quote_count {
-            // This means we have exactly the right number of closing quotes for an empty string
-            // Don't count more opening quotes
-            break;
-        }
-
-        chars.next();
-        offset += 1;
-        additional_quotes += 1;
+    if total_open_quotes >= 3 {
+        // Multi-line raw. Opener is exactly `"""` (3 quotes); any further
+        // quotes are content. Consume 2 more opener quotes (1 was matched).
+        scan_raw_close(lex, pound_count, /* opener_quote_count = */ 3, /* extra_consumed = */ 2)
+    } else {
+        // Single-line raw. Opener is exactly `"` (1 quote). No extra quotes
+        // to consume from the regex match.
+        scan_raw_close(lex, pound_count, /* opener_quote_count = */ 1, /* extra_consumed = */ 0)
     }
+}
 
-    let quote_count = 3 + additional_quotes;
-
-    // Now scan for the closing sequence of `quote_count` quotes
+/// Scan for the closing delimiter of a raw string and bump the lexer past it.
+/// The closer is `quote_count` quotes followed by `pound_count` pounds.
+/// `extra_consumed` is the number of opener bytes (after the regex slice) we
+/// need to skip before content begins (used for the 2 extra `"`s in a
+/// multi-line opener).
+fn scan_raw_close(
+    lex: &mut logos::Lexer<Token>,
+    pound_count: usize,
+    quote_count: usize,
+    extra_consumed: usize,
+) -> bool {
+    let remainder = lex.remainder();
+    let mut offset = extra_consumed;
     let mut consecutive_quotes = 0;
 
-    for c in chars {
-        offset += c.len_utf8();
+    let bytes = remainder.as_bytes();
+    while offset < bytes.len() {
+        let b = bytes[offset];
+        offset += 1;
 
-        if c == '"' {
+        if b == b'"' {
             consecutive_quotes += 1;
-            if consecutive_quotes == quote_count {
-                // Found the closing sequence
-                lex.bump(offset);
-                return true;
+            if consecutive_quotes >= quote_count {
+                // Need exactly `pound_count` pounds immediately after.
+                let pounds_start = offset;
+                let mut pounds_seen = 0;
+                while pounds_seen < pound_count
+                    && pounds_start + pounds_seen < bytes.len()
+                    && bytes[pounds_start + pounds_seen] == b'#'
+                {
+                    pounds_seen += 1;
+                }
+                if pounds_seen == pound_count {
+                    lex.bump(offset + pound_count);
+                    return true;
+                }
+                // Not enough pounds — keep scanning (consecutive_quotes stays).
             }
         } else {
             consecutive_quotes = 0;
         }
     }
 
-    // Unterminated raw string - consume everything we've seen
-    lex.bump(offset);
+    // Unterminated — consume the rest. Downstream surfaces the error.
+    lex.bump(remainder.len());
     true
 }
 
@@ -262,16 +258,28 @@ fn scan_block_comment_in_interpolation(chars: &mut std::iter::Peekable<std::str:
     offset
 }
 
-/// Parse a string literal, properly handling interpolation with nested strings.
+/// Parse a cooked string literal. Dispatches to single-line or multi-line
+/// based on the opening sequence.
 ///
-/// This replaces the simple regex matcher because strings with interpolation
-/// can contain nested strings (e.g., `"\(dict["key"])"`), which the regex
-/// can't handle correctly.
+/// - `"..."` — single-line, supports escapes (`\n`, `\xHH`, `\u{HEX}`,
+///   `\<nl>` continuation) and `\(...)` interpolation.
+/// - `"""\n...\n"""` — multi-line; same escape and interpolation rules,
+///   plus indent strip applied downstream by the HIR lower / analyzer.
 ///
-/// For strings WITHOUT interpolation, this produces a `String` token.
-/// For strings WITH interpolation (containing `\(...)`), this produces
-/// an `InterpolatedString` token.
+/// 3 consecutive UN-ESCAPED `"`s close a multi-line string. To embed `"""`
+/// literally inside multi-line content, escape one of the quotes (e.g.
+/// `\"""`) or use the raw form `#"""..."""#`.
 fn parse_string(lex: &mut logos::Lexer<Token>) -> bool {
+    let remainder = lex.remainder();
+    let bytes = remainder.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'"' && bytes[1] == b'"' {
+        // `"""` opener. Consume 2 extra quotes here, then scan content.
+        return parse_multiline_cooked(lex);
+    }
+    parse_single_line_cooked(lex)
+}
+
+fn parse_single_line_cooked(lex: &mut logos::Lexer<Token>) -> bool {
     let remainder = lex.remainder();
     let mut chars = remainder.chars().peekable();
     let mut offset = 0;
@@ -303,6 +311,44 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> bool {
     }
 
     // Unterminated string - consume everything we've seen
+    lex.bump(offset);
+    true
+}
+
+fn parse_multiline_cooked(lex: &mut logos::Lexer<Token>) -> bool {
+    let remainder = lex.remainder();
+    let mut chars = remainder.chars().peekable();
+    // Skip the 2 extra opener quotes (the regex matched 1).
+    chars.next();
+    chars.next();
+    let mut offset = 2;
+    let mut consecutive_quotes = 0;
+
+    while let Some(&c) = chars.peek() {
+        chars.next();
+        offset += c.len_utf8();
+
+        if c == '"' {
+            consecutive_quotes += 1;
+            if consecutive_quotes == 3 {
+                lex.bump(offset);
+                return true;
+            }
+        } else {
+            consecutive_quotes = 0;
+            if c == '\\' {
+                if let Some(&next) = chars.peek() {
+                    chars.next();
+                    offset += next.len_utf8();
+                    if next == '(' {
+                        offset += scan_interpolation(&mut chars, remainder);
+                    }
+                }
+            }
+        }
+    }
+
+    // Unterminated multi-line string — consume everything we've seen.
     lex.bump(offset);
     true
 }
@@ -368,9 +414,9 @@ pub enum Token {
     #[regex(r"[\p{L}_][\p{L}\p{N}_]*", is_valid_identifier)]
     Identifier,
 
-    // String literals - use callback to handle interpolation with nested strings
-    // The callback properly handles cases like `"\(dict["key"])"` where nested
-    // strings appear within interpolation expressions.
+    // Cooked string literals — the callback dispatches between single-line
+    // (`"..."`) and multi-line (`"""...\n...\n..."""`) forms. Both support
+    // escape sequences and `\(...)` interpolation.
     #[regex(r#"""#, parse_string)]
     String,
 
@@ -378,9 +424,12 @@ pub enum Token {
     #[regex(r#"'([^'\\]|\\(.|\r|\n))*'"#)]
     Char,
 
-    // Raw string literals: """content""" or """"content"""" etc.
-    // Must have higher priority than String to match first
-    #[regex(r#"""""#, parse_raw_string, priority = 2)]
+    // Raw string literals — `#`-prefixed forms with no escape processing and
+    // no interpolation. Pound count must match between opener and closer.
+    //   `#"..."#`  — single-line
+    //   `#"""...\n..."""#` — multi-line
+    //   `##"..."##`, etc. — escalate the pound count to embed `"#` literally.
+    #[regex(r##"#+""##, parse_pound_string, priority = 2)]
     RawString,
 
     // Integer literals with optional underscores: 1_000_000, 0xFF_FF, 0b1010_1010, 0o755_000
@@ -1062,42 +1111,81 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_strings() {
-        // Basic raw string with 3 quotes
-        let source = r#""""hello world""""#;
+    fn test_multiline_cooked_strings() {
+        // `"""..."""` is now multi-line COOKED (escapes + interpolation).
+        // The single-token kind is `String` — multi-line-ness is determined
+        // downstream from the token text.
+        let source = "\"\"\"\nhello\nworld\n\"\"\"";
         let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].value, Token::String);
+        assert_eq!(tokens[0].span.range(), 0..source.len());
 
-        // Raw string with newlines
-        let source = "\"\"\"hello\nworld\"\"\"";
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::RawString);
-
-        // Raw string with 4 quotes (allows 3 quotes inside)
-        let source = r#"""""hello """ world"""""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::RawString);
-
-        // Raw string with backslashes (no escape processing)
-        let source = r#""""hello\nworld""""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::RawString);
-
-        // Empty raw string
+        // Empty multi-line: `""""""` is opener `"""` + closer `"""` with
+        // no body. Whether it's *valid* (Swift requires newlines) is a
+        // downstream question; the lexer just consumes 6 quotes as one
+        // String token.
         let source = r#""""""""#;
         let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].value, Token::String);
 
-        // Regular string is still recognized
+        // Multi-line with backslash escapes — these are now PROCESSED
+        // (compare with the raw form below).
+        let source = "\"\"\"\nhello\\nworld\n\"\"\"";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::String);
+
+        // Single-line `"..."` still works.
         let source = r#""hello""#;
         let tokens = filter_trivia(lex(source, 0).collect());
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].value, Token::String);
+    }
+
+    #[test]
+    fn test_raw_strings_pound_prefixed() {
+        // Single-line raw, 1 pound: `#"hello"#`
+        let source = r##"#"hello"#"##;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].span.range(), 0..source.len());
+
+        // Empty single-line raw: `#""#`
+        let source = r##"#""#"##;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].span.range(), 0..source.len());
+
+        // Multi-line raw: `#"""\n...\n"""#`
+        let source = "#\"\"\"\nhello\nworld\n\"\"\"#";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].span.range(), 0..source.len());
+
+        // Backslashes are NOT escaped in raw forms.
+        let source = r##"#"hello\nworld"#"##;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+
+        // Pound escalation: `##"contains \"# pound-quote"##`
+        let source = r###"##"contains "# pound-quote"##"###;
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].span.range(), 0..source.len());
+
+        // Multi-line raw can embed `"""` when pound-escalated.
+        let source = "##\"\"\"\nthree quotes \"\"\" inline\n\"\"\"##";
+        let tokens = filter_trivia(lex(source, 0).collect());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].value, Token::RawString);
+        assert_eq!(tokens[0].span.range(), 0..source.len());
     }
 
     #[test]
