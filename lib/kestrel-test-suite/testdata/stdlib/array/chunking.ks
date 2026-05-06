@@ -7,8 +7,8 @@ module Test
             var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1); arr.append(2); arr.append(3); arr.append(4); arr.append(5);
 
-            // chunks(of:)
-            var chunkIter = arr.chunks(of: 2);
+            // chunks(of:) — returns ChunksView; .iter() for the cursor
+            var chunkIter = arr.chunks(of: 2).iter();
 
             // First chunk: [1, 2]
             let c1 = chunkIter.next();
@@ -40,7 +40,7 @@ module Test
             // windows(of:)
             var arr2 = std.collections.Array[std.numeric.Int64]();
             arr2.append(1); arr2.append(2); arr2.append(3); arr2.append(4);
-            var winIter = arr2.windows(of: 2);
+            var winIter = arr2.windows(of: 2).iter();
 
             // Window 1: [1, 2]
             let w1 = winIter.next();

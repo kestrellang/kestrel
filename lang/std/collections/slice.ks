@@ -394,6 +394,169 @@ extend Slice[T] {
         }
         result
     }
+
+    // -- Views ---------------------------------------------------------------
+
+    /// Multi-pass lazy view over non-overlapping `size`-sized chunks.
+    ///
+    /// The trailing chunk may be shorter than `size`. Multi-pass: query
+    /// `count`, index with `view.get(i)`, and iterate repeatedly without
+    /// re-creating the view.
+    ///
+    /// # Errors
+    ///
+    /// Panics if `size <= 0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let v = [1, 2, 3, 4, 5].chunks(of: 2);
+    /// v.count;          // 3
+    /// v.get(2);          // ArraySlice[5]
+    /// for c in v { ... }
+    /// ```
+    public func chunks(of size: Int64) -> ChunksView[T] {
+        if size <= 0 {
+            fatalError("chunks: size must be positive")
+        }
+        ChunksView(slice: self.asSlice(), chunkSize: size)
+    }
+
+    /// Multi-pass lazy view over overlapping `size`-sized sliding
+    /// windows.
+    ///
+    /// Adjacent windows overlap by `size - 1` elements. Empty when the
+    /// source has fewer than `size` elements.
+    ///
+    /// # Errors
+    ///
+    /// Panics if `size <= 0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let v = [1, 2, 3, 4].windows(of: 2);
+    /// v.count;          // 3
+    /// for w in v { ... }
+    /// ```
+    public func windows(of size: Int64) -> WindowsView[T] {
+        if size <= 0 {
+            fatalError("windows: size must be positive")
+        }
+        WindowsView(slice: self.asSlice(), windowSize: size)
+    }
+
+    /// Multi-pass lazy reversed view. Iterates back-to-front and
+    /// supports indexed access in O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let v = [1, 2, 3].reversed();
+    /// v.first();        // Some(3)
+    /// v.toArray();       // [3, 2, 1] — eager copy
+    /// ```
+    public func reversed() -> ReversedView[T] {
+        ReversedView(slice: self.asSlice())
+    }
+
+    /// Multi-pass lazy view over the segments produced by splitting at
+    /// each element matching `predicate`. Matching elements are dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let v = [1, -1, 2, 3, -1, 4].split(matching: { it < 0 });
+    /// for seg in v { ... }
+    /// ```
+    public func split(matching predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
+        ArraySplitWhereView(slice: self.asSlice(), predicate: predicate)
+    }
+
+    // -- Eager transforms ---------------------------------------------------
+
+    /// Maps every element through `transform` into a new array. O(n).
+    ///
+    /// Pre-sizes the result buffer to `self.count`, so no growth steps. For
+    /// the lazy version that fuses into a chain, use `iter().map { ... }`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].map { it * 2 };       // [2, 4, 6]
+    /// [1, 2, 3].map { it.format() };  // ["1", "2", "3"]
+    /// ```
+    public func map[U](transform: (T) -> U) -> Array[U] {
+        let s = self.asSlice();
+        var b = ArrayBuilder[U](capacity: s.count);
+        let p = s.pointer;
+        for i in 0..<s.count {
+            b.append(transform(p.offset(by: i).read()))
+        }
+        b.build()
+    }
+
+    /// Returns a new array containing every element matching `predicate`.
+    /// O(n). Result size is unknown; uses geometric growth.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4].filter(matching: { it % 2 == 0 });  // [2, 4]
+    /// ```
+    public func filter(matching predicate: (T) -> Bool) -> Array[T] {
+        let s = self.asSlice();
+        var b = ArrayBuilder[T]();
+        let p = s.pointer;
+        for i in 0..<s.count {
+            let elem = p.offset(by: i).read();
+            if predicate(elem) {
+                b.append(elem)
+            }
+        }
+        b.build()
+    }
+
+    /// Maps every element through `transform`, dropping `.None` results.
+    /// O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["1", "x", "3"].compactMap { Int64.parse(it) };  // [1, 3]
+    /// ```
+    public func compactMap[U](transform: (T) -> Optional[U]) -> Array[U] {
+        let s = self.asSlice();
+        var b = ArrayBuilder[U]();
+        let p = s.pointer;
+        for i in 0..<s.count {
+            if let .Some(value) = transform(p.offset(by: i).read()) {
+                b.append(value)
+            }
+        }
+        b.build()
+    }
+
+    /// Maps every element through `transform` and concatenates the results
+    /// into one flat array. O(n + total_output).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].flatMap { [it, it * 10] };  // [1, 10, 2, 20, 3, 30]
+    /// ```
+    public func flatMap[U](transform: (T) -> Array[U]) -> Array[U] {
+        let s = self.asSlice();
+        var b = ArrayBuilder[U]();
+        let p = s.pointer;
+        for i in 0..<s.count {
+            let inner = transform(p.offset(by: i).read());
+            for j in 0..<inner.count {
+                b.append(inner(unchecked: j))
+            }
+        }
+        b.build()
+    }
 }
 
 // ============================================================================
@@ -519,34 +682,25 @@ extend Slice[T] where T: Equatable {
         true
     }
 
-    /// Splits on each element equal to `separator`. O(n).
+    /// Multi-pass lazy view over the segments produced by splitting on
+    /// each occurrence of `separator`. Separators are dropped; empty
+    /// runs between adjacent separators are preserved.
     ///
-    /// Separators are dropped; empty runs between adjacent separators
-    /// are preserved. The result always has `(separatorCount + 1)`
-    /// elements. The returned slices alias the source buffer.
+    /// Use `view.toArray()` to materialize all segments into an owned
+    /// `Array[ArraySlice[T]]`.
     ///
     /// # Examples
     ///
     /// ```
-    /// [1, 0, 2, 0, 3].split(0);
-    /// // [ArraySlice[1], ArraySlice[2], ArraySlice[3]]
+    /// let v = [1, 0, 2, 0, 3].split(separator: 0);
+    /// for seg in v { ... }            // ArraySlice[1], ArraySlice[2], ArraySlice[3]
+    /// v.toArray();                     // eager: 3 segments
     ///
-    /// [1, 2, 3].split(0);
-    /// // [ArraySlice[1, 2, 3]] — separator not found
+    /// [1, 2, 3].split(separator: 0).toArray();
+    /// // [ArraySlice[1, 2, 3]] — separator not found, single segment
     /// ```
-    public func split(separator: T) -> Array[ArraySlice[T]] {
-        var result = Array[ArraySlice[T]]();
-        let s = self.asSlice();
-        let myPtr = s.pointer;
-        var start: Int64 = 0;
-        for i in 0..<s.count {
-            if myPtr.offset(by: i).read().isEqual(to: separator) {
-                result.append(ArraySlice(pointer: myPtr.offset(by: start), count: i - start));
-                start = i + 1
-            }
-        }
-        result.append(ArraySlice(pointer: myPtr.offset(by: start), count: s.count - start));
-        result
+    public func split(separator: T) -> ArraySplitView[T] {
+        ArraySplitView(slice: self.asSlice(), separator: separator)
     }
 }
 
