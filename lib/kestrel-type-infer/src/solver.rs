@@ -1664,6 +1664,9 @@ fn solve_call(
             // `T(...)` where T is a generic param → init call on the bound.
             // The init's declared return is () but the actual result is an
             // instance of the type param. Override via an equal(result, callee).
+            //
+            // TODO: effectful init wrapping for generic calls (T? / T throws E)
+            // requires witness-call path changes in MIR lowering; deferred.
             let init_result = ctx.fresh();
             let res = solve_member(
                 ctx,

@@ -145,12 +145,13 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     let compiler = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
-    driver.analyze_all();
+    let analyze_summary = driver.analyze_all();
 
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
     driver.emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    emit_analyze_errors(&compiler, &analyze_summary);
+    if has_errors(&compiler) || analyze_summary.errors > 0 {
         return Err(ExitCode::FAILURE);
     }
 
@@ -419,4 +420,48 @@ fn has_errors(compiler: &Compiler) -> bool {
         .diagnostics()
         .iter()
         .any(|d| d.severity >= Severity::Error)
+}
+
+/// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
+fn emit_analyze_errors(
+    compiler: &Compiler,
+    summary: &kestrel_compiler_driver::AnalyzeSummary,
+) {
+    use codespan_reporting::diagnostic::{Diagnostic, Label};
+    use kestrel_compiler::diagnostic::WorldFiles;
+
+    let error_diags: Vec<_> = summary
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
+        .collect();
+
+    if error_diags.is_empty() {
+        return;
+    }
+
+    let files = WorldFiles::from_world(compiler.world(), compiler.files());
+    let codespan_diags: Vec<Diagnostic<usize>> = error_diags
+        .iter()
+        .map(|d| {
+            let labels = d
+                .labels
+                .iter()
+                .map(|l| {
+                    let label = if l.is_primary {
+                        Label::primary(l.span.file_id, l.span.range())
+                    } else {
+                        Label::secondary(l.span.file_id, l.span.range())
+                    };
+                    label.with_message(&l.message)
+                })
+                .collect();
+            Diagnostic::error()
+                .with_message(format!("{} [{}]", d.message, d.descriptor_id))
+                .with_labels(labels)
+                .with_notes(d.notes.clone())
+        })
+        .collect();
+
+    kestrel_reporting::emit_all(&files, &codespan_diags).ok();
 }

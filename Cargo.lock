@@ -887,12 +887,15 @@ name = "kestrel"
 version = "0.15.0"
 dependencies = [
  "clap",
+ "codespan-reporting",
+ "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-codegen",
  "kestrel-codegen-cranelift",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-mir-lower",
+ "kestrel-reporting",
 ]
 
 [[package]]
