@@ -86,6 +86,17 @@ pub fn identifier<'tokens>()
     })
 }
 
+/// Parse an identifier or keyword token, skipping leading trivia.
+/// Used in label position where keywords are allowed (e.g., `func insert(in list: Array[Int])`).
+pub fn identifier_or_keyword<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+    trivia(
+        any()
+            .filter(|t: &Token| matches!(t, Token::Identifier) || t.is_label_keyword())
+            .map_with(|_, e| to_kestrel_span(e.span())),
+    )
+}
+
 /// Internal Chumsky parser for module path segments
 ///
 /// Parses identifier sequences separated by dots: A.B.C
@@ -319,10 +330,8 @@ fn default_value_parser<'tokens>() -> impl Parser<
 /// - `x: Int = 0` → access_mode=None, label=None, pattern=Binding(x), default=Some(0)
 pub(crate) fn parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone {
-    // Parse identifier (with trivia skipping)
-    let ident = trivia(select! {
-        Token::Identifier = e => to_kestrel_span(e.span()),
-    });
+    // Parse label: identifier or keyword (keywords allowed as parameter labels)
+    let ident = identifier_or_keyword();
 
     let param_pattern = parameter_pattern_parser();
 
