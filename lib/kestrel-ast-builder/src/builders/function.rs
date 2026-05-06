@@ -186,12 +186,13 @@ pub fn build_deinit(
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 
-    // Deinits always have a `self` receiver (consuming — they're destroying the instance)
+    // Deinits receive &var self. The caller owns the memory and handles
+    // deallocation after the deinit body runs cleanup.
     world.set(
         entity,
         Callable {
             params: Vec::new(),
-            receiver: Some(ReceiverKind::Consuming),
+            receiver: Some(ReceiverKind::Mutating),
         },
     );
 

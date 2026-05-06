@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use crate::MirModule;
 use crate::body::{LocalDef, MirBody};
 use crate::id::LocalId;
+use crate::item::FunctionKind;
 use crate::place::Place;
 use crate::statement::{Rvalue, Statement, StatementKind};
 use crate::terminator::TerminatorKind;
@@ -114,6 +115,68 @@ pub fn run_deinit_pass(module: &mut MirModule) {
                 body.blocks[block_idx].stmts.extend(deinit_stmts);
             }
         }
+
+        // Phase 2: Effectful init partial-drop — insert field-level DeinitIf
+        // before failure-return terminators so partially-initialized fields
+        // get cleaned up when the init fails.
+        if matches!(func.kind, FunctionKind::Initializer { .. })
+            && !body.failure_return_blocks.is_empty()
+        {
+            insert_init_field_deinits(body);
+        }
+    }
+}
+
+/// Insert DeinitIf for each tracked init field before failure-return blocks.
+///
+/// Flag locals are created by MIR lowering with name `_init_<fieldname>`.
+/// Flag semantics: true = uninitialized (skip), false = initialized (deinit).
+fn insert_init_field_deinits(body: &mut MirBody) {
+    // Find init field flags: locals named "_init_*" with Bool type
+    let init_flags: Vec<(String, LocalId)> = body
+        .locals
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.name.starts_with("_init_") && l.ty == MirTy::Bool)
+        .map(|(i, l)| {
+            let field_name = l.name.strip_prefix("_init_").unwrap().to_string();
+            (field_name, LocalId::new(i))
+        })
+        .collect();
+
+    if init_flags.is_empty() {
+        return;
+    }
+
+    let failure_blocks: Vec<usize> = body
+        .failure_return_blocks
+        .iter()
+        .map(|b| b.index())
+        .collect();
+
+    for block_idx in failure_blocks {
+        if !matches!(
+            body.blocks[block_idx].terminator.kind,
+            TerminatorKind::Return(_)
+        ) {
+            continue;
+        }
+
+        // Insert DeinitIf for each tracked field (reverse order for proper cleanup)
+        let deinit_stmts: Vec<Statement> = init_flags
+            .iter()
+            .rev()
+            .map(|(field_name, flag)| {
+                // self is local 0; project into field
+                let place = Place::local(LocalId::new(0)).field(field_name);
+                Statement::new(StatementKind::DeinitIf {
+                    place,
+                    flag: *flag,
+                })
+            })
+            .collect();
+
+        body.blocks[block_idx].stmts.extend(deinit_stmts);
     }
 }
 

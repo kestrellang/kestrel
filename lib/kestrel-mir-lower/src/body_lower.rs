@@ -52,6 +52,8 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         current_block: None,
         loop_stack: Vec::new(),
         temp_counter: 0,
+        init_field_flags: HashMap::new(),
+        is_effectful_init: false,
         ctx,
     };
 
@@ -90,6 +92,13 @@ struct BodyLowerCtx<'a, 'b> {
 
     // Counter for generating unique temp names
     temp_counter: u32,
+
+    // For effectful init bodies: maps field name → Bool flag local tracking initialization.
+    // Flag semantics: true = uninitialized (skip deinit), false = initialized (needs deinit).
+    init_field_flags: HashMap<String, LocalId>,
+
+    // Whether this function is an effectful init needing partial-drop support.
+    is_effectful_init: bool,
 }
 
 impl<'a, 'b> BodyLowerCtx<'a, 'b> {
@@ -106,10 +115,23 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Set param count from HIR
         self.body.param_count = self.hir.params.len();
 
+        // Detect effectful init and create field-init flags
+        self.setup_init_field_flags();
+
         // Create entry block
         let entry = self.new_block();
         self.body.entry = entry;
         self.current_block = Some(entry);
+
+        // Initialize field-init flags to true (uninitialized = skip deinit)
+        if self.is_effectful_init {
+            for (_, &flag) in &self.init_field_flags.clone() {
+                self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                    flag,
+                    value: true,
+                }));
+            }
+        }
 
         // Lower top-level statements
         for &stmt_id in &self.hir.statements {
@@ -707,9 +729,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::Break { label, .. } => self.lower_break(label.as_deref()),
             HirExpr::Continue { label, .. } => self.lower_continue(label.as_deref()),
             HirExpr::Return { value, .. } => {
+                // Check before lowering (which may create new blocks)
+                let is_failure = self.is_effectful_init
+                    && value.is_some_and(|v| self.is_init_failure_value_hir(v));
                 let ret_val = value
                     .map(|v| self.lower_expr(v))
                     .unwrap_or(Value::Immediate(Immediate::unit()));
+                // Tag failure-return blocks for the deinit pass
+                if is_failure {
+                    if let Some(block) = self.current_block {
+                        self.body.failure_return_blocks.insert(block);
+                    }
+                }
                 self.set_terminator(Terminator::ret(ret_val));
                 // After return, the block is terminated — return a dummy value
                 Value::Immediate(Immediate::unit())
@@ -726,9 +757,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let lhs = self.lower_expr(*target);
                 if let Value::Place(dest) = lhs {
                     self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest,
+                        dest: dest.clone(),
                         rvalue: value_to_rvalue(rhs),
                     }));
+                    self.maybe_emit_init_field_flag(&dest);
                 }
                 Value::Immediate(Immediate::unit())
             },
@@ -2785,6 +2817,112 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
+    /// Detect if this function is an effectful init and create field-init tracking flags.
+    fn setup_init_field_flags(&mut self) {
+        use kestrel_ast_builder::{
+            Body, Computed, InitEffect, NodeKind,
+        };
+
+        let func_def = &self.ctx.module.functions[self.func_id.index()];
+        let FunctionKind::Initializer { parent } = func_def.kind else {
+            return;
+        };
+
+        let entity = func_def.entity;
+        if self.ctx.world.get::<InitEffect>(entity).is_none() {
+            return;
+        }
+
+        self.is_effectful_init = true;
+
+        // Find stored fields on the parent struct that need deinit
+        for &child in self.ctx.world.children_of(parent) {
+            if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Field) {
+                continue;
+            }
+            // Skip computed properties (have a Callable with receiver)
+            if self.ctx.world.get::<Computed>(child).is_some() {
+                continue;
+            }
+            // Skip fields with default values (have a Body component)
+            if self.ctx.world.get::<Body>(child).is_some() {
+                continue;
+            }
+
+            let Some(name) = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Name>(child)
+                .map(|n| n.0.clone())
+            else {
+                continue;
+            };
+
+            // Resolve field type from the MIR struct def (if available)
+            let field_ty = self
+                .ctx
+                .module
+                .structs
+                .iter()
+                .find(|s| s.entity == parent)
+                .and_then(|s| s.field_by_name(&name))
+                .map(|fid| {
+                    self.ctx.module.structs.iter()
+                        .find(|s| s.entity == parent)
+                        .unwrap()
+                        .fields[fid.index()]
+                        .ty
+                        .clone()
+                });
+
+            let needs_cleanup = field_ty
+                .as_ref()
+                .map(|ty| needs_field_deinit(ty))
+                .unwrap_or(true); // conservative: unknown type → assume needs deinit
+
+            if needs_cleanup {
+                let flag_local = self.body.add_local(LocalDef::new(
+                    format!("_init_{}", name),
+                    MirTy::Bool,
+                ));
+                self.init_field_flags.insert(name, flag_local);
+            }
+        }
+    }
+
+    /// After a field assignment to self, emit SetDeinitFlag if tracked.
+    fn maybe_emit_init_field_flag(&mut self, dest: &Place) {
+        if !self.is_effectful_init {
+            return;
+        }
+        if let Place::Field { parent, name } = dest {
+            if parent.root_local() == Some(LocalId::new(0)) {
+                if let Some(&flag) = self.init_field_flags.get(name.as_str()) {
+                    // false = initialized / needs deinit
+                    self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                        flag,
+                        value: false,
+                    }));
+                }
+            }
+        }
+    }
+
+    /// Check if an HIR expression is a failure value (null, .None, .Err) in an effectful init.
+    fn is_init_failure_value_hir(&self, expr_id: HirExprId) -> bool {
+        match &self.hir.exprs[expr_id] {
+            HirExpr::Literal {
+                value: kestrel_hir::body::HirLiteral::Null,
+                ..
+            } => true,
+            HirExpr::ImplicitMember { name, .. } => {
+                let n = name.as_str_or_empty();
+                n == "Err" || n == "None"
+            }
+            _ => false,
+        }
+    }
+
     /// Emit a call, handling init calls by allocating self and prepending it as first arg.
     /// For init calls: allocates a temp of the struct type, passes &mut temp as self,
     /// calls the init, and returns the temp as the result.
@@ -4289,6 +4427,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 }
 
 /// Convert a Value to an Rvalue for assignment.
+/// Check if a field type needs deinit (non-trivially destructible).
+fn needs_field_deinit(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::Bool | MirTy::I8 | MirTy::I16 | MirTy::I32 | MirTy::I64 => false,
+        MirTy::F16 | MirTy::F32 | MirTy::F64 => false,
+        MirTy::Never | MirTy::Error => false,
+        MirTy::Ref(_) | MirTy::RefMut(_) | MirTy::Pointer(_) => false,
+        MirTy::FuncThin { .. } => false,
+        MirTy::Tuple(elems) if elems.is_empty() => false,
+        _ => true,
+    }
+}
+
 fn value_to_rvalue(value: Value) -> Rvalue {
     match value {
         Value::Place(p) => Rvalue::Copy(p),
