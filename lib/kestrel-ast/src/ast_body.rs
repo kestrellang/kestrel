@@ -209,7 +209,7 @@ pub enum AstStmt {
         expr: ExprId,
         span: Span,
     },
-    GuardLet {
+    Guard {
         conditions: Vec<IfCondition>,
         else_body: AstBlock,
         span: Span,

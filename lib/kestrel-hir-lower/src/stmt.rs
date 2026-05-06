@@ -31,11 +31,11 @@ impl LowerCtx<'_> {
                 })
             },
 
-            AstStmt::GuardLet {
+            AstStmt::Guard {
                 conditions,
                 else_body,
                 span,
-            } => self.lower_guard_let(body, conditions, else_body, span),
+            } => self.lower_guard(body, conditions, else_body, span),
 
             AstStmt::Deinit { name, span } => {
                 let local = self.lookup_local(name);
@@ -138,9 +138,9 @@ impl LowerCtx<'_> {
         }
     }
 
-    /// Lower a guard-let statement.
+    /// Lower a guard statement.
     /// Desugars to: if !conditions { else_body } with bindings in outer scope.
-    fn lower_guard_let(
+    fn lower_guard(
         &mut self,
         body: &AstBody,
         conditions: &[IfCondition],
@@ -152,9 +152,9 @@ impl LowerCtx<'_> {
 
         // Build the condition check
         let condition_expr =
-            self.lower_if_conditions(body, conditions, MatchSource::GuardLet, span);
+            self.lower_if_conditions(body, conditions, MatchSource::Guard, span);
 
-        // Guard-let: if condition fails (is false / pattern doesn't match), run else
+        // Guard: if condition fails (is false / pattern doesn't match), run else
         // The bindings from let-conditions are defined in the current scope (not nested)
         let break_block = HirBlock {
             stmts: lowered_else.stmts,
@@ -175,9 +175,9 @@ impl LowerCtx<'_> {
             expr: guard_expr,
             span: span.clone(),
         });
-        // Mark this statement as originating from guard-let so the
-        // guard_let_divergence analyzer can check the else block diverges.
-        self.guard_let_stmts.push(stmt_id);
+        // Mark this statement as originating from guard so the
+        // guard divergence analyzer can check the else block diverges.
+        self.guard_stmts.push(stmt_id);
         stmt_id
     }
 }

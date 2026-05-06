@@ -40,7 +40,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Body checks
     r.add_body_check(body::exhaustive_return::ExhaustiveReturnAnalyzer);
     r.add_body_check(body::dead_code::DeadCodeAnalyzer);
-    r.add_body_check(body::guard_let::GuardLetDivergenceAnalyzer);
+    r.add_body_check(body::guard::GuardDivergenceAnalyzer);
     r.add_body_check(body::type_check::TypeCheckAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);

@@ -4,7 +4,7 @@ pub mod assignment;
 pub mod condition_check;
 pub mod dead_code;
 pub mod exhaustive_return;
-pub mod guard_let;
+pub mod guard;
 pub mod param_pattern;
 pub mod type_check;
 
