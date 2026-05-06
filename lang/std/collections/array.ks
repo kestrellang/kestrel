@@ -9,102 +9,15 @@ import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, RcBox)
+import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
 import std.collections.(Slice)
 
-// ============================================================================
-// ARRAY ITERATOR
-// ============================================================================
+// ArrayIterator[T] removed — Array.iter() now returns ArraySliceIterator[T]
+// (same (ptr, remaining) layout; single iterator type for all Slice conformers).
 
-/// Single-pass forward iterator over the elements of an `Array[T]`.
-///
-/// Produced by `Array.iter()`, walks the underlying storage one element at a
-/// time and yields owned copies of each element. The iterator holds a raw
-/// pointer into the array's buffer, so any mutation of the source array
-/// (which may reallocate) invalidates iteration. Use `chunks(of:)` or
-/// `windows(of:)` if you need grouped views instead.
-///
-/// # Examples
-///
-/// ```
-/// let arr = [1, 2, 3];
-/// var it = arr.iter();
-/// it.next();  // Some(1)
-/// it.next();  // Some(2)
-/// it.next();  // Some(3)
-/// it.next();  // None
-/// ```
-///
-/// # Representation
-///
-/// A `(ptr, remaining)` pair: a `Pointer[T]` advanced on each call and an
-/// `Int64` count of remaining elements.
-///
-/// # Memory Model
-///
-/// Value type. The pointer aliases array storage; do not retain an iterator
-/// across mutations of the source array.
-public struct ArrayIterator[T]: Iterator {
-    /// The element type yielded by `next()` — always `T`.
-    type Item = T
-
-    /// Pointer to the next element to return; advances on each `next()` call.
-    private var ptr: Pointer[T]
-    /// Number of elements still to yield.
-    private var remaining: Int64
-
-    /// @name From Pointer
-    /// Constructs an iterator from a raw pointer and a remaining-count.
-    ///
-    /// Normally you should not call this directly — use `Array.iter()` instead.
-    /// The pointer must be valid for `remaining` reads of `T`.
-    ///
-    /// # Safety
-    ///
-    /// The caller must guarantee `ptr` points to at least `remaining`
-    /// initialized elements of `T` and remains valid for the iterator's
-    /// lifetime.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let it = ArrayIterator(ptr: arr.asPointer(), remaining: arr.count);
-    /// ```
-    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
-        self.ptr = ptr;
-        self.remaining = remaining;
-    }
-
-    /// Advances the iterator and returns the next element, or `None` when the
-    /// iterator is exhausted.
-    ///
-    /// Each call reads one element, advances the internal pointer by one,
-    /// and decrements the remaining count. Once `None` is returned the
-    /// iterator stays exhausted.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var it = [10, 20].iter();
-    /// it.next();  // Some(10)
-    /// it.next();  // Some(20)
-    /// it.next();  // None
-    /// ```
-    public mutating func next() -> T? {
-        if self.remaining > 0 {
-            let value = self.ptr.read();
-            self.ptr = self.ptr.offset(by: 1);
-            self.remaining = self.remaining - 1;
-            .Some(value)
-        } else {
-            .None
-        }
-    }
-}
-
-// ChunksIterator and WindowsIterator now live in views.ks (alongside
+// ChunksIterator and WindowsIterator live in views.ks (alongside
 // ChunksView / WindowsView).
 
 // ============================================================================
@@ -271,7 +184,7 @@ struct ArrayStorage[T]: Cloneable {
 ///
 /// # Representation
 ///
-/// Holds a single `RcBox[ArrayStorage[T]]` field. The storage is a
+/// Holds a single `CowBox[ArrayStorage[T]]` field. The storage is a
 /// `(ptr, len, cap)` triple over a heap-allocated buffer.
 ///
 /// # Memory Model
@@ -295,32 +208,26 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
-    type TargetIterator = ArrayIterator[T]
+    type TargetIterator = ArraySliceIterator[T]
     /// Pattern-matching element type — used by `ArrayMatchable` for
     /// `[a, b, ..rest]` patterns.
     type Element = T
 
-    /// Refcounted storage cell holding `(ptr, len, cap)`. Sharing this
-    /// between `Array` copies is what enables COW.
-    fileprivate var storage: RcBox[ArrayStorage[T]]
+    /// COW storage — `CowBox` handles the reference counting and
+    /// clone-on-write barrier. Sharing this between `Array` copies is
+    /// what enables COW.
+    fileprivate var storage: CowBox[ArrayStorage[T]]
 
     /// Returns the raw element pointer. Internal helper for storage access.
-    fileprivate func ptr() -> Pointer[T] { self.storage.getValue().ptr }
+    fileprivate func ptr() -> Pointer[T] { self.storage.read().ptr }
     /// Returns the element count from the storage. Internal helper.
-    fileprivate func len() -> Int64 { self.storage.getValue().len }
+    fileprivate func len() -> Int64 { self.storage.read().len }
     /// Returns the buffer capacity from the storage. Internal helper.
-    fileprivate func cap() -> Int64 { self.storage.getValue().cap }
+    fileprivate func cap() -> Int64 { self.storage.read().cap }
 
-    /// Ensures the storage is uniquely owned, deep-copying it if shared.
-    ///
-    /// This is the COW write barrier: every mutating method calls it
-    /// before touching the buffer, so writes never leak into other
-    /// `Array` copies that share the same `RcBox`. A no-op when this is
-    /// the only reference.
+    /// COW write barrier — ensures the storage is uniquely owned.
     fileprivate mutating func makeUnique() {
-        if self.storage.isUnique() == false {
-            self.storage = RcBox(self.storage.getValue().clone())
-        }
+        let _ = self.storage.write();
     }
 
     /// @name From Storage
@@ -329,7 +236,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// Module-internal — used by `clone()`, `ArrayBuilder.build()`, and
     /// other `std.collections` code that constructs arrays from raw
     /// storage.
-    init(storage storage: RcBox[ArrayStorage[T]]) {
+    init(storage storage: CowBox[ArrayStorage[T]]) {
         self.storage = storage;
     }
 
@@ -352,7 +259,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.capacity;  // 0
     /// ```
     public init() {
-        self.storage = RcBox(ArrayStorage(
+        self.storage = CowBox(ArrayStorage(
             ptr: Pointer[T].nullPointer(),
             len: 0,
             cap: 0
@@ -379,7 +286,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if let .Some(rawPtr) = result {
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: rawPtr.cast[T](),
                     len: 0,
                     cap: capacity
@@ -388,7 +295,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                 fatalError("Array allocation failed")
             }
         } else {
-            self.storage = RcBox(ArrayStorage(
+            self.storage = CowBox(ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
                 cap: 0
@@ -447,7 +354,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                     newPtr.offset(by: currentLen).write(item);
                     currentLen = currentLen + 1
                 }
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: newPtr,
                     len: currentLen,
                     cap: elementCount
@@ -456,7 +363,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                 fatalError("Array allocation failed")
             }
         } else {
-            self.storage = RcBox(ArrayStorage(
+            self.storage = CowBox(ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
                 cap: 0
@@ -494,7 +401,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                 for i in 1..<count {
                     newPtr.offset(by: i).write(value);
                 }
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: newPtr,
                     len: count,
                     cap: count
@@ -556,7 +463,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                 for i in 0..<count {
                     newPtr.offset(by: i).write(gen(i));
                 }
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: newPtr,
                     len: count,
                     cap: count
@@ -622,7 +529,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            let oldStorage = self.storage.getValue();
+            let oldStorage = self.storage.read();
             // Copy existing elements
             for i in 0..<oldStorage.len {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
@@ -664,7 +571,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + 1);
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         s.ptr.offset(by: s.len).write(element);
         s.len = s.len + 1;
         self.storage.setValue(s)
@@ -694,7 +601,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + otherLen);
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         let otherPtr = other.asPointer();
         for i in 0..<otherLen {
             s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
@@ -750,7 +657,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
         self.makeUnique();
         self.grow(myLen + 1);
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         // Shift elements right
         var i: Int64 = s.len;
         while i > index {
@@ -786,7 +693,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         if myLen > 0 {
             self.makeUnique();
-            var s = self.storage.getValue();
+            var s = self.storage.read();
             s.len = s.len - 1;
             let value = s.ptr.offset(by: s.len).read();
             self.storage.setValue(s);
@@ -843,7 +750,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         let removed = s.ptr.offset(by: index).read();
         // Shift elements left
         var i: Int64 = index;
@@ -887,7 +794,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             return
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         // Shift elements left
         var i = start;
         while i < myLen - removeCount {
@@ -912,7 +819,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         s.len = 0;
         self.storage.setValue(s)
     }
@@ -932,7 +839,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func retain(matching predicate: (T) -> Bool) {
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         var writeIdx: Int64 = 0;
         for readIdx in 0..<s.len {
             let element = s.ptr.offset(by: readIdx).read();
@@ -1014,7 +921,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func reverse() {
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         var left: Int64 = 0;
         var right: Int64 = s.len - 1;
         while left < right {
@@ -1120,7 +1027,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
         self.grow(newLen);
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
 
         if insertCount > removeCount {
             // Shift elements right
@@ -1167,7 +1074,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             return
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         var generator = rng;
 
         // Fisher-Yates shuffle
@@ -1288,7 +1195,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             if myLen == 0 and myCap > 0 {
                 // Deallocate entirely for empty array
                 self.makeUnique();
-                var s = self.storage.getValue();
+                var s = self.storage.read();
                 let layout = Layout.array[T](myCap);
                 var allocator = SystemAllocator();
                 allocator.deallocate(s.ptr.asRaw(), layout);
@@ -1307,7 +1214,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            let oldStorage = self.storage.getValue();
+            let oldStorage = self.storage.read();
             for i in 0..<myLen {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read())
             }
@@ -1329,8 +1236,8 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     // ========================================================================
 
     /// Returns a forward iterator over the array's elements.
-    public func iter() -> ArrayIterator[T] {
-        ArrayIterator(ptr: self.ptr(), remaining: self.len())
+    public func iter() -> ArraySliceIterator[T] {
+        ArraySliceIterator(ptr: self.ptr(), remaining: self.len())
     }
 
     // chunks(of:), windows(of:): provided by extend Slice[T] — return
@@ -1359,7 +1266,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func partition(by predicate: (T) -> Bool) -> Int64 {
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         var lo: Int64 = 0;
         var hi: Int64 = s.len - 1;
 
@@ -1426,7 +1333,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// Returns an `Array[T]` sharing the same storage; the deep copy is
     /// deferred until either side mutates.
     ///
-    /// O(1) — just bumps the storage `RcBox`'s refcount. The first
+    /// O(1) — just bumps the storage `CowBox`'s refcount. The first
     /// mutation on either the original or the clone triggers
     /// `makeUnique()`, which deep-copies the buffer so the two arrays
     /// diverge.
@@ -1510,7 +1417,7 @@ extend Array[T] where T: Equatable {
             return
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         var writeIdx: Int64 = 1;
         for readIdx in 1..<s.len {
             let current = s.ptr.offset(by: readIdx).read();
@@ -1592,9 +1499,9 @@ extend Array[T]: ArrayMatchable {
 extend Array[T] where T: Comparable {
     /// Sorts the array in ascending order using the natural `<` ordering.
     ///
-    /// Stable insertion sort under the hood (see the custom-comparator
-    /// `sort(by:)` for the algorithm). For descending or custom orderings
-    /// pass a comparator to `sort(by:)`. Non-mutating variant: `sorted()`.
+    /// Uses introsort — O(n log n) worst-case. For descending or custom
+    /// orderings pass a comparator to `sort(by:)`. Non-mutating variant:
+    /// `sorted()`.
     ///
     /// # Examples
     ///
@@ -1641,9 +1548,10 @@ extend Array[T] {
     /// Sorts the array in place using a `<`-style comparator.
     ///
     /// The comparator returns `true` when its first argument should come
-    /// before the second. Uses insertion sort — O(n²) worst-case but
-    /// stable and excellent for small or nearly-sorted inputs. Pass a
-    /// reversed comparator for descending order.
+    /// before the second. Uses introsort — quicksort with heapsort
+    /// fallback when recursion exceeds 2·log₂(n), and insertion sort for
+    /// partitions ≤ 16 elements. O(n log n) worst-case. Pass a reversed
+    /// comparator for descending order.
     ///
     /// # Examples
     ///
@@ -1653,15 +1561,77 @@ extend Array[T] {
     /// ```
     public mutating func sort(by comparator: (T, T) -> Bool) {
         let n = self.count;
-        if n <= 1 {
+        if n <= 1 { return }
+        self.makeUnique();
+        var depthLimit: Int64 = 0;
+        var v = n;
+        while v > 1 { v = v / 2; depthLimit = depthLimit + 1 }
+        depthLimit = depthLimit * 2;
+        self.introsortLoop(low: 0, high: n, depthLimit: depthLimit, by: comparator)
+    }
+
+    // -- Introsort internals ------------------------------------------------
+
+    private mutating func introsortLoop(low lo: Int64, high hi: Int64, depthLimit depth: Int64, by cmp: (T, T) -> Bool) {
+        if hi - lo <= 16 {
+            self.insertionSortRange(low: lo, high: hi, by: cmp);
             return
         }
-        self.makeUnique();
-        // Insertion sort (simple and stable)
-        for i in 1..<n {
+        if depth == 0 {
+            self.heapsortRange(low: lo, high: hi, by: cmp);
+            return
+        }
+        let p = self.partitionRange(low: lo, high: hi, by: cmp);
+        self.introsortLoop(low: lo, high: p, depthLimit: depth - 1, by: cmp);
+        self.introsortLoop(low: p + 1, high: hi, depthLimit: depth - 1, by: cmp)
+    }
+
+    // Lomuto partition with median-of-three pivot selection.
+    private mutating func partitionRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) -> Int64 {
+        let mid = lo + (hi - lo) / 2;
+        let last = hi - 1;
+        // Sort lo, mid, last so median lands at mid
+        if cmp(self(unchecked: mid), self(unchecked: lo)) {
+            let t = self(unchecked: lo);
+            self(unchecked: lo) = self(unchecked: mid);
+            self(unchecked: mid) = t
+        }
+        if cmp(self(unchecked: last), self(unchecked: lo)) {
+            let t = self(unchecked: lo);
+            self(unchecked: lo) = self(unchecked: last);
+            self(unchecked: last) = t
+        }
+        if cmp(self(unchecked: last), self(unchecked: mid)) {
+            let t = self(unchecked: mid);
+            self(unchecked: mid) = self(unchecked: last);
+            self(unchecked: last) = t
+        }
+        // Move median to pivot position (last)
+        let t = self(unchecked: mid);
+        self(unchecked: mid) = self(unchecked: last);
+        self(unchecked: last) = t;
+        let pivot = self(unchecked: last);
+        var i = lo;
+        for j in lo..<last {
+            if cmp(self(unchecked: j), pivot) {
+                let tmp = self(unchecked: i);
+                self(unchecked: i) = self(unchecked: j);
+                self(unchecked: j) = tmp;
+                i = i + 1
+            }
+        }
+        // Place pivot at its final position
+        let tmp = self(unchecked: i);
+        self(unchecked: i) = self(unchecked: last);
+        self(unchecked: last) = tmp;
+        i
+    }
+
+    private mutating func insertionSortRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) {
+        for i in (lo + 1)..<hi {
             let key = self(unchecked: i);
             var j = i - 1;
-            while j >= 0 and comparator(key, self(unchecked: j)) {
+            while j >= lo and cmp(key, self(unchecked: j)) {
                 self(unchecked: j + 1) = self(unchecked: j);
                 j = j - 1
             }
@@ -1669,17 +1639,55 @@ extend Array[T] {
         }
     }
 
-    /// Returns a new array sorted by a custom comparator. Original
-    /// unchanged.
-    ///
-    /// Non-mutating mirror of `sort(by:)`. Useful for one-shot orderings
-    /// such as case-insensitive string sorts.
+    // Max-heap sort on the subrange [lo, hi).
+    private mutating func heapsortRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) {
+        let n = hi - lo;
+        // Build max-heap
+        var i = n / 2 - 1;
+        while i >= 0 {
+            self.siftDown(lo: lo, index: i, count: n, by: cmp);
+            i = i - 1
+        }
+        // Extract max repeatedly
+        var end = n - 1;
+        while end > 0 {
+            let t = self(unchecked: lo);
+            self(unchecked: lo) = self(unchecked: lo + end);
+            self(unchecked: lo + end) = t;
+            self.siftDown(lo: lo, index: 0, count: end, by: cmp);
+            end = end - 1
+        }
+    }
+
+    private mutating func siftDown(lo lo: Int64, index start: Int64, count n: Int64, by cmp: (T, T) -> Bool) {
+        var idx = start;
+        while true {
+            var largest = idx;
+            let left = 2 * idx + 1;
+            let right = 2 * idx + 2;
+            if left < n and cmp(self(unchecked: lo + largest), self(unchecked: lo + left)) {
+                largest = left
+            }
+            if right < n and cmp(self(unchecked: lo + largest), self(unchecked: lo + right)) {
+                largest = right
+            }
+            if largest == idx { return }
+            let t = self(unchecked: lo + idx);
+            self(unchecked: lo + idx) = self(unchecked: lo + largest);
+            self(unchecked: lo + largest) = t;
+            idx = largest
+        }
+    }
+
+    // -- Public sort variants -----------------------------------------------
+
+    /// Returns a new array sorted by a custom comparator. Original unchanged.
     ///
     /// # Examples
     ///
     /// ```
-    /// let arr = ["apple", "Banana", "cherry"];
-    /// let sorted = arr.sorted(by: { (a, b) in a.lowercase() < b.lowercase() });
+    /// let arr = [3, 1, 2];
+    /// let desc = arr.sorted(by: { (a, b) in a > b });  // [3, 2, 1]
     /// ```
     public func sorted(by comparator: (T, T) -> Bool) -> Array[T] {
         var result = self.clone();
@@ -1689,16 +1697,11 @@ extend Array[T] {
 
     /// Sorts the array in place by an extracted `Comparable` key.
     ///
-    /// Equivalent to `sort(by: { (a, b) in key(a) < key(b) })`. The key
-    /// closure runs O(n²) times in the worst case (insertion sort), so
-    /// keep it cheap. For descending order, pass a comparator to
-    /// `sort(by:)` instead.
-    ///
     /// # Examples
     ///
     /// ```
     /// var people = [Person("Alice", 30), Person("Bob", 25)];
-    /// people.sort(byKey: { (p) in p.age });  // sorted by age ascending
+    /// people.sort(byKey: { (p) in p.age });
     /// ```
     public mutating func sort[K](byKey key: (T) -> K) where K: Comparable {
         self.sort(by: { (a, b) in key(a) < key(b) })
@@ -1707,13 +1710,11 @@ extend Array[T] {
     /// Returns a new array sorted by an extracted `Comparable` key;
     /// original unchanged.
     ///
-    /// Non-mutating mirror of `sort(byKey:)`.
-    ///
     /// # Examples
     ///
     /// ```
     /// let words = ["hi", "hello", "hey"];
-    /// let byLength = words.sorted(byKey: { (w) in w.count });  // ["hi", "hey", "hello"]
+    /// let byLen = words.sorted(byKey: { (w) in w.count });
     /// ```
     public func sorted[K](byKey key: (T) -> K) -> Array[T] where K: Comparable {
         self.sorted(by: { (a, b) in key(a) < key(b) })
