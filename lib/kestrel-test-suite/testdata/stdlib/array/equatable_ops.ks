@@ -65,10 +65,10 @@ module Test
             if a.ends(with: prefix12) { return 20 }
             if a.ends(with: emptyArr) == false { return 21 }
 
-            // split(separator:) - positional single-name param
+            // split(separator:) — returns ArraySplitView; .toArray() materializes
             var splitArr = std.collections.Array[std.numeric.Int64]();
             splitArr.append(1); splitArr.append(0); splitArr.append(2); splitArr.append(0); splitArr.append(3);
-            let parts = splitArr.split(0);
+            let parts = splitArr.split(0).toArray();
             if parts.count != 3 { return 22 }
             if parts(0).count != 1 { return 23 }
             if parts(0)(unchecked: 0) != 1 { return 24 }
@@ -78,7 +78,7 @@ module Test
             if parts(2)(unchecked: 0) != 3 { return 28 }
 
             // split with no separator found
-            let noSepParts = a.split(0);
+            let noSepParts = a.split(0).toArray();
             if noSepParts.count != 1 { return 29 }
             if noSepParts(0).count != 3 { return 30 }
 

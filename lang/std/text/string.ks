@@ -816,3 +816,25 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
         _writePadded(into: writer, self, options)
     }
 }
+
+extend String {
+    /// @name From Char Iterable
+    /// Builds a string by encoding each character of `chars` as UTF-8.
+    ///
+    /// Mirrors `Array.init(from:)` and `Set.init(from:)` — accepts any
+    /// `Iterable` whose `Item` is `Char`. Useful for materializing the
+    /// result of an iterator chain back into a `String`:
+    ///
+    /// ```
+    /// let upper = String(from: "hello".chars.iter().map { it.toUpper() });
+    /// // "HELLO"
+    /// ```
+    public init[I](from chars: I) where I: Iterable, I.Item = Char {
+        var b = StringBuilder();
+        var iter = chars.iter();
+        while let .Some(c) = iter.next() {
+            b.appendChar(c)
+        }
+        self = b.build();
+    }
+}
