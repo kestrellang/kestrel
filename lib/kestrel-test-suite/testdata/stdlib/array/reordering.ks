@@ -24,11 +24,11 @@ module Test
             if arr(unchecked: 1) != 20 { return 6 }
             if arr(unchecked: 2) != 30 { return 7 }
 
-            // Test reversed (returns ReversedView; .at(i) for indexed access)
+            // Test reversed (returns ReversedView; subscript for indexed access)
             let rev = arr.reversed();
-            if rev.at(0) != 30 { return 8 }
-            if rev.at(1) != 20 { return 9 }
-            if rev.at(2) != 10 { return 10 }
+            if rev(0) != 30 { return 8 }
+            if rev(1) != 20 { return 9 }
+            if rev(2) != 10 { return 10 }
             // Original should be unchanged
             if arr(unchecked: 0) != 10 { return 11 }
 

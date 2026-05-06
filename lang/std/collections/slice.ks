@@ -35,6 +35,7 @@ import std.collections.(Array)
 /// ```
 public protocol Slice[T]: Iterable {
     func asSlice() -> ArraySlice[T]
+    mutating func ensureUnique()
 }
 
 // ============================================================================
@@ -314,39 +315,41 @@ extend Int64: SeqWrappable[T] {
 // UNIFIED SUBSCRIPTS
 // ============================================================================
 
-// Read-only subscripts on the protocol extension. Write subscripts live on
-// Array and ArraySlice directly because the compiler currently mis-resolves
-// the extension's T as the subscript's I inside set blocks (compiler bug).
-
 extend Slice[T] {
+    public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
+        get { index.readSeq(from: self.asSlice()) }
+        set {
+            self.ensureUnique();
+            index.writeSeq(to: self.asSlice(), with: newValue)
+        }
+    }
+
     public subscript[I](checked index: I) -> I.SeqOutput? where I: SeqIndex[T] {
         get { index.readSeqChecked(from: self.asSlice()) }
     }
-}
-
-// ArraySlice subscripts — read-write, dispatched through unified SeqIndex
-// protocols. Defined here (std.collections) rather than std.memory so
-// the internal SeqIndex/SeqClampable/SeqWrappable protocols are visible.
-
-extend ArraySlice[T] {
-    public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeq(from: self) }
-        set { index.writeSeq(to: self, with: newValue) }
-    }
 
     public subscript[I](unchecked index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeqUnchecked(from: self) }
-        set { index.writeSeqUnchecked(to: self, with: newValue) }
+        get { index.readSeqUnchecked(from: self.asSlice()) }
+        set {
+            self.ensureUnique();
+            index.writeSeqUnchecked(to: self.asSlice(), with: newValue)
+        }
     }
 
     public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
-        get { index.readSeqClamped(from: self) }
-        set { index.writeSeqClamped(to: self, with: newValue) }
+        get { index.readSeqClamped(from: self.asSlice()) }
+        set {
+            self.ensureUnique();
+            index.writeSeqClamped(to: self.asSlice(), with: newValue)
+        }
     }
 
     public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {
-        get { index.readSeqWrapped(from: self) }
-        set { index.writeSeqWrapped(to: self, with: newValue) }
+        get { index.readSeqWrapped(from: self.asSlice()) }
+        set {
+            self.ensureUnique();
+            index.writeSeqWrapped(to: self.asSlice(), with: newValue)
+        }
     }
 }
 

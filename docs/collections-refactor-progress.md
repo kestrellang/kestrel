@@ -71,13 +71,13 @@ grouped by phase. `[x]` = landed; `[ ]` = pending.
 - [x] `ClosedRange[Int64]: SeqIndex[T]` — full read + write
 - [x] `Int64: SeqClampable[T]` / `Range[Int64]: SeqClampable[T]`
 - [x] `Int64: SeqWrappable[T]`
-- [x] Wire subscripts: `(checked:)` on `extend Slice[T]`; `(index:)`, `(unchecked:)`, `(clamped:)`, `(wrapped:)` on `Array[T]` and `extend ArraySlice[T]`
+- [x] Wire all subscripts on `extend Slice[T]`: `(index:)`, `(checked:)`, `(unchecked:)`, `(clamped:)`, `(wrapped:)` — setters call `ensureUnique()` for COW
 - [x] Remove old `ArrayIndex[T]` / `ArrayClampable[T]` / `ArrayWrappable[T]` from `array.ks`
 - [x] Remove old `SliceIndex[T]` / `SliceClampable[T]` / `SliceWrappable[T]` from `pointer.ks`
 - [x] Drop probe subscripts (`probe:` / `probeChecked:`) and probe protocol; replaced with full implementation
 - [x] Test `seqindex_probe.ks` updated to exercise all subscript variants
-- [ ] Add subscripts to views (`ChunksView`, `WindowsView`, `ReversedView`); remove `.at(i)` debt
-- [ ] Move write subscripts to `extend Slice[T]` once compiler bug is fixed (subscript set blocks mis-resolve extension `T` as subscript type param `I`)
+- [x] Add subscripts to views (`ChunksView`, `WindowsView`, `ReversedView`); `.at(i)` replaced with `subscript(index:)`
+- [x] ~~Move write subscripts to `extend Slice[T]`~~ — done after compiler bug fix (`ad452c74`)
 
 ---
 

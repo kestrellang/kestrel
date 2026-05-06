@@ -182,13 +182,17 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
                 let name = protocol_member_name(ctx, &m);
                 let labels = get_param_labels(ctx, m.entity).unwrap_or_default();
                 let mut entries = vec![(
-                    WitnessMethodKey::new(name.clone(), labels),
+                    WitnessMethodKey::new(name.clone(), labels.clone()),
                     name.clone(),
                     m.clone(),
                 )];
                 if ctx.world.get::<Settable>(m.entity).is_some() {
                     let setter_name = format!("{name}.set");
-                    entries.push((WitnessMethodKey::bare(setter_name.clone()), setter_name, m));
+                    entries.push((
+                        WitnessMethodKey::new(setter_name.clone(), labels.clone()),
+                        setter_name,
+                        m,
+                    ));
                 }
                 entries
             })
@@ -245,11 +249,19 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
             // Fall back to the protocol extension's default implementation,
             // if this member came from one. ProtocolMembers already walked
             // the extensions, so the default impl is right there on `member`.
+            // For setter keys (`<name>.set`), bind to the Setter child entity
+            // so the monomorphizer calls the setter function (which takes
+            // `[self, index, newValue]`), not the getter.
             if member.extension.is_some() {
-                ctx.register_name(member.entity);
+                let bind_entity = if method_name.ends_with(".set") {
+                    find_setter_among(ctx, &[member.entity]).unwrap_or(member.entity)
+                } else {
+                    member.entity
+                };
+                ctx.register_name(bind_entity);
                 witness.bind_method(
                     method_key.clone(),
-                    MethodBinding::extension(member.entity, vec![], *protocol),
+                    MethodBinding::extension(bind_entity, vec![], *protocol),
                 );
             }
         }
@@ -398,7 +410,10 @@ fn find_impl_among(
 /// the field's base name (Fields carry `Gettable`, so they surface there).
 fn find_setter_among(ctx: &LowerCtx, candidates: &[Entity]) -> Option<Entity> {
     for &c in candidates {
-        if ctx.world.get::<NodeKind>(c) != Some(&NodeKind::Field) {
+        if !matches!(
+            ctx.world.get::<NodeKind>(c),
+            Some(NodeKind::Field | NodeKind::Subscript)
+        ) {
             continue;
         }
         for &gc in ctx.world.children_of(c) {

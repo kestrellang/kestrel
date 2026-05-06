@@ -581,38 +581,11 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         ArraySlice(pointer: self.ptr(), count: self.len())
     }
 
-    // subscript(checked:): provided by extend Slice[T]
+    // All subscripts provided by extend Slice[T] in slice.ks
 
-    public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeq(from: self.asSlice()) }
-        set {
-            self.makeUnique();
-            index.writeSeq(to: self.asSlice(), with: newValue)
-        }
-    }
-
-    public subscript[I](unchecked index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeqUnchecked(from: self.asSlice()) }
-        set {
-            self.makeUnique();
-            index.writeSeqUnchecked(to: self.asSlice(), with: newValue)
-        }
-    }
-
-    public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
-        get { index.readSeqClamped(from: self.asSlice()) }
-        set {
-            self.makeUnique();
-            index.writeSeqClamped(to: self.asSlice(), with: newValue)
-        }
-    }
-
-    public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {
-        get { index.readSeqWrapped(from: self.asSlice()) }
-        set {
-            self.makeUnique();
-            index.writeSeqWrapped(to: self.asSlice(), with: newValue)
-        }
+    /// COW write barrier — deep-copies storage if shared.
+    public mutating func ensureUnique() {
+        self.makeUnique()
     }
 
     // ========================================================================
