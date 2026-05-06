@@ -2345,7 +2345,12 @@ fn solve_member(
         // Walk from the owner (function) to its parent (protocol, extension,
         // or struct). For extensions, type params live on the target type, not
         // the extension entity itself.
-        let parent = ctx.query_ctx.parent_of(ctx.owner);
+        // Use accessor_enclosing_container to skip through Subscript/Field
+        // parents — a setter's direct parent is the subscript (which has its
+        // own TypeParams [I]), not the extension. Without this, the protocol's
+        // T gets mapped to the subscript's I.
+        let parent = crate::accessor_enclosing_container(ctx.query_ctx, ctx.owner)
+            .or_else(|| ctx.query_ctx.parent_of(ctx.owner));
         let params_source = parent.and_then(|p| {
             if ctx.query_ctx.get::<TypeParams>(p).is_some() {
                 Some(p)
