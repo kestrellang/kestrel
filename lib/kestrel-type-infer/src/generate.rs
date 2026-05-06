@@ -4,7 +4,7 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
@@ -1003,6 +1003,9 @@ fn gen_struct_init(
         }
     }
 
+    // Track the matched init entity for effect wrapping
+    let mut matched_init: Option<Entity> = None;
+
     if !inits.is_empty() {
         // Collect all inits matching by arity + label pattern
         let matched: Vec<Entity> = inits
@@ -1021,6 +1024,7 @@ fn gen_struct_init(
         // type-directed disambiguation which happens during solving.
         if let [init] = matched.as_slice() {
             let init = *init;
+            matched_init = Some(init);
             // Record which init was selected so MIR lowering can use the init entity
             ctx.resolutions.insert(expr_id, init);
             // Build subs that includes both struct type params AND init's own type params
@@ -1147,9 +1151,60 @@ fn gen_struct_init(
         }
     }
 
-    // Record this expr's type and return
-    ctx.expr_types.insert(expr_id, result_tv);
-    result_tv
+    // Wrap result through type operators for effectful inits (Self? or Self throws E)
+    let final_tv = if let Some(init) = matched_init {
+        wrap_init_result(ctx, init, result_tv, &struct_subs, span)
+    } else {
+        result_tv
+    };
+
+    ctx.expr_types.insert(expr_id, final_tv);
+    final_tv
+}
+
+// ===== Init effect wrapping =====
+
+/// Wrap a TyVar for an effectful init call site: `Self` → `Self?` or `Self throws E`.
+///
+/// Uses the init's `LowerTypeAnnotation` (e.g. `Optional[()]` or `Result[(), E]`) to get
+/// the wrapper entity, then substitutes the inner type for the first type arg.
+fn wrap_init_result(
+    ctx: &mut InferCtx<'_>,
+    init_entity: Entity,
+    inner_tv: TyVar,
+    struct_subs: &[(Entity, TyVar)],
+    _span: &Span,
+) -> TyVar {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    if qctx.get::<InitEffect>(init_entity).is_none() {
+        return inner_tv;
+    }
+
+    // The init's TypeAnnotation is ()? or () throws E, lowered to HirTy with the
+    // actual wrapper entity (Optional enum or Result enum). Replace the first type arg
+    // (which is ()) with the struct type to get Self? or Self throws E.
+    let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
+        entity: init_entity,
+        root,
+    }) else {
+        return inner_tv;
+    };
+
+    match &hir_ty {
+        HirTy::Enum { entity, args, .. } | HirTy::Struct { entity, args, .. } => {
+            let mut wrapped_args = Vec::with_capacity(args.len());
+            // First arg is () — replace with inner_tv (Self)
+            wrapped_args.push(inner_tv);
+            // Remaining args (e.g. error type E) — lower with struct subs
+            for arg in args.iter().skip(1) {
+                wrapped_args.push(lower_hir_ty_with_subs(ctx, arg, struct_subs));
+            }
+            ctx.named(*entity, wrapped_args)
+        }
+        _ => inner_tv,
+    }
 }
 
 // ===== Helpers =====

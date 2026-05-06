@@ -71,6 +71,7 @@ pub enum SyntaxKind {
     PropertyAccessors, // { get { } set { } } or { get } { get set }
     FunctionDeclaration,
     InitializerDeclaration,
+    InitEffect, // ? or throws E after init params
     DeinitDeclaration,
     SubscriptDeclaration,
     SubscriptBody,
@@ -495,6 +496,7 @@ impl Language for KestrelLanguage {
         const PROPERTY_ACCESSORS: u16 = SyntaxKind::PropertyAccessors as u16;
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
         const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
+        const INIT_EFFECT: u16 = SyntaxKind::InitEffect as u16;
         const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
         const SUBSCRIPT_DECLARATION: u16 = SyntaxKind::SubscriptDeclaration as u16;
         const SUBSCRIPT_BODY: u16 = SyntaxKind::SubscriptBody as u16;
@@ -749,6 +751,7 @@ impl Language for KestrelLanguage {
             PROPERTY_ACCESSORS => SyntaxKind::PropertyAccessors,
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
             INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
+            INIT_EFFECT => SyntaxKind::InitEffect,
             DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
             SUBSCRIPT_DECLARATION => SyntaxKind::SubscriptDeclaration,
             SUBSCRIPT_BODY => SyntaxKind::SubscriptBody,

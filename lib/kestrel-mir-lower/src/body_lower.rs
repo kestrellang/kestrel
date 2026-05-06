@@ -2775,15 +2775,26 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         };
 
         if is_init {
-            // Init call: allocate self, prepend as first arg, call, return self
+            // Check if this init is effectful (failable/throwing)
+            let init_effect = match &callee {
+                Callee::Direct { func, .. } => self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::InitEffect>(*func)
+                    .cloned(),
+                _ => None,
+            };
+
+            if let Some(effect) = init_effect {
+                return self.emit_effectful_init_call(callee, call_args, result_ty, effect);
+            }
+
+            // Regular init: allocate self, prepend as first arg, call, return self
             let self_local = self.fresh_temp(result_ty.clone());
             let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
             call_args.insert(0, self_ref);
 
-            // Direct init callees need `self_type` set (for mangling) —
-            // `type_args` comes from upstream (`resolve_type_args(expr_id)` +
-            // `infer_parent_type_args`), which already supplies the complete
-            // struct-first list.
+            // Direct init callees need `self_type` set (for mangling)
             let callee = match callee {
                 Callee::Direct {
                     func,
@@ -2840,6 +2851,172 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         } else {
             self.emit_call(callee, call_args, result_ty)
         }
+    }
+
+    /// Handle an effectful init call (failable or throwing).
+    ///
+    /// The init body returns `Optional[()]` or `Result[(), E]`. The call site
+    /// must map this to `Optional[Self]` or `Result[Self, E]`:
+    ///   - Success (.Some(()) / .Ok(())) → wrap self in .Some(self) / .Ok(self)
+    ///   - Failure (.None / .Err(e)) → propagate .None / .Err(e)
+    fn emit_effectful_init_call(
+        &mut self,
+        callee: Callee,
+        mut call_args: Vec<CallArg>,
+        result_ty: MirTy,
+        effect: kestrel_ast_builder::InitEffect,
+    ) -> Value {
+        // result_ty is Optional[Self] or Result[Self, E].
+        // Extract the inner struct type from the first type arg.
+        let (inner_ty, success_variant, failure_variant) = match &effect {
+            kestrel_ast_builder::InitEffect::Failable => {
+                let inner = match &result_ty {
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
+                        type_args[0].clone()
+                    }
+                    _ => result_ty.clone(),
+                };
+                (inner, "Some", "None")
+            }
+            kestrel_ast_builder::InitEffect::Throwing => {
+                let inner = match &result_ty {
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
+                        type_args[0].clone()
+                    }
+                    _ => result_ty.clone(),
+                };
+                (inner, "Ok", "Err")
+            }
+        };
+
+        // 1. Allocate self_local of the inner struct type
+        let self_local = self.fresh_temp(inner_ty.clone());
+        let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
+        call_args.insert(0, self_ref);
+
+        // Set self_type on callee for mangling
+        let callee = match callee {
+            Callee::Direct {
+                func,
+                type_args,
+                self_type: None,
+            } => Callee::Direct {
+                func,
+                type_args,
+                self_type: Some(inner_ty.clone()),
+            },
+            other => other,
+        };
+
+        // 2. Call init — returns Optional[()] or Result[(), E]
+        let init_ret_ty = match &effect {
+            kestrel_ast_builder::InitEffect::Failable => {
+                // Optional[()]
+                if let MirTy::Named { entity, .. } = &result_ty {
+                    MirTy::Named {
+                        entity: *entity,
+                        type_args: vec![MirTy::Tuple(vec![])],
+                    }
+                } else {
+                    MirTy::Tuple(vec![])
+                }
+            }
+            kestrel_ast_builder::InitEffect::Throwing => {
+                // Result[(), E]
+                if let MirTy::Named {
+                    entity, type_args, ..
+                } = &result_ty
+                {
+                    let err_ty = type_args.get(1).cloned().unwrap_or(MirTy::Tuple(vec![]));
+                    MirTy::Named {
+                        entity: *entity,
+                        type_args: vec![MirTy::Tuple(vec![]), err_ty],
+                    }
+                } else {
+                    MirTy::Tuple(vec![])
+                }
+            }
+        };
+
+        let init_ret_local = self.fresh_temp(init_ret_ty.clone());
+        self.emit_stmt(Statement::new(StatementKind::Call {
+            dest: Some(Place::local(init_ret_local)),
+            callee,
+            args: call_args,
+        }));
+
+        // 3. Switch on the init result discriminant
+        let final_local = self.fresh_temp(result_ty.clone());
+        let success_block = self.new_block();
+        let failure_block = self.new_block();
+        let join_block = self.new_block();
+
+        self.set_terminator(Terminator::switch(
+            Place::local(init_ret_local),
+            vec![
+                (
+                    kestrel_mir::SwitchCase::Variant(success_variant.to_string()),
+                    success_block,
+                ),
+                (
+                    kestrel_mir::SwitchCase::Variant(failure_variant.to_string()),
+                    failure_block,
+                ),
+            ],
+        ));
+
+        // Success block: wrap self in .Some(self) / .Ok(self)
+        self.switch_to_block(success_block);
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest: Place::local(final_local),
+            rvalue: Rvalue::EnumVariant {
+                enum_ty: result_ty.clone(),
+                variant: success_variant.to_string(),
+                payload: vec![Value::Place(Place::local(self_local))],
+            },
+        }));
+        self.set_terminator(Terminator::jump(join_block));
+
+        // Failure block: propagate .None or .Err(e)
+        self.switch_to_block(failure_block);
+        if failure_variant == "None" {
+            // .None has no payload
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(final_local),
+                rvalue: Rvalue::EnumVariant {
+                    enum_ty: result_ty.clone(),
+                    variant: failure_variant.to_string(),
+                    payload: vec![],
+                },
+            }));
+        } else {
+            // .Err(e): extract the error payload from the init result and re-wrap
+            let err_place = Place::local(init_ret_local).downcast(failure_variant);
+            let err_ty = match &result_ty {
+                MirTy::Named { type_args, .. } => {
+                    type_args.get(1).cloned().unwrap_or(MirTy::Tuple(vec![]))
+                }
+                _ => MirTy::Tuple(vec![]),
+            };
+            let err_local = self.fresh_temp(err_ty);
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(err_local),
+                rvalue: Rvalue::Copy(err_place),
+            }));
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(final_local),
+                rvalue: Rvalue::EnumVariant {
+                    enum_ty: result_ty.clone(),
+                    variant: failure_variant.to_string(),
+                    payload: vec![Value::Place(Place::local(err_local))],
+                },
+            }));
+        }
+        self.set_terminator(Terminator::jump(join_block));
+
+        // Continue in join block
+        self.switch_to_block(join_block);
+        Value::Place(Place::local(final_local))
     }
 
     /// Expand missing call arguments with default parameter values.

@@ -12,7 +12,7 @@ use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
@@ -1916,7 +1916,8 @@ fn emit_resolved_call(
         .map(|hir_ty| lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs))
         .unwrap_or_else(|| ctx.tuple(Vec::new()));
 
-    // For inits and enum cases, result type is the parent type
+    // For inits and enum cases, result type is the parent type.
+    // Effectful inits wrap through type operators: Self? or Self throws E.
     if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
         if let Some(parent) = qctx.parent_of(entity) {
             let parent_tps: Vec<Entity> = qctx
@@ -1928,7 +1929,9 @@ fn emit_resolved_call(
                 .filter_map(|tp| subs.iter().find(|(e, _)| e == tp).map(|&(_, tv)| tv))
                 .collect();
             let parent_ty = ctx.named(parent, parent_args);
-            ctx.equal(result, parent_ty, span);
+            let final_ty =
+                wrap_init_call_result(ctx, entity, parent_ty, &subs, &span);
+            ctx.equal(result, final_ty, span);
         } else {
             ctx.equal(result, ret_tv, span);
         }
@@ -3613,4 +3616,40 @@ fn lower_hir_ty_sub(
 /// Convert HirTy to TyVar without substitution.
 pub fn lower_hir_ty_plain(ctx: &mut InferCtx<'_>, ty: &kestrel_hir::ty::HirTy) -> TyVar {
     lower_hir_ty_sub(ctx, ty, None, TyVar(0), &[])
+}
+
+/// Wrap a TyVar for an effectful init call site: `Self` → `Self?` or `Self throws E`.
+fn wrap_init_call_result(
+    ctx: &mut InferCtx<'_>,
+    init_entity: kestrel_hecs::Entity,
+    inner_tv: TyVar,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+    _span: &kestrel_span::Span,
+) -> TyVar {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    if qctx.get::<InitEffect>(init_entity).is_none() {
+        return inner_tv;
+    }
+
+    let Some(hir_ty) = qctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: init_entity,
+        root,
+    }) else {
+        return inner_tv;
+    };
+
+    match &hir_ty {
+        kestrel_hir::ty::HirTy::Enum { entity, args, .. }
+        | kestrel_hir::ty::HirTy::Struct { entity, args, .. } => {
+            let mut wrapped_args = Vec::with_capacity(args.len());
+            wrapped_args.push(inner_tv);
+            for arg in args.iter().skip(1) {
+                wrapped_args.push(lower_hir_ty_sub(ctx, arg, None, TyVar(0), subs));
+            }
+            ctx.named(*entity, wrapped_args)
+        }
+        _ => inner_tv,
+    }
 }
