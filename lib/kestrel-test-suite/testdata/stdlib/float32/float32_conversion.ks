@@ -55,7 +55,7 @@ module Test
             if asF64.isEqual(to: onePointFiveF64) == false { return 10 }
 
             // parse — valid float
-            let parsed = std.numeric.Float32.parse("3.14");
+            let parsed = std.numeric.Float32(parsing: "3.14");
             if parsed.isNone() { return 11 }
             let parsedVal = parsed.unwrap();
             let parseThreePtOneFour: std.numeric.Float32 = 3.14;
@@ -63,38 +63,38 @@ module Test
             if parseDiff > tolerance { return 12 }
 
             // parse — negative value
-            let parsedNeg = std.numeric.Float32.parse("-2.5");
+            let parsedNeg = std.numeric.Float32(parsing: "-2.5");
             if parsedNeg.isNone() { return 13 }
             let parsedNegVal = parsedNeg.unwrap();
             let negTwoPointFive: std.numeric.Float32 = -2.5;
             if parsedNegVal.isEqual(to: negTwoPointFive) == false { return 14 }
 
             // parse — scientific notation
-            let parsedSci = std.numeric.Float32.parse("1.5e2");
+            let parsedSci = std.numeric.Float32(parsing: "1.5e2");
             if parsedSci.isNone() { return 15 }
             let oneHundredFifty: std.numeric.Float32 = 150.0;
             if parsedSci.unwrap().isEqual(to: oneHundredFifty) == false { return 16 }
 
             // parse — "nan"
-            let parsedNan = std.numeric.Float32.parse("nan");
+            let parsedNan = std.numeric.Float32(parsing: "nan");
             if parsedNan.isNone() { return 17 }
             if parsedNan.unwrap().isNaN == false { return 18 }
 
             // parse — "inf"
-            let parsedInf = std.numeric.Float32.parse("inf");
+            let parsedInf = std.numeric.Float32(parsing: "inf");
             if parsedInf.isNone() { return 19 }
             if parsedInf.unwrap().isInfinite == false { return 20 }
 
             // parse — invalid string
-            let parsedBad = std.numeric.Float32.parse("abc");
+            let parsedBad = std.numeric.Float32(parsing: "abc");
             if parsedBad.isSome() { return 21 }
 
             // parse — empty string
-            let parsedEmpty = std.numeric.Float32.parse("");
+            let parsedEmpty = std.numeric.Float32(parsing: "");
             if parsedEmpty.isSome() { return 22 }
 
             // parse — integer string
-            let parsedInt = std.numeric.Float32.parse("42");
+            let parsedInt = std.numeric.Float32(parsing: "42");
             if parsedInt.isNone() { return 23 }
             let parsedFortyTwo: std.numeric.Float32 = 42.0;
             if parsedInt.unwrap().isEqual(to: parsedFortyTwo) == false { return 24 }

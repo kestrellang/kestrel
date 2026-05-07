@@ -62,35 +62,35 @@ module Test
             if fromI8 != expectedFromI8 { return 14 }
 
             // parse — valid Int32 value
-            let parsed = std.numeric.Int32.parse( "100000");
+            let parsed = std.numeric.Int32(parsing: "100000");
             if parsed.isNone() { return 15 }
             let expectedParsed: std.numeric.Int32 = 100000;
             if parsed.unwrap() != expectedParsed { return 16 }
 
             // parse — negative value
-            let parsedNeg = std.numeric.Int32.parse( "-2147483648");
+            let parsedNeg = std.numeric.Int32(parsing: "-2147483648");
             if parsedNeg.isNone() { return 17 }
             if parsedNeg.unwrap() != std.numeric.Int32.minValue { return 18 }
 
             // parse — maxValue
-            let parsedMax = std.numeric.Int32.parse( "2147483647");
+            let parsedMax = std.numeric.Int32(parsing: "2147483647");
             if parsedMax.isNone() { return 19 }
             if parsedMax.unwrap() != std.numeric.Int32.maxValue { return 20 }
 
             // parse — out-of-range (too large)
-            let parsedBig = std.numeric.Int32.parse( "2147483648");
+            let parsedBig = std.numeric.Int32(parsing: "2147483648");
             if parsedBig.isSome() { return 21 }
 
             // parse — out-of-range (too small)
-            let parsedSmall = std.numeric.Int32.parse( "-2147483649");
+            let parsedSmall = std.numeric.Int32(parsing: "-2147483649");
             if parsedSmall.isSome() { return 22 }
 
             // parse — invalid string
-            let parsedBad = std.numeric.Int32.parse( "xyz");
+            let parsedBad = std.numeric.Int32(parsing: "xyz");
             if parsedBad.isSome() { return 23 }
 
             // parse — empty string
-            let parsedEmpty = std.numeric.Int32.parse( "");
+            let parsedEmpty = std.numeric.Int32(parsing: "");
             if parsedEmpty.isSome() { return 24 }
 
             0

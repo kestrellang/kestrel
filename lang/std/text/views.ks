@@ -288,7 +288,7 @@ public struct CharsIterator: Iterator {
             // Invalid UTF-8 - skip byte and return replacement character
             self.byteIndex = self.byteIndex + 1;
             let replacementValue = UInt32(raw: 0xFFFD);
-            .Some(Char(replacementValue))
+            .Some(Char(unchecked: replacementValue))
         }
     }
 }
@@ -2432,7 +2432,7 @@ extend CharIndex: CharsIndex {
         let result = decodeUtf8(view.ptr, view.length, at: self.byteOffset);
         match result {
             .Some(d) => d.char,
-            .None => Char(0xFFFD)
+            .None => Char(unchecked: 0xFFFD)
         }
     }
 
@@ -2443,7 +2443,7 @@ extend CharIndex: CharsIndex {
         let result = decodeUtf8(view.ptr, view.length, at: self.byteOffset);
         match result {
             .Some(d) => .Some(d.char),
-            .None => .Some(Char(0xFFFD))
+            .None => .Some(Char(unchecked: 0xFFFD))
         }
     }
 }
@@ -2758,7 +2758,7 @@ public struct IndexedCharsIterator: Iterator {
         } else {
             self.byteIndex = self.byteIndex + 1;
             let replacementValue = UInt32(raw: 0xFFFD);
-            .Some((idx, Char(replacementValue)))
+            .Some((idx, Char(unchecked: replacementValue)))
         }
     }
 }
@@ -2929,7 +2929,7 @@ public struct ReversedCharsIterator: Iterator {
         if let .Some(decoded) = result {
             .Some(decoded.char)
         } else {
-            .Some(Char(UInt32(raw: 0xFFFD)))
+            .Some(Char(unchecked: UInt32(raw: 0xFFFD)))
         }
     }
 }

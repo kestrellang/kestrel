@@ -69,6 +69,9 @@ struct LoopInfo {
     header_block: BlockId,
     exit_block: BlockId,
     label: Option<String>,
+    /// (MIR local, Bool flag) for `let` bindings inside the loop body.
+    /// Flag = true means uninitialized (skip deinit), false = initialized.
+    scoped_locals: Vec<(LocalId, LocalId)>,
 }
 
 /// Per-function lowering context.
@@ -538,13 +541,27 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         rvalue: value_to_rvalue(init_value),
                     }));
                 }
+                // Mark loop-scoped local as initialized
+                if let Some(info) = self.loop_stack.last() {
+                    if let Some(&(_, flag)) = info.scoped_locals.iter().find(|(l, _)| *l == mir_local) {
+                        self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                            flag,
+                            value: false,
+                        }));
+                    }
+                }
             },
             HirStmt::Expr { expr, .. } => {
                 // Lower for side effects, discard result
                 let _ = self.lower_expr(*expr);
             },
-            HirStmt::Deinit { .. } => {
-                // Skip — deinit pass handles this later
+            HirStmt::Deinit { local, .. } => {
+                if let Some(hir_local) = local {
+                    let mir_local = self.map_local(*hir_local);
+                    self.emit_stmt(Statement::new(StatementKind::Deinit {
+                        place: Place::local(mir_local),
+                    }));
+                }
             },
         }
     }
@@ -3696,6 +3713,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let header_block = self.new_block();
         let exit_block = self.new_block();
 
+        // Create (local, flag) pairs for let-bindings inside the loop body.
+        // The flag tracks whether the local is initialized — true = uninit.
+        let raw_locals = self.collect_block_locals(body);
+        let scoped_locals: Vec<(LocalId, LocalId)> = raw_locals
+            .into_iter()
+            .map(|local| {
+                let flag = self.body.add_local(
+                    LocalDef::new(format!("_loop_{}", self.body.locals[local.index()].name), MirTy::Bool),
+                );
+                (local, flag)
+            })
+            .collect();
+
         // Jump into the loop header
         if !self.is_terminated() {
             self.set_terminator(Terminator::jump(header_block));
@@ -3706,14 +3736,27 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             header_block,
             exit_block,
             label: label.map(|s| s.to_string()),
+            scoped_locals,
         });
 
-        // Lower loop body
+        // At the top of the loop header, set all flags to true (uninit)
         self.switch_to_block(header_block);
+        let flag_inits: Vec<LocalId> = self.loop_stack.last()
+            .map(|l| l.scoped_locals.iter().map(|&(_, f)| f).collect())
+            .unwrap_or_default();
+        for flag in flag_inits {
+            self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                flag,
+                value: true,
+            }));
+        }
+
+        // Lower loop body
         let _ = self.lower_hir_block(body);
 
-        // At end of body, loop back to header
+        // Emit conditional deinits for loop-scoped locals before the back-edge
         if !self.is_terminated() {
+            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(header_block));
         }
 
@@ -3729,6 +3772,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_break(&mut self, label: Option<&str>) -> Value {
         let exit_block = self.find_loop(label).map(|l| l.exit_block);
         if let Some(exit) = exit_block {
+            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(exit));
         }
         Value::Immediate(Immediate::unit())
@@ -3738,9 +3782,36 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_continue(&mut self, label: Option<&str>) -> Value {
         let header_block = self.find_loop(label).map(|l| l.header_block);
         if let Some(header) = header_block {
+            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(header));
         }
         Value::Immediate(Immediate::unit())
+    }
+
+    /// Emit DeinitIf for each loop-scoped local in the innermost loop.
+    /// Uses the flag to skip locals that haven't been initialized yet.
+    fn emit_loop_scope_deinits(&mut self) {
+        let pairs: Vec<(LocalId, LocalId)> = self.loop_stack.last()
+            .map(|l| l.scoped_locals.clone())
+            .unwrap_or_default();
+        for &(local, flag) in pairs.iter().rev() {
+            self.emit_stmt(Statement::new(StatementKind::DeinitIf {
+                place: Place::local(local),
+                flag,
+            }));
+        }
+    }
+
+    /// Collect MIR local IDs for `let` bindings declared in a HIR block.
+    fn collect_block_locals(&self, block: &HirBlock) -> Vec<LocalId> {
+        let mut locals = Vec::new();
+        for &stmt_id in &block.stmts {
+            if let HirStmt::Let { local, .. } = &self.hir.stmts[stmt_id] {
+                let mir_local = self.map_local(*local);
+                locals.push(mir_local);
+            }
+        }
+        locals
     }
 
     /// Find a loop by label (or the innermost loop if no label).

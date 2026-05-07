@@ -47,29 +47,30 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     // ========================================================================
 
     /// @name From Value
-    /// Wraps a raw `UInt32` scalar value as a `Char`.
-    ///
-    /// No range or surrogate validation is performed; pass values you
-    /// already know are valid Unicode scalars. Prefer the literal syntax
-    /// (`'a'`, `'\u{...}'`) when the value is known at compile time.
+    /// Returns a `Char` if the value is a valid Unicode scalar, `null` otherwise.
+    /// Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
     ///
     /// # Examples
     ///
     /// ```
-    /// let c = Char(value: UInt32(intLiteral: 0x41));
-    /// c == 'A';  // true
+    /// let c = Char(65);      // Some('A')
+    /// let bad = Char(0xD800); // None (surrogate)
     /// ```
-    public init(value: UInt32) {
+    public init(value: UInt32)? {
+        if value > UInt32(intLiteral: 0x10FFFF) { return null }
+        if value >= UInt32(intLiteral: 0xD800) and value <= UInt32(intLiteral: 0xDFFF) { return null }
         self._value = value;
     }
 
-    /// @name Validated
-    /// Returns a `Char` if the value is a valid Unicode scalar, `.None` otherwise.
-    /// Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
-    public static func validated(value: UInt32) -> Char? {
-        if value > UInt32(intLiteral: 0x10FFFF) { return .None }
-        if value >= UInt32(intLiteral: 0xD800) and value <= UInt32(intLiteral: 0xDFFF) { return .None }
-        .Some(Char(value))
+    /// @name Unchecked
+    /// Wraps a raw `UInt32` scalar value as a `Char` without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `value` is a valid Unicode scalar
+    /// (0..=0x10FFFF, excluding surrogates U+D800..U+DFFF).
+    public init(unchecked value: UInt32) {
+        self._value = value;
     }
 
     /// @name Char Literal
@@ -395,23 +396,21 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
         }
     }
 
-    /// Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.
+    /// @name From Digit
+    /// Returns the ASCII digit `Char` for a numeric value `0`–`9`, `null` otherwise.
     ///
-    /// Inverse of `digitValue`. Values outside `0..=9` return `None`.
+    /// Inverse of `digitValue`. Values outside `0..=9` return `null`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Char.fromDigit(7);   // Some('7')
-    /// Char.fromDigit(12);  // None
+    /// Char(fromDigit: 7);   // Some('7')
+    /// Char(fromDigit: 12);  // None
     /// ```
-    public static func fromDigit(d: UInt32) -> Char? {
-        if d <= 9 {
-            let zero: Char = '0';
-            .Some(Char(d + zero.value()))
-        } else {
-            .None
-        }
+    public init(fromDigit d: UInt32)? {
+        if d > 9 { return null }
+        let zero: Char = '0';
+        self._value = d + zero.value();
     }
 
     // ========================================================================
@@ -568,7 +567,7 @@ public struct Grapheme: Equatable, Cloneable {
     public init(chars chars: Array[Char]) {
         let n = chars.count;
         if n == 0 {
-            self._first = Char(0);
+            self._first = Char(unchecked: 0);
             self._rest = .None
         } else if n == 1 {
             self._first = chars(unchecked: 0);
@@ -848,7 +847,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
 
     if lang.i32_unsigned_lt(firstU, 0x80) {
         // Single byte (ASCII): 0xxxxxxx
-        let c = Char(UInt32(raw: firstU));
+        let c = Char(unchecked: UInt32(raw: firstU));
         return .Some(Utf8DecodeResult(char: c, bytesConsumed: 1))
     } else if lang.i32_unsigned_lt(firstU, 0xC0) {
         // Continuation byte as start - invalid
@@ -863,7 +862,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             lang.i32_shl(lang.i32_and(firstU, 0x1F), 6),
             lang.i32_and(second, 0x3F)
         );
-        let c = Char(UInt32(raw: v));
+        let c = Char(unchecked: UInt32(raw: v));
         return .Some(Utf8DecodeResult(char: c, bytesConsumed: 2))
     } else if lang.i32_unsigned_lt(firstU, 0xF0) {
         // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
@@ -881,7 +880,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             ),
             lang.i32_and(third, 0x3F)
         );
-        let c = Char(UInt32(raw: v));
+        let c = Char(unchecked: UInt32(raw: v));
         return .Some(Utf8DecodeResult(char: c, bytesConsumed: 3))
     } else if lang.i32_unsigned_lt(firstU, 0xF8) {
         // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
@@ -905,7 +904,7 @@ public func decodeUtf8(ptr: lang.ptr[lang.i8], length: Int64, at index: Int64) -
             ),
             lang.i32_and(fourth, 0x3F)
         );
-        let c = Char(UInt32(raw: v));
+        let c = Char(unchecked: UInt32(raw: v));
         return .Some(Utf8DecodeResult(char: c, bytesConsumed: 4))
     } else {
         // Invalid start byte

@@ -22,21 +22,21 @@ module Test
             if b7 != 0 { return 5 }
 
             // fromBytesLittleEndian round-trip
-            let recovered = std.numeric.Int64.fromBytesLittleEndian(bytes);
+            let recovered = std.numeric.Int64(fromBytesLittleEndian: bytes);
             if recovered.isNone() { return 6 }
             if recovered.unwrap() != 258 { return 7 }
 
             // Round-trip with a larger value
             let bigVal: std.numeric.Int64 = 1000000;
             let bigBytes = bigVal.toBytesLittleEndian();
-            let bigRecovered = std.numeric.Int64.fromBytesLittleEndian(bigBytes);
+            let bigRecovered = std.numeric.Int64(fromBytesLittleEndian: bigBytes);
             if bigRecovered.isNone() { return 8 }
             if bigRecovered.unwrap() != 1000000 { return 9 }
 
             // Round-trip with negative value
             let negVal: std.numeric.Int64 = -12345;
             let negBytes = negVal.toBytesLittleEndian();
-            let negRecovered = std.numeric.Int64.fromBytesLittleEndian(negBytes);
+            let negRecovered = std.numeric.Int64(fromBytesLittleEndian: negBytes);
             if negRecovered.isNone() { return 10 }
             if negRecovered.unwrap() != -12345 { return 11 }
 
