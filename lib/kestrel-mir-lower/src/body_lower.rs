@@ -2319,24 +2319,50 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity),
                 Some(kestrel_ast_builder::NodeKind::EnumCase)
             ) {
-                // Inference often doesn't tag the Call expr's type for case
-                // construction — fall back to deriving from the parent enum.
+                // Resolve the enum type for this case construction. Inference
+                // may return the enum entity without type_args (e.g. Wrapper
+                // instead of Wrapper[Resource]), so supplement from the callee's
+                // explicit type arguments when the enum is generic.
                 let inferred = self.resolve_expr_type(expr_id);
-                let result_ty = if matches!(inferred, MirTy::Error) {
-                    if let Some(parent) = self.ctx.world.parent_of(entity) {
-                        self.ctx.register_name(parent);
-                        // Generic enum type args (B3) come from explicit_type_args
-                        // on the callee Def — try to resolve them.
-                        let type_args = self.resolve_type_args(callee_expr);
-                        MirTy::Named {
-                            entity: parent,
-                            type_args,
+                let result_ty = match &inferred {
+                    MirTy::Named { entity: e, type_args } if type_args.is_empty() => {
+                        // Only supplement for genuinely generic enums (have TypeParams)
+                        let parent_entity = self.ctx.world.parent_of(entity).unwrap_or(entity);
+                        let is_generic = self.ctx.world
+                            .get::<kestrel_ast_builder::TypeParams>(parent_entity)
+                            .map_or(false, |tp| !tp.0.is_empty());
+                        if is_generic {
+                            let explicit = self.resolve_type_args(callee_expr);
+                            let args = if !explicit.is_empty() {
+                                explicit
+                            } else {
+                                self.extract_explicit_type_args(callee_expr).unwrap_or_default()
+                            };
+                            if !args.is_empty() {
+                                self.ctx.register_name(*e);
+                                MirTy::Named { entity: *e, type_args: args }
+                            } else {
+                                inferred
+                            }
+                        } else {
+                            inferred
                         }
-                    } else {
-                        inferred
                     }
-                } else {
-                    inferred
+                    MirTy::Error => {
+                        if let Some(parent) = self.ctx.world.parent_of(entity) {
+                            self.ctx.register_name(parent);
+                            let type_args = self.resolve_type_args(callee_expr);
+                            let args = if !type_args.is_empty() {
+                                type_args
+                            } else {
+                                self.extract_explicit_type_args(callee_expr).unwrap_or_default()
+                            };
+                            MirTy::Named { entity: parent, type_args: args }
+                        } else {
+                            inferred
+                        }
+                    }
+                    _ => inferred,
                 };
                 let case_name = self
                     .ctx

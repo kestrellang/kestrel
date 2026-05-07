@@ -60,7 +60,13 @@ pub fn run_drop_elaboration(module: &mut MirModule) {
         .collect();
 
     // Phase B + C + D: mutate each function body
-    for (func_idx, droppable, is_effectful_init, _) in &per_func {
+    // Collect return types before mutating (avoids borrow conflict)
+    let per_func_ret_tys: Vec<MirTy> = per_func
+        .iter()
+        .map(|(idx, _, _, _)| module.functions[*idx].ret.clone())
+        .collect();
+
+    for (i, (func_idx, droppable, is_effectful_init, _)) in per_func.iter().enumerate() {
         let body = module.functions[*func_idx].body.as_mut().unwrap();
 
         if *is_effectful_init {
@@ -68,8 +74,9 @@ pub fn run_drop_elaboration(module: &mut MirModule) {
         }
 
         if !droppable.is_empty() {
-            elaborate_drops(body, droppable, &consuming_receiver_funcs);
+            elaborate_drops(body, droppable, &consuming_receiver_funcs, &per_func_ret_tys[i]);
         }
+
     }
 
     // Phase D: expand Deinit/DeinitIf into CFG + Call (needs &module for type resolution)
@@ -112,8 +119,9 @@ fn identify_droppable_locals(
     types_needing_drop: &HashSet<Entity>,
     structs_with_droppable_fields: &HashSet<Entity>,
 ) -> Vec<DroppableLocal> {
-    // Step 1: find locals that are Construct/EnumVariant targets for droppable types
+    // Step 1: find locals that are Construct/EnumVariant/Call targets for droppable types
     let mut construct_targets: HashMap<LocalId, Entity> = HashMap::new();
+    let mut call_result_targets: HashSet<LocalId> = HashSet::new();
     for block in &body.blocks {
         for stmt in &block.stmts {
             let (dest, entity) = match &stmt.kind {
@@ -131,45 +139,20 @@ fn identify_droppable_locals(
                     dest,
                     rvalue: Rvalue::EnumVariant { enum_ty, .. },
                 } => {
-                    let e = match enum_ty {
-                        MirTy::Named { entity, type_args } => {
-                            let has_droppable_arg = type_args.iter().any(|arg| match arg {
-                                MirTy::Named { entity, .. } => {
-                                    types_needing_drop.contains(entity)
-                                        || structs_with_droppable_fields.contains(entity)
-                                }
-                                _ => false,
-                            });
-                            if types_needing_drop.contains(entity) || has_droppable_arg {
-                                Some(*entity)
-                            } else {
-                                None
-                            }
+                    let e = if is_type_droppable(enum_ty, types_needing_drop, structs_with_droppable_fields) {
+                        match enum_ty {
+                            MirTy::Named { entity, .. } => Some(*entity),
+                            _ => None,
                         }
-                        _ => None,
+                    } else {
+                        None
                     };
                     (dest, e)
                 }
-                // Call results with droppable return type
-                StatementKind::Call { dest: Some(dest), .. } => {
-                    if let Some(local_id) = dest.root_local() {
-                        let local_ty = &body.locals[local_id.index()].ty;
-                        if let MirTy::Named { entity, .. } = local_ty {
-                            if types_needing_drop.contains(entity)
-                                || structs_with_droppable_fields.contains(entity)
-                                || is_type_droppable(local_ty, types_needing_drop, structs_with_droppable_fields)
-                            {
-                                (dest, Some(*entity))
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    }
-                }
+                // Call results with droppable return type — DISABLED pending
+                // investigation of memory corruption regression. The expansion
+                // generates deinit cascades that corrupt memory for some types.
+                // StatementKind::Call { dest: Some(dest), .. } => { ... }
                 _ => continue,
             };
             if let Some(e) = entity {
@@ -200,13 +183,18 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 3: merge — owner is the copy target if it exists, else the construct target
+    // Step 3: merge — owner is the copy target if it exists, else the construct target.
+    // Call-result targets that are NOT copied to another local are excluded — they
+    // are intermediary temps whose lifetime is managed by the caller, not owned here.
     let mut result_set = HashSet::new();
     for &local_id in owners.keys() {
         result_set.insert(local_id);
     }
     for &local_id in construct_targets.keys() {
         if !copied_from.contains(&local_id) {
+            if call_result_targets.contains(&local_id) {
+                continue;
+            }
             result_set.insert(local_id);
         }
     }
@@ -230,9 +218,9 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 4c: scan all locals for droppable types not caught by Construct/Copy/Call
-    // tracking (e.g., generic enums like Wrapper[Resource] whose definition uses
-    // TypeParam fields, but whose concrete type_args are droppable).
+    // Step 4c: scan all locals for droppable types not caught by Construct/Copy
+    // tracking (e.g., call results like `let b = identity(Resource(...))`, or
+    // guard-let bindings from function calls returning Optional[Resource]).
     for (i, local) in body.locals.iter().enumerate() {
         let local_id = LocalId::new(i);
         if result_set.contains(&local_id) || copied_from.contains(&local_id) { continue; }
@@ -241,13 +229,22 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 5: build result, excluding params that aren't consuming
+    // Step 5: build result, excluding params that aren't consuming.
+    // Self params in consuming receiver methods are treated as consuming
+    // even though ParamMode isn't set (to avoid caller-side PassingMode issues).
+    let is_consuming_self_method = matches!(
+        &func.kind,
+        FunctionKind::Method { receiver: crate::item::ReceiverConvention::Consuming, .. }
+    );
     let mut result: Vec<DroppableLocal> = result_set
         .into_iter()
         .filter(|id| {
             let is_param = id.index() < body.param_count;
             if is_param {
-                func.params.iter().any(|p| p.local == *id && p.mode == ParamMode::Consuming)
+                let is_consuming_param = func.params.iter().any(|p| p.local == *id && p.mode == ParamMode::Consuming);
+                let is_self_in_consuming = is_consuming_self_method
+                    && func.params.first().map_or(false, |p| p.local == *id);
+                is_consuming_param || is_self_in_consuming
             } else {
                 true
             }
@@ -304,7 +301,7 @@ impl InitState {
     }
 }
 
-fn elaborate_drops(body: &mut MirBody, droppable: &[DroppableLocal], consuming_receiver_funcs: &HashSet<Entity>) {
+fn elaborate_drops(body: &mut MirBody, droppable: &[DroppableLocal], consuming_receiver_funcs: &HashSet<Entity>, ret_ty: &MirTy) {
     if droppable.is_empty() {
         return;
     }
@@ -470,7 +467,7 @@ fn elaborate_drops(body: &mut MirBody, droppable: &[DroppableLocal], consuming_r
     insert_deinits_at_exits(
         body, droppable, &block_entry_states, &block_exit_states, &local_to_idx,
         &flags, &loop_headers, &loop_body_blocks, &is_back_edge,
-        consuming_receiver_funcs, &scope_loop_exits,
+        consuming_receiver_funcs, &scope_loop_exits, ret_ty,
     );
 }
 
@@ -695,6 +692,10 @@ fn insert_overwrite_drops(
         for si in 0..body.blocks[bi].stmts.len() {
             let kind = &body.blocks[bi].stmts[si].kind;
             if let StatementKind::Assign { dest, .. } = kind {
+                // Only trigger overwrite-drop for full local assignments,
+                // not field/index/deref writes (which update part of the value)
+                let is_full_local = matches!(dest, Place::Local(_));
+                if is_full_local {
                 if let Some(local) = dest.root_local() {
                     if let Some(&idx) = local_to_idx.get(&local) {
                         match state[idx] {
@@ -714,6 +715,7 @@ fn insert_overwrite_drops(
                             InitState::Dead => {}
                         }
                     }
+                }
                 }
             }
             transfer_statement(kind, local_to_idx, &mut state, consuming_receiver_funcs);
@@ -775,6 +777,7 @@ fn insert_deinits_at_exits(
     is_back_edge: &HashSet<(usize, usize)>,
     consuming_receiver_funcs: &HashSet<Entity>,
     scope_loop_exits: &HashMap<usize, usize>,
+    ret_ty: &MirTy,
 ) {
     let num_blocks = body.blocks.len();
     for bi in 0..num_blocks {
@@ -798,6 +801,24 @@ fn insert_deinits_at_exits(
                 }
 
                 let deinit_stmts = build_deinit_stmts(droppable, &state, flags, None);
+                if !deinit_stmts.is_empty() {
+                    // If the return value is not a simple local (e.g., a global or
+                    // field read), capture it into a temp before cleanup so the
+                    // cleanup deinits don't modify it before it's read.
+                    let needs_capture = match ret_val {
+                        Value::Place(p) => p.root_local().is_none(),
+                        Value::Immediate(_) => false,
+                    };
+                    if needs_capture {
+                        let ret_temp = body.add_local(LocalDef::new("_ret_capture", ret_ty.clone()));
+                        body.blocks[bi].stmts.push(Statement::new(StatementKind::Assign {
+                            dest: Place::local(ret_temp),
+                            rvalue: Rvalue::Copy(ret_val.as_place().unwrap().clone()),
+                        }));
+                        body.blocks[bi].terminator.kind =
+                            TerminatorKind::Return(Value::Place(Place::local(ret_temp)));
+                    }
+                }
                 body.blocks[bi].stmts.extend(deinit_stmts);
             }
             TerminatorKind::Jump(target) => {

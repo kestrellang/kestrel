@@ -52,14 +52,15 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
                 kestrel_ast_builder::ReceiverKind::Consuming => kestrel_mir::MirTy::SelfType,
             };
 
-            let mut param = kestrel_mir::ParamDef::new(
+            let param = kestrel_mir::ParamDef::new(
                 "self",
                 kestrel_mir::LocalId::new(0), // placeholder
                 self_ty,
             );
-            if matches!(receiver, kestrel_ast_builder::ReceiverKind::Consuming) {
-                param.mode = kestrel_mir::ParamMode::Consuming;
-            }
+            // NOTE: consuming self mode is handled by consuming_receiver_funcs
+            // in the drop pass, not through ParamMode. Setting ParamMode::Consuming
+            // here would cause the lowering to emit PassingMode::Move for ALL
+            // callers, which breaks stdlib methods called before the callee is lowered.
             def.params.push(param);
         }
 
