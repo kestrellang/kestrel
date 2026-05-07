@@ -15,6 +15,7 @@ pub mod duplicate_symbol;
 pub mod extension_conflict;
 pub mod extension_validation;
 pub mod extern_ffi_safe;
+pub mod indirect_enum;
 pub mod field;
 pub mod function_body;
 pub mod generics;

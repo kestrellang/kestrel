@@ -57,6 +57,10 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
                 kestrel_mir::LocalId::new(0), // placeholder
                 self_ty,
             );
+            // NOTE: consuming self mode is handled by consuming_receiver_funcs
+            // in the drop pass, not through ParamMode. Setting ParamMode::Consuming
+            // here would cause the lowering to emit PassingMode::Move for ALL
+            // callers, which breaks stdlib methods called before the callee is lowered.
             def.params.push(param);
         }
 

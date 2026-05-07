@@ -64,5 +64,8 @@ fn compile_statement(
             builder.def_var(var, val);
             Ok(())
         },
+
+        // ScopeLive: no-op at codegen — consumed by drop elaboration pass
+        StatementKind::ScopeLive(_) => Ok(()),
     }
 }

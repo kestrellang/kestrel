@@ -87,7 +87,8 @@ public struct RcBox[T] {
     /// unique owner (`isUnique() == true`); otherwise other clones see the
     /// new value, defeating COW. The COW types check `isUnique` before
     /// calling this and `deepClone` otherwise.
-    public func setValue(value: T) {
+    /// Takes `value` by consuming — the caller's copy is dead after this.
+    public func setValue(consuming value: T) {
         var storage = self.ptr.read();
         storage.value = value;
         self.ptr.write(storage);

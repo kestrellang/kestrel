@@ -54,6 +54,11 @@ pub enum StatementKind {
 
     /// `<flag> = true/false` — set a deinit tracking flag.
     SetDeinitFlag { flag: LocalId, value: bool },
+
+    /// `scope_live %local` — marks a local as entering scope.
+    /// The drop elaboration pass reads this as "init-state resets to dead here."
+    /// Emitted at loop headers so loop-scoped locals start each iteration uninitialized.
+    ScopeLive(LocalId),
 }
 
 /// The right-hand side of an assignment.

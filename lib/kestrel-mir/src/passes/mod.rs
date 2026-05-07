@@ -5,16 +5,14 @@
 //!
 //! - **Layout**: compute struct sizes, field offsets, alignment, drop order
 //! - **Thunk**: scan for `ApplyPartial`, generate/deduplicate thunk wrappers
-//! - **Deinit**: analyze liveness, insert `Deinit`/`DeinitIf` for non-copyable values
+//! - **Drop elaboration**: dataflow-based destructor insertion for non-copyable values
 
-mod deinit;
-mod expand_deinit;
+pub(crate) mod drop_elaboration;
 mod layout;
 mod thunk;
 pub mod verify;
 
-pub use deinit::run_deinit_pass;
-pub use expand_deinit::run_expand_deinit_pass;
+pub use drop_elaboration::run_drop_elaboration;
 pub use layout::run_layout_pass;
 pub use thunk::run_thunk_pass;
 pub use verify::{VerifyResult, verify};

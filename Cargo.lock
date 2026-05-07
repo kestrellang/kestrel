@@ -1115,6 +1115,7 @@ dependencies = [
  "kestrel-name-res",
  "kestrel-pattern-matching",
  "kestrel-reporting",
+ "kestrel-semantics",
  "kestrel-span",
  "kestrel-type-infer",
 ]

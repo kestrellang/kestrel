@@ -29,7 +29,7 @@ pub mod value;
 pub mod witness_lookup;
 
 // Re-export core types
-pub use body::{BasicBlock, LocalDef, MirBody};
+pub use body::{BasicBlock, LocalDef, MirBody, ScopeId};
 pub use builder::{BlockBuilder, FunctionBuilder};
 pub use id::*;
 pub use immediate::{Immediate, ImmediateKind};
@@ -214,16 +214,9 @@ impl MirModule {
         self
     }
 
-    /// Run the deinit pass: insert destructor calls for non-copyable locals.
-    pub fn with_deinits(mut self) -> Self {
-        passes::run_deinit_pass(&mut self);
-        self
-    }
-
-    /// Expand `Deinit`/`DeinitIf` into actual destructor calls.
-    /// Must run after `with_deinits()` (which inserts the nodes).
-    pub fn with_expand_deinits(mut self) -> Self {
-        passes::run_expand_deinit_pass(&mut self);
+    /// Unified drop elaboration: dataflow-based destructor insertion + expansion.
+    pub fn with_drop_elaboration(mut self) -> Self {
+        passes::run_drop_elaboration(&mut self);
         self
     }
 
@@ -234,7 +227,7 @@ impl MirModule {
 
     /// Run all post-lowering passes in the recommended order.
     pub fn with_all_passes(self) -> Self {
-        self.with_deinits().with_expand_deinits().with_thunks().with_layouts()
+        self.with_drop_elaboration().with_thunks().with_layouts()
     }
 }
 

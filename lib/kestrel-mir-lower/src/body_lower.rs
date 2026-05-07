@@ -69,9 +69,6 @@ struct LoopInfo {
     header_block: BlockId,
     exit_block: BlockId,
     label: Option<String>,
-    /// (MIR local, Bool flag) for `let` bindings inside the loop body.
-    /// Flag = true means uninitialized (skip deinit), false = initialized.
-    scoped_locals: Vec<(LocalId, LocalId)>,
 }
 
 /// Per-function lowering context.
@@ -464,10 +461,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     Value::Place(p) => p.field(method_name.to_string()),
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(receiver_val),
-                        }));
+                        self.emit_value_transfer(Place::local(temp), receiver_val, &receiver_ty);
                         Place::local(temp).field(method_name.to_string())
                     },
                 };
@@ -536,20 +530,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let mir_local = self.map_local(*local);
                 if let Some(init_expr) = value {
                     let init_value = self.lower_expr(*init_expr);
-                    self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest: Place::local(mir_local),
-                        rvalue: value_to_rvalue(init_value),
-                    }));
+                    let local_ty = self.body.locals[mir_local.index()].ty.clone();
+                    self.emit_value_transfer(Place::local(mir_local), init_value, &local_ty);
                 }
-                // Mark loop-scoped local as initialized
-                if let Some(info) = self.loop_stack.last() {
-                    if let Some(&(_, flag)) = info.scoped_locals.iter().find(|(l, _)| *l == mir_local) {
-                        self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
-                            flag,
-                            value: false,
-                        }));
-                    }
-                }
+                // Drop elaboration tracks init-state via dataflow — no flag needed
             },
             HirStmt::Expr { expr, .. } => {
                 // Lower for side effects, discard result
@@ -709,11 +693,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         _ => {
                             // Need to materialize the value into a temp first
                             let ty = self.resolve_expr_type(*base);
-                            let temp = self.fresh_temp(ty);
-                            self.emit_stmt(Statement::new(StatementKind::Assign {
-                                dest: Place::local(temp),
-                                rvalue: value_to_rvalue(base_val),
-                            }));
+                            let temp = self.fresh_temp(ty.clone());
+                            self.emit_value_transfer(Place::local(temp), base_val, &ty);
                             Value::Place(
                                 Place::local(temp).field(name.as_str_or_empty().to_string()),
                             )
@@ -727,11 +708,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     Value::Place(p) => Value::Place(p.index(*index as usize)),
                     _ => {
                         let ty = self.resolve_expr_type(*base);
-                        let temp = self.fresh_temp(ty);
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(base_val),
-                        }));
+                        let temp = self.fresh_temp(ty.clone());
+                        self.emit_value_transfer(Place::local(temp), base_val, &ty);
                         Value::Place(Place::local(temp).index(*index as usize))
                     },
                 }
@@ -771,12 +749,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     return val;
                 }
                 let rhs = self.lower_expr(*value);
+                let rhs_ty = self.resolve_expr_type(*value);
                 let lhs = self.lower_expr(*target);
                 if let Value::Place(dest) = lhs {
-                    self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest: dest.clone(),
-                        rvalue: value_to_rvalue(rhs),
-                    }));
+                    self.emit_value_transfer(dest.clone(), rhs, &rhs_ty);
                     self.maybe_emit_init_field_flag(&dest);
                 }
                 Value::Immediate(Immediate::unit())
@@ -2330,24 +2306,50 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity),
                 Some(kestrel_ast_builder::NodeKind::EnumCase)
             ) {
-                // Inference often doesn't tag the Call expr's type for case
-                // construction — fall back to deriving from the parent enum.
+                // Resolve the enum type for this case construction. Inference
+                // may return the enum entity without type_args (e.g. Wrapper
+                // instead of Wrapper[Resource]), so supplement from the callee's
+                // explicit type arguments when the enum is generic.
                 let inferred = self.resolve_expr_type(expr_id);
-                let result_ty = if matches!(inferred, MirTy::Error) {
-                    if let Some(parent) = self.ctx.world.parent_of(entity) {
-                        self.ctx.register_name(parent);
-                        // Generic enum type args (B3) come from explicit_type_args
-                        // on the callee Def — try to resolve them.
-                        let type_args = self.resolve_type_args(callee_expr);
-                        MirTy::Named {
-                            entity: parent,
-                            type_args,
+                let result_ty = match &inferred {
+                    MirTy::Named { entity: e, type_args } if type_args.is_empty() => {
+                        // Only supplement for genuinely generic enums (have TypeParams)
+                        let parent_entity = self.ctx.world.parent_of(entity).unwrap_or(entity);
+                        let is_generic = self.ctx.world
+                            .get::<kestrel_ast_builder::TypeParams>(parent_entity)
+                            .map_or(false, |tp| !tp.0.is_empty());
+                        if is_generic {
+                            let explicit = self.resolve_type_args(callee_expr);
+                            let args = if !explicit.is_empty() {
+                                explicit
+                            } else {
+                                self.extract_explicit_type_args(callee_expr).unwrap_or_default()
+                            };
+                            if !args.is_empty() {
+                                self.ctx.register_name(*e);
+                                MirTy::Named { entity: *e, type_args: args }
+                            } else {
+                                inferred
+                            }
+                        } else {
+                            inferred
                         }
-                    } else {
-                        inferred
                     }
-                } else {
-                    inferred
+                    MirTy::Error => {
+                        if let Some(parent) = self.ctx.world.parent_of(entity) {
+                            self.ctx.register_name(parent);
+                            let type_args = self.resolve_type_args(callee_expr);
+                            let args = if !type_args.is_empty() {
+                                type_args
+                            } else {
+                                self.extract_explicit_type_args(callee_expr).unwrap_or_default()
+                            };
+                            MirTy::Named { entity: parent, type_args: args }
+                        } else {
+                            inferred
+                        }
+                    }
+                    _ => inferred,
                 };
                 let case_name = self
                     .ctx
@@ -2617,10 +2619,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     Value::Place(p) => p.field(field_name),
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(receiver_val),
-                        }));
+                        self.emit_value_transfer(Place::local(temp), receiver_val, &receiver_ty);
                         Place::local(temp).field(field_name)
                     },
                 };
@@ -2696,10 +2695,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             Value::Place(p) => p.field(method_name.to_string()),
                             _ => {
                                 let temp = self.fresh_temp(receiver_ty.clone());
-                                self.emit_stmt(Statement::new(StatementKind::Assign {
-                                    dest: Place::local(temp),
-                                    rvalue: value_to_rvalue(receiver_val),
-                                }));
+                                self.emit_value_transfer(Place::local(temp), receiver_val, &receiver_ty);
                                 Place::local(temp).field(method_name.to_string())
                             },
                         };
@@ -3196,11 +3192,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
                 _ => MirTy::Tuple(vec![]),
             };
-            let err_local = self.fresh_temp(err_ty);
-            self.emit_stmt(Statement::new(StatementKind::Assign {
-                dest: Place::local(err_local),
-                rvalue: Rvalue::Copy(err_place),
-            }));
+            let err_local = self.fresh_temp(err_ty.clone());
+            self.emit_value_transfer(
+                Place::local(err_local),
+                Value::Place(err_place),
+                &err_ty,
+            );
             self.emit_stmt(Statement::new(StatementKind::Assign {
                 dest: Place::local(final_local),
                 rvalue: Rvalue::EnumVariant {
@@ -3666,7 +3663,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let merge_block = self.new_block();
 
         // Result temp — both branches assign to this before jumping to merge
-        let result_local = self.fresh_temp(result_ty);
+        let result_local = self.fresh_temp(result_ty.clone());
 
         // Branch on condition
         self.set_terminator(Terminator::branch(cond_val, then_block, else_block));
@@ -3675,10 +3672,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         self.switch_to_block(then_block);
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
-            self.emit_stmt(Statement::new(StatementKind::Assign {
-                dest: Place::local(result_local),
-                rvalue: value_to_rvalue(then_val),
-            }));
+            self.emit_value_transfer(Place::local(result_local), then_val, &result_ty);
             self.set_terminator(Terminator::jump(merge_block));
         }
 
@@ -3687,10 +3681,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
             if !self.is_terminated() {
-                self.emit_stmt(Statement::new(StatementKind::Assign {
-                    dest: Place::local(result_local),
-                    rvalue: value_to_rvalue(else_val),
-                }));
+                self.emit_value_transfer(Place::local(result_local), else_val, &result_ty);
                 self.set_terminator(Terminator::jump(merge_block));
             }
         } else {
@@ -3713,18 +3704,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let header_block = self.new_block();
         let exit_block = self.new_block();
 
-        // Create (local, flag) pairs for let-bindings inside the loop body.
-        // The flag tracks whether the local is initialized — true = uninit.
+        // Register loop-scoped locals for the drop elaboration pass
         let raw_locals = self.collect_block_locals(body);
-        let scoped_locals: Vec<(LocalId, LocalId)> = raw_locals
-            .into_iter()
-            .map(|local| {
-                let flag = self.body.add_local(
-                    LocalDef::new(format!("_loop_{}", self.body.locals[local.index()].name), MirTy::Bool),
-                );
-                (local, flag)
-            })
-            .collect();
+        for &local in &raw_locals {
+            self.body.local_scopes.insert(local, ScopeId::Loop { header: header_block, exit: exit_block });
+        }
 
         // Jump into the loop header
         if !self.is_terminated() {
@@ -3736,27 +3720,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             header_block,
             exit_block,
             label: label.map(|s| s.to_string()),
-            scoped_locals,
         });
 
-        // At the top of the loop header, set all flags to true (uninit)
+        // At the top of the loop header, emit ScopeLive markers so the
+        // drop elaboration pass knows to reset init-state here.
         self.switch_to_block(header_block);
-        let flag_inits: Vec<LocalId> = self.loop_stack.last()
-            .map(|l| l.scoped_locals.iter().map(|&(_, f)| f).collect())
-            .unwrap_or_default();
-        for flag in flag_inits {
-            self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
-                flag,
-                value: true,
-            }));
+        for &local in &raw_locals {
+            self.emit_stmt(Statement::new(StatementKind::ScopeLive(local)));
         }
 
         // Lower loop body
         let _ = self.lower_hir_block(body);
 
-        // Emit conditional deinits for loop-scoped locals before the back-edge
+        // Back-edge: drop elaboration handles cleanup
         if !self.is_terminated() {
-            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(header_block));
         }
 
@@ -3769,37 +3746,23 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Lower a break expression — jump to the loop's exit block.
+    /// Drop elaboration handles cleanup at the exit edge.
     fn lower_break(&mut self, label: Option<&str>) -> Value {
         let exit_block = self.find_loop(label).map(|l| l.exit_block);
         if let Some(exit) = exit_block {
-            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(exit));
         }
         Value::Immediate(Immediate::unit())
     }
 
     /// Lower a continue expression — jump to the loop's header block.
+    /// Drop elaboration handles cleanup at the back-edge.
     fn lower_continue(&mut self, label: Option<&str>) -> Value {
         let header_block = self.find_loop(label).map(|l| l.header_block);
         if let Some(header) = header_block {
-            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(header));
         }
         Value::Immediate(Immediate::unit())
-    }
-
-    /// Emit DeinitIf for each loop-scoped local in the innermost loop.
-    /// Uses the flag to skip locals that haven't been initialized yet.
-    fn emit_loop_scope_deinits(&mut self) {
-        let pairs: Vec<(LocalId, LocalId)> = self.loop_stack.last()
-            .map(|l| l.scoped_locals.clone())
-            .unwrap_or_default();
-        for &(local, flag) in pairs.iter().rev() {
-            self.emit_stmt(Statement::new(StatementKind::DeinitIf {
-                place: Place::local(local),
-                flag,
-            }));
-        }
     }
 
     /// Collect MIR local IDs for `let` bindings declared in a HIR block.
@@ -3981,10 +3944,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let cap_name = self.hir.locals[captured].name.clone();
                 // Deref the env pointer and access the field by name
                 let field_place = Place::local(env_local).deref().field(&cap_name);
-                self.emit_stmt(Statement::new(StatementKind::Assign {
-                    dest: Place::local(closure_local),
-                    rvalue: Rvalue::Copy(field_place),
-                }));
+                let cap_ty = self.body.locals[closure_local.index()].ty.clone();
+                self.emit_value_transfer(
+                    Place::local(closure_local),
+                    Value::Place(field_place),
+                    &cap_ty,
+                );
             }
         }
 
@@ -4406,11 +4371,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(arm) = arms.get(*arm_index) {
                     let body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
-                        // Store result and jump to join
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(result_local),
-                            rvalue: value_to_rvalue(body_val),
-                        }));
+                        let result_ty = self.body.locals[result_local.index()].ty.clone();
+                        self.emit_value_transfer(Place::local(result_local), body_val, &result_ty);
                         self.set_terminator(Terminator::jump(join_block));
                     }
                 }
@@ -4461,10 +4423,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         for binding in bindings {
             let mir_local = self.map_local(binding.local_id);
             let source = apply_access_path(scrutinee.clone(), &binding.path);
-            self.emit_stmt(Statement::new(StatementKind::Assign {
-                dest: Place::local(mir_local),
-                rvalue: Rvalue::Copy(source),
-            }));
+            let local_ty = self.body.locals[mir_local.index()].ty.clone();
+            self.emit_value_transfer(
+                Place::local(mir_local),
+                Value::Place(source),
+                &local_ty,
+            );
         }
     }
 
@@ -4495,6 +4459,83 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             Value::Immediate(Immediate::unit())
         }
     }
+
+    // === Value transfer (Move / Copy / Clone) ===
+
+    /// Check if a MirTy is Cloneable (needs clone() instead of bitwise copy).
+    fn is_type_cloneable(&self, ty: &MirTy) -> bool {
+        let entity = match ty {
+            MirTy::Named { entity, .. } => *entity,
+            _ => return false,
+        };
+        let semantics = self.ctx.query.query(kestrel_semantics::NominalCopySemantics {
+            entity,
+            root: self.ctx.root,
+        });
+        semantics.semantics == kestrel_semantics::CopySemantics::Cloneable
+    }
+
+    /// Transfer a value into `dest`, choosing Move, Copy, or Clone:
+    ///
+    /// - **Bare temp local** → `Rvalue::Move` (source is dead after transfer)
+    /// - **User local + Cloneable** → witness call to `Cloneable.clone()`
+    /// - **Everything else** → `Rvalue::Copy` (bitwise copy, source stays valid)
+    fn emit_value_transfer(&mut self, dest: Place, value: Value, ty: &MirTy) {
+        let Value::Place(ref place) = value else {
+            // Immediate → Const (no ownership transfer)
+            let Value::Immediate(imm) = value else { unreachable!() };
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest,
+                rvalue: Rvalue::Const(imm),
+            }));
+            return;
+        };
+
+        let is_user_local = self.is_user_local(place);
+
+        // Bare temp local → Move (single-use, source dead after transfer)
+        if place.is_local() && !is_user_local {
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest,
+                rvalue: Rvalue::Move(place.clone()),
+            }));
+            return;
+        }
+
+        // User local/field of Cloneable type → clone()
+        if is_user_local && self.is_type_cloneable(ty) {
+            if let Some(proto) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::Cloneable,
+                root: self.ctx.root,
+            }) {
+                self.ctx.register_name(proto);
+                let method_key = WitnessMethodKey::bare("clone");
+                let callee = Callee::witness(proto, method_key, ty.clone(), vec![]);
+                let receiver_arg = CallArg::borrow(value);
+                self.emit_stmt(Statement::new(StatementKind::Call {
+                    dest: Some(dest),
+                    callee,
+                    args: vec![receiver_arg],
+                }));
+                return;
+            }
+        }
+
+        // Default → bitwise Copy (Copyable types, globals, projected temp places)
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest,
+            rvalue: Rvalue::Copy(place.clone()),
+        }));
+    }
+
+    /// Check if a Place's root is a user-declared local (parameter or `let`
+    /// binding) rather than a compiler-generated temp.
+    fn is_user_local(&self, place: &Place) -> bool {
+        let Some(root) = place.root_local() else {
+            return false;
+        };
+        self.local_map.values().any(|v| *v == root)
+    }
 }
 
 /// Convert a Value to an Rvalue for assignment.
@@ -4511,12 +4552,6 @@ fn needs_field_deinit(ty: &MirTy) -> bool {
     }
 }
 
-fn value_to_rvalue(value: Value) -> Rvalue {
-    match value {
-        Value::Place(p) => Rvalue::Copy(p),
-        Value::Immediate(i) => Rvalue::Const(i),
-    }
-}
 
 /// Apply an access path to a place to reach a sub-value.
 /// e.g., scrutinee + [Downcast("Some"), Index(0)] → scrutinee.Some.0
