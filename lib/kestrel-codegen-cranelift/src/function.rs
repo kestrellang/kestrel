@@ -68,75 +68,50 @@ pub fn resolve_assoc_type_substs(
 ) {
     use crate::monomorphize::witness;
 
-    // Collect all Named entities from the function body that might be associated types
+    // Collect all Named entities once; build a name→entity map for O(1) lookups.
     let mut candidate_entities: Vec<Entity> = Vec::new();
     collect_named_entities_from_func(func, &mut candidate_entities);
 
-    let debug = std::env::var("DEBUG_ASSOC").is_ok()
-        && (func.name.contains("min") || func.name.contains("closure"));
-    if debug {
-        eprintln!(
-            "\n=== resolve_assoc_type_substs for {} ===\n  self_type={:?}\n  initial subst={:?}",
-            func.name, self_type, subst
-        );
-    }
+    let candidates_by_name: HashMap<&str, Entity> = candidate_entities
+        .iter()
+        .copied()
+        .map(|e| (module.resolve_name(e), e))
+        .filter(|(name, _)| *name != "<unknown>")
+        .collect();
 
-    for entity in candidate_entities {
+    for (&name, &entity) in &candidates_by_name {
         if subst.contains_key(&entity) {
-            continue; // Already resolved
-        }
-
-        let name = module.resolve_name(entity);
-        if name == "<unknown>" {
             continue;
         }
 
-        if debug {
-            eprintln!("  candidate entity {:?} name={}", entity, name);
-        }
-
         // Check if this entity's name matches <protocol_name>.<assoc_type_name>
-        // for any known protocol
         for proto_def in &module.protocols {
             for assoc in &proto_def.associated_types {
-                let expected = format!("{}.{}", proto_def.name, assoc.name);
-                if name == expected {
-                    // Candidate concrete types to try, in priority order:
-                    // concrete types already in `subst` (method-level type
-                    // params like `I` in `init[I](from: I)` — the body's
-                    // `I.Item` must resolve via `I`, not via the enclosing
-                    // `Self`). Fall back to the caller-supplied `self_type`
-                    // for protocol extension methods whose body has no type
-                    // params of its own (e.g. `extend Iterator { collect }`),
-                    // where the only concrete witness to query is `Self`.
-                    let subst_candidates = subst.values();
-                    let self_candidate = self_type.into_iter();
-                    for concrete in subst_candidates.chain(self_candidate) {
-                        if debug {
-                            eprintln!(
-                                "    trying resolve {}.{} with concrete={:?}",
-                                proto_def.name, assoc.name, concrete
-                            );
-                        }
-                        match witness::resolve_associated_type(
-                            module,
-                            proto_def.entity,
-                            concrete,
-                            &assoc.name,
-                        ) {
-                            Ok(resolved) => {
-                                if debug {
-                                    eprintln!("    ✓ resolved to {:?}", resolved);
-                                }
-                                subst.insert(entity, resolved);
-                                break;
-                            },
-                            Err(e) => {
-                                if debug {
-                                    eprintln!("    ✗ failed: {:?}", e);
-                                }
-                            },
-                        }
+                if !name_matches_qualified(name, &proto_def.name, &assoc.name) {
+                    continue;
+                }
+                // Candidate concrete types to try, in priority order:
+                // concrete types already in `subst` (method-level type
+                // params like `I` in `init[I](from: I)` — the body's
+                // `I.Item` must resolve via `I`, not via the enclosing
+                // `Self`). Fall back to the caller-supplied `self_type`
+                // for protocol extension methods whose body has no type
+                // params of its own (e.g. `extend Iterator { collect }`),
+                // where the only concrete witness to query is `Self`.
+                let subst_candidates = subst.values();
+                let self_candidate = self_type.into_iter();
+                for concrete in subst_candidates.chain(self_candidate) {
+                    match witness::resolve_associated_type(
+                        module,
+                        proto_def.entity,
+                        concrete,
+                        &assoc.name,
+                    ) {
+                        Ok(resolved) => {
+                            subst.insert(entity, resolved);
+                            break;
+                        },
+                        Err(_) => {},
                     }
                 }
             }
@@ -181,7 +156,7 @@ pub fn resolve_assoc_type_substs(
                     method_type_args,
                     self_type,
                     subst,
-                    func,
+                    &candidates_by_name,
                 );
             }
         }
@@ -202,7 +177,7 @@ fn bind_witness_protocol_args(
     method_type_args: &[MirTy],
     outer_self: Option<&MirTy>,
     subst: &mut HashMap<Entity, MirTy>,
-    func: &FunctionDef,
+    candidates_by_name: &HashMap<&str, Entity>,
 ) {
     use kestrel_codegen::substitute_type_with_self;
 
@@ -261,21 +236,9 @@ fn bind_witness_protocol_args(
         let Some(bound) = witness.type_bindings.get(&assoc.name) else {
             continue;
         };
-        // Locate the protocol-level assoc-type entity by name. The protocol
-        // owns the alias as a child; look it up by walking children and
-        // matching `{Protocol}.{Name}` against `module.resolve_name`.
-        // Locate the protocol-level assoc-type entity by walking the
-        // function's candidate Named entities and matching the qualified
-        // name (`Protocol.Assoc`). MirModule has no central name→entity
-        // index; the candidate set is what's referenced by the function's
-        // own signature/body, so the alias entity is in there if it's
-        // mentioned anywhere in the surface this monomorph touches.
+        // Look up the protocol-level assoc-type entity from the pre-built name map.
         let qualified = format!("{}.{}", proto_def.name, assoc.name);
-        let mut candidates_local: Vec<Entity> = Vec::new();
-        collect_named_entities_from_func(func, &mut candidates_local);
-        let entity_for_assoc = candidates_local
-            .into_iter()
-            .find(|&cand| module.resolve_name(cand) == qualified);
+        let entity_for_assoc = candidates_by_name.get(qualified.as_str()).copied();
         if let Some(e) = entity_for_assoc {
             // The witness's binding may reference the conformance's free
             // TypeParams (e.g. `Yield = Slice[T_ext]`). Those resolve via
@@ -394,6 +357,14 @@ fn ty_has_typeparam(ty: &MirTy) -> bool {
         MirTy::AssociatedProjection { base, .. } => ty_has_typeparam(base),
         _ => false,
     }
+}
+
+/// Check if `name == "{prefix}.{suffix}"` without allocating.
+fn name_matches_qualified(name: &str, prefix: &str, suffix: &str) -> bool {
+    name.len() == prefix.len() + 1 + suffix.len()
+        && name.starts_with(prefix)
+        && name.as_bytes()[prefix.len()] == b'.'
+        && name[prefix.len() + 1..] == *suffix
 }
 
 /// Collect all entities from Named types in a function's signature and body.
