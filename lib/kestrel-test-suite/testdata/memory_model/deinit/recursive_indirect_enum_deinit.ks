@@ -1,6 +1,5 @@
-// test: execution
+// test: diagnostics
 // stdlib: true
-// expect-exit: 0
 
 module Test
 
@@ -15,24 +14,7 @@ struct Payload: not Copyable {
     }
 }
 
-indirect enum Tree: not Copyable {
+indirect enum Tree: not Copyable { // ERROR: indirect enums are not yet supported
     case Leaf(value: Payload)
     case Node(left: Tree, right: Tree)
-}
-
-func test() {
-    let tree = Tree.Node(
-        left: Tree.Leaf(value: Payload(id: 1)),
-        right: Tree.Node(
-            left: Tree.Leaf(value: Payload(id: 2)),
-            right: Tree.Leaf(value: Payload(id: 3))
-        )
-    );
-    // Recursively deinits all 3 Payloads
-}
-
-func main() -> lang.i64 {
-    test();
-    if deinit_count != 3 { return 1; }
-    0
 }

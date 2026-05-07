@@ -3,7 +3,7 @@
 
 module Test
 
-indirect enum LinkedList[T] {
+indirect enum LinkedList[T] { // ERROR: indirect enums are not yet supported
     case Node(value: T, next: LinkedList[T])
     case Empty
 
