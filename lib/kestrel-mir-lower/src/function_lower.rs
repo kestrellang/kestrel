@@ -52,11 +52,14 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
                 kestrel_ast_builder::ReceiverKind::Consuming => kestrel_mir::MirTy::SelfType,
             };
 
-            let param = kestrel_mir::ParamDef::new(
+            let mut param = kestrel_mir::ParamDef::new(
                 "self",
                 kestrel_mir::LocalId::new(0), // placeholder
                 self_ty,
             );
+            if matches!(receiver, kestrel_ast_builder::ReceiverKind::Consuming) {
+                param.mode = kestrel_mir::ParamMode::Consuming;
+            }
             def.params.push(param);
         }
 

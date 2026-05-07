@@ -304,6 +304,9 @@ impl fmt::Display for StatementDisplay<'_> {
             StatementKind::SetDeinitFlag { flag, value } => {
                 write!(f, "%{} = {}", self.module.resolve_local_name(*flag), value,)
             },
+            StatementKind::ScopeLive(local) => {
+                write!(f, "scope_live %{}", self.module.resolve_local_name(*local))
+            },
         }
     }
 }
