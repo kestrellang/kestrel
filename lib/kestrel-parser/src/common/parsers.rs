@@ -16,8 +16,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    DeinitDeclarationData, FunctionBodyData, InitializerDeclarationData, ParameterAccessMode,
-    ParameterData,
+    DeinitDeclarationData, FunctionBodyData, InitEffect, InitializerDeclarationData,
+    ParameterAccessMode, ParameterData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -454,9 +454,25 @@ pub fn block_body_parser<'tokens>()
 // Declaration Parsers - Single Source of Truth
 // =============================================================================
 
+/// Parser for an init effect modifier: `?` or `throws Type`
+fn init_effect_parser<'tokens>(
+) -> impl Parser<'tokens, ParserInput<'tokens>, Option<InitEffect>, ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Question)
+                .map_with(|_, e| InitEffect::Failable(to_kestrel_span(e.span())))
+                .or(just(Token::Throws)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .then(ty_parser())
+                    .map(|(throws_span, err_ty)| InitEffect::Throwing(throws_span, err_ty))),
+        )
+        .or_not()
+        .boxed()
+}
+
 /// Parser for an initializer declaration
 ///
-/// Syntax: `(@attr)* (visibility)? init(params) { body }?`
+/// Syntax: `(@attr)* (visibility)? init(params)(? | throws E)? { body }?`
 /// Body is optional for protocol initializer declarations.
 ///
 /// This is the single source of truth for initializer declaration parsing.
@@ -470,6 +486,7 @@ pub fn initializer_declaration_parser_internal<'tokens>()
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
+        .then(init_effect_parser())
         .then(where_clause_parser().or_not())
         .then(block_body_parser())
         .map(
@@ -477,10 +494,13 @@ pub fn initializer_declaration_parser_internal<'tokens>()
                 (
                     (
                         (
-                            ((((attributes, visibility), init_span), type_params), lparen),
-                            parameters,
+                            (
+                                ((((attributes, visibility), init_span), type_params), lparen),
+                                parameters,
+                            ),
+                            rparen,
                         ),
-                        rparen,
+                        effect,
                     ),
                     where_clause,
                 ),
@@ -494,6 +514,7 @@ pub fn initializer_declaration_parser_internal<'tokens>()
                     lparen,
                     parameters,
                     rparen,
+                    effect,
                     where_clause,
                     body,
                 }

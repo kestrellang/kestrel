@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use kestrel_ast::arena::Arena;
+use kestrel_ast_builder::InitEffect;
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
@@ -156,6 +157,30 @@ impl<'a> LowerCtx<'a> {
     /// Check if a label is in the active loop stack.
     pub fn has_loop_label(&self, label: &str) -> bool {
         self.loop_labels.iter().any(|l| l.as_deref() == Some(label))
+    }
+
+    // ===== Init effect helpers =====
+
+    /// For failable/throwing inits, wrap a bare success return in `.Some(())` or `.Ok(())`.
+    /// Returns `None` if the owner isn't an effectful init.
+    pub fn wrap_init_success_value(&mut self, span: Span) -> Option<HirExprId> {
+        let effect = self.ctx.get::<InitEffect>(self.owner)?;
+        let unit_expr = self.alloc_expr(HirExpr::Tuple {
+            elements: vec![],
+            span: span.clone(),
+        });
+        let wrapper_name = match effect {
+            InitEffect::Failable => "Some",
+            InitEffect::Throwing => "Ok",
+        };
+        Some(self.alloc_expr(HirExpr::ImplicitMember {
+            name: HirName::name(wrapper_name),
+            args: Some(vec![HirCallArg {
+                label: None,
+                value: unit_expr,
+            }]),
+            span,
+        }))
     }
 
     // ===== Capture detection =====

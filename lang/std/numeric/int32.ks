@@ -17,6 +17,7 @@ import std.core.(
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 32-bit signed integer.
@@ -781,11 +782,13 @@ public struct Int32:
         result
     }
 
-    /// Reassembles a `Int32` from 4 bytes in native (host) byte
-    /// order. Returns `None` if the input is not exactly 4 bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> Int32? {
+    /// @name From Bytes
+    /// Reassembles a `Int32` from 4 bytes in native byte order.
+    /// Returns `null` if the input is not exactly 4 bytes long.
+    public init[S](fromBytes fromBytes: S)? where S: Slice[UInt8] {
+        let bytes = fromBytes.asSlice();
         if bytes.count != 4 {
-            return .None
+            return null
         }
         var value = Int32.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
@@ -794,14 +797,16 @@ public struct Int32:
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
-        .Some(value)
+        self.raw = value.raw;
     }
 
+    /// @name From Bytes Big Endian
     /// Reassembles a `Int32` from 4 bytes in big-endian order.
-    /// Returns `None` if the input is not exactly 4 bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> Int32? {
+    /// Returns `null` if the input is not exactly 4 bytes long.
+    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Slice[UInt8] {
+        let bytes = fromBytesBigEndian.asSlice();
         if bytes.count != 4 {
-            return .None
+            return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -810,14 +815,16 @@ public struct Int32:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        .Some(Int32(from: result))
+        self.raw = Int32(from: result).raw;
     }
 
+    /// @name From Bytes Little Endian
     /// Reassembles a `Int32` from 4 bytes in little-endian order.
-    /// Returns `None` if the input is not exactly 4 bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> Int32? {
+    /// Returns `null` if the input is not exactly 4 bytes long.
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Slice[UInt8] {
+        let bytes = fromBytesLittleEndian.asSlice();
         if bytes.count != 4 {
-            return .None
+            return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -827,131 +834,121 @@ public struct Int32:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        .Some(Int32(from: result))
+        self.raw = Int32(from: result).raw;
     }
 
     // ========================================================================
     // PARSING
     // ========================================================================
 
-    /// Parses a base-10 integer literal, optionally prefixed with `+` or
-    /// `-`. Returns `None` for an empty string, a non-digit character,
+    /// @name Parsing
+    /// Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+    /// Returns `null` for an empty string, a non-digit character,
     /// or a value that does not fit in `Int32`.
     ///
     /// # Examples
     ///
     /// ```
-    /// Int32.parse("42");    // Some(42)
-    /// Int32.parse("-7");    // Some(-7)
-    /// Int32.parse("abc");   // None
-    /// Int32.parse("");      // None
+    /// Int32(parsing: "42");    // Some(42)
+    /// Int32(parsing: "-7");    // Some(-7)
+    /// Int32(parsing: "abc");   // None
     /// ```
-    public static func parse(string: String) -> Int32? {
+    public init(parsing string: String)? {
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
         var index: Int64 = 0;
         var isNegative = false;
 
-        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {  // '-'
+        if firstByteVal == 45 {
             isNegative = true;
             index = 1
-        } else if firstByteVal == 43 {  // '+'
+        } else if firstByteVal == 43 {
             index = 1
         }
 
-        // Must have at least one digit
         if index >= len {
-            return .None
+            return null
         }
 
-        // Parse digits using Int64 for accumulation
         var result: Int64 = 0;
-        let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
+        let maxBeforeMultiply: Int64 = 922337203685477580;
 
         while index < len {
             let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
-            // Check if digit (0-9 = 48-57)
             if byteVal < 48 or byteVal > 57 {
-                return .None
+                return null
             }
 
             let digit = byteVal - 48;
 
-            // Check for overflow before multiply
             if result > maxBeforeMultiply {
-                return .None
+                return null
             }
             result = result * 10;
 
-            // Check for overflow before add
             if result > 9223372036854775807 - digit {
-                return .None
+                return null
             }
             result = result + digit;
 
             index = index + 1
         }
 
-        // Apply sign and check bounds for target type
         if isNegative {
             result = result.negate();
             if result < Int64(from: Int32.minValue) {
-                return .None
+                return null
             }
         } else {
             if result > Int64(from: Int32.maxValue) {
-                return .None
+                return null
             }
         }
 
-        .Some(Int32(from: result))
+        self.raw = Int32(from: result).raw;
     }
-    /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-    /// case-insensitive and represent digit values 10–35. Returns `None`
-    /// for an out-of-range radix, an empty string, an unrecognised digit,
-    /// or a value that overflows `Int32`.
+    /// @name Parsing with Radix
+    /// Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+    /// case-insensitive and represent digit values 10-35.
     ///
     /// # Examples
     ///
     /// ```
-    /// Int32.parse("ff", 16);     // Some(255 if it fits, else None)
-    /// Int32.parse("101010", 2);  // Some(42)
-    /// Int32.parse("z", 36);      // Some(35)
+    /// Int32(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// Int32(parsing: "101010", radix: 2);  // Some(42)
+    /// Int32(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public static func parse(string: String, radix: Int64) -> Int32? {
+    public init(parsing string: String, radix radix: Int64)? {
         if radix < 2 or radix > 36 {
-            return .None
+            return null
         }
 
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
         var index: Int64 = 0;
         var isNegative = false;
 
-        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {  // '-'
+        if firstByteVal == 45 {
             isNegative = true;
             index = 1
-        } else if firstByteVal == 43 {  // '+'
+        } else if firstByteVal == 43 {
             index = 1
         }
 
-        // Must have at least one digit
         if index >= len {
-            return .None
+            return null
         }
 
         let radixU: UInt64 = UInt64(from: radix);
@@ -974,31 +971,26 @@ public struct Int32:
             } else if byteVal >= 97 and byteVal <= 122 {
                 byteVal - 87
             } else {
-                return .None
+                return null
             };
 
             if digit >= radix {
-                return .None
+                return null
             }
 
             let digitU: UInt64 = UInt64(from: digit);
             if result > (maxMagnitude - digitU) / radixU {
-                return .None
+                return null
             }
             result = result * radixU + digitU;
             index = index + 1
         }
 
-        // Magnitude fits — `result` ≤ maxMagnitude, which is `maxValue` for
-        // positives or `|minValue|` for negatives. For negatives we cast
-        // first (the `|minValue|` bit pattern reinterprets to `minValue`)
-        // then negate; two's-complement negation of `minValue` wraps back
-        // to `minValue`, so the boundary case lands correctly.
         let typedResult = Int32(from: result);
         if isNegative {
-            .Some(typedResult.negate())
+            self.raw = typedResult.negate().raw
         } else {
-            .Some(typedResult)
+            self.raw = typedResult.raw
         }
     }
 

@@ -19,3 +19,4 @@ Feature implementation plans organized by topic.
 | [Lang Ptr](lang-ptr/) | Planned | lang-ptr-implementation |
 | [Boolean Guard](boolean-guard.md) | In Progress | boolean-guard |
 | [Partial Ranges](partial-ranges.md) | Design | partial-ranges |
+| [Optional/Throwing Inits](optional-throwing-inits.md) | Design | optional-throwing-inits |

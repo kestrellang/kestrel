@@ -52,6 +52,8 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         current_block: None,
         loop_stack: Vec::new(),
         temp_counter: 0,
+        init_field_flags: HashMap::new(),
+        is_effectful_init: false,
         ctx,
     };
 
@@ -67,6 +69,9 @@ struct LoopInfo {
     header_block: BlockId,
     exit_block: BlockId,
     label: Option<String>,
+    /// (MIR local, Bool flag) for `let` bindings inside the loop body.
+    /// Flag = true means uninitialized (skip deinit), false = initialized.
+    scoped_locals: Vec<(LocalId, LocalId)>,
 }
 
 /// Per-function lowering context.
@@ -90,6 +95,13 @@ struct BodyLowerCtx<'a, 'b> {
 
     // Counter for generating unique temp names
     temp_counter: u32,
+
+    // For effectful init bodies: maps field name → Bool flag local tracking initialization.
+    // Flag semantics: true = uninitialized (skip deinit), false = initialized (needs deinit).
+    init_field_flags: HashMap<String, LocalId>,
+
+    // Whether this function is an effectful init needing partial-drop support.
+    is_effectful_init: bool,
 }
 
 impl<'a, 'b> BodyLowerCtx<'a, 'b> {
@@ -106,10 +118,23 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Set param count from HIR
         self.body.param_count = self.hir.params.len();
 
+        // Detect effectful init and create field-init flags
+        self.setup_init_field_flags();
+
         // Create entry block
         let entry = self.new_block();
         self.body.entry = entry;
         self.current_block = Some(entry);
+
+        // Initialize field-init flags to true (uninitialized = skip deinit)
+        if self.is_effectful_init {
+            for (_, &flag) in &self.init_field_flags.clone() {
+                self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                    flag,
+                    value: true,
+                }));
+            }
+        }
 
         // Lower top-level statements
         for &stmt_id in &self.hir.statements {
@@ -516,13 +541,27 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         rvalue: value_to_rvalue(init_value),
                     }));
                 }
+                // Mark loop-scoped local as initialized
+                if let Some(info) = self.loop_stack.last() {
+                    if let Some(&(_, flag)) = info.scoped_locals.iter().find(|(l, _)| *l == mir_local) {
+                        self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                            flag,
+                            value: false,
+                        }));
+                    }
+                }
             },
             HirStmt::Expr { expr, .. } => {
                 // Lower for side effects, discard result
                 let _ = self.lower_expr(*expr);
             },
-            HirStmt::Deinit { .. } => {
-                // Skip — deinit pass handles this later
+            HirStmt::Deinit { local, .. } => {
+                if let Some(hir_local) = local {
+                    let mir_local = self.map_local(*hir_local);
+                    self.emit_stmt(Statement::new(StatementKind::Deinit {
+                        place: Place::local(mir_local),
+                    }));
+                }
             },
         }
     }
@@ -707,9 +746,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::Break { label, .. } => self.lower_break(label.as_deref()),
             HirExpr::Continue { label, .. } => self.lower_continue(label.as_deref()),
             HirExpr::Return { value, .. } => {
+                // Check before lowering (which may create new blocks)
+                let is_failure = self.is_effectful_init
+                    && value.is_some_and(|v| self.is_init_failure_value_hir(v));
                 let ret_val = value
                     .map(|v| self.lower_expr(v))
                     .unwrap_or(Value::Immediate(Immediate::unit()));
+                // Tag failure-return blocks for the deinit pass
+                if is_failure {
+                    if let Some(block) = self.current_block {
+                        self.body.failure_return_blocks.insert(block);
+                    }
+                }
                 self.set_terminator(Terminator::ret(ret_val));
                 // After return, the block is terminated — return a dummy value
                 Value::Immediate(Immediate::unit())
@@ -726,9 +774,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let lhs = self.lower_expr(*target);
                 if let Value::Place(dest) = lhs {
                     self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest,
+                        dest: dest.clone(),
                         rvalue: value_to_rvalue(rhs),
                     }));
+                    self.maybe_emit_init_field_flag(&dest);
                 }
                 Value::Immediate(Immediate::unit())
             },
@@ -1915,6 +1964,33 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         false
     }
 
+    /// Find the InitEffect of an init on a protocol, matching by labels.
+    fn find_protocol_init_effect(
+        &self,
+        protocol: Entity,
+        labels: &[Option<String>],
+    ) -> Option<kestrel_ast_builder::InitEffect> {
+        use kestrel_ast_builder::{Callable, InitEffect, NodeKind};
+        for &child in self.ctx.world.children_of(protocol) {
+            if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Initializer) {
+                continue;
+            }
+            if let Some(callable) = self.ctx.world.get::<Callable>(child) {
+                let child_labels: Vec<Option<&str>> = callable
+                    .params
+                    .iter()
+                    .map(|p| p.label.as_deref())
+                    .collect();
+                let match_labels: Vec<Option<&str>> =
+                    labels.iter().map(|l| l.as_deref()).collect();
+                if child_labels == match_labels {
+                    return self.ctx.world.get::<InitEffect>(child).cloned();
+                }
+            }
+        }
+        None
+    }
+
     /// If a method entity belongs to a protocol (abstract or extension), return the
     /// protocol entity. Both abstract protocol methods and protocol extension methods
     /// need Witness dispatch so the witness table can route to the correct implementation.
@@ -2758,6 +2834,112 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
+    /// Detect if this function is an effectful init and create field-init tracking flags.
+    fn setup_init_field_flags(&mut self) {
+        use kestrel_ast_builder::{
+            Body, Computed, InitEffect, NodeKind,
+        };
+
+        let func_def = &self.ctx.module.functions[self.func_id.index()];
+        let FunctionKind::Initializer { parent } = func_def.kind else {
+            return;
+        };
+
+        let entity = func_def.entity;
+        if self.ctx.world.get::<InitEffect>(entity).is_none() {
+            return;
+        }
+
+        self.is_effectful_init = true;
+
+        // Find stored fields on the parent struct that need deinit
+        for &child in self.ctx.world.children_of(parent) {
+            if self.ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Field) {
+                continue;
+            }
+            // Skip computed properties (have a Callable with receiver)
+            if self.ctx.world.get::<Computed>(child).is_some() {
+                continue;
+            }
+            // Skip fields with default values (have a Body component)
+            if self.ctx.world.get::<Body>(child).is_some() {
+                continue;
+            }
+
+            let Some(name) = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Name>(child)
+                .map(|n| n.0.clone())
+            else {
+                continue;
+            };
+
+            // Resolve field type from the MIR struct def (if available)
+            let field_ty = self
+                .ctx
+                .module
+                .structs
+                .iter()
+                .find(|s| s.entity == parent)
+                .and_then(|s| s.field_by_name(&name))
+                .map(|fid| {
+                    self.ctx.module.structs.iter()
+                        .find(|s| s.entity == parent)
+                        .unwrap()
+                        .fields[fid.index()]
+                        .ty
+                        .clone()
+                });
+
+            let needs_cleanup = field_ty
+                .as_ref()
+                .map(|ty| needs_field_deinit(ty))
+                .unwrap_or(true); // conservative: unknown type → assume needs deinit
+
+            if needs_cleanup {
+                let flag_local = self.body.add_local(LocalDef::new(
+                    format!("_init_{}", name),
+                    MirTy::Bool,
+                ));
+                self.init_field_flags.insert(name, flag_local);
+            }
+        }
+    }
+
+    /// After a field assignment to self, emit SetDeinitFlag if tracked.
+    fn maybe_emit_init_field_flag(&mut self, dest: &Place) {
+        if !self.is_effectful_init {
+            return;
+        }
+        if let Place::Field { parent, name } = dest {
+            if parent.root_local() == Some(LocalId::new(0)) {
+                if let Some(&flag) = self.init_field_flags.get(name.as_str()) {
+                    // false = initialized / needs deinit
+                    self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                        flag,
+                        value: false,
+                    }));
+                }
+            }
+        }
+    }
+
+    /// Check if an HIR expression is a failure value (null, .None, .Err) in an effectful init.
+    fn is_init_failure_value_hir(&self, expr_id: HirExprId) -> bool {
+        match &self.hir.exprs[expr_id] {
+            HirExpr::Literal {
+                value: kestrel_hir::body::HirLiteral::Null,
+                ..
+            } => true,
+            HirExpr::ImplicitMember { name, .. } => {
+                let n = name.as_str_or_empty();
+                n == "Err" || n == "None"
+            }
+            _ => false,
+        }
+    }
+
     /// Emit a call, handling init calls by allocating self and prepending it as first arg.
     /// For init calls: allocates a temp of the struct type, passes &mut temp as self,
     /// calls the init, and returns the temp as the result.
@@ -2775,15 +2957,31 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         };
 
         if is_init {
-            // Init call: allocate self, prepend as first arg, call, return self
+            // Check if this init is effectful (failable/throwing)
+            let init_effect = match &callee {
+                Callee::Direct { func, .. } => self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::InitEffect>(*func)
+                    .cloned(),
+                Callee::Witness {
+                    protocol, method, ..
+                } if method.name == "init" => {
+                    self.find_protocol_init_effect(*protocol, &method.labels)
+                }
+                _ => None,
+            };
+
+            if let Some(effect) = init_effect {
+                return self.emit_effectful_init_call(callee, call_args, result_ty, effect);
+            }
+
+            // Regular init: allocate self, prepend as first arg, call, return self
             let self_local = self.fresh_temp(result_ty.clone());
             let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
             call_args.insert(0, self_ref);
 
-            // Direct init callees need `self_type` set (for mangling) —
-            // `type_args` comes from upstream (`resolve_type_args(expr_id)` +
-            // `infer_parent_type_args`), which already supplies the complete
-            // struct-first list.
+            // Direct init callees need `self_type` set (for mangling)
             let callee = match callee {
                 Callee::Direct {
                     func,
@@ -2840,6 +3038,183 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         } else {
             self.emit_call(callee, call_args, result_ty)
         }
+    }
+
+    /// Handle an effectful init call (failable or throwing).
+    ///
+    /// The init body returns `Optional[()]` or `Result[(), E]`. The call site
+    /// must map this to `Optional[Self]` or `Result[Self, E]`:
+    ///   - Success (.Some(()) / .Ok(())) → wrap self in .Some(self) / .Ok(self)
+    ///   - Failure (.None / .Err(e)) → propagate .None / .Err(e)
+    fn emit_effectful_init_call(
+        &mut self,
+        callee: Callee,
+        mut call_args: Vec<CallArg>,
+        result_ty: MirTy,
+        effect: kestrel_ast_builder::InitEffect,
+    ) -> Value {
+        // result_ty is Optional[Self] or Result[Self, E].
+        // Extract the inner struct type from the first type arg.
+        let (inner_ty, success_variant, failure_variant) = match &effect {
+            kestrel_ast_builder::InitEffect::Failable => {
+                let inner = match &result_ty {
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
+                        type_args[0].clone()
+                    }
+                    _ => result_ty.clone(),
+                };
+                (inner, "Some", "None")
+            }
+            kestrel_ast_builder::InitEffect::Throwing => {
+                let inner = match &result_ty {
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
+                        type_args[0].clone()
+                    }
+                    _ => result_ty.clone(),
+                };
+                (inner, "Ok", "Err")
+            }
+        };
+
+        // 1. Allocate self_local of the inner struct type
+        let self_local = self.fresh_temp(inner_ty.clone());
+        let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
+        call_args.insert(0, self_ref);
+
+        // Set self_type to the inner (unwrapped) type for correct dispatch
+        let callee = match callee {
+            Callee::Direct {
+                func,
+                type_args,
+                self_type: None,
+            } => Callee::Direct {
+                func,
+                type_args,
+                self_type: Some(inner_ty.clone()),
+            },
+            Callee::Witness {
+                protocol,
+                method,
+                method_type_args,
+                ..
+            } => Callee::Witness {
+                protocol,
+                method,
+                self_type: inner_ty.clone(),
+                method_type_args,
+            },
+            other => other,
+        };
+
+        // 2. Call init — returns Optional[()] or Result[(), E]
+        let init_ret_ty = match &effect {
+            kestrel_ast_builder::InitEffect::Failable => {
+                // Optional[()]
+                if let MirTy::Named { entity, .. } = &result_ty {
+                    MirTy::Named {
+                        entity: *entity,
+                        type_args: vec![MirTy::Tuple(vec![])],
+                    }
+                } else {
+                    MirTy::Tuple(vec![])
+                }
+            }
+            kestrel_ast_builder::InitEffect::Throwing => {
+                // Result[(), E]
+                if let MirTy::Named {
+                    entity, type_args, ..
+                } = &result_ty
+                {
+                    let err_ty = type_args.get(1).cloned().unwrap_or(MirTy::Tuple(vec![]));
+                    MirTy::Named {
+                        entity: *entity,
+                        type_args: vec![MirTy::Tuple(vec![]), err_ty],
+                    }
+                } else {
+                    MirTy::Tuple(vec![])
+                }
+            }
+        };
+
+        let init_ret_local = self.fresh_temp(init_ret_ty.clone());
+        self.emit_stmt(Statement::new(StatementKind::Call {
+            dest: Some(Place::local(init_ret_local)),
+            callee,
+            args: call_args,
+        }));
+
+        // 3. Switch on the init result discriminant
+        let final_local = self.fresh_temp(result_ty.clone());
+        let success_block = self.new_block();
+        let failure_block = self.new_block();
+        let join_block = self.new_block();
+
+        self.set_terminator(Terminator::switch(
+            Place::local(init_ret_local),
+            vec![
+                (
+                    kestrel_mir::SwitchCase::Variant(success_variant.to_string()),
+                    success_block,
+                ),
+                (
+                    kestrel_mir::SwitchCase::Variant(failure_variant.to_string()),
+                    failure_block,
+                ),
+            ],
+        ));
+
+        // Success block: wrap self in .Some(self) / .Ok(self)
+        self.switch_to_block(success_block);
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest: Place::local(final_local),
+            rvalue: Rvalue::EnumVariant {
+                enum_ty: result_ty.clone(),
+                variant: success_variant.to_string(),
+                payload: vec![Value::Place(Place::local(self_local))],
+            },
+        }));
+        self.set_terminator(Terminator::jump(join_block));
+
+        // Failure block: propagate .None or .Err(e)
+        self.switch_to_block(failure_block);
+        if failure_variant == "None" {
+            // .None has no payload
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(final_local),
+                rvalue: Rvalue::EnumVariant {
+                    enum_ty: result_ty.clone(),
+                    variant: failure_variant.to_string(),
+                    payload: vec![],
+                },
+            }));
+        } else {
+            // .Err(e): extract the error payload from the init result and re-wrap
+            let err_place = Place::local(init_ret_local).downcast(failure_variant);
+            let err_ty = match &result_ty {
+                MirTy::Named { type_args, .. } => {
+                    type_args.get(1).cloned().unwrap_or(MirTy::Tuple(vec![]))
+                }
+                _ => MirTy::Tuple(vec![]),
+            };
+            let err_local = self.fresh_temp(err_ty);
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(err_local),
+                rvalue: Rvalue::Copy(err_place),
+            }));
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(final_local),
+                rvalue: Rvalue::EnumVariant {
+                    enum_ty: result_ty.clone(),
+                    variant: failure_variant.to_string(),
+                    payload: vec![Value::Place(Place::local(err_local))],
+                },
+            }));
+        }
+        self.set_terminator(Terminator::jump(join_block));
+
+        // Continue in join block
+        self.switch_to_block(join_block);
+        Value::Place(Place::local(final_local))
     }
 
     /// Expand missing call arguments with default parameter values.
@@ -3338,6 +3713,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let header_block = self.new_block();
         let exit_block = self.new_block();
 
+        // Create (local, flag) pairs for let-bindings inside the loop body.
+        // The flag tracks whether the local is initialized — true = uninit.
+        let raw_locals = self.collect_block_locals(body);
+        let scoped_locals: Vec<(LocalId, LocalId)> = raw_locals
+            .into_iter()
+            .map(|local| {
+                let flag = self.body.add_local(
+                    LocalDef::new(format!("_loop_{}", self.body.locals[local.index()].name), MirTy::Bool),
+                );
+                (local, flag)
+            })
+            .collect();
+
         // Jump into the loop header
         if !self.is_terminated() {
             self.set_terminator(Terminator::jump(header_block));
@@ -3348,14 +3736,27 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             header_block,
             exit_block,
             label: label.map(|s| s.to_string()),
+            scoped_locals,
         });
 
-        // Lower loop body
+        // At the top of the loop header, set all flags to true (uninit)
         self.switch_to_block(header_block);
+        let flag_inits: Vec<LocalId> = self.loop_stack.last()
+            .map(|l| l.scoped_locals.iter().map(|&(_, f)| f).collect())
+            .unwrap_or_default();
+        for flag in flag_inits {
+            self.emit_stmt(Statement::new(StatementKind::SetDeinitFlag {
+                flag,
+                value: true,
+            }));
+        }
+
+        // Lower loop body
         let _ = self.lower_hir_block(body);
 
-        // At end of body, loop back to header
+        // Emit conditional deinits for loop-scoped locals before the back-edge
         if !self.is_terminated() {
+            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(header_block));
         }
 
@@ -3371,6 +3772,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_break(&mut self, label: Option<&str>) -> Value {
         let exit_block = self.find_loop(label).map(|l| l.exit_block);
         if let Some(exit) = exit_block {
+            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(exit));
         }
         Value::Immediate(Immediate::unit())
@@ -3380,9 +3782,36 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_continue(&mut self, label: Option<&str>) -> Value {
         let header_block = self.find_loop(label).map(|l| l.header_block);
         if let Some(header) = header_block {
+            self.emit_loop_scope_deinits();
             self.set_terminator(Terminator::jump(header));
         }
         Value::Immediate(Immediate::unit())
+    }
+
+    /// Emit DeinitIf for each loop-scoped local in the innermost loop.
+    /// Uses the flag to skip locals that haven't been initialized yet.
+    fn emit_loop_scope_deinits(&mut self) {
+        let pairs: Vec<(LocalId, LocalId)> = self.loop_stack.last()
+            .map(|l| l.scoped_locals.clone())
+            .unwrap_or_default();
+        for &(local, flag) in pairs.iter().rev() {
+            self.emit_stmt(Statement::new(StatementKind::DeinitIf {
+                place: Place::local(local),
+                flag,
+            }));
+        }
+    }
+
+    /// Collect MIR local IDs for `let` bindings declared in a HIR block.
+    fn collect_block_locals(&self, block: &HirBlock) -> Vec<LocalId> {
+        let mut locals = Vec::new();
+        for &stmt_id in &block.stmts {
+            if let HirStmt::Let { local, .. } = &self.hir.stmts[stmt_id] {
+                let mir_local = self.map_local(*local);
+                locals.push(mir_local);
+            }
+        }
+        locals
     }
 
     /// Find a loop by label (or the innermost loop if no label).
@@ -4069,6 +4498,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 }
 
 /// Convert a Value to an Rvalue for assignment.
+/// Check if a field type needs deinit (non-trivially destructible).
+fn needs_field_deinit(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::Bool | MirTy::I8 | MirTy::I16 | MirTy::I32 | MirTy::I64 => false,
+        MirTy::F16 | MirTy::F32 | MirTy::F64 => false,
+        MirTy::Never | MirTy::Error => false,
+        MirTy::Ref(_) | MirTy::RefMut(_) | MirTy::Pointer(_) => false,
+        MirTy::FuncThin { .. } => false,
+        MirTy::Tuple(elems) if elems.is_empty() => false,
+        _ => true,
+    }
+}
+
 fn value_to_rvalue(value: Value) -> Rvalue {
     match value {
         Value::Place(p) => Rvalue::Copy(p),

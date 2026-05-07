@@ -159,8 +159,14 @@ impl LowerCtx<'_> {
             },
             AstExpr::Return { value, span } => {
                 let lowered = value.map(|v| self.lower_expr(body, v));
+                // Bare return in effectful init: wrap () in .Some(())/.Ok(())
+                let wrapped = if lowered.is_none() {
+                    self.wrap_init_success_value(span.clone())
+                } else {
+                    lowered
+                };
                 self.alloc_expr(HirExpr::Return {
-                    value: lowered,
+                    value: wrapped,
                     span,
                 })
             },

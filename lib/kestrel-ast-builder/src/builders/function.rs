@@ -89,6 +89,7 @@ pub fn build_function(
 /// Build an initializer declaration entity from CST.
 ///
 /// Components: NodeKind::Initializer, FileId, Vis, Callable,
+/// [InitEffect], [TypeAnnotation (return)],
 /// [Valued (body)], [TypeParams], [WhereClause], [Attributes], [Documentation]
 pub fn build_initializer(
     world: &mut World,
@@ -114,6 +115,44 @@ pub fn build_initializer(
             receiver: Some(ReceiverKind::Mutating),
         },
     );
+
+    // Init effect: ? (failable) or throws E (throwing).
+    // Sets TypeAnnotation to ()? or () throws E so the body return type is correct.
+    if let Some(effect_node) = find_child(node, SyntaxKind::InitEffect) {
+        let effect_span = get_decl_span(&effect_node, file_id);
+        let unit_ty = kestrel_ast::AstType::Unit(effect_span.clone());
+
+        let has_question = effect_node.children_with_tokens().any(|c| {
+            c.as_token()
+                .map(|t| t.kind() == SyntaxKind::Question)
+                .unwrap_or(false)
+        });
+
+        if has_question {
+            world.set(entity, InitEffect::Failable);
+            world.set(
+                entity,
+                TypeAnnotation(kestrel_ast::AstType::Optional(
+                    Box::new(unit_ty),
+                    effect_span,
+                )),
+            );
+        } else if let Some(err_ty) = effect_node
+            .children()
+            .find(|c| is_type_kind(c.kind()))
+            .and_then(|c| ast_type_from_cst(&c, file_id))
+        {
+            world.set(entity, InitEffect::Throwing);
+            world.set(
+                entity,
+                TypeAnnotation(kestrel_ast::AstType::Result {
+                    ok: Box::new(unit_ty),
+                    err: Box::new(err_ty),
+                    span: effect_span,
+                }),
+            );
+        }
+    }
 
     // Body — CST wraps it in FunctionBody > CodeBlock
     if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody)
@@ -147,12 +186,13 @@ pub fn build_deinit(
     world.set(entity, CstNode(node.clone()));
     world.set_parent(entity, parent);
 
-    // Deinits always have a `self` receiver (consuming — they're destroying the instance)
+    // Deinits receive &var self. The caller owns the memory and handles
+    // deallocation after the deinit body runs cleanup.
     world.set(
         entity,
         Callable {
             params: Vec::new(),
-            receiver: Some(ReceiverKind::Consuming),
+            receiver: Some(ReceiverKind::Mutating),
         },
     );
 

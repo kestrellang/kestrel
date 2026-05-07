@@ -2,6 +2,8 @@
 //!
 //! Self-contained: a statement in function A never references a local in function B.
 
+use std::collections::HashSet;
+
 use crate::id::{BlockId, LocalId};
 use crate::statement::Statement;
 use crate::terminator::Terminator;
@@ -18,6 +20,9 @@ pub struct MirBody {
     pub entry: BlockId,
     /// Number of parameters — the first `param_count` locals are parameters.
     pub param_count: usize,
+    /// Blocks whose Return terminator is a failure path in an effectful init.
+    /// The deinit pass uses this to insert partial-drop cleanup.
+    pub failure_return_blocks: HashSet<BlockId>,
 }
 
 impl MirBody {
@@ -28,6 +33,7 @@ impl MirBody {
             blocks: Vec::new(),
             entry: BlockId::new(0),
             param_count: 0,
+            failure_return_blocks: HashSet::new(),
         }
     }
 

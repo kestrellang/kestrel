@@ -8,6 +8,8 @@ import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, ArraySlice)
 import std.iter.(Iterator, Iterable)
+import std.collections.(Slice)
+import std.numeric.(UInt32)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
 import std.text.unicode as unicode
 import std.ffi.(memcpy, memcmp, memmem)
@@ -297,54 +299,101 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     }
 
     /// @name From UTF-8
-    /// Constructs a string by copying validated UTF-8 bytes from `bytes`,
-    /// returning `.None` if the slice is not valid UTF-8.
-    ///
-    /// Walks the slice end-to-end with `decodeUtf8`; any malformed,
-    /// truncated, or overlong sequence produces `.None`. The empty slice
-    /// is valid and yields the empty string. On success the bytes are
-    /// copied into a fresh heap allocation, so the returned `String`
-    /// owns its storage independently of `bytes`.
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"String allocation failed"` if the system allocator
-    /// returns null. Returns `.None` only for invalid UTF-8 — the
-    /// allocation case is unrecoverable.
+    /// Constructs a string from validated UTF-8 bytes, returning `null`
+    /// if the input is not valid UTF-8.
     ///
     /// # Examples
     ///
     /// ```
-    /// String.fromUtf8("héllo".bytes.asSlice());  // Some("héllo")
-    /// String.fromUtf8(badSlice);                 // None
+    /// let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
     /// ```
-    public static func fromUtf8(bytes: ArraySlice[UInt8]) -> String? {
+    public init[S](fromUtf8 fromUtf8: S)? where S: Slice[UInt8] {
+        let bytes = fromUtf8.asSlice();
         let count = bytes.count;
         if count == 0 {
-            return .Some(String())
-        }
-        // Validate: walk the buffer with decodeUtf8 until exhausted.
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
-        var i: Int64 = 0;
-        while i < count {
-            match decodeUtf8(rawPtr, count, at: i) {
-                .Some(decoded) => i = i + decoded.bytesConsumed,
-                .None => return .None
+            self.storage = CowBox(StringStorage(
+                ptr: Pointer[UInt8].nullPointer(),
+                len: 0,
+                cap: 0
+            ))
+        } else {
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
+            var i: Int64 = 0;
+            while i < count {
+                match decodeUtf8(rawPtr, count, at: i) {
+                    .Some(decoded) => i = i + decoded.bytesConsumed,
+                    .None => return null
+                }
             }
+            let newPtr = _textAlloc(Layout.array[UInt8](count));
+            _memcpyBytes(dst: newPtr, src: bytes.pointer, n: count);
+            self.storage = CowBox(StringStorage(ptr: newPtr, len: count, cap: count))
         }
-        .Some(String.fromBytesUnchecked(bytes.pointer, count))
     }
 
-    /// Constructs a string by copying `count` bytes starting at `ptr`, without UTF-8 validation.
-    ///
-    /// Internal helper used by split iterators and substring helpers
-    /// that already know the byte range falls on UTF-8 boundaries.
+    /// @name From UTF-8 Unchecked
+    /// Constructs a string by copying bytes without UTF-8 validation.
     ///
     /// # Safety
     ///
-    /// `ptr` must reference at least `count` valid UTF-8 bytes; the
-    /// range starting at `ptr` and ending at `ptr + count` must not
-    /// split a multi-byte sequence.
+    /// The caller must ensure the bytes are valid UTF-8.
+    public init[S](fromUtf8Unchecked fromUtf8Unchecked: S) where S: Slice[UInt8] {
+        let bytes = fromUtf8Unchecked.asSlice();
+        let count = bytes.count;
+        if count == 0 {
+            self.storage = CowBox(StringStorage(
+                ptr: Pointer[UInt8].nullPointer(),
+                len: 0,
+                cap: 0
+            ))
+        } else {
+            let newPtr = _textAlloc(Layout.array[UInt8](count));
+            _memcpyBytes(dst: newPtr, src: bytes.pointer, n: count);
+            self.storage = CowBox(StringStorage(ptr: newPtr, len: count, cap: count))
+        }
+    }
+
+    /// @name From UTF-8 Lossy
+    /// Constructs a string from bytes, replacing invalid UTF-8 sequences
+    /// with the Unicode replacement character (U+FFFD).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
+    /// ```
+    public init[S](fromUtf8Lossy fromUtf8Lossy: S) where S: Slice[UInt8] {
+        let bytes = fromUtf8Lossy.asSlice();
+        let count = bytes.count;
+        if count == 0 {
+            self.storage = CowBox(StringStorage(
+                ptr: Pointer[UInt8].nullPointer(),
+                len: 0,
+                cap: 0
+            ))
+        } else {
+            // Worst case: every byte is invalid → 3 bytes per replacement char
+            var result = StringBuilder(capacity: count * 3);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
+            var i: Int64 = 0;
+            while i < count {
+                match decodeUtf8(rawPtr, count, at: i) {
+                    .Some(decoded) => {
+                        result.appendChar(decoded.char);
+                        i = i + decoded.bytesConsumed
+                    },
+                    .None => {
+                        result.appendChar(Char(unchecked: UInt32(intLiteral: 0xFFFD)));
+                        i = i + 1
+                    }
+                }
+            }
+            let built = result.build();
+            self.storage = built.storage
+        }
+    }
+
+    /// Internal helper: copies `count` bytes from `ptr` without validation.
     static func fromBytesUnchecked(ptr: Pointer[UInt8], count: Int64) -> String {
         if count == 0 {
             return String()
@@ -354,15 +403,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
         String(storage: CowBox(StringStorage(ptr: newPtr, len: count, cap: count)))
     }
 
-    /// Constructs a string by copying `count` bytes from a raw `lang.ptr[lang.i8]`.
-    ///
-    /// Internal helper for view-side code that holds raw pointers but
-    /// needs to materialize an owned `String`. No UTF-8 validation.
-    ///
-    /// # Safety
-    ///
-    /// `rawPtr` must reference at least `count` valid UTF-8 bytes; the
-    /// range must not split a multi-byte sequence.
+    /// Internal helper: copies `count` bytes from a raw `lang.ptr[lang.i8]`.
     static func fromRawBytes(rawPtr: lang.ptr[lang.i8], count: Int64) -> String {
         if count <= 0 {
             return String()

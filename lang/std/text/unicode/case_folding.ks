@@ -161,13 +161,13 @@ public func caseFold(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path
     if cp >= 65 and cp <= 90 {
-        return Char(cp + 32)
+        return Char(unchecked: cp + 32)
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = FOLD_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let delta = FOLD_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     if delta == 0 { return c }
-    Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
+    Char(unchecked: UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
 /// `true` iff folding `c` produces more than one codepoint. Linear
@@ -202,9 +202,9 @@ public func caseFoldExpansion(c: Char) -> String {
         let entry = FOLD_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(UInt32(from: entry.4))) }
+            result.appendChar(Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.appendChar(Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.appendChar(Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1

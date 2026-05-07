@@ -73,7 +73,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, CstNode, NodeKind, Settable};
+use kestrel_ast_builder::{Callable, CstNode, InitEffect, NodeKind, Settable};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -475,32 +475,36 @@ fn analyze_expr(
             }
         },
 
-        // Return: check all fields initialized
+        // Return: check all fields initialized (skip for failure returns in effectful inits)
         HirExpr::Return { value, .. } => {
             if let Some(val) = value {
                 state = analyze_expr(cx, *val, state, false, vctx);
             }
-            let uninitialized: Vec<String> = vctx
-                .all_fields
-                .iter()
-                .filter(|f| !state.assigned.contains(*f))
-                .cloned()
-                .collect();
-            if !uninitialized.is_empty() {
-                vctx.diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[4].id,
-                    severity: DESCRIPTORS[4].default_severity,
-                    message: "cannot return before all fields are initialized".into(),
-                    labels: vec![DiagLabel {
-                        span: util::expr_span(cx.hir, id),
-                        message: "return here".into(),
-                        is_primary: true,
-                    }],
-                    notes: vec![format!(
-                        "uninitialized fields: {}",
-                        uninitialized.join(", ")
-                    )],
-                });
+            let is_failure_return = cx.query.get::<InitEffect>(cx.entity).is_some()
+                && value.is_some_and(|v| is_init_failure_value(cx, v));
+            if !is_failure_return {
+                let uninitialized: Vec<String> = vctx
+                    .all_fields
+                    .iter()
+                    .filter(|f| !state.assigned.contains(*f))
+                    .cloned()
+                    .collect();
+                if !uninitialized.is_empty() {
+                    vctx.diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[4].id,
+                        severity: DESCRIPTORS[4].default_severity,
+                        message: "cannot return before all fields are initialized".into(),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, id),
+                            message: "return here".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![format!(
+                            "uninitialized fields: {}",
+                            uninitialized.join(", ")
+                        )],
+                    });
+                }
             }
             // diverged is set by the Never-type check at the end of analyze_expr
         },
@@ -704,5 +708,19 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
         cx.hir.locals[*local_id].name == "self"
     } else {
         false
+    }
+}
+
+/// Check if a return value represents an init failure path (null literal or .Err(...)).
+/// These are allowed to return before all fields are initialized in effectful inits.
+fn is_init_failure_value(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    match &cx.hir.exprs[expr_id] {
+        HirExpr::Literal {
+            value: HirLiteral::Null,
+            ..
+        } => true,
+        HirExpr::ImplicitMember { name, .. } if name.as_str() == Some("Err") => true,
+        HirExpr::ImplicitMember { name, .. } if name.as_str() == Some("None") => true,
+        _ => false,
     }
 }

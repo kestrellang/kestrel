@@ -7,9 +7,12 @@ edition.workspace = true
 kestrel-compiler = { path = "lib/kestrel-compiler" }
 kestrel-compiler-driver = { path = "lib/kestrel-compiler-driver" }
 kestrel-ast-builder = { path = "lib/kestrel-ast-builder" }
+kestrel-analyze = { path = "lib/kestrel-analyze" }
+kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
+codespan-reporting = { workspace = true }
 clap = { workspace = true }
 
 [workspace.package]

@@ -445,7 +445,7 @@ public protocol Interpolatable {
     /// `literalCapacity` is the total byte count of the static segments;
     /// `interpolationCount` is the number of `\{...}` holes. Implementors
     /// can use these to preallocate.
-    init(literalCapacity: Int64, interpolationCount: Int64)
+    init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64)
 
     /// Appends a static literal segment.
     ///
