@@ -59,7 +59,9 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
 
     /// Writes `value` into the storage in place. Only valid after
     /// a preceding `write()` call (which ensures uniqueness).
-    public func setValue(value: T) {
+    /// Takes `value` by consuming so the drop pass sees the caller's
+    /// local as moved (Dead) — prevents double-free of shared buffers.
+    public func setValue(consuming value: T) {
         self.inner.setValue(value)
     }
 

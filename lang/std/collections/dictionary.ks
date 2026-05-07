@@ -883,12 +883,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 }
             }
 
-            // Free old table
-            if oldCap > 0 {
-                let oldLayout = Layout.array[Bucket[K, V]](oldCap);
-                allocator.deallocate(oldBuckets.asRaw(), oldLayout)
-            }
-
             self.storage.setValue(DictionaryStorage(
                 buckets: newBuckets,
                 len: newLen,
@@ -948,12 +942,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                     },
                     _ => {}
                 }
-            }
-
-            // Free old table
-            if oldCap > 0 {
-                let oldLayout = Layout.array[Bucket[K, V]](oldCap);
-                allocator.deallocate(oldBuckets.asRaw(), oldLayout)
             }
 
             self.storage.setValue(DictionaryStorage(

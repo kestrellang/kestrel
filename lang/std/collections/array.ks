@@ -655,11 +655,6 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             for i in 0..<oldStorage.len {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
             }
-            // Free old buffer
-            if oldStorage.cap > 0 {
-                let oldLayout = Layout.array[T](oldStorage.cap);
-                allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
-            }
             self.storage.setValue(ArrayStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
         } else {
             fatalError("Array grow failed")
@@ -1341,10 +1336,6 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             let oldStorage = self.storage.getValue();
             for i in 0..<myLen {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read())
-            }
-            if myCap > 0 {
-                let oldLayout = Layout.array[T](myCap);
-                allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
             self.storage.setValue(ArrayStorage(ptr: newPtr, len: myLen, cap: myLen))
         }

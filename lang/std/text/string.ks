@@ -486,9 +486,6 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
         let newPtr = _textAlloc(newLayout);
         let oldStorage = self.storage.write();
         _memcpyBytes(dst: newPtr, src: oldStorage.ptr, n: oldStorage.len);
-        if oldStorage.cap > 0 {
-            _textDealloc(oldStorage.ptr, Layout.array[UInt8](oldStorage.cap))
-        }
         self.storage.setValue(StringStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
     }
 

@@ -461,10 +461,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     Value::Place(p) => p.field(method_name.to_string()),
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(receiver_val),
-                        }));
+                        self.emit_value_transfer(Place::local(temp), receiver_val, &receiver_ty);
                         Place::local(temp).field(method_name.to_string())
                     },
                 };
@@ -533,10 +530,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let mir_local = self.map_local(*local);
                 if let Some(init_expr) = value {
                     let init_value = self.lower_expr(*init_expr);
-                    self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest: Place::local(mir_local),
-                        rvalue: value_to_rvalue(init_value),
-                    }));
+                    let local_ty = self.body.locals[mir_local.index()].ty.clone();
+                    self.emit_value_transfer(Place::local(mir_local), init_value, &local_ty);
                 }
                 // Drop elaboration tracks init-state via dataflow — no flag needed
             },
@@ -698,11 +693,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         _ => {
                             // Need to materialize the value into a temp first
                             let ty = self.resolve_expr_type(*base);
-                            let temp = self.fresh_temp(ty);
-                            self.emit_stmt(Statement::new(StatementKind::Assign {
-                                dest: Place::local(temp),
-                                rvalue: value_to_rvalue(base_val),
-                            }));
+                            let temp = self.fresh_temp(ty.clone());
+                            self.emit_value_transfer(Place::local(temp), base_val, &ty);
                             Value::Place(
                                 Place::local(temp).field(name.as_str_or_empty().to_string()),
                             )
@@ -716,11 +708,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     Value::Place(p) => Value::Place(p.index(*index as usize)),
                     _ => {
                         let ty = self.resolve_expr_type(*base);
-                        let temp = self.fresh_temp(ty);
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(base_val),
-                        }));
+                        let temp = self.fresh_temp(ty.clone());
+                        self.emit_value_transfer(Place::local(temp), base_val, &ty);
                         Value::Place(Place::local(temp).index(*index as usize))
                     },
                 }
@@ -760,12 +749,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     return val;
                 }
                 let rhs = self.lower_expr(*value);
+                let rhs_ty = self.resolve_expr_type(*value);
                 let lhs = self.lower_expr(*target);
                 if let Value::Place(dest) = lhs {
-                    self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest: dest.clone(),
-                        rvalue: value_to_rvalue(rhs),
-                    }));
+                    self.emit_value_transfer(dest.clone(), rhs, &rhs_ty);
                     self.maybe_emit_init_field_flag(&dest);
                 }
                 Value::Immediate(Immediate::unit())
@@ -2632,10 +2619,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     Value::Place(p) => p.field(field_name),
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(temp),
-                            rvalue: value_to_rvalue(receiver_val),
-                        }));
+                        self.emit_value_transfer(Place::local(temp), receiver_val, &receiver_ty);
                         Place::local(temp).field(field_name)
                     },
                 };
@@ -2711,10 +2695,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             Value::Place(p) => p.field(method_name.to_string()),
                             _ => {
                                 let temp = self.fresh_temp(receiver_ty.clone());
-                                self.emit_stmt(Statement::new(StatementKind::Assign {
-                                    dest: Place::local(temp),
-                                    rvalue: value_to_rvalue(receiver_val),
-                                }));
+                                self.emit_value_transfer(Place::local(temp), receiver_val, &receiver_ty);
                                 Place::local(temp).field(method_name.to_string())
                             },
                         };
@@ -3211,11 +3192,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
                 _ => MirTy::Tuple(vec![]),
             };
-            let err_local = self.fresh_temp(err_ty);
-            self.emit_stmt(Statement::new(StatementKind::Assign {
-                dest: Place::local(err_local),
-                rvalue: Rvalue::Copy(err_place),
-            }));
+            let err_local = self.fresh_temp(err_ty.clone());
+            self.emit_value_transfer(
+                Place::local(err_local),
+                Value::Place(err_place),
+                &err_ty,
+            );
             self.emit_stmt(Statement::new(StatementKind::Assign {
                 dest: Place::local(final_local),
                 rvalue: Rvalue::EnumVariant {
@@ -3681,7 +3663,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let merge_block = self.new_block();
 
         // Result temp — both branches assign to this before jumping to merge
-        let result_local = self.fresh_temp(result_ty);
+        let result_local = self.fresh_temp(result_ty.clone());
 
         // Branch on condition
         self.set_terminator(Terminator::branch(cond_val, then_block, else_block));
@@ -3690,10 +3672,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         self.switch_to_block(then_block);
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
-            self.emit_stmt(Statement::new(StatementKind::Assign {
-                dest: Place::local(result_local),
-                rvalue: value_to_rvalue(then_val),
-            }));
+            self.emit_value_transfer(Place::local(result_local), then_val, &result_ty);
             self.set_terminator(Terminator::jump(merge_block));
         }
 
@@ -3702,10 +3681,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
             if !self.is_terminated() {
-                self.emit_stmt(Statement::new(StatementKind::Assign {
-                    dest: Place::local(result_local),
-                    rvalue: value_to_rvalue(else_val),
-                }));
+                self.emit_value_transfer(Place::local(result_local), else_val, &result_ty);
                 self.set_terminator(Terminator::jump(merge_block));
             }
         } else {
@@ -3968,10 +3944,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let cap_name = self.hir.locals[captured].name.clone();
                 // Deref the env pointer and access the field by name
                 let field_place = Place::local(env_local).deref().field(&cap_name);
-                self.emit_stmt(Statement::new(StatementKind::Assign {
-                    dest: Place::local(closure_local),
-                    rvalue: Rvalue::Copy(field_place),
-                }));
+                let cap_ty = self.body.locals[closure_local.index()].ty.clone();
+                self.emit_value_transfer(
+                    Place::local(closure_local),
+                    Value::Place(field_place),
+                    &cap_ty,
+                );
             }
         }
 
@@ -4393,11 +4371,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(arm) = arms.get(*arm_index) {
                     let body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
-                        // Store result and jump to join
-                        self.emit_stmt(Statement::new(StatementKind::Assign {
-                            dest: Place::local(result_local),
-                            rvalue: value_to_rvalue(body_val),
-                        }));
+                        let result_ty = self.body.locals[result_local.index()].ty.clone();
+                        self.emit_value_transfer(Place::local(result_local), body_val, &result_ty);
                         self.set_terminator(Terminator::jump(join_block));
                     }
                 }
@@ -4448,10 +4423,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         for binding in bindings {
             let mir_local = self.map_local(binding.local_id);
             let source = apply_access_path(scrutinee.clone(), &binding.path);
-            self.emit_stmt(Statement::new(StatementKind::Assign {
-                dest: Place::local(mir_local),
-                rvalue: Rvalue::Copy(source),
-            }));
+            let local_ty = self.body.locals[mir_local.index()].ty.clone();
+            self.emit_value_transfer(
+                Place::local(mir_local),
+                Value::Place(source),
+                &local_ty,
+            );
         }
     }
 
@@ -4482,6 +4459,83 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             Value::Immediate(Immediate::unit())
         }
     }
+
+    // === Value transfer (Move / Copy / Clone) ===
+
+    /// Check if a MirTy is Cloneable (needs clone() instead of bitwise copy).
+    fn is_type_cloneable(&self, ty: &MirTy) -> bool {
+        let entity = match ty {
+            MirTy::Named { entity, .. } => *entity,
+            _ => return false,
+        };
+        let semantics = self.ctx.query.query(kestrel_semantics::NominalCopySemantics {
+            entity,
+            root: self.ctx.root,
+        });
+        semantics.semantics == kestrel_semantics::CopySemantics::Cloneable
+    }
+
+    /// Transfer a value into `dest`, choosing Move, Copy, or Clone:
+    ///
+    /// - **Bare temp local** → `Rvalue::Move` (source is dead after transfer)
+    /// - **User local + Cloneable** → witness call to `Cloneable.clone()`
+    /// - **Everything else** → `Rvalue::Copy` (bitwise copy, source stays valid)
+    fn emit_value_transfer(&mut self, dest: Place, value: Value, ty: &MirTy) {
+        let Value::Place(ref place) = value else {
+            // Immediate → Const (no ownership transfer)
+            let Value::Immediate(imm) = value else { unreachable!() };
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest,
+                rvalue: Rvalue::Const(imm),
+            }));
+            return;
+        };
+
+        let is_user_local = self.is_user_local(place);
+
+        // Bare temp local → Move (single-use, source dead after transfer)
+        if place.is_local() && !is_user_local {
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest,
+                rvalue: Rvalue::Move(place.clone()),
+            }));
+            return;
+        }
+
+        // User local/field of Cloneable type → clone()
+        if is_user_local && self.is_type_cloneable(ty) {
+            if let Some(proto) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::Cloneable,
+                root: self.ctx.root,
+            }) {
+                self.ctx.register_name(proto);
+                let method_key = WitnessMethodKey::bare("clone");
+                let callee = Callee::witness(proto, method_key, ty.clone(), vec![]);
+                let receiver_arg = CallArg::borrow(value);
+                self.emit_stmt(Statement::new(StatementKind::Call {
+                    dest: Some(dest),
+                    callee,
+                    args: vec![receiver_arg],
+                }));
+                return;
+            }
+        }
+
+        // Default → bitwise Copy (Copyable types, globals, projected temp places)
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest,
+            rvalue: Rvalue::Copy(place.clone()),
+        }));
+    }
+
+    /// Check if a Place's root is a user-declared local (parameter or `let`
+    /// binding) rather than a compiler-generated temp.
+    fn is_user_local(&self, place: &Place) -> bool {
+        let Some(root) = place.root_local() else {
+            return false;
+        };
+        self.local_map.values().any(|v| *v == root)
+    }
 }
 
 /// Convert a Value to an Rvalue for assignment.
@@ -4498,12 +4552,6 @@ fn needs_field_deinit(ty: &MirTy) -> bool {
     }
 }
 
-fn value_to_rvalue(value: Value) -> Rvalue {
-    match value {
-        Value::Place(p) => Rvalue::Copy(p),
-        Value::Immediate(i) => Rvalue::Const(i),
-    }
-}
 
 /// Apply an access path to a place to reach a sub-value.
 /// e.g., scrutinee + [Downcast("Some"), Index(0)] → scrutinee.Some.0

@@ -149,10 +149,24 @@ fn identify_droppable_locals(
                     };
                     (dest, e)
                 }
-                // Call results with droppable return type — DISABLED pending
-                // investigation of memory corruption regression. The expansion
-                // generates deinit cascades that corrupt memory for some types.
-                // StatementKind::Call { dest: Some(dest), .. } => { ... }
+                StatementKind::Call { dest: Some(dest), .. } => {
+                    let local_id = dest.root_local();
+                    if let Some(id) = local_id {
+                        let ty = &body.locals[id.index()].ty;
+                        if is_type_droppable(ty, types_needing_drop, structs_with_droppable_fields) {
+                            let e = match ty {
+                                MirTy::Named { entity, .. } => Some(*entity),
+                                _ => None,
+                            };
+                            call_result_targets.insert(id);
+                            (dest, e)
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                }
                 _ => continue,
             };
             if let Some(e) = entity {
@@ -163,21 +177,22 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 2: follow Construct→Copy chains to find final owners
+    // Step 2: follow Construct→Copy/Move chains to find final owners.
+    // Move is emitted when the source is a temp (ownership transfer);
+    // Copy is emitted when the source is a user local (value duplication).
     let mut owners: HashMap<LocalId, Entity> = HashMap::new();
     let mut copied_from: HashSet<LocalId> = HashSet::new();
     for block in &body.blocks {
         for stmt in &block.stmts {
-            if let StatementKind::Assign {
-                dest,
-                rvalue: Rvalue::Copy(src),
-            } = &stmt.kind
-            {
-                if let (Some(dest_id), Some(src_id)) = (dest.root_local(), src.root_local()) {
-                    if let Some(&entity) = construct_targets.get(&src_id) {
-                        owners.insert(dest_id, entity);
-                        copied_from.insert(src_id);
-                    }
+            let (dest, src) = match &stmt.kind {
+                StatementKind::Assign { dest, rvalue: Rvalue::Copy(src) }
+                | StatementKind::Assign { dest, rvalue: Rvalue::Move(src) } => (dest, src),
+                _ => continue,
+            };
+            if let (Some(dest_id), Some(src_id)) = (dest.root_local(), src.root_local()) {
+                if let Some(&entity) = construct_targets.get(&src_id) {
+                    owners.insert(dest_id, entity);
+                    copied_from.insert(src_id);
                 }
             }
         }
@@ -199,9 +214,16 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 4: add consuming params
-    for param in &func.params {
-        if param.mode == ParamMode::Consuming {
+    // Step 4: add consuming params (including consuming-self receivers whose
+    // ParamMode isn't set to Consuming — see function_lower.rs comment).
+    let is_consuming_self_method = matches!(
+        &func.kind,
+        FunctionKind::Method { receiver: crate::item::ReceiverConvention::Consuming, .. }
+    );
+    for (pi, param) in func.params.iter().enumerate() {
+        let dominated = param.mode == ParamMode::Consuming
+            || (is_consuming_self_method && pi == 0);
+        if dominated {
             let local_id = param.local;
             if is_type_droppable(&body.locals[local_id.index()].ty, types_needing_drop, structs_with_droppable_fields) {
                 result_set.insert(local_id);
@@ -218,33 +240,28 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 4c: scan all locals for droppable types not caught by Construct/Copy
-    // tracking (e.g., call results like `let b = identity(Resource(...))`, or
-    // guard-let bindings from function calls returning Optional[Resource]).
-    for (i, local) in body.locals.iter().enumerate() {
-        let local_id = LocalId::new(i);
-        if result_set.contains(&local_id) || copied_from.contains(&local_id) { continue; }
-        if is_type_droppable(&local.ty, types_needing_drop, structs_with_droppable_fields) {
-            result_set.insert(local_id);
-        }
-    }
+    // Step 4c is disabled. A broad "scan all droppable-typed locals" catches
+    // temporaries from CowBox.write() whose buffers are manually freed by
+    // the caller (e.g. String.grow frees oldStorage.ptr then sets a new
+    // StringStorage). The consuming-setValue convention handles the
+    // checkout/checkin pattern (appendByte), but not manual-free patterns
+    // (grow). Enabling this requires a way to mark locals as "already
+    // cleaned up" — either via a consume annotation or explicit dead-marking.
 
     // Step 5: build result, excluding params that aren't consuming.
-    // Self params in consuming receiver methods are treated as consuming
-    // even though ParamMode isn't set (to avoid caller-side PassingMode issues).
-    let is_consuming_self_method = matches!(
-        &func.kind,
-        FunctionKind::Method { receiver: crate::item::ReceiverConvention::Consuming, .. }
-    );
+    // Step 4 already added the consuming params (including consuming-self),
+    // so the filter here just keeps non-param locals and those params.
     let mut result: Vec<DroppableLocal> = result_set
         .into_iter()
         .filter(|id| {
             let is_param = id.index() < body.param_count;
             if is_param {
-                let is_consuming_param = func.params.iter().any(|p| p.local == *id && p.mode == ParamMode::Consuming);
-                let is_self_in_consuming = is_consuming_self_method
-                    && func.params.first().map_or(false, |p| p.local == *id);
-                is_consuming_param || is_self_in_consuming
+                // Only keep params that Step 4 explicitly added (consuming or consuming-self)
+                let dominated = func.params.iter().enumerate().any(|(pi, p)| {
+                    p.local == *id && (p.mode == ParamMode::Consuming
+                        || (is_consuming_self_method && pi == 0))
+                });
+                dominated
             } else {
                 true
             }
@@ -729,6 +746,9 @@ fn insert_overwrite_drops(
 }
 
 /// Collect locals consumed by an rvalue (Construct fields, EnumVariant payload, ApplyPartial captures).
+/// Note: Rvalue::Move is handled separately in the main dataflow, not here —
+/// this function is for effectful init flag tracking where Move of a temp
+/// should not mark the source field as "skip deinit".
 fn collect_consumed_locals(rvalue: &Rvalue) -> Vec<LocalId> {
     let mut consumed = Vec::new();
     match rvalue {

@@ -744,17 +744,20 @@ impl<'a> VerifyCtx<'a> {
             }
         }
 
-        // Follow Construct→Copy chains
+        // Follow Construct→Copy/Move chains
         let mut owners: HashSet<LocalId> = HashSet::new();
         let mut copied_from: HashSet<LocalId> = HashSet::new();
         for block in &body.blocks {
             for stmt in &block.stmts {
-                if let StatementKind::Assign { dest, rvalue: Rvalue::Copy(src) } = &stmt.kind {
-                    if let (Some(d), Some(s)) = (dest.root_local(), src.root_local()) {
-                        if construct_targets.contains(&s) {
-                            owners.insert(d);
-                            copied_from.insert(s);
-                        }
+                let (dest, src) = match &stmt.kind {
+                    StatementKind::Assign { dest, rvalue: Rvalue::Copy(src) }
+                    | StatementKind::Assign { dest, rvalue: Rvalue::Move(src) } => (dest, src),
+                    _ => continue,
+                };
+                if let (Some(d), Some(s)) = (dest.root_local(), src.root_local()) {
+                    if construct_targets.contains(&s) {
+                        owners.insert(d);
+                        copied_from.insert(s);
                     }
                 }
             }
