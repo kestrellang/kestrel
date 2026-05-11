@@ -225,9 +225,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// Build an [`Rvalue`] from a [`Value`] for use as the RHS of an
     /// `Assign` statement, picking Move (for affine types) or Copy.
     ///
-    /// Stage 2 narrowly uses this at let-binding RHS (`let x = e`). Other
-    /// places that build assignment RHS still go through `value_to_rvalue`
-    /// — they're folded in at Stage 5 once MoveCheck is live.
+    /// This is the *only* helper that constructs an assignment RHS from a
+    /// place-reading value — every site in body lowering routes through
+    /// here (Stage 5). Constants pass through unchanged.
     fn read_value_for_assign(&self, value: Value, source_ty: &MirTy) -> Rvalue {
         match value {
             Value::Const(i) => Rvalue::Const(i),
@@ -484,9 +484,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     },
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
+                        let rvalue = self.read_value_for_assign(receiver_val, &receiver_ty);
                         self.emit_stmt(Statement::new(StatementKind::Assign {
                             dest: Place::local(temp),
-                            rvalue: value_to_rvalue(receiver_val),
+                            rvalue,
                         }));
                         Place::local(temp).field(method_name.to_string())
                     },
@@ -716,10 +717,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         _ => {
                             // Need to materialize the value into a temp first
                             let ty = self.resolve_expr_type(*base);
-                            let temp = self.fresh_temp(ty);
+                            let temp = self.fresh_temp(ty.clone());
+                            let rvalue = self.read_value_for_assign(base_val, &ty);
                             self.emit_stmt(Statement::new(StatementKind::Assign {
                                 dest: Place::local(temp),
-                                rvalue: value_to_rvalue(base_val),
+                                rvalue,
                             }));
                             Value::Copy(
                                 Place::local(temp).field(name.as_str_or_empty().to_string()),
@@ -736,10 +738,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     },
                     _ => {
                         let ty = self.resolve_expr_type(*base);
-                        let temp = self.fresh_temp(ty);
+                        let temp = self.fresh_temp(ty.clone());
+                        let rvalue = self.read_value_for_assign(base_val, &ty);
                         self.emit_stmt(Statement::new(StatementKind::Assign {
                             dest: Place::local(temp),
-                            rvalue: value_to_rvalue(base_val),
+                            rvalue,
                         }));
                         Value::Copy(Place::local(temp).index(*index as usize))
                     },
@@ -770,13 +773,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(val) = self.try_lower_setter_assign(*target, *value) {
                     return val;
                 }
+                let rhs_ty = self.resolve_expr_type(*value);
                 let rhs = self.lower_expr(*value);
                 let lhs = self.lower_expr(*target);
                 if let Some(dest) = lhs.as_place().cloned() {
-                    self.emit_stmt(Statement::new(StatementKind::Assign {
-                        dest,
-                        rvalue: value_to_rvalue(rhs),
-                    }));
+                    let rvalue = self.read_value_for_assign(rhs, &rhs_ty);
+                    self.emit_stmt(Statement::new(StatementKind::Assign { dest, rvalue }));
                 }
                 Value::Const(Immediate::unit())
             },
@@ -2593,9 +2595,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     },
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
+                        let rvalue = self.read_value_for_assign(receiver_val, &receiver_ty);
                         self.emit_stmt(Statement::new(StatementKind::Assign {
                             dest: Place::local(temp),
-                            rvalue: value_to_rvalue(receiver_val),
+                            rvalue,
                         }));
                         Place::local(temp).field(field_name)
                     },
@@ -2675,9 +2678,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             | Value::RefMut(p) => p.field(method_name.to_string()),
                             _ => {
                                 let temp = self.fresh_temp(receiver_ty.clone());
+                                let rvalue =
+                                    self.read_value_for_assign(receiver_val, &receiver_ty);
                                 self.emit_stmt(Statement::new(StatementKind::Assign {
                                     dest: Place::local(temp),
-                                    rvalue: value_to_rvalue(receiver_val),
+                                    rvalue,
                                 }));
                                 Place::local(temp).field(method_name.to_string())
                             },
@@ -3331,7 +3336,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let merge_block = self.new_block();
 
         // Result temp — both branches assign to this before jumping to merge
-        let result_local = self.fresh_temp(result_ty);
+        let result_local = self.fresh_temp(result_ty.clone());
 
         // Branch on condition
         self.set_terminator(Terminator::branch(cond_val, then_block, else_block));
@@ -3340,9 +3345,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         self.switch_to_block(then_block);
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
+            let rvalue = self.read_value_for_assign(then_val, &result_ty);
             self.emit_stmt(Statement::new(StatementKind::Assign {
                 dest: Place::local(result_local),
-                rvalue: value_to_rvalue(then_val),
+                rvalue,
             }));
             self.set_terminator(Terminator::jump(merge_block));
         }
@@ -3352,9 +3358,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
             if !self.is_terminated() {
+                let rvalue = self.read_value_for_assign(else_val, &result_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(result_local),
-                    rvalue: value_to_rvalue(else_val),
+                    rvalue,
                 }));
                 self.set_terminator(Terminator::jump(merge_block));
             }
@@ -4017,10 +4024,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(arm) = arms.get(*arm_index) {
                     let body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
-                        // Store result and jump to join
+                        // Store result and jump to join. The arm-body source
+                        // type matches `result_local`'s declared type (both
+                        // arms produce the match's result type).
+                        let result_ty = self.body.locals[result_local.index()].ty.clone();
+                        let rvalue = self.read_value_for_assign(body_val, &result_ty);
                         self.emit_stmt(Statement::new(StatementKind::Assign {
                             dest: Place::local(result_local),
-                            rvalue: value_to_rvalue(body_val),
+                            rvalue,
                         }));
                         self.set_terminator(Terminator::jump(join_block));
                     }
@@ -4108,18 +4119,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 }
 
-/// Convert a Value to an Rvalue for assignment.
-///
-/// Picks `Rvalue::Copy` for all place-reading variants. Stage 5 will route
-/// the let-binding RHS and assignment RHS through `read_value_for_assign`
-/// (which consults the source type's `CopyBehavior` to pick Move vs Copy);
-/// remaining call-sites pass through this helper until then.
-fn value_to_rvalue(value: Value) -> Rvalue {
-    match value {
-        Value::Const(i) => Rvalue::Const(i),
-        Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Rvalue::Copy(p),
-    }
-}
+// `value_to_rvalue` removed in Stage 5: every assignment-RHS site now routes
+// through `BodyLowerCtx::read_value_for_assign`, which consults the source
+// type's `CopyBehavior` to pick Move vs Copy.
 
 /// Apply an access path to a place to reach a sub-value.
 /// e.g., scrutinee + [Downcast("Some"), Index(0)] → scrutinee.Some.0
