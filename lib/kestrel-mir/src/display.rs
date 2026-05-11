@@ -304,6 +304,17 @@ impl fmt::Display for StatementDisplay<'_> {
             StatementKind::SetDeinitFlag { flag, value } => {
                 write!(f, "%{} = {}", self.module.resolve_local_name(*flag), value,)
             },
+            StatementKind::Drop { place } => {
+                write!(f, "drop {}", place.display(self.module))
+            },
+            StatementKind::DropIf { place, flag } => {
+                write!(
+                    f,
+                    "drop {} if %{}",
+                    place.display(self.module),
+                    self.module.resolve_local_name(*flag),
+                )
+            },
         }
     }
 }

@@ -34,11 +34,11 @@ pub use builder::{BlockBuilder, FunctionBuilder};
 pub use id::*;
 pub use immediate::{Immediate, ImmediateKind};
 pub use item::{
-    AssociatedTypeDef, CallingConvention, CaptureInfo, CaptureMode, ClosureInfo, EnumCaseDef,
-    EnumDef, ExternInfo, FieldDef, FileConstantData, FunctionDef, FunctionKind, MethodBinding,
-    MethodSource, ParamDef, ParamMode, ProtocolDef, ProtocolMethodDef, ReceiverConvention,
-    StaticDef, StructDef, StructLayout, TypeParamDef, WhereClause, WhereConstraint, WitnessDef,
-    WitnessMethodKey,
+    AssociatedTypeDef, CallingConvention, CaptureInfo, CaptureMode, ClosureInfo, CopyBehavior,
+    DeinitBehavior, EnumCaseDef, EnumDef, ExternInfo, FieldDef, FileConstantData, FunctionDef,
+    FunctionKind, MethodBinding, MethodSource, ParamDef, ParamMode, ProtocolDef,
+    ProtocolMethodDef, ReceiverConvention, StaticDef, StructDef, StructLayout, TypeParamDef,
+    WhereClause, WhereConstraint, WitnessDef, WitnessMethodKey,
 };
 pub use op::{
     FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness,

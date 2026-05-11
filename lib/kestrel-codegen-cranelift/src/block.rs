@@ -64,5 +64,12 @@ fn compile_statement(
             builder.def_var(var, val);
             Ok(())
         },
+
+        // Drop/DropIf are the greenfield memory-model equivalents of
+        // Deinit/DeinitIf. Stage 1 of the rewrite treats them identically
+        // (no-op at codegen; lowering / drop-elab has already emitted the
+        // explicit deinit calls). Stage 7 will switch this to real drop
+        // dispatch.
+        StatementKind::Drop { .. } | StatementKind::DropIf { .. } => Ok(()),
     }
 }

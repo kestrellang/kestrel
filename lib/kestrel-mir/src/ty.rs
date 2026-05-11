@@ -3,6 +3,8 @@
 //! Types are by value — no interning, no `Id<Ty>` indirection.
 //! Entity references point into the ECS for struct/enum/protocol/type-param identity.
 
+use crate::MirModule;
+use crate::item::CopyBehavior;
 use kestrel_hecs::Entity;
 
 /// MIR type representation.
@@ -161,5 +163,85 @@ impl MirTy {
                 | MirTy::Pointer(_)
                 | MirTy::FuncThin { .. }
         )
+    }
+
+    /// Compute this type's [`CopyBehavior`] using its definition in `module`.
+    ///
+    /// - Primitives, refs (`&T`/`&var T`), raw pointers, thin function pointers,
+    ///   `Str`, `Never`, and unit tuples are [`CopyBehavior::Bitwise`].
+    /// - [`MirTy::Named`] resolves to the matching `StructDef`/`EnumDef`'s
+    ///   `copy_behavior` field. Returns [`CopyBehavior::None`] if no def is
+    ///   found (so unresolved references fail safe).
+    /// - [`MirTy::Tuple`] composes structurally: any `None` element makes the
+    ///   tuple `None`; any non-`Bitwise` element makes the tuple non-`Bitwise`
+    ///   (collapsed to a synthetic `Clone` marker — TODO: distinguish
+    ///   structural compound clones from method clones).
+    /// - [`MirTy::TypeParam`], [`MirTy::SelfType`], [`MirTy::AssociatedProjection`]
+    ///   conservatively return `None`; a constraint-aware variant will be added
+    ///   in Stage 6.
+    /// - [`MirTy::FuncThick`] is composed from its env behavior — for now,
+    ///   conservatively `None` until closure-env propagation lands.
+    /// - [`MirTy::Error`] returns `None`.
+    pub fn copy_behavior(&self, module: &MirModule) -> CopyBehavior {
+        match self {
+            // Primitives + bitwise types.
+            MirTy::I8
+            | MirTy::I16
+            | MirTy::I32
+            | MirTy::I64
+            | MirTy::F16
+            | MirTy::F32
+            | MirTy::F64
+            | MirTy::Bool
+            | MirTy::Never
+            | MirTy::Str
+            | MirTy::Ref(_)
+            | MirTy::RefMut(_)
+            | MirTy::Pointer(_)
+            | MirTy::FuncThin { .. } => CopyBehavior::Bitwise,
+
+            // Tuples compose structurally. Unit (empty tuple) is Bitwise.
+            MirTy::Tuple(elems) => {
+                let mut kind = CopyBehavior::Bitwise;
+                for elem in elems {
+                    match elem.copy_behavior(module) {
+                        CopyBehavior::None => return CopyBehavior::None,
+                        CopyBehavior::Clone(e) => {
+                            // First non-Bitwise child wins the marker; later
+                            // structural-clone work uses the per-element
+                            // behavior, not this marker.
+                            if matches!(kind, CopyBehavior::Bitwise) {
+                                kind = CopyBehavior::Clone(e);
+                            }
+                        },
+                        CopyBehavior::Bitwise => {},
+                    }
+                }
+                kind
+            },
+
+            // Named types: look up the matching def.
+            MirTy::Named { entity, .. } => {
+                if let Some(s) = module.structs.iter().find(|s| s.entity == *entity) {
+                    return s.copy_behavior.clone();
+                }
+                if let Some(e) = module.enums.iter().find(|e| e.entity == *entity) {
+                    return e.copy_behavior.clone();
+                }
+                // Unknown nominal — fail safe. Lowering errors should already
+                // have surfaced.
+                CopyBehavior::None
+            },
+
+            // Conservatively non-copyable until Stage 6's constraint-aware
+            // variant. The verifier won't reject these — only `Value::Move`
+            // on a non-`None` type — so this leaves us free to lower generic
+            // bodies without panicking.
+            MirTy::TypeParam(_)
+            | MirTy::SelfType
+            | MirTy::AssociatedProjection { .. }
+            | MirTy::FuncThick { .. }
+            | MirTy::Error => CopyBehavior::None,
+        }
     }
 }

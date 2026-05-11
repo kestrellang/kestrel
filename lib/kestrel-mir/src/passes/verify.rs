@@ -212,6 +212,13 @@ impl<'a> VerifyCtx<'a> {
                 StatementKind::SetDeinitFlag { flag, .. } => {
                     self.verify_local(func_name, bi, *flag, body);
                 },
+                StatementKind::Drop { place } => {
+                    self.verify_place(func_name, bi, place, body);
+                },
+                StatementKind::DropIf { place, flag } => {
+                    self.verify_place(func_name, bi, place, body);
+                    self.verify_local(func_name, bi, *flag, body);
+                },
             }
         }
 

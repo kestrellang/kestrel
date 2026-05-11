@@ -18,6 +18,10 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) -> EnumId {
     let type_params = collect_type_params(ctx, entity);
     def.type_params = type_params.clone();
 
+    // CopyBehavior from `NominalCopySemantics` (same query covers structs +
+    // enums). DeinitBehavior is left default for Stage 1.
+    def.copy_behavior = crate::struct_lower::lower_copy_behavior(ctx, entity);
+
     // Cases: children with NodeKind::EnumCase
     let children: Vec<Entity> = ctx.world.children_of(entity).to_vec();
     for child in children {

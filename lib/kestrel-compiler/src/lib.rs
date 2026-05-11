@@ -208,8 +208,17 @@ impl Compiler {
     ///
     /// Call after inference has been run (e.g. via
     /// `CompilerDriver::infer_all()` from `kestrel-compiler-driver`).
+    ///
+    /// Pipeline order:
+    /// 1. MIR lowering
+    /// 2. Legacy deinit pass (`with_deinits`) — emits `Deinit`/`DeinitIf`
+    /// 3. `kestrel-ownership` — Stage 1 rewrites them to `Drop`/`DropIf`;
+    ///    later stages take over fully and the legacy pass is deleted.
+    /// 4. Thunk + layout passes
     pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
-        kestrel_mir_lower::lower_module(self.world(), self.root()).with_all_passes()
+        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root()).with_deinits();
+        kestrel_ownership::run(&mut mir);
+        mir.with_thunks().with_layouts()
     }
 
     /// Lower to MIR, run all passes, and compile to native object code.
