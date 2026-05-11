@@ -3,13 +3,14 @@ func Test.use_handle() -> ()
     locals:
         %h: Test.Handle
         %_t0: Test.Handle
-        %_moved__t0: bool
+        %_init__t0: bool
 
     bb0:
+        %_init__t0 = false
         %_t0 = construct Test.Handle { fd: i64.literal 7 }
+        %_init__t0 = true
         %self = move %_t0
-        %_moved__t0 = true
-        drop %_t0 if %_moved__t0
+        %_init__t0 = false
         drop %self
         return ()
 }

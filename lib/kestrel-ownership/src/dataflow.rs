@@ -17,9 +17,8 @@
 //!   - For each `Value::Move(p)` arg: kill `path(p)`.
 //!   - If `dest` is `Some`: gen `path(dest)`.
 //!   - `Value::Copy/Ref/RefMut/Const`: no kill.
-//! - Other statement kinds (Deinit/DeinitIf/Drop/DropIf/SetDeinitFlag) are
-//!   ignored — they're compiler-inserted destructors, not user-visible
-//!   moves. Stage 7 will remove the legacy variants entirely.
+//! - Other statement kinds (`Drop` / `DropIf`) are ignored — they're
+//!   compiler-inserted destructors, not user-visible moves.
 //!
 //! Block merge at join points:
 //! - `def_init` is intersected (AND) — only paths init on every predecessor.
@@ -191,13 +190,8 @@ fn apply_statement(state: &mut InitState, stmt: &Statement, paths: &MovePathSet)
                 state.mark_init(p);
             }
         },
-        // Compiler-inserted drops/flags don't move from the user's
-        // perspective. Stage 4 ignores them.
-        StatementKind::Deinit { .. }
-        | StatementKind::DeinitIf { .. }
-        | StatementKind::SetDeinitFlag { .. }
-        | StatementKind::Drop { .. }
-        | StatementKind::DropIf { .. } => {},
+        // Compiler-inserted drops don't move from the user's perspective.
+        StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {},
     }
 }
 

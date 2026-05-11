@@ -44,32 +44,17 @@ pub enum StatementKind {
         args: Vec<Value>,
     },
 
-    /// `deinit <place>` — unconditionally run destructor.
-    ///
-    /// Legacy: emitted by the existing `passes::deinit` pass. The greenfield
-    /// memory model emits [`StatementKind::Drop`] instead; this variant will
-    /// be removed at Stage 7 of the memory-model rewrite.
-    Deinit { place: Place },
-
-    /// `deinit <place> if <flag>` — conditionally run destructor.
-    /// The flag is a Bool local tracking whether the value is still live.
-    ///
-    /// Legacy: see [`StatementKind::Deinit`].
-    DeinitIf { place: Place, flag: LocalId },
-
-    /// `<flag> = true/false` — set a deinit tracking flag.
-    ///
-    /// Legacy: see [`StatementKind::Deinit`].
-    SetDeinitFlag { flag: LocalId, value: bool },
-
     /// `drop <place>` — unconditionally run destructor.
     ///
     /// Emitted exclusively by `kestrel-ownership::drop_elab`. Lowering must
     /// never emit this. The verifier (Stage 6+) enforces both invariants.
     Drop { place: Place },
 
-    /// `drop <place> if <flag>` — conditionally run destructor when the
-    /// dataflow proved the path is `MaybeInit` but not `DefinitelyInit`.
+    /// `drop <place> if <flag>` — conditionally run destructor only when the
+    /// per-local `_init_*: Bool` flag (also maintained by drop-elab) is
+    /// `true`. The flag is initialised to `false` at function entry, set
+    /// `true` after each gen of the underlying path, and `false` after each
+    /// kill.
     DropIf { place: Place, flag: LocalId },
 }
 

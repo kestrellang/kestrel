@@ -211,10 +211,10 @@ impl Compiler {
     ///
     /// Pipeline order:
     /// 1. MIR lowering
-    /// 2. Legacy deinit pass (`with_deinits`) — emits `Deinit`/`DeinitIf`
-    /// 3. `kestrel-ownership` — Stage 1 rewrites them to `Drop`/`DropIf`;
-    ///    later stages take over fully and the legacy pass is deleted.
-    /// 4. Thunk + layout passes
+    /// 2. `kestrel-ownership` — emits `Drop` / `DropIf` (move check + drop
+    ///    elaboration). This is the only pass that produces destructor
+    ///    statements; lowering itself must never emit them.
+    /// 3. Thunk + layout passes
     ///
     /// Set `KESTREL_VERIFY_MIR=1` to run [`MirModule::verify`] at the
     /// pre-drop-elab and post-pass stages. Stage 6 keeps verification
@@ -223,7 +223,7 @@ impl Compiler {
     /// hard error.
     pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
         let verify_on = std::env::var_os("KESTREL_VERIFY_MIR").is_some();
-        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root()).with_deinits();
+        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
         if verify_on {
             kestrel_mir::passes::verify_with_stage(
                 &mir,

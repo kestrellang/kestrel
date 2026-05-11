@@ -91,10 +91,10 @@ impl VerifyResult {
 
 /// Where in the pipeline this verification runs.
 ///
-/// Stage 1 invokes `kestrel_ownership::run` after the legacy deinit pass,
-/// and that's when `Deinit`/`DeinitIf` get rewritten to `Drop`/`DropIf`.
-/// `PreDropElab` is used between lowering and that pass; `PostDropElab`
-/// is used afterwards (the normal `verify(module)` entry point).
+/// `PreDropElab` is used between lowering and `kestrel_ownership::run`. At
+/// that point the MIR must contain no `Drop` / `DropIf` statements — those
+/// are exclusively emitted by drop-elaboration. `PostDropElab` is used
+/// afterwards (the normal `verify(module)` entry point).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyStage {
     /// MIR straight out of lowering (and the legacy deinit pass). At this
@@ -233,16 +233,6 @@ impl<'a> VerifyCtx<'a> {
                         self.verify_value(func_name, bi, arg, body, func);
                     }
                     self.verify_callee(func_name, bi, callee);
-                },
-                StatementKind::Deinit { place } => {
-                    self.verify_place(func_name, bi, place, body);
-                },
-                StatementKind::DeinitIf { place, flag } => {
-                    self.verify_place(func_name, bi, place, body);
-                    self.verify_local(func_name, bi, *flag, body);
-                },
-                StatementKind::SetDeinitFlag { flag, .. } => {
-                    self.verify_local(func_name, bi, *flag, body);
                 },
                 StatementKind::Drop { place } => {
                     self.verify_place(func_name, bi, place, body);

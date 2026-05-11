@@ -127,9 +127,9 @@ impl MirModule {
 
     /// Resolve a local ID to its name. Searches all function bodies.
     ///
-    /// This is used by display code for DeinitIf/SetDeinitFlag which reference
-    /// locals by ID outside of a function context. For efficiency, callers
-    /// displaying a whole function should use the body's locals directly.
+    /// This is used by display code for `DropIf` which references locals by
+    /// ID outside of a function context. For efficiency, callers displaying a
+    /// whole function should use the body's locals directly.
     pub fn resolve_local_name(&self, id: LocalId) -> &str {
         // Search through all functions for a body containing this local
         for func in &self.functions {
@@ -214,20 +214,15 @@ impl MirModule {
         self
     }
 
-    /// Run the deinit pass: insert destructor calls for non-copyable locals.
-    pub fn with_deinits(mut self) -> Self {
-        passes::run_deinit_pass(&mut self);
-        self
-    }
-
     /// Run MIR verification and print diagnostics. Does not abort — reports all issues.
     pub fn verify(&self) -> passes::VerifyResult {
         passes::verify(self)
     }
 
-    /// Run all post-lowering passes in the recommended order.
+    /// Run all post-lowering passes in the recommended order. Drop elaboration
+    /// is handled by [`kestrel_ownership::run`] and is not invoked here.
     pub fn with_all_passes(self) -> Self {
-        self.with_deinits().with_thunks().with_layouts()
+        self.with_thunks().with_layouts()
     }
 }
 

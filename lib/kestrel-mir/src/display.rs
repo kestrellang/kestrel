@@ -293,20 +293,6 @@ impl fmt::Display for StatementDisplay<'_> {
                 write_call_args(f, args, self.module)?;
                 write!(f, ")")
             },
-            StatementKind::Deinit { place } => {
-                write!(f, "deinit {}", place.display(self.module))
-            },
-            StatementKind::DeinitIf { place, flag } => {
-                write!(
-                    f,
-                    "deinit {} if %{}",
-                    place.display(self.module),
-                    self.module.resolve_local_name(*flag),
-                )
-            },
-            StatementKind::SetDeinitFlag { flag, value } => {
-                write!(f, "%{} = {}", self.module.resolve_local_name(*flag), value,)
-            },
             StatementKind::Drop { place } => {
                 write!(f, "drop {}", place.display(self.module))
             },

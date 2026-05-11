@@ -263,21 +263,6 @@ impl<'a> BlockBuilder<'a> {
         self.call(dest, Callee::direct(func), args);
     }
 
-    /// `deinit <place>`
-    pub fn deinit(&mut self, place: Place) {
-        self.add_statement(Statement::new(StatementKind::Deinit { place }));
-    }
-
-    /// `deinit <place> if <flag>`
-    pub fn deinit_if(&mut self, place: Place, flag: LocalId) {
-        self.add_statement(Statement::new(StatementKind::DeinitIf { place, flag }));
-    }
-
-    /// `<flag> = true/false`
-    pub fn set_deinit_flag(&mut self, flag: LocalId, value: bool) {
-        self.add_statement(Statement::new(StatementKind::SetDeinitFlag { flag, value }));
-    }
-
     // === Terminators ===
 
     /// Set the block's terminator.
