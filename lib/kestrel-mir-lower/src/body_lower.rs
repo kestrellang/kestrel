@@ -199,6 +199,48 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         MirTy::Error
     }
 
+    /// Pick the right [`CallArg`] mode for a call operand based on the source
+    /// type's [`CopyBehavior`].
+    ///
+    /// - `CopyBehavior::None` → borrow (pass-by-reference)
+    /// - Everything else → copy (pass-by-value, semantics decided at codegen)
+    ///
+    /// The legacy `is_trivially_copyable` predicate classified all named
+    /// types as non-copyable; this helper extends the "copy" path to
+    /// Copyable / Cloneable structs and enums.
+    ///
+    /// `MirTy::Error` with an immediate operand falls back to copy — see the
+    /// comment on `lower_call_args` for the inference-edge-case rationale.
+    fn arg_for_value(&self, value: Value, ty: &MirTy) -> CallArg {
+        if matches!(ty, MirTy::Error) && matches!(value, Value::Immediate(_)) {
+            return CallArg::copy(value);
+        }
+        if ty.copy_behavior(&self.ctx.module) != CopyBehavior::None {
+            CallArg::copy(value)
+        } else {
+            CallArg::borrow(value)
+        }
+    }
+
+    /// Build an [`Rvalue`] from a [`Value`] for use as the RHS of an
+    /// `Assign` statement, picking Move (for affine types) or Copy.
+    ///
+    /// Stage 2 narrowly uses this at let-binding RHS (`let x = e`). Other
+    /// places that build assignment RHS still go through `value_to_rvalue`
+    /// — they're folded in at Stage 5 once MoveCheck is live.
+    fn read_value_for_assign(&self, value: Value, source_ty: &MirTy) -> Rvalue {
+        match value {
+            Value::Immediate(i) => Rvalue::Const(i),
+            Value::Place(p) => {
+                if source_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
+                    Rvalue::Move(p)
+                } else {
+                    Rvalue::Copy(p)
+                }
+            },
+        }
+    }
+
     /// If the assignment target is a computed property (Field or Def entity
     /// with a `NodeKind::Setter` child), emit a setter call and return the
     /// unit value. Otherwise returns None so the caller falls through to the
@@ -510,10 +552,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirStmt::Let { local, value, .. } => {
                 let mir_local = self.map_local(*local);
                 if let Some(init_expr) = value {
+                    let init_ty = self.resolve_expr_type(*init_expr);
                     let init_value = self.lower_expr(*init_expr);
                     self.emit_stmt(Statement::new(StatementKind::Assign {
                         dest: Place::local(mir_local),
-                        rvalue: value_to_rvalue(init_value),
+                        rvalue: self.read_value_for_assign(init_value, &init_ty),
                     }));
                 }
             },
@@ -1150,16 +1193,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let method_key = WitnessMethodKey::new("matches".to_string(), vec![None]);
         let callee = Callee::witness(proto, method_key, string_ty.clone(), vec![]);
 
-        let receiver_arg = if string_ty.is_trivially_copyable() {
-            CallArg::copy(Value::Place(scrutinee_place.clone()))
-        } else {
-            CallArg::borrow(Value::Place(scrutinee_place.clone()))
-        };
-        let lit_arg = if string_ty.is_trivially_copyable() {
-            CallArg::copy(lit_value)
-        } else {
-            CallArg::borrow(lit_value)
-        };
+        let receiver_arg =
+            self.arg_for_value(Value::Place(scrutinee_place.clone()), &string_ty);
+        let lit_arg = self.arg_for_value(lit_value, &string_ty);
 
         self.emit_call(callee, vec![receiver_arg, lit_arg], bool_ty)
     }
@@ -2147,30 +2183,28 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Lower call arguments from HIR to MIR.
-    /// Trivially copyable types (primitives, refs, pointers, thin func ptrs)
-    /// are passed by copy. Everything else is passed by borrow.
+    ///
+    /// Each operand is classified by its source type's [`CopyBehavior`] (see
+    /// [`Self::arg_for_value`]) — copyable types pass by copy, affine types
+    /// pass by borrow. Param-mode overrides (`mutating`, `consuming`) are
+    /// applied separately in [`Self::apply_callee_param_modes`].
+    ///
+    /// `MirTy::Error` edge case: inference doesn't always populate
+    /// `expr_types` for init-call argument expressions — when the call
+    /// labels don't match an init exactly, `gen_struct_init` falls through
+    /// without emitting arg constraints, leaving the literal TyVar
+    /// unresolved. The MIR-side `resolve_init_function` still picks an init
+    /// by name, so the call goes ahead with `arg_ty == MirTy::Error`. A
+    /// primitive literal would then be classified non-copyable and lowered
+    /// as `ref &literal_slot`, storing a stack pointer into the field
+    /// instead of the value. `arg_for_value` falls back to copy when the
+    /// value is an immediate.
     fn lower_call_args(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
         args.iter()
             .map(|arg| {
                 let value = self.lower_expr(arg.value);
                 let arg_ty = self.resolve_expr_type(arg.value);
-                // Inference doesn't always populate `expr_types` for init-call
-                // argument expressions — when the call labels don't match an
-                // init exactly, `gen_struct_init` falls through without emitting
-                // arg constraints, leaving the literal TyVar unresolved. The
-                // MIR-side `resolve_init_function` still picks an init by name,
-                // so the call goes ahead with `arg_ty == MirTy::Error`. A
-                // primitive literal would then be classified non-copyable and
-                // lowered as `ref &literal_slot`, storing a stack pointer into
-                // the field instead of the value. Fall back to the lowered
-                // Value: an Immediate is a constant, always pass-by-value.
-                let copyable = arg_ty.is_trivially_copyable()
-                    || (matches!(arg_ty, MirTy::Error) && matches!(value, Value::Immediate(_)));
-                if copyable {
-                    CallArg::copy(value)
-                } else {
-                    CallArg::borrow(value)
-                }
+                self.arg_for_value(value, &arg_ty)
             })
             .collect()
     }
@@ -2367,11 +2401,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             if has_receiver && !is_init {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
                 let receiver_val = self.lower_expr(callee_expr);
-                let receiver_arg = if receiver_ty.is_trivially_copyable() {
-                    CallArg::copy(receiver_val)
-                } else {
-                    CallArg::borrow(receiver_val)
-                };
+                let receiver_arg = self.arg_for_value(receiver_val, &receiver_ty);
                 call_args.insert(0, receiver_arg);
             }
 
@@ -2631,11 +2661,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     };
 
                     // Call the subscript with the materialized value as receiver
-                    let receiver_arg = if subscript_receiver_ty.is_trivially_copyable() {
-                        CallArg::copy(subscript_receiver_val)
-                    } else {
-                        CallArg::borrow(subscript_receiver_val)
-                    };
+                    let receiver_arg =
+                        self.arg_for_value(subscript_receiver_val, &subscript_receiver_ty);
                     let mut call_args = vec![receiver_arg];
                     call_args.extend(self.lower_call_args(args));
                     let method_type_args = self.resolve_method_type_args(expr_id, hir_type_args);
@@ -2668,11 +2695,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             self.lower_call_args(args)
         } else {
             let receiver_val = self.lower_expr(receiver_expr);
-            let receiver_arg = if receiver_ty.is_trivially_copyable() {
-                CallArg::copy(receiver_val)
-            } else {
-                CallArg::borrow(receiver_val)
-            };
+            let receiver_arg = self.arg_for_value(receiver_val, &receiver_ty);
             let mut a = vec![receiver_arg];
             a.extend(self.lower_call_args(args));
             a
@@ -2712,12 +2735,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let receiver_val = self.lower_expr(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        // Build args: receiver first (copy if trivially copyable), then explicit args
-        let receiver_arg = if receiver_ty.is_trivially_copyable() {
-            CallArg::copy(receiver_val)
-        } else {
-            CallArg::borrow(receiver_val)
-        };
+        // Build args: receiver classified by copy_behavior; then explicit args.
+        let receiver_arg = self.arg_for_value(receiver_val, &receiver_ty);
         let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args));
 
@@ -2874,11 +2893,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let param_ty = crate::ty::resolve_type_annotation(self.ctx, default_entity);
 
             let default_val = self.lower_default_arg(default_entity, param_ty.clone());
-            let arg = if param_ty.is_trivially_copyable() {
-                CallArg::copy(default_val)
-            } else {
-                CallArg::borrow(default_val)
-            };
+            let arg = self.arg_for_value(default_val, &param_ty);
             call_args.push(arg);
         }
 
