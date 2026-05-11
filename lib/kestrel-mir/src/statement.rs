@@ -9,7 +9,6 @@ use crate::ty::MirTy;
 use crate::value::Value;
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
-use std::fmt;
 
 /// A statement in a basic block.
 #[derive(Debug, Clone)]
@@ -42,7 +41,7 @@ pub enum StatementKind {
     Call {
         dest: Option<Place>,
         callee: Callee,
-        args: Vec<CallArg>,
+        args: Vec<Value>,
     },
 
     /// `deinit <place>` — unconditionally run destructor.
@@ -202,61 +201,7 @@ impl Callee {
     }
 }
 
-/// An argument to a function call, with its value and passing mode.
-#[derive(Debug, Clone)]
-pub struct CallArg {
-    pub value: Value,
-    pub mode: PassingMode,
-}
-
-impl CallArg {
-    pub fn new(value: Value, mode: PassingMode) -> Self {
-        Self { value, mode }
-    }
-
-    pub fn borrow(value: Value) -> Self {
-        Self::new(value, PassingMode::Ref)
-    }
-
-    pub fn mutating(value: Value) -> Self {
-        Self::new(value, PassingMode::MutRef)
-    }
-
-    pub fn copy(value: Value) -> Self {
-        Self::new(value, PassingMode::Copy)
-    }
-
-    pub fn moving(value: Value) -> Self {
-        Self::new(value, PassingMode::Move)
-    }
-}
-
-/// How an argument is passed to a function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PassingMode {
-    /// Immutable borrow (default).
-    Ref,
-    /// Mutable borrow.
-    MutRef,
-    /// Value copied, original retained.
-    Copy,
-    /// Value moved, original invalidated.
-    Move,
-}
-
-impl PassingMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PassingMode::Ref => "ref",
-            PassingMode::MutRef => "mut",
-            PassingMode::Copy => "copy",
-            PassingMode::Move => "move",
-        }
-    }
-}
-
-impl fmt::Display for PassingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// `CallArg` and `PassingMode` removed as part of the Stage 3 greenfield
+// memory-model rewrite. Call arguments are now `Vec<Value>`, and the four
+// pass-by modes are expressed directly via the `Value::{Copy, Move, Ref,
+// RefMut}` variants on the operand.

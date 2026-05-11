@@ -7,7 +7,7 @@ func Test.caller() -> ()
     bb0:
         %_t0 = construct Test.Point { x: i64.literal 1, y: i64.literal 2 }
         %pt = copy %_t0
-        call Test.reset(mut %pt)
+        call Test.reset(ref var %pt)
         drop %_t0
         drop %pt
         return ()

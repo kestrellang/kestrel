@@ -17,10 +17,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::Module;
 use kestrel_codegen::{LayoutCache, substitute_type_with_self};
 use kestrel_hecs::Entity;
-use kestrel_mir::{
-    BlockId, FunctionDef, LocalId, MirBody, MirTy, PassingMode, Rvalue,
-    StatementKind,
-};
+use kestrel_mir::{BlockId, FunctionDef, LocalId, MirBody, MirTy, Rvalue, StatementKind};
 use std::collections::{HashMap, HashSet};
 
 /// Per-function compilation state.
@@ -744,19 +741,20 @@ fn collect_address_taken_locals(
                 },
                 StatementKind::Call { args, .. } => {
                     for arg in args {
-                        if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef)
-                            && let kestrel_mir::Value::Place(place) = &arg.value
-                                && let Some(id) = place.root_local() {
-                                    let ty = substitute_type_with_self(
-                                        &body.locals[id.index()].ty,
-                                        subst,
-                                        self_type,
-                                        layouts.module(),
-                                    );
-                                    if !is_aggregate(&ty, layouts) {
-                                        result.insert(id);
-                                    }
-                                }
+                        if let kestrel_mir::Value::Ref(place) | kestrel_mir::Value::RefMut(place) =
+                            arg
+                            && let Some(id) = place.root_local()
+                        {
+                            let ty = substitute_type_with_self(
+                                &body.locals[id.index()].ty,
+                                subst,
+                                self_type,
+                                layouts.module(),
+                            );
+                            if !is_aggregate(&ty, layouts) {
+                                result.insert(id);
+                            }
+                        }
                     }
                 },
                 _ => {},

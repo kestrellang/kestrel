@@ -11,7 +11,7 @@ use crate::body::BasicBlock;
 use crate::immediate::{Immediate, ImmediateKind};
 use crate::item::*;
 use crate::place::Place;
-use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
+use crate::statement::{Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::{Terminator, TerminatorKind};
 use crate::ty::MirTy;
 use crate::value::Value;
@@ -195,8 +195,11 @@ struct ValueDisplay<'a> {
 impl fmt::Display for ValueDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.value {
-            Value::Place(p) => write!(f, "{}", p.display(self.module)),
-            Value::Immediate(i) => write!(f, "{}", i.display(self.module)),
+            Value::Copy(p) => write!(f, "copy {}", p.display(self.module)),
+            Value::Move(p) => write!(f, "move {}", p.display(self.module)),
+            Value::Ref(p) => write!(f, "ref {}", p.display(self.module)),
+            Value::RefMut(p) => write!(f, "ref var {}", p.display(self.module)),
+            Value::Const(i) => write!(f, "{}", i.display(self.module)),
         }
     }
 }
@@ -485,17 +488,18 @@ impl fmt::Display for CalleeDisplay<'_> {
     }
 }
 
-/// Write call arguments with passing modes.
+/// Write call arguments. Each `Value` displays its own mode
+/// (`copy`/`move`/`ref`/`ref var`/literal).
 fn write_call_args(
     f: &mut fmt::Formatter<'_>,
-    args: &[CallArg],
+    args: &[Value],
     module: &MirModule,
 ) -> fmt::Result {
     for (i, arg) in args.iter().enumerate() {
         if i > 0 {
             write!(f, ", ")?;
         }
-        write!(f, "{} {}", arg.mode, arg.value.display(module))?;
+        write!(f, "{}", arg.display(module))?;
     }
     Ok(())
 }

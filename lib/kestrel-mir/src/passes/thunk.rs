@@ -19,7 +19,7 @@ use crate::body::{BasicBlock, LocalDef, MirBody};
 use crate::id::FunctionId;
 use crate::immediate::Immediate;
 use crate::item::{FunctionDef, FunctionKind, ParamDef};
-use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
+use crate::statement::{Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::Terminator;
 use crate::ty::MirTy;
 use crate::value::Value;
@@ -126,15 +126,13 @@ pub fn run_thunk_pass(module: &mut MirModule) {
         body.param_count += 1;
 
         // If the target closure expects an env pointer, forward it.
-        // Use Copy mode (not Borrow): env_local is itself a pointer; we want to
+        // Use Copy mode (not Ref): env_local is itself a pointer; we want to
         // pass the pointer VALUE so the callee receives env_ptr directly.
-        // Borrow mode would pass &env_ptr_storage and the callee would need a
+        // A Ref would pass &env_ptr_storage and the callee would need a
         // double dereference it doesn't perform — captured values become garbage.
-        let mut forward_args = Vec::new();
+        let mut forward_args: Vec<Value> = Vec::new();
         if target_needs_env {
-            forward_args.push(CallArg::copy(Value::Place(crate::place::Place::local(
-                env_local,
-            ))));
+            forward_args.push(Value::Copy(crate::place::Place::local(env_local)));
         }
         for param in &target_params {
             let local = body.add_local(LocalDef::new(&param.name, param.ty.clone()));
@@ -142,9 +140,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
                 .params
                 .push(ParamDef::new(&param.name, local, param.ty.clone()));
             body.param_count += 1;
-            forward_args.push(CallArg::borrow(Value::Place(crate::place::Place::local(
-                local,
-            ))));
+            forward_args.push(Value::Ref(crate::place::Place::local(local)));
         }
 
         // Create entry block: call target and return result
@@ -179,7 +175,7 @@ pub fn run_thunk_pass(module: &mut MirModule) {
                 callee,
                 args: forward_args,
             }));
-            entry.terminator = Terminator::ret(Value::Place(crate::place::Place::local(result)));
+            entry.terminator = Terminator::ret(Value::Copy(crate::place::Place::local(result)));
         }
 
         let entry_id = body.add_block(entry);

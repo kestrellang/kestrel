@@ -199,26 +199,26 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         MirTy::Error
     }
 
-    /// Pick the right [`CallArg`] mode for a call operand based on the source
-    /// type's [`CopyBehavior`].
+    /// Pick the right mode for a call operand based on the source type's
+    /// [`CopyBehavior`].
     ///
-    /// - `CopyBehavior::None` → borrow (pass-by-reference)
-    /// - Everything else → copy (pass-by-value, semantics decided at codegen)
+    /// - `CopyBehavior::None` → `Value::Ref` (pass-by-reference)
+    /// - Everything else → `Value::Copy` (pass-by-value)
     ///
     /// The legacy `is_trivially_copyable` predicate classified all named
     /// types as non-copyable; this helper extends the "copy" path to
     /// Copyable / Cloneable structs and enums.
     ///
-    /// `MirTy::Error` with an immediate operand falls back to copy — see the
+    /// `MirTy::Error` with a constant operand falls back to copy — see the
     /// comment on `lower_call_args` for the inference-edge-case rationale.
-    fn arg_for_value(&self, value: Value, ty: &MirTy) -> CallArg {
-        if matches!(ty, MirTy::Error) && matches!(value, Value::Immediate(_)) {
-            return CallArg::copy(value);
+    fn arg_for_value(&self, value: Value, ty: &MirTy) -> Value {
+        if matches!(ty, MirTy::Error) && matches!(value, Value::Const(_)) {
+            return value;
         }
         if ty.copy_behavior(&self.ctx.module) != CopyBehavior::None {
-            CallArg::copy(value)
+            value.into_copy()
         } else {
-            CallArg::borrow(value)
+            value.into_ref()
         }
     }
 
@@ -230,8 +230,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// — they're folded in at Stage 5 once MoveCheck is live.
     fn read_value_for_assign(&self, value: Value, source_ty: &MirTy) -> Rvalue {
         match value {
-            Value::Immediate(i) => Rvalue::Const(i),
-            Value::Place(p) => {
+            Value::Const(i) => Rvalue::Const(i),
+            // Any place-reading variant: pick Move (affine) or Copy.
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                 if source_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
                     Rvalue::Move(p)
                 } else {
@@ -299,7 +300,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         .get::<kestrel_ast_builder::Static>(resolved)
                         .is_some();
                     let rhs_val = self.lower_expr(value_id);
-                    let newval_arg = CallArg::copy(rhs_val);
+                    let newval_arg = (rhs_val).into_copy();
                     let method_type_args = self.resolve_type_args(target_id);
                     if is_static {
                         let self_type = self.type_from_type_ref(base);
@@ -313,7 +314,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     } else {
                         let receiver_ty = self.resolve_expr_type(base);
                         let base_val = self.lower_expr(base);
-                        let receiver_arg = CallArg::mutating(base_val);
+                        let receiver_arg = (base_val).into_ref_mut();
                         let callee = Callee::witness(
                             protocol,
                             format!("{name}.set"),
@@ -322,7 +323,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         );
                         self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::unit());
                     }
-                    return Some(Value::Immediate(Immediate::unit()));
+                    return Some(Value::Const(Immediate::unit()));
                 }
 
                 let setter = find_setter_child(self.ctx, resolved)?;
@@ -333,7 +334,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .get::<kestrel_ast_builder::Static>(resolved)
                     .is_some();
                 let rhs_val = self.lower_expr(value_id);
-                let newval_arg = CallArg::copy(rhs_val);
+                let newval_arg = (rhs_val).into_copy();
                 if is_static {
                     let self_type = self.type_from_type_ref(base);
                     let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
@@ -342,22 +343,22 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 } else {
                     let receiver_ty = self.resolve_expr_type(base);
                     let base_val = self.lower_expr(base);
-                    let receiver_arg = CallArg::mutating(base_val);
+                    let receiver_arg = (base_val).into_ref_mut();
                     let type_args = self.resolve_type_args(target_id);
                     let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
                     let callee = Callee::method(setter, type_args, receiver_ty);
                     self.emit_call(callee, vec![receiver_arg, newval_arg], MirTy::unit());
                 }
-                Some(Value::Immediate(Immediate::unit()))
+                Some(Value::Const(Immediate::unit()))
             },
             HirExpr::Def(entity, _, _) => {
                 let setter = find_setter_child(self.ctx, entity)?;
                 self.ctx.register_name(setter);
                 let rhs_val = self.lower_expr(value_id);
-                let newval_arg = CallArg::copy(rhs_val);
+                let newval_arg = (rhs_val).into_copy();
                 let callee = Callee::direct_generic(setter, Vec::new());
                 self.emit_call(callee, vec![newval_arg], MirTy::unit());
-                Some(Value::Immediate(Immediate::unit()))
+                Some(Value::Const(Immediate::unit()))
             },
             // Subscript assignment: `arr(i) = v`. Concrete subscripts only —
             // when the Call doesn't resolve to a NodeKind::Subscript, or the
@@ -389,7 +390,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .get::<kestrel_ast_builder::Static>(resolved)
                     .is_some();
                 let mut subscript_args = self.lower_call_args(&args);
-                let newval_arg = CallArg::copy(self.lower_expr(value_id));
+                let newval_arg = (self.lower_expr(value_id)).into_copy();
                 if is_static {
                     let self_type = self.type_from_type_ref(callee_expr);
                     let type_args = self.prepend_receiver_type_args(&self_type, vec![]);
@@ -399,7 +400,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     self.emit_call(callee, call_args, MirTy::unit());
                 } else {
                     let receiver_ty = self.resolve_expr_type(callee_expr);
-                    let receiver_arg = CallArg::mutating(self.lower_expr(callee_expr));
+                    let receiver_arg = (self.lower_expr(callee_expr)).into_ref_mut();
                     let type_args = self.resolve_type_args(target_id);
                     let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
                     let callee = Callee::method(setter, type_args, receiver_ty);
@@ -408,7 +409,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     call_args.push(newval_arg);
                     self.emit_call(callee, call_args, MirTy::unit());
                 }
-                Some(Value::Immediate(Immediate::unit()))
+                Some(Value::Const(Immediate::unit()))
             },
             // Subscript-set on a struct field: `obj.field(i) = v`. The reader
             // path in `lower_method_call` decomposes this into "field access +
@@ -478,7 +479,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                 let receiver_val = self.lower_expr(receiver);
                 let field_place = match receiver_val {
-                    Value::Place(p) => p.field(method_name.to_string()),
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                        p.field(method_name.to_string())
+                    },
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
                         self.emit_stmt(Statement::new(StatementKind::Assign {
@@ -488,9 +491,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         Place::local(temp).field(method_name.to_string())
                     },
                 };
-                let receiver_arg = CallArg::mutating(Value::Place(field_place));
+                let receiver_arg = Value::RefMut(field_place);
                 let mut subscript_args = self.lower_call_args(&args);
-                let newval_arg = CallArg::copy(self.lower_expr(value_id));
+                let newval_arg = self.lower_expr(value_id).into_copy();
                 let type_args = self.resolve_type_args(target_id);
                 let type_args = self.prepend_receiver_type_args(&field_ty, type_args);
                 let callee = Callee::method(setter, type_args, field_ty);
@@ -498,7 +501,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 call_args.append(&mut subscript_args);
                 call_args.push(newval_arg);
                 self.emit_call(callee, call_args, MirTy::unit());
-                Some(Value::Immediate(Immediate::unit()))
+                Some(Value::Const(Immediate::unit()))
             },
             _ => None,
         }
@@ -577,7 +580,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
             HirExpr::Literal { value, .. } => self.lower_literal_expr(expr_id, value),
-            HirExpr::Local(hir_local, _) => Value::Place(Place::local(self.map_local(*hir_local))),
+            HirExpr::Local(hir_local, _) => Value::Copy(Place::local(self.map_local(*hir_local))),
             HirExpr::Tuple { elements, .. } => {
                 let values: Vec<Value> = elements.iter().map(|&e| self.lower_expr(e)).collect();
                 let ty = self.resolve_expr_type(expr_id);
@@ -586,7 +589,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Tuple(values),
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             HirExpr::Field { base, name, .. } => {
                 // Check if this is a computed property (resolved entity has Callable)
@@ -651,7 +654,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let receiver_ty = self.resolve_expr_type(*base);
                     let base_val = self.lower_expr(*base);
                     let result_ty = self.resolve_expr_type(expr_id);
-                    let receiver_arg = CallArg::borrow(base_val);
+                    let receiver_arg = (base_val).into_ref();
                     let method_type_args = self.resolve_type_args(expr_id);
                     let callee = Callee::witness(
                         protocol,
@@ -675,7 +678,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // No receiver, no call — just a global place.
                     let static_entity = resolved.unwrap();
                     self.ctx.register_name(static_entity);
-                    Value::Place(Place::Global(static_entity))
+                    Value::Copy(Place::Global(static_entity))
                 } else if is_callable {
                     // Computed property: emit a getter call. Protocol-default
                     // getters (`var count: Int64 { ... }` in `extend Slice[T]`)
@@ -688,7 +691,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let receiver_ty = self.resolve_expr_type(*base);
                     let base_val = self.lower_expr(*base);
                     let result_ty = self.resolve_expr_type(expr_id);
-                    let receiver_arg = CallArg::borrow(base_val);
+                    let receiver_arg = (base_val).into_ref();
                     let method_type_args = self.resolve_type_args(expr_id);
 
                     let callee = if let Some(protocol) =
@@ -707,8 +710,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // Stored field: direct place access
                     let base_val = self.lower_expr(*base);
                     match base_val {
-                        Value::Place(p) => {
-                            Value::Place(p.field(name.as_str_or_empty().to_string()))
+                        Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                            Value::Copy(p.field(name.as_str_or_empty().to_string()))
                         },
                         _ => {
                             // Need to materialize the value into a temp first
@@ -718,7 +721,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                 dest: Place::local(temp),
                                 rvalue: value_to_rvalue(base_val),
                             }));
-                            Value::Place(
+                            Value::Copy(
                                 Place::local(temp).field(name.as_str_or_empty().to_string()),
                             )
                         },
@@ -728,7 +731,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::TupleIndex { base, index, .. } => {
                 let base_val = self.lower_expr(*base);
                 match base_val {
-                    Value::Place(p) => Value::Place(p.index(*index as usize)),
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                        Value::Copy(p.index(*index as usize))
+                    },
                     _ => {
                         let ty = self.resolve_expr_type(*base);
                         let temp = self.fresh_temp(ty);
@@ -736,7 +741,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             dest: Place::local(temp),
                             rvalue: value_to_rvalue(base_val),
                         }));
-                        Value::Place(Place::local(temp).index(*index as usize))
+                        Value::Copy(Place::local(temp).index(*index as usize))
                     },
                 }
             },
@@ -752,10 +757,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::Return { value, .. } => {
                 let ret_val = value
                     .map(|v| self.lower_expr(v))
-                    .unwrap_or(Value::Immediate(Immediate::unit()));
+                    .unwrap_or(Value::Const(Immediate::unit()));
                 self.set_terminator(Terminator::ret(ret_val));
                 // After return, the block is terminated — return a dummy value
-                Value::Immediate(Immediate::unit())
+                Value::Const(Immediate::unit())
             },
             HirExpr::Assign { target, value, .. } => {
                 // Computed-property assignments (`obj.computed = v`,
@@ -767,16 +772,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 }
                 let rhs = self.lower_expr(*value);
                 let lhs = self.lower_expr(*target);
-                if let Value::Place(dest) = lhs {
+                if let Some(dest) = lhs.as_place().cloned() {
                     self.emit_stmt(Statement::new(StatementKind::Assign {
                         dest,
                         rvalue: value_to_rvalue(rhs),
                     }));
                 }
-                Value::Immediate(Immediate::unit())
+                Value::Const(Immediate::unit())
             },
             HirExpr::Block { body, .. } => self.lower_hir_block(body),
-            HirExpr::Error { .. } => Value::Immediate(Immediate::error()),
+            HirExpr::Error { .. } => Value::Const(Immediate::error()),
 
             // === References ===
             HirExpr::Def(entity, _type_args, _) => {
@@ -802,11 +807,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                     captures: vec![],
                                 },
                             }));
-                            return Value::Place(Place::local(dest));
+                            return Value::Copy(Place::local(dest));
                         }
                         // Function reference — return as immediate
                         let type_args = self.resolve_type_args(expr_id);
-                        Value::Immediate(Immediate::function_ref_generic(*entity, type_args))
+                        Value::Const(Immediate::function_ref_generic(*entity, type_args))
                     },
                     Some(kestrel_ast_builder::NodeKind::EnumCase) => {
                         // Simple enum case (no payload) — construct as enum variant
@@ -826,15 +831,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                 payload: vec![],
                             },
                         }));
-                        Value::Place(Place::local(dest))
+                        Value::Copy(Place::local(dest))
                     },
                     Some(kestrel_ast_builder::NodeKind::Struct) => {
                         // Struct used as value — likely an init reference.
                         // Try to find the default init and use that.
                         if let Some(init) = self.resolve_init_function(*entity, &[]) {
-                            Value::Immediate(Immediate::function_ref(init))
+                            Value::Const(Immediate::function_ref(init))
                         } else {
-                            Value::Immediate(Immediate::function_ref(*entity))
+                            Value::Const(Immediate::function_ref(*entity))
                         }
                     },
                     Some(kestrel_ast_builder::NodeKind::Field) => {
@@ -856,18 +861,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             self.emit_call(callee, Vec::new(), result_ty)
                         } else {
                             self.ctx.register_name(*entity);
-                            Value::Place(Place::Global(*entity))
+                            Value::Copy(Place::Global(*entity))
                         }
                     },
                     Some(kestrel_ast_builder::NodeKind::TypeParameter)
                     | Some(kestrel_ast_builder::NodeKind::TypeAlias) => {
                         // Type entities used as values — usually metatype references
                         // that don't have runtime representation
-                        Value::Immediate(Immediate::unit())
+                        Value::Const(Immediate::unit())
                     },
                     _ => {
                         // Unknown entity — return error to avoid bad FunctionRef
-                        Value::Immediate(Immediate::error())
+                        Value::Const(Immediate::error())
                     },
                 }
             },
@@ -876,12 +881,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
                     self.ctx.register_name(resolved);
                     let type_args = self.resolve_type_args(expr_id);
-                    Value::Immediate(Immediate::function_ref_generic(resolved, type_args))
+                    Value::Const(Immediate::function_ref_generic(resolved, type_args))
                 } else if let Some(&first) = candidates.first() {
                     self.ctx.register_name(first);
-                    Value::Immediate(Immediate::function_ref(first))
+                    Value::Const(Immediate::function_ref(first))
                 } else {
-                    Value::Immediate(Immediate::error())
+                    Value::Const(Immediate::error())
                 }
             },
 
@@ -953,17 +958,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             payload,
                         },
                     }));
-                    Value::Place(Place::local(dest))
+                    Value::Copy(Place::local(dest))
                 } else {
                     // Static method call (e.g., .fromResidual(residual: early))
                     let resolved_entity = resolved.unwrap();
-                    let call_args: Vec<kestrel_mir::CallArg> = args
+                    let call_args: Vec<kestrel_mir::Value> = args
                         .as_ref()
                         .map(|a| {
                             a.iter()
                                 .map(|arg| {
                                     let val = self.lower_expr(arg.value);
-                                    kestrel_mir::CallArg::copy(val)
+                                    val.into_copy()
                                 })
                                 .collect()
                         })
@@ -1009,7 +1014,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::ArrayLiteral { element_ty, values },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
 
             // === Dict literal — lowered as ArrayLiteral of (K, V) tuples ===
@@ -1038,7 +1043,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             dest: Place::local(pair_dest),
                             rvalue: Rvalue::Tuple(vec![key, val]),
                         }));
-                        Value::Place(Place::local(pair_dest))
+                        Value::Copy(Place::local(pair_dest))
                     })
                     .collect();
 
@@ -1050,7 +1055,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         values,
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
 
             // Sugar wrapper is structurally transparent: lower the inner expr.
@@ -1145,14 +1150,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let MirTy::Named { entity, .. } = &string_ty
             && let Some(init_entity) = self.find_string_literal_init(*entity)
         {
-            let ptr_val = Value::Immediate(Immediate::string_ptr(content.to_string()));
-            let len_val = Value::Immediate(Immediate::i64(content.len() as i64));
+            let ptr_val = Value::Const(Immediate::string_ptr(content.to_string()));
+            let len_val = Value::Const(Immediate::i64(content.len() as i64));
             self.ctx.register_name(init_entity);
-            let call_args = vec![CallArg::copy(ptr_val), CallArg::copy(len_val)];
+            let call_args = vec![(ptr_val).into_copy(), (len_val).into_copy()];
             let callee = Callee::method(init_entity, vec![], string_ty.clone());
             return self.emit_call_maybe_init(callee, call_args, string_ty);
         }
-        Value::Immediate(Immediate::string(content.to_string()))
+        Value::Const(Immediate::string(content.to_string()))
     }
 
     /// Emit a witness-dispatched `Matchable.matches(other:)` call for a
@@ -1184,7 +1189,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let Some(proto) = proto_entity else {
             // Stdlib didn't define Matchable — leave a constant false so
             // codegen still produces a valid module.
-            return Value::Immediate(Immediate::bool(false));
+            return Value::Const(Immediate::bool(false));
         };
         self.ctx.register_name(proto);
 
@@ -1194,7 +1199,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let callee = Callee::witness(proto, method_key, string_ty.clone(), vec![]);
 
         let receiver_arg =
-            self.arg_for_value(Value::Place(scrutinee_place.clone()), &string_ty);
+            self.arg_for_value(Value::Copy(scrutinee_place.clone()), &string_ty);
         let lit_arg = self.arg_for_value(lit_value, &string_ty);
 
         self.emit_call(callee, vec![receiver_arg, lit_arg], bool_ty)
@@ -1205,7 +1210,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         resolved_entity: Entity,
         receiver_ty: MirTy,
         method_type_args: Vec<MirTy>,
-        call_args: Vec<CallArg>,
+        call_args: Vec<Value>,
         result_ty: MirTy,
     ) -> Value {
         let callee = if let Some(protocol) = self.find_protocol_for_method(resolved_entity) {
@@ -1266,7 +1271,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             if idx < args.len() {
                 this.lower_expr(args[idx].value)
             } else {
-                Value::Immediate(Immediate::unit())
+                Value::Const(Immediate::unit())
             }
         };
 
@@ -1279,7 +1284,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 dest: Place::local(dest),
                 rvalue: Rvalue::Op2 { op, lhs, rhs },
             }));
-            Value::Place(Place::local(dest))
+            Value::Copy(Place::local(dest))
         };
 
         // Helper: emit Op1 and return result
@@ -1290,7 +1295,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 dest: Place::local(dest),
                 rvalue: Rvalue::Op1 { op, arg },
             }));
-            Value::Place(Place::local(dest))
+            Value::Copy(Place::local(dest))
         };
 
         // Helper: emit Op3 (ternary, e.g. fma) and return result
@@ -1303,7 +1308,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 dest: Place::local(dest),
                 rvalue: Rvalue::Op3 { op, a, b, c },
             }));
-            Value::Place(Place::local(dest))
+            Value::Copy(Place::local(dest))
         };
 
         // Match intrinsic name to Op
@@ -1543,10 +1548,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::FloatConst(FloatBits::F32, FloatConstantKind::Infinity),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             "f64_infinity" => {
                 let dest = self.fresh_temp(result_ty);
@@ -1554,10 +1559,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::FloatConst(FloatBits::F64, FloatConstantKind::Infinity),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             "f32_nan" => {
                 let dest = self.fresh_temp(result_ty);
@@ -1565,10 +1570,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::FloatConst(FloatBits::F32, FloatConstantKind::Nan),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             "f64_nan" => {
                 let dest = self.fresh_temp(result_ty);
@@ -1576,10 +1581,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::FloatConst(FloatBits::F64, FloatConstantKind::Nan),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
 
             // Pointer operations
@@ -1594,10 +1599,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::PtrNull(inner),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             "ptr_offset" => emit_op2(self, Op::PtrOffset),
             "ptr_to_address" => emit_op1(self, Op::PtrToAddress),
@@ -1653,10 +1658,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::SizeOf(ty),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             "alignof" | "align_of" => {
                 // alignof[T]() — same as sizeof, extract the type arg
@@ -1670,10 +1675,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(dest),
                     rvalue: Rvalue::Op1 {
                         op: Op::AlignOf(ty),
-                        arg: Value::Immediate(Immediate::unit()),
+                        arg: Value::Const(Immediate::unit()),
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
 
             // Atomic
@@ -2199,7 +2204,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// as `ref &literal_slot`, storing a stack pointer into the field
     /// instead of the value. `arg_for_value` falls back to copy when the
     /// value is an immediate.
-    fn lower_call_args(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
+    fn lower_call_args(&mut self, args: &[HirCallArg]) -> Vec<Value> {
         args.iter()
             .map(|arg| {
                 let value = self.lower_expr(arg.value);
@@ -2212,9 +2217,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// After lowering args, override their passing modes to match the callee's
     /// `mutating`/`consuming` parameter declarations. Indexes 1:1 against the
     /// callee's `params` (which include `self` at index 0 for instance methods).
+    ///
+    /// Stage 3: args are now `Vec<Value>`; mode overrides happen by
+    /// re-moding each `Value` (`into_ref_mut`/`into_move`) in place.
     fn apply_callee_param_modes(
         &self,
-        call_args: &mut [CallArg],
+        call_args: &mut [Value],
         callee_entity: kestrel_hecs::Entity,
     ) {
         // Prefer the already-lowered FunctionDef; fall back to the AST
@@ -2228,10 +2236,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .iter()
             .find(|f| f.entity == callee_entity)
         {
-            for (arg, param) in call_args.iter_mut().zip(callee.params.iter()) {
-                match param.mode {
-                    kestrel_mir::ParamMode::InOut => arg.mode = kestrel_mir::PassingMode::MutRef,
-                    kestrel_mir::ParamMode::Consuming => arg.mode = kestrel_mir::PassingMode::Move,
+            // Collect param modes first to avoid borrowing self.ctx while
+            // mutating call_args.
+            let modes: Vec<kestrel_mir::ParamMode> =
+                callee.params.iter().map(|p| p.mode).collect();
+            for (arg, mode) in call_args.iter_mut().zip(modes.into_iter()) {
+                match mode {
+                    kestrel_mir::ParamMode::InOut => {
+                        let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+                        *arg = owned.into_ref_mut();
+                    },
+                    kestrel_mir::ParamMode::Consuming => {
+                        let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+                        *arg = owned.into_move();
+                    },
                     kestrel_mir::ParamMode::In => {},
                 }
             }
@@ -2251,9 +2269,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let skip = if callable.receiver.is_some() { 1 } else { 0 };
         for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
             if param.is_consuming {
-                arg.mode = kestrel_mir::PassingMode::Move;
+                let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+                *arg = owned.into_move();
             } else if param.is_mut {
-                arg.mode = kestrel_mir::PassingMode::MutRef;
+                let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+                *arg = owned.into_ref_mut();
             }
         }
     }
@@ -2270,7 +2290,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             && self.is_panic_intrinsic(*entity) {
                 let msg = "panic".to_string();
                 self.set_terminator(Terminator::panic(msg));
-                return Value::Immediate(Immediate::unit());
+                return Value::Const(Immediate::unit());
             }
 
         // Intercept lang intrinsics — emit as MIR Ops, not function calls
@@ -2324,7 +2344,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         payload,
                     },
                 }));
-                return Value::Place(Place::local(dest));
+                return Value::Copy(Place::local(dest));
             }
         }
 
@@ -2497,7 +2517,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let callee = Callee::direct_generic(func_entity, type_args);
                     self.emit_call_maybe_init(callee, call_args, result_ty)
                 } else {
-                    Value::Immediate(Immediate::error())
+                    Value::Const(Immediate::error())
                 }
             },
             // Indirect call through a variable/expression
@@ -2505,7 +2525,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let callee_ty = self.resolve_expr_type(callee_expr);
                 let callee_val = self.lower_expr(callee_expr);
                 match callee_val {
-                    Value::Place(p) => {
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         // Dispatch thin vs thick based on the callee's function type
                         let callee = match &callee_ty {
                             MirTy::FuncThin { .. } => Callee::Thin(p),
@@ -2513,7 +2533,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         };
                         self.emit_call(callee, call_args, result_ty)
                     },
-                    Value::Immediate(Immediate {
+                    Value::Const(Immediate {
                         kind: ImmediateKind::FunctionRef { func, type_args },
                         ..
                     }) => {
@@ -2521,7 +2541,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         let callee = Callee::direct_generic(func_entity, type_args);
                         self.emit_call_maybe_init(callee, call_args, result_ty)
                     },
-                    _ => Value::Immediate(Immediate::error()),
+                    _ => Value::Const(Immediate::error()),
                 }
             },
         }
@@ -2568,7 +2588,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let receiver_val = self.lower_expr(receiver_expr);
                 // Build field place from receiver
                 let field_place = match receiver_val {
-                    Value::Place(p) => p.field(field_name),
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                        p.field(field_name)
+                    },
                     _ => {
                         let temp = self.fresh_temp(receiver_ty.clone());
                         self.emit_stmt(Statement::new(StatementKind::Assign {
@@ -2632,7 +2654,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         self.ctx.register_name(getter_entity);
                         let getter_result_ty = self.resolve_field_type(&receiver_ty, method_name);
                         let base_val = self.lower_expr(receiver_expr);
-                        let getter_receiver_arg = CallArg::borrow(base_val);
+                        let getter_receiver_arg = (base_val).into_ref();
                         let getter_type_args =
                             self.prepend_receiver_type_args(&receiver_ty, vec![]);
                         let getter_callee =
@@ -2647,7 +2669,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                         let receiver_val = self.lower_expr(receiver_expr);
                         let field_place = match receiver_val {
-                            Value::Place(p) => p.field(method_name.to_string()),
+                            Value::Copy(p)
+                            | Value::Move(p)
+                            | Value::Ref(p)
+                            | Value::RefMut(p) => p.field(method_name.to_string()),
                             _ => {
                                 let temp = self.fresh_temp(receiver_ty.clone());
                                 self.emit_stmt(Statement::new(StatementKind::Assign {
@@ -2657,7 +2682,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                                 Place::local(temp).field(method_name.to_string())
                             },
                         };
-                        (field_ty, Value::Place(field_place))
+                        (field_ty, Value::Copy(field_place))
                     };
 
                     // Call the subscript with the materialized value as receiver
@@ -2717,7 +2742,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             )
         } else {
             // Unresolved method — emit error
-            Value::Immediate(Immediate::error())
+            Value::Const(Immediate::error())
         }
     }
 
@@ -2783,7 +2808,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn emit_call_maybe_init(
         &mut self,
         callee: Callee,
-        mut call_args: Vec<CallArg>,
+        mut call_args: Vec<Value>,
         result_ty: MirTy,
     ) -> Value {
         // Check if this is an init function (Direct or Witness)
@@ -2796,7 +2821,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if is_init {
             // Init call: allocate self, prepend as first arg, call, return self
             let self_local = self.fresh_temp(result_ty.clone());
-            let self_ref = CallArg::mutating(Value::Place(Place::local(self_local)));
+            let self_ref = (Value::Copy(Place::local(self_local))).into_ref_mut();
             call_args.insert(0, self_ref);
 
             // Direct init callees need `self_type` set (for mangling) —
@@ -2822,7 +2847,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 callee,
                 args: call_args,
             }));
-            Value::Place(Place::local(self_local))
+            Value::Copy(Place::local(self_local))
         } else if let Callee::Direct { func, .. } = &callee {
             // Check if the callee is a struct entity (memberwise init with no explicit init)
             if self.is_struct_entity(*func) {
@@ -2841,7 +2866,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             .get(i)
                             .cloned()
                             .unwrap_or_else(|| format!("_{i}"));
-                        (name, arg.value)
+                        (name, arg)
                     })
                     .collect();
                 let dest = self.fresh_temp(result_ty.clone());
@@ -2852,7 +2877,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         fields,
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             } else {
                 self.emit_call(callee, call_args, result_ty)
             }
@@ -2866,10 +2891,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// function, lowers it, and calls it to produce the default value.
     fn expand_default_args(
         &mut self,
-        mut call_args: Vec<CallArg>,
+        mut call_args: Vec<Value>,
         callee_entity: Entity,
         explicit_arg_count: usize,
-    ) -> Vec<CallArg> {
+    ) -> Vec<Value> {
         let Some(callable) = self
             .ctx
             .world
@@ -2937,7 +2962,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Emit a call statement and return the result value.
-    fn emit_call(&mut self, callee: Callee, mut args: Vec<CallArg>, result_ty: MirTy) -> Value {
+    fn emit_call(&mut self, callee: Callee, mut args: Vec<Value>, result_ty: MirTy) -> Value {
         // Override arg passing modes from the callee's `mutating`/`consuming`
         // param declarations. Only applies to Direct calls — witness/indirect
         // dispatch can't know the param modes at MIR-emission time.
@@ -2950,7 +2975,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 callee,
                 args,
             }));
-            Value::Immediate(Immediate::unit())
+            Value::Const(Immediate::unit())
         } else {
             let dest = self.fresh_temp(result_ty);
             self.emit_stmt(Statement::new(StatementKind::Call {
@@ -2958,7 +2983,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 callee,
                 args,
             }));
-            Value::Place(Place::local(dest))
+            Value::Copy(Place::local(dest))
         }
     }
 
@@ -2993,10 +3018,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 HirLiteral::String { value: content, .. } => {
                     // String literals need a 2-arg init: init(stringLiteral: ptr, length: i64)
                     if let Some(init_entity) = self.find_string_literal_init(*entity) {
-                        let ptr_val = Value::Immediate(Immediate::string_ptr(content.clone()));
-                        let len_val = Value::Immediate(Immediate::i64(content.len() as i64));
+                        let ptr_val = Value::Const(Immediate::string_ptr(content.clone()));
+                        let len_val = Value::Const(Immediate::i64(content.len() as i64));
                         self.ctx.register_name(init_entity);
-                        let call_args = vec![CallArg::copy(ptr_val), CallArg::copy(len_val)];
+                        let call_args = vec![(ptr_val).into_copy(), (len_val).into_copy()];
                         let callee = Callee::method(init_entity, vec![], result_ty.clone());
                         return self.emit_call_maybe_init(callee, call_args, result_ty);
                     }
@@ -3030,7 +3055,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .unwrap_or_else(|| result_ty.clone());
                 let primitive = self.lower_literal_primitive(lit, &param_ty);
                 self.ctx.register_name(init_entity);
-                let call_args = vec![CallArg::copy(primitive)];
+                let call_args = vec![(primitive).into_copy()];
                 // Set self_type to the target struct so monomorphization
                 // mangles correctly (not the caller's self_type)
                 let callee = Callee::method(init_entity, vec![], result_ty.clone());
@@ -3048,19 +3073,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn lower_literal_primitive(&self, lit: &HirLiteral, target_ty: &MirTy) -> Value {
         match lit {
             HirLiteral::Integer(v) => match target_ty {
-                MirTy::I8 => Value::Immediate(Immediate::i8(*v as i8)),
-                MirTy::I16 => Value::Immediate(Immediate::i16(*v as i16)),
-                MirTy::I32 => Value::Immediate(Immediate::i32(*v as i32)),
-                _ => Value::Immediate(Immediate::i64(*v)),
+                MirTy::I8 => Value::Const(Immediate::i8(*v as i8)),
+                MirTy::I16 => Value::Const(Immediate::i16(*v as i16)),
+                MirTy::I32 => Value::Const(Immediate::i32(*v as i32)),
+                _ => Value::Const(Immediate::i64(*v)),
             },
             HirLiteral::Float(v) => match target_ty {
-                MirTy::F32 => Value::Immediate(Immediate::f32(*v as f32)),
-                _ => Value::Immediate(Immediate::f64(*v)),
+                MirTy::F32 => Value::Const(Immediate::f32(*v as f32)),
+                _ => Value::Const(Immediate::f64(*v)),
             },
-            HirLiteral::Bool(v) => Value::Immediate(Immediate::bool(*v)),
-            HirLiteral::String { value, .. } => Value::Immediate(Immediate::string(value.clone())),
-            HirLiteral::Char(c) => Value::Immediate(Immediate::i32(*c as i32)),
-            HirLiteral::Null => Value::Immediate(Immediate::unit()),
+            HirLiteral::Bool(v) => Value::Const(Immediate::bool(*v)),
+            HirLiteral::String { value, .. } => Value::Const(Immediate::string(value.clone())),
+            HirLiteral::Char(c) => Value::Const(Immediate::i32(*c as i32)),
+            HirLiteral::Null => Value::Const(Immediate::unit()),
         }
     }
 
@@ -3076,7 +3101,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let ptr_ty = MirTy::Pointer(Box::new(element_ty.clone()));
         let ptr_local = self.fresh_temp(ptr_ty);
         let ptr_place = Place::local(ptr_local);
-        let count_value = Value::Immediate(Immediate::i64(elements.len() as i64));
+        let count_value = Value::Const(Immediate::i64(elements.len() as i64));
 
         self.emit_stmt(Statement::new(StatementKind::Assign {
             dest: ptr_place.clone(),
@@ -3091,22 +3116,22 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             dest: Place::local(size_local),
             rvalue: Rvalue::Op1 {
                 op: Op::SizeOf(element_ty.clone()),
-                arg: Value::Immediate(Immediate::unit()),
+                arg: Value::Const(Immediate::unit()),
             },
         }));
 
         for (i, &element_expr) in elements.iter().enumerate() {
             let element_value = self.lower_expr_with_hint(element_expr, &element_ty);
             let element_ptr = if i == 0 {
-                Value::Place(ptr_place.clone())
+                Value::Copy(ptr_place.clone())
             } else {
                 let offset_local = self.fresh_temp(MirTy::I64);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(offset_local),
                     rvalue: Rvalue::Op2 {
                         op: Op::Mul(IntBits::I64, Signedness::Signed),
-                        lhs: Value::Immediate(Immediate::i64(i as i64)),
-                        rhs: Value::Place(Place::local(size_local)),
+                        lhs: Value::Const(Immediate::i64(i as i64)),
+                        rhs: Value::Copy(Place::local(size_local)),
                     },
                 }));
 
@@ -3116,11 +3141,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     dest: Place::local(offset_ptr_local),
                     rvalue: Rvalue::Op2 {
                         op: Op::PtrOffset,
-                        lhs: Value::Place(ptr_place.clone()),
-                        rhs: Value::Place(Place::local(offset_local)),
+                        lhs: Value::Copy(ptr_place.clone()),
+                        rhs: Value::Copy(Place::local(offset_local)),
                     },
                 }));
-                Value::Place(Place::local(offset_ptr_local))
+                Value::Copy(Place::local(offset_ptr_local))
             };
 
             let write_local = self.fresh_temp(MirTy::unit());
@@ -3137,8 +3162,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         self.ctx.register_name(init_entity);
         let callee = Callee::method(init_entity, type_args, result_ty.clone());
         let call_args = vec![
-            CallArg::copy(Value::Place(ptr_place)),
-            CallArg::copy(count_value),
+            (Value::Copy(ptr_place)).into_copy(),
+            (count_value).into_copy(),
         ];
         Some(self.emit_call_maybe_init(callee, call_args, result_ty.clone()))
     }
@@ -3165,7 +3190,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         payload,
                     },
                 }));
-                Value::Place(Place::local(dest))
+                Value::Copy(Place::local(dest))
             },
             HirExpr::Def(entity, _, _) => {
                 if self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
@@ -3186,7 +3211,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             payload: vec![],
                         },
                     }));
-                    Value::Place(Place::local(dest))
+                    Value::Copy(Place::local(dest))
                 } else {
                     self.lower_expr(expr_id)
                 }
@@ -3344,7 +3369,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // Continue in merge block
         self.switch_to_block(merge_block);
-        Value::Place(Place::local(result_local))
+        Value::Copy(Place::local(result_local))
     }
 
     /// Lower a loop expression.
@@ -3379,7 +3404,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // Continue after the loop
         self.switch_to_block(exit_block);
-        Value::Immediate(Immediate::unit())
+        Value::Const(Immediate::unit())
     }
 
     /// Lower a break expression — jump to the loop's exit block.
@@ -3388,7 +3413,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Some(exit) = exit_block {
             self.set_terminator(Terminator::jump(exit));
         }
-        Value::Immediate(Immediate::unit())
+        Value::Const(Immediate::unit())
     }
 
     /// Lower a continue expression — jump to the loop's header block.
@@ -3397,7 +3422,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if let Some(header) = header_block {
             self.set_terminator(Terminator::jump(header));
         }
-        Value::Immediate(Immediate::unit())
+        Value::Const(Immediate::unit())
     }
 
     /// Find a loop by label (or the innermost loop if no label).
@@ -3617,7 +3642,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .iter()
             .map(|&hir_local| {
                 let mir_local = self.map_local(hir_local);
-                Value::Place(Place::local(mir_local))
+                Value::Copy(Place::local(mir_local))
             })
             .collect();
 
@@ -3632,7 +3657,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             },
         }));
 
-        Value::Place(Place::local(dest))
+        Value::Copy(Place::local(dest))
     }
 
     /// Find locals from the parent scope that are referenced in a closure body.
@@ -3809,8 +3834,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Lower scrutinee to a place (materialize immediates into a temp)
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_place = match scrutinee_val {
-            Value::Place(p) => p,
-            Value::Immediate(imm) => {
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => p,
+            Value::Const(imm) => {
                 let s_ty = self.resolve_expr_type(scrutinee_expr);
                 let temp = self.fresh_temp(s_ty);
                 self.emit_stmt(Statement::new(StatementKind::Assign {
@@ -3839,7 +3864,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
         // Continue from the join block
         self.switch_to_block(join_block);
-        Value::Place(Place::local(result_local))
+        Value::Copy(Place::local(result_local))
     }
 
     /// Recursively emit a decision tree as MIR basic blocks.
@@ -3877,7 +3902,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let true_block = self.new_block();
                     let false_block = self.new_block();
                     self.set_terminator(Terminator::branch(
-                        Value::Place(test_place),
+                        Value::Copy(test_place),
                         true_block,
                         false_block,
                     ));
@@ -4071,23 +4096,28 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         for &stmt_id in &block.stmts {
             self.lower_stmt(stmt_id);
             if self.is_terminated() {
-                return Value::Immediate(Immediate::unit());
+                return Value::Const(Immediate::unit());
             }
         }
 
         if let Some(tail) = block.tail_expr {
             self.lower_expr(tail)
         } else {
-            Value::Immediate(Immediate::unit())
+            Value::Const(Immediate::unit())
         }
     }
 }
 
 /// Convert a Value to an Rvalue for assignment.
+///
+/// Picks `Rvalue::Copy` for all place-reading variants. Stage 5 will route
+/// the let-binding RHS and assignment RHS through `read_value_for_assign`
+/// (which consults the source type's `CopyBehavior` to pick Move vs Copy);
+/// remaining call-sites pass through this helper until then.
 fn value_to_rvalue(value: Value) -> Rvalue {
     match value {
-        Value::Place(p) => Rvalue::Copy(p),
-        Value::Immediate(i) => Rvalue::Const(i),
+        Value::Const(i) => Rvalue::Const(i),
+        Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Rvalue::Copy(p),
     }
 }
 

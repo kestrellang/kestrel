@@ -44,7 +44,7 @@ pub use op::{
     FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness,
 };
 pub use place::Place;
-pub use statement::{CallArg, Callee, PassingMode, Rvalue, Statement, StatementKind};
+pub use statement::{Callee, Rvalue, Statement, StatementKind};
 pub use terminator::{SwitchCase, Terminator, TerminatorKind};
 pub use ty::MirTy;
 pub use value::Value;

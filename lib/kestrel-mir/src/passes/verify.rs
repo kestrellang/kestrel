@@ -198,7 +198,7 @@ impl<'a> VerifyCtx<'a> {
                         self.verify_place(func_name, bi, d, body);
                     }
                     for arg in args {
-                        self.verify_value(func_name, bi, &arg.value, body);
+                        self.verify_value(func_name, bi, arg, body);
                     }
                     self.verify_callee(func_name, bi, callee);
                 },
@@ -279,8 +279,10 @@ impl<'a> VerifyCtx<'a> {
 
     fn verify_value(&mut self, func: &str, bi: usize, value: &Value, body: &MirBody) {
         match value {
-            Value::Place(p) => self.verify_place(func, bi, p, body),
-            Value::Immediate(imm) => self.verify_immediate(func, bi, &imm.kind),
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                self.verify_place(func, bi, p, body)
+            },
+            Value::Const(imm) => self.verify_immediate(func, bi, &imm.kind),
         }
     }
 
@@ -403,7 +405,7 @@ impl<'a> VerifyCtx<'a> {
         func_name: &str,
         bi: usize,
         callee: &Callee,
-        args: &[crate::CallArg],
+        args: &[Value],
         _func: &FunctionDef,
         _body: &MirBody,
     ) {
