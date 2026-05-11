@@ -4,7 +4,7 @@
 //! Entity references point into the ECS for struct/enum/protocol/type-param identity.
 
 use crate::MirModule;
-use crate::item::CopyBehavior;
+use crate::item::{CopyBehavior, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
 
 /// MIR type representation.
@@ -233,10 +233,8 @@ impl MirTy {
                 CopyBehavior::None
             },
 
-            // Conservatively non-copyable until Stage 6's constraint-aware
-            // variant. The verifier won't reject these — only `Value::Move`
-            // on a non-`None` type — so this leaves us free to lower generic
-            // bodies without panicking.
+            // Conservatively non-copyable. Generic-aware classification
+            // happens via [`Self::copy_behavior_with_constraints`].
             MirTy::TypeParam(_)
             | MirTy::SelfType
             | MirTy::AssociatedProjection { .. }
@@ -244,4 +242,94 @@ impl MirTy {
             | MirTy::Error => CopyBehavior::None,
         }
     }
+
+    /// Same as [`Self::copy_behavior`], but consults a [`WhereClause`] so
+    /// `TypeParam(T)` constrained by `Copyable`/`Cloneable` reports a non-
+    /// `None` behavior.
+    ///
+    /// Used by the MIR verifier to decide whether `Value::Move(p)` is legal
+    /// in a generic body: `let f = move x` on `x: T where T: Copyable` is
+    /// rejected because `T` may resolve to a copyable type.
+    pub fn copy_behavior_with_constraints(
+        &self,
+        module: &MirModule,
+        where_clause: Option<&WhereClause>,
+    ) -> CopyBehavior {
+        if let MirTy::TypeParam(entity) = self {
+            return type_param_copy_behavior(*entity, module, where_clause);
+        }
+        // Tuples recurse with constraints; everything else reuses the
+        // non-constraint path (no TypeParam at the leaves).
+        if let MirTy::Tuple(elems) = self {
+            let mut kind = CopyBehavior::Bitwise;
+            for elem in elems {
+                match elem.copy_behavior_with_constraints(module, where_clause) {
+                    CopyBehavior::None => return CopyBehavior::None,
+                    CopyBehavior::Clone(e) => {
+                        if matches!(kind, CopyBehavior::Bitwise) {
+                            kind = CopyBehavior::Clone(e);
+                        }
+                    },
+                    CopyBehavior::Bitwise => {},
+                }
+            }
+            return kind;
+        }
+        self.copy_behavior(module)
+    }
+}
+
+/// Walk the where clause for `T: P` constraints and check whether `P`
+/// (or any of its parent protocols) is the builtin `Copyable` or
+/// `Cloneable`. Falls back to `CopyBehavior::None` if no such constraint
+/// applies.
+fn type_param_copy_behavior(
+    type_param: Entity,
+    module: &MirModule,
+    where_clause: Option<&WhereClause>,
+) -> CopyBehavior {
+    let Some(where_clause) = where_clause else {
+        return CopyBehavior::None;
+    };
+    for constraint in &where_clause.constraints {
+        let WhereConstraint::Implements {
+            type_param: tp,
+            protocol,
+        } = constraint
+        else {
+            continue;
+        };
+        if *tp != type_param {
+            continue;
+        }
+        if protocol_implies_copyable(*protocol, module) {
+            return CopyBehavior::Bitwise;
+        }
+    }
+    CopyBehavior::None
+}
+
+/// True if `protocol` is `Copyable`/`Cloneable` or transitively extends
+/// either via `parent_protocols`. Identified by qualified name suffix
+/// — matches the builtin std-core protocols.
+fn protocol_implies_copyable(protocol: Entity, module: &MirModule) -> bool {
+    fn is_copyable_or_cloneable_name(name: &str) -> bool {
+        // Match the fully-qualified `std.core.Copyable` / `.Cloneable` and
+        // accept any module-suffix variant the test harness might use.
+        let short = name.rsplit('.').next().unwrap_or(name);
+        short == "Copyable" || short == "Cloneable"
+    }
+    let proto = module.protocols.iter().find(|p| p.entity == protocol);
+    let Some(proto) = proto else {
+        // Unknown protocol — fall back to name lookup in case it isn't in
+        // the protocols vec yet (forward declarations during lowering).
+        return is_copyable_or_cloneable_name(module.resolve_name(protocol));
+    };
+    if is_copyable_or_cloneable_name(&proto.name) {
+        return true;
+    }
+    proto
+        .parent_protocols
+        .iter()
+        .any(|p| protocol_implies_copyable(*p, module))
 }

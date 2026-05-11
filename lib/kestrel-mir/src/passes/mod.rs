@@ -15,4 +15,4 @@ pub mod verify;
 pub use deinit::run_deinit_pass;
 pub use layout::run_layout_pass;
 pub use thunk::run_thunk_pass;
-pub use verify::{VerifyResult, verify};
+pub use verify::{VerifyResult, VerifyStage, verify, verify_with_stage};
