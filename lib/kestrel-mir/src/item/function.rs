@@ -99,30 +99,24 @@ pub enum ReceiverConvention {
     Consuming,
 }
 
-/// Calling-convention mode for a parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ParamMode {
-    /// Default — pass by value (scalars) or by borrowed pointer (aggregates).
-    In,
-    /// `mutating` — pass a pointer to the caller's storage; writes propagate back.
-    InOut,
-    /// `consuming` — value moved into callee.
-    Consuming,
-}
-
 /// A function parameter.
+///
+/// Stage 5b: parameter ownership is encoded in the *type*:
+///   - default (borrowing): `MirTy::Ref(T)`
+///   - mutating: `MirTy::RefMut(T)`
+///   - consuming: `T` (owned)
+/// The previous separate `ParamMode` field is gone — all ABI and ownership
+/// decisions consult `ty` directly.
 #[derive(Debug, Clone)]
 pub struct ParamDef {
     /// Parameter name.
     pub name: String,
     /// The local variable this parameter is bound to.
     pub local: LocalId,
-    /// Parameter type.
+    /// Parameter type (with ownership wrapper baked in).
     pub ty: MirTy,
     /// External label for this parameter (used in mangling).
     pub external_label: Option<String>,
-    /// Calling-convention mode (default: In).
-    pub mode: ParamMode,
 }
 
 impl ParamDef {
@@ -132,7 +126,6 @@ impl ParamDef {
             local,
             ty,
             external_label: None,
-            mode: ParamMode::In,
         }
     }
 
@@ -147,13 +140,7 @@ impl ParamDef {
             local,
             ty,
             external_label: label,
-            mode: ParamMode::In,
         }
-    }
-
-    pub fn with_mode(mut self, mode: ParamMode) -> Self {
-        self.mode = mode;
-        self
     }
 }
 

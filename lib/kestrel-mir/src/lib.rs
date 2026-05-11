@@ -36,7 +36,7 @@ pub use immediate::{Immediate, ImmediateKind};
 pub use item::{
     AssociatedTypeDef, CallingConvention, CaptureInfo, CaptureMode, ClosureInfo, CopyBehavior,
     DeinitBehavior, EnumCaseDef, EnumDef, ExternInfo, FieldDef, FileConstantData, FunctionDef,
-    FunctionKind, MethodBinding, MethodSource, ParamDef, ParamMode, ProtocolDef,
+    FunctionKind, MethodBinding, MethodSource, ParamDef, ProtocolDef,
     ProtocolMethodDef, ReceiverConvention, StaticDef, StructDef, StructLayout, TypeParamDef,
     WhereClause, WhereConstraint, WitnessDef, WitnessMethodKey,
 };

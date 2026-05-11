@@ -488,7 +488,10 @@ fn compile_call_arg(
                 };
                 if promoted_to_slot {
                     let addr = place::compile_place_read(ctx, state, builder, place)?;
-                    let cl_ty = types::translate_type(expected, ctx.target);
+                    // For `Ref(scalar)`, the callee expects the inner scalar
+                    // type, not the pointer — translate the unwrapped type.
+                    let cl_ty =
+                        types::translate_type(common::param_inner_ty(expected), ctx.target);
                     return Ok(builder
                         .ins()
                         .load(cl_ty, ir::MemFlags::new(), addr, Offset32::new(0)));
@@ -569,19 +572,28 @@ fn compile_call_arg(
 }
 
 /// Aggregate-or-pointer test for ABI reconciliation. Returns true when the
-/// callee receives the value via a pointer (aggregate, raw pointer, ref). A
-/// `false` result means the callee expects a scalar in a register, so the
-/// caller must deliver a value rather than an address.
+/// callee receives the value via a pointer (aggregate, raw pointer, mut
+/// ref, ref-to-aggregate). A `false` result means the callee expects a
+/// scalar in a register, so the caller must deliver a value rather than an
+/// address.
+///
+/// `Ref(scalar)` flows by value: it carries no ownership at the ABI level,
+/// so the caller delivers the scalar directly.
 fn is_aggregate_for_call(ty: &MirTy) -> bool {
+    if matches!(ty, MirTy::RefMut(_)) {
+        return true;
+    }
+    let inner = match ty {
+        MirTy::Ref(t) => t.as_ref(),
+        other => other,
+    };
     matches!(
-        ty,
+        inner,
         MirTy::Tuple(_)
             | MirTy::Named { .. }
             | MirTy::Str
             | MirTy::FuncThick { .. }
             | MirTy::Pointer(_)
-            | MirTy::Ref(_)
-            | MirTy::RefMut(_)
     )
 }
 

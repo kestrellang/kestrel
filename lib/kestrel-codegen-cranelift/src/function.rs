@@ -519,18 +519,16 @@ pub fn compile_function(
     // Collect address-taken locals
     let stack_locals = collect_address_taken_locals(body, subst, self_type, &mut ctx.layouts);
 
-    // `mutating` (InOut) and aggregate `In` parameters receive a pointer to
-    // caller storage. The local Cranelift Variable holds that pointer; reads/
-    // writes deref through it. This matches lib1's Borrow→Ref convention and
-    // ensures `lang.ptr_to(in_param)` returns the caller's address, not a
-    // dangling pointer to a callee-local copy.
+    // Ownership encoded in the type — see `common::param_passed_by_ptr`:
+    // `RefMut`, `Ref(aggregate)`, and owned aggregate params receive a
+    // pointer to caller storage. The local Cranelift Variable holds that
+    // pointer; reads/writes deref through it. Matches lib1's Borrow→Ref
+    // convention so `lang.ptr_to(in_param)` returns the caller's address.
+    // Scalar `Ref` params flow by value and live in a scalar local.
     let mut inout_param_locals: HashSet<LocalId> = HashSet::new();
     for p in &func_def.params {
         let pty = substitute_type_with_self(&p.ty, subst, self_type, ctx.module);
-        let pass_as_ptr = matches!(p.mode, kestrel_mir::ParamMode::InOut)
-            || (matches!(p.mode, kestrel_mir::ParamMode::In)
-                && is_aggregate(&pty, &mut ctx.layouts));
-        if pass_as_ptr {
+        if common::param_passed_by_ptr(&pty, &mut ctx.layouts) {
             inout_param_locals.insert(p.local);
         }
     }

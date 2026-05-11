@@ -2238,22 +2238,31 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .iter()
             .find(|f| f.entity == callee_entity)
         {
-            // Collect param modes first to avoid borrowing self.ctx while
-            // mutating call_args.
-            let modes: Vec<kestrel_mir::ParamMode> =
-                callee.params.iter().map(|p| p.mode).collect();
-            for (arg, mode) in call_args.iter_mut().zip(modes.into_iter()) {
-                match mode {
-                    kestrel_mir::ParamMode::InOut => {
-                        let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
-                        *arg = owned.into_ref_mut();
-                    },
-                    kestrel_mir::ParamMode::Consuming => {
-                        let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
-                        *arg = owned.into_move();
-                    },
-                    kestrel_mir::ParamMode::In => {},
-                }
+            // Ownership is encoded in the param type. Snapshot first to avoid
+            // borrowing self.ctx while mutating call_args.
+            //
+            //   MirTy::Ref(_)    → default-borrowing → rewrite to Value::Ref
+            //   MirTy::RefMut(_) → mutating          → rewrite to Value::RefMut
+            //   anything else    → consuming         → rewrite to Value::Move
+            //
+            // Extern callees are an exception: their formal params stay
+            // unwrapped (no Ref/RefMut), so they fall through the
+            // "anything else" arm. That's wrong — we should NOT move into
+            // them. Skip the rewrite entirely for extern callees; their args
+            // are delivered by `compile_extern_call_arg`.
+            let is_extern = callee.is_extern();
+            let modes: Vec<kestrel_mir::MirTy> =
+                callee.params.iter().map(|p| p.ty.clone()).collect();
+            if is_extern {
+                return;
+            }
+            for (arg, ty) in call_args.iter_mut().zip(modes.into_iter()) {
+                let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+                *arg = match ty {
+                    kestrel_mir::MirTy::Ref(_) => owned.into_ref(),
+                    kestrel_mir::MirTy::RefMut(_) => owned.into_ref_mut(),
+                    _ => owned.into_move(),
+                };
             }
             return;
         }
@@ -2264,19 +2273,29 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // prepend a receiver into `call_args[0]` do so whenever the callee is
         // method-shaped, so the skip count lines up with `callable.receiver`.
         // Inits go through `emit_call_maybe_init` and bypass this path.
-        use kestrel_ast_builder::Callable;
+        use kestrel_ast_builder::{Attributes, Callable};
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return;
         };
+        // Extern callees: leave args untouched (C ABI, no Ref/RefMut).
+        let is_extern = self
+            .ctx
+            .world
+            .get::<Attributes>(callee_entity)
+            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
+        if is_extern {
+            return;
+        }
         let skip = if callable.receiver.is_some() { 1 } else { 0 };
         for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
-            if param.is_consuming {
-                let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
-                *arg = owned.into_move();
+            let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+            *arg = if param.is_consuming {
+                owned.into_move()
             } else if param.is_mut {
-                let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
-                *arg = owned.into_ref_mut();
-            }
+                owned.into_ref_mut()
+            } else {
+                owned.into_ref()
+            };
         }
     }
 

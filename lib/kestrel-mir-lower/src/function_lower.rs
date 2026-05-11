@@ -26,6 +26,14 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     // Type parameters: parent's first (for methods), then function's own
     collect_inherited_type_params(ctx, entity, &mut def);
 
+    // Detect @extern up front so we can skip ownership wrapping for FFI
+    // params — C ABI doesn't have Ref/RefMut, and Kestrel forbids `mut` on
+    // extern declarations, so default/consuming both pass the plain inner type.
+    let is_extern = ctx
+        .world
+        .get::<Attributes>(entity)
+        .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
+
     if let Some(type_params) = ctx.world.get::<TypeParams>(entity) {
         for &tp_entity in &type_params.0 {
             ctx.register_name(tp_entity);
@@ -60,35 +68,41 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
             def.params.push(param);
         }
 
-        // Resolve param types via query
+        // Resolve param types via query. Ownership is encoded in the type:
+        //   default (borrowing)  → MirTy::Ref(T)
+        //   mutating             → MirTy::RefMut(T)
+        //   consuming            → T (owned)
+        // The body's *local* for the param keeps the inner T (HIR's view);
+        // codegen handles the impedance at the entry block.
         let resolved_types = resolve_callable_types(ctx, entity);
         for (i, ast_param) in callable.params.iter().enumerate() {
-            let param_ty = resolved_types
+            let inner_ty = resolved_types
                 .get(i)
                 .and_then(|t| t.clone())
                 .unwrap_or(kestrel_mir::MirTy::Error);
             let local_id = kestrel_mir::LocalId::new(def.params.len());
 
-            let mode = if ast_param.is_consuming {
-                kestrel_mir::ParamMode::Consuming
+            let param_ty = if is_extern || ast_param.is_consuming {
+                inner_ty
             } else if ast_param.is_mut {
-                kestrel_mir::ParamMode::InOut
+                kestrel_mir::MirTy::RefMut(Box::new(inner_ty))
             } else {
-                kestrel_mir::ParamMode::In
+                kestrel_mir::MirTy::Ref(Box::new(inner_ty))
             };
             let param = kestrel_mir::ParamDef::with_label(
                 &ast_param.name,
                 local_id,
                 param_ty,
                 ast_param.label.clone(),
-            )
-            .with_mode(mode);
+            );
             def.params.push(param);
         }
     }
 
     // Check for @extern attribute → set extern_info
-    if let Some(attrs) = ctx.world.get::<Attributes>(entity) {
+    if is_extern
+        && let Some(attrs) = ctx.world.get::<Attributes>(entity)
+    {
         for attr in &attrs.0 {
             if attr.name == "extern" {
                 let symbol_name = attr
