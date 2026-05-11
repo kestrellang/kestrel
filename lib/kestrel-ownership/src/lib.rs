@@ -20,8 +20,10 @@
 //! so the new statement types are visible end-to-end. Real move-checking and
 //! drop-elaboration land at Stages 4 and 7.
 
+pub mod dataflow;
 pub mod drop_elab;
 pub mod move_check;
+pub mod move_path;
 
 use kestrel_mir::MirModule;
 
