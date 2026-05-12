@@ -3,6 +3,8 @@
 //! Types are by value — no interning, no `Id<Ty>` indirection.
 //! Entity references point into the ECS for struct/enum/protocol/type-param identity.
 
+use std::collections::HashMap;
+
 use crate::MirModule;
 use crate::item::{CopyBehavior, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
@@ -183,6 +185,18 @@ impl MirTy {
     ///   conservatively `None` until closure-env propagation lands.
     /// - [`MirTy::Error`] returns `None`.
     pub fn copy_behavior(&self, module: &MirModule) -> CopyBehavior {
+        self.copy_behavior_inner(module, 0)
+    }
+
+    /// Inner recursive implementation with a depth guard. Direct
+    /// nominal recursion is illegal in well-formed MIR (sizes would be
+    /// infinite), but cycles through pointer/ref break naturally because
+    /// those are always Bitwise and don't recurse. The depth guard
+    /// defends against pathological inputs we haven't yet rejected.
+    fn copy_behavior_inner(&self, module: &MirModule, depth: usize) -> CopyBehavior {
+        if depth > 64 {
+            return CopyBehavior::None;
+        }
         match self {
             // Primitives + bitwise types.
             MirTy::I8
@@ -204,7 +218,7 @@ impl MirTy {
             MirTy::Tuple(elems) => {
                 let mut kind = CopyBehavior::Bitwise;
                 for elem in elems {
-                    match elem.copy_behavior(module) {
+                    match elem.copy_behavior_inner(module, depth + 1) {
                         CopyBehavior::None => return CopyBehavior::None,
                         CopyBehavior::Clone(e) => {
                             // First non-Bitwise child wins the marker; later
@@ -220,17 +234,16 @@ impl MirTy {
                 kind
             },
 
-            // Named types: look up the matching def.
-            MirTy::Named { entity, .. } => {
-                if let Some(s) = module.structs.iter().find(|s| s.entity == *entity) {
-                    return s.copy_behavior.clone();
-                }
-                if let Some(e) = module.enums.iter().find(|e| e.entity == *entity) {
-                    return e.copy_behavior.clone();
-                }
-                // Unknown nominal — fail safe. Lowering errors should already
-                // have surfaced.
-                CopyBehavior::None
+            // Named types: look up the matching def, then refine using the
+            // actual type_args. The def's `copy_behavior` is computed for
+            // the *uninstantiated* form (`Result[T, E]` where T/E are
+            // TypeParam) and assumes type params default to Copyable — so
+            // `Result[Thing, Int64]` would inherit Result's Bitwise marker
+            // even though Thing is `not Copyable`. Substitute the args into
+            // the field/payload types and recurse so the instantiation's
+            // real behavior surfaces.
+            MirTy::Named { entity, type_args } => {
+                named_copy_behavior(*entity, type_args, module, depth)
             },
 
             // Conservatively non-copyable. Generic-aware classification
@@ -277,6 +290,121 @@ impl MirTy {
         }
         self.copy_behavior(module)
     }
+}
+
+/// Compute copy behavior for `MirTy::Named { entity, type_args }` by
+/// looking up the matching struct/enum def and folding over its fields
+/// (or its cases' payload structs) with `type_args` substituted in.
+///
+/// An explicit `CopyBehavior::None` on the def always wins — those are
+/// types that declared `: not Copyable`, and no choice of type args can
+/// recover Copyable. For any other declared behavior, the structural
+/// fold over the instantiated payload types decides: any None field
+/// makes the whole thing None; any non-Bitwise field bumps the result
+/// to Clone (with the def's clone-method marker preserved).
+fn named_copy_behavior(
+    entity: Entity,
+    type_args: &[MirTy],
+    module: &MirModule,
+    depth: usize,
+) -> CopyBehavior {
+    // Struct path.
+    if let Some(s) = module.structs.iter().find(|s| s.entity == entity) {
+        if matches!(s.copy_behavior, CopyBehavior::None) {
+            return CopyBehavior::None;
+        }
+        let subst = build_type_param_subst(&s.type_params.iter().map(|p| p.entity).collect::<Vec<_>>(), type_args);
+        return fold_field_copy_behavior(
+            s.copy_behavior.clone(),
+            s.fields.iter().map(|f| &f.ty),
+            &subst,
+            module,
+            depth,
+        );
+    }
+    // Enum path: fold across every case's payload struct's fields.
+    if let Some(e) = module.enums.iter().find(|e| e.entity == entity) {
+        if matches!(e.copy_behavior, CopyBehavior::None) {
+            return CopyBehavior::None;
+        }
+        let subst = build_type_param_subst(&e.type_params.iter().map(|p| p.entity).collect::<Vec<_>>(), type_args);
+        let mut payload_tys: Vec<MirTy> = Vec::new();
+        for case in &e.cases {
+            let idx = case.payload_struct.index();
+            if let Some(payload_struct) = module.structs.get(idx) {
+                for f in &payload_struct.fields {
+                    payload_tys.push(f.ty.clone());
+                }
+            }
+        }
+        return fold_field_copy_behavior(
+            e.copy_behavior.clone(),
+            payload_tys.iter(),
+            &subst,
+            module,
+            depth,
+        );
+    }
+    // Unknown nominal — fail safe.
+    CopyBehavior::None
+}
+
+/// Substitute type-params in `ty` using the (param-entity → arg) map.
+/// Returns `ty` unchanged when no substitution applies.
+fn substitute_type_params(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
+    match ty {
+        MirTy::TypeParam(e) => subst.get(e).cloned().unwrap_or_else(|| ty.clone()),
+        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(substitute_type_params(inner, subst))),
+        MirTy::Ref(inner) => MirTy::Ref(Box::new(substitute_type_params(inner, subst))),
+        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(substitute_type_params(inner, subst))),
+        MirTy::Tuple(elems) => MirTy::Tuple(
+            elems.iter().map(|t| substitute_type_params(t, subst)).collect(),
+        ),
+        MirTy::Named { entity, type_args } => MirTy::Named {
+            entity: *entity,
+            type_args: type_args.iter().map(|t| substitute_type_params(t, subst)).collect(),
+        },
+        MirTy::FuncThin { params, ret } => MirTy::FuncThin {
+            params: params.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            ret: Box::new(substitute_type_params(ret, subst)),
+        },
+        MirTy::FuncThick { params, ret } => MirTy::FuncThick {
+            params: params.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            ret: Box::new(substitute_type_params(ret, subst)),
+        },
+        _ => ty.clone(),
+    }
+}
+
+fn build_type_param_subst(params: &[Entity], args: &[MirTy]) -> HashMap<Entity, MirTy> {
+    params
+        .iter()
+        .zip(args.iter())
+        .map(|(p, t)| (*p, t.clone()))
+        .collect()
+}
+
+fn fold_field_copy_behavior<'a, I: IntoIterator<Item = &'a MirTy>>(
+    def_kind: CopyBehavior,
+    field_tys: I,
+    subst: &HashMap<Entity, MirTy>,
+    module: &MirModule,
+    depth: usize,
+) -> CopyBehavior {
+    let mut kind = def_kind;
+    for field_ty in field_tys {
+        let substituted = substitute_type_params(field_ty, subst);
+        match substituted.copy_behavior_inner(module, depth + 1) {
+            CopyBehavior::None => return CopyBehavior::None,
+            CopyBehavior::Clone(e) => {
+                if matches!(kind, CopyBehavior::Bitwise) {
+                    kind = CopyBehavior::Clone(e);
+                }
+            },
+            CopyBehavior::Bitwise => {},
+        }
+    }
+    kind
 }
 
 /// Walk the where clause for `T: P` constraints and check whether `P`
