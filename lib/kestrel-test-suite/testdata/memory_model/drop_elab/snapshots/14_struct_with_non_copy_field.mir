@@ -1,0 +1,19 @@
+func Test.example() -> ()
+{
+    locals:
+        %o: Test.Outer
+        %_t0: Test.Inner
+        %_t1: Test.Outer
+        %_init__t1: bool
+
+    bb0:
+        %_init__t1 = false
+        %_t0 = construct Test.Inner { x: i64.literal 1 }
+        %_t1 = construct Test.Outer { inner: ref %_t0 }
+        %_init__t1 = true
+        %self = move %_t1
+        %_init__t1 = false
+        drop %_t0
+        drop %self
+        return ()
+}

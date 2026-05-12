@@ -1,0 +1,20 @@
+func Test.example() -> ()
+{
+    locals:
+        %outer: Test.Handle
+        %inner: Test.Handle
+        %_t0: Test.Handle
+        %_t1: func escaping() -> ()
+        %_init__t0: bool
+
+    bb0:
+        %_init__t0 = false
+        %_t0 = construct Test.Handle { fd: i64.literal 1 }
+        %_init__t0 = true
+        %self = move %_t0
+        %_init__t0 = false
+        %_t1 = apply partial Test.example.closure.0()
+        drop %_t1
+        drop %self
+        return copy %_t1
+}
