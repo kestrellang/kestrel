@@ -193,6 +193,29 @@ impl<'a> VerifyCtx<'a> {
             );
         }
 
+        // Module/static init bodies (synthetic `__init$<name>` functions
+        // generated for static initializers) must contain no `Drop`/
+        // `DropIf`. The architecture explicitly rules out module/static
+        // deinit — there's no point where it could run.
+        if self.stage == VerifyStage::PostDropElab && name.starts_with("__init$") {
+            for (bi, block) in body.blocks.iter().enumerate() {
+                for stmt in &block.stmts {
+                    match &stmt.kind {
+                        StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {
+                            self.err(
+                                name,
+                                Some(bi),
+                                "module-init: Drop/DropIf emitted in a static-init body; \
+                                 static-init bodies must not own values that need dropping"
+                                    .into(),
+                            );
+                        },
+                        _ => {},
+                    }
+                }
+            }
+        }
+
         // Check each basic block
         for (bi, block) in body.blocks.iter().enumerate() {
             self.verify_block(name, bi, block, body, func);
@@ -264,6 +287,32 @@ impl<'a> VerifyCtx<'a> {
 
         // Verify terminator
         self.verify_terminator(func_name, bi, &block.terminator.kind, body, func);
+
+        // Panic-edge invariant: blocks ending in `Panic(_)` or
+        // `Unreachable` must not own any `Drop`/`DropIf` statements.
+        // Per the memory-model architecture, panic = abort; drops on a
+        // path that aborts are unreachable code that DropElab should
+        // have skipped. If they're here it's a placement bug.
+        if matches!(
+            block.terminator.kind,
+            TerminatorKind::Panic(_) | TerminatorKind::Unreachable
+        ) && self.stage == VerifyStage::PostDropElab
+        {
+            for stmt in &block.stmts {
+                match &stmt.kind {
+                    StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {
+                        self.err(
+                            func_name,
+                            Some(bi),
+                            "panic-edge: Drop/DropIf in a block that terminates with \
+                             panic/unreachable; panic = abort, those drops never run"
+                                .into(),
+                        );
+                    },
+                    _ => {},
+                }
+            }
+        }
     }
 
     fn verify_place(&mut self, func: &str, bi: usize, place: &Place, body: &MirBody) {
