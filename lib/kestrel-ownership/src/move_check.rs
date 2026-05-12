@@ -195,18 +195,21 @@ fn check_rvalue(
 ) {
     match rv {
         // Copy / Move are unambiguous reads — observing a moved value is a
-        // bug. `Ref` and `RefMut` *can* be reads, but in MIR they're also
-        // how out-parameters get their storage (`File.init(ref var %t, fd)`
-        // writes into an as-yet-uninit `%t`). Without a way to distinguish
-        // "read this place" from "this place is the destination of a
-        // borrow-passed init", treating them as reads produces false
-        // positives on standard stdlib idioms. Conservatively skip
-        // ref/refmut reads for now — they'll be reinstated once we model
-        // out-params explicitly.
-        Rvalue::Copy(p) | Rvalue::Move(p) => {
+        // bug. `Ref` is also a read (an immutable borrow of an uninit
+        // place is semantically nonsensical, so anywhere `Ref(p)` shows
+        // up in lowered code it's intended as a read). `RefMut` is
+        // overloaded: in the read-modify shape it's a read, but in the
+        // out-parameter init shape (`File.init(ref var %t, fd)`) it
+        // initializes a still-uninit place. We don't yet have `&out T`
+        // to distinguish those, so the heuristic is "RefMut is a read
+        // iff `p` is at least maybe-init coming in" — see
+        // `check_borrow_read`.
+        Rvalue::Copy(p) | Rvalue::Move(p) | Rvalue::Ref(p) => {
             check_place_read(body, p, use_span, state, paths, reported, diags);
         },
-        Rvalue::Ref(_) | Rvalue::RefMut(_) => {},
+        Rvalue::RefMut(p) => {
+            check_borrow_read(body, p, use_span, state, paths, reported, diags);
+        },
         Rvalue::Const(_) => {},
         Rvalue::Op1 { arg, .. } => {
             check_value(body, arg, use_span, state, paths, reported, diags);
@@ -253,13 +256,38 @@ fn check_value(
     diags: &mut Diagnostics,
 ) {
     match v {
-        // See the comment on [`check_rvalue`] for why `Ref` / `RefMut` are
-        // not currently checked as reads.
-        Value::Copy(p) | Value::Move(p) => {
+        // See the comment on [`check_rvalue`] for the Ref vs RefMut split.
+        Value::Copy(p) | Value::Move(p) | Value::Ref(p) => {
             check_place_read(body, p, use_span, state, paths, reported, diags);
         },
-        Value::Ref(_) | Value::RefMut(_) | Value::Const(_) => {},
+        Value::RefMut(p) => {
+            check_borrow_read(body, p, use_span, state, paths, reported, diags);
+        },
+        Value::Const(_) => {},
     }
+}
+
+/// Mutable-borrow read check. Mirrors [`check_place_read`] but skips
+/// when `p` is fully uninit — that shape is the out-parameter init
+/// pattern (`File.init(ref var %t, fd)` writes into the uninit `%t`),
+/// and reporting it would false-positive every stdlib initializer.
+/// Once the MIR distinguishes `&out T` from `&var T` this special-case
+/// goes away.
+fn check_borrow_read(
+    body: &MirBody,
+    place: &Place,
+    use_span: Option<&Span>,
+    state: &InitState,
+    paths: &MovePathSet,
+    reported: &mut HashSet<MovePathId>,
+    diags: &mut Diagnostics,
+) {
+    if let Some(path) = paths.lookup_place(place)
+        && !state.is_maybe_init(path)
+    {
+        return;
+    }
+    check_place_read(body, place, use_span, state, paths, reported, diags);
 }
 
 fn check_place_read(
