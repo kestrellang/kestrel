@@ -21,16 +21,6 @@ pub struct StructDef {
     pub fields_by_name: IndexMap<String, FieldId>,
     /// Precomputed layout (filled by the layout pass).
     pub layout: Option<StructLayout>,
-    /// Fields that need dropping, in drop order (filled by the layout pass).
-    ///
-    /// Legacy: superseded by `deinit_behavior.field_drops`. Kept for the
-    /// duration of the memory-model rewrite (see Stage 9 cleanup).
-    pub drop_fields: Vec<FieldId>,
-    /// Whether this type needs drop code at all.
-    ///
-    /// Legacy: superseded by `!deinit_behavior.is_trivial()`. Kept for the
-    /// duration of the memory-model rewrite (see Stage 9 cleanup).
-    pub needs_drop: bool,
     /// How this struct is duplicated. Populated by `kestrel-mir-lower` from
     /// `kestrel_semantics::NominalCopySemantics`.
     pub copy_behavior: CopyBehavior,
@@ -48,8 +38,6 @@ impl StructDef {
             fields: Vec::new(),
             fields_by_name: IndexMap::new(),
             layout: None,
-            drop_fields: Vec::new(),
-            needs_drop: false,
             // Default to `None` (affine) until lowering populates the real
             // behavior. Primitives and types built directly by the MIR test
             // helpers can override after `new`.

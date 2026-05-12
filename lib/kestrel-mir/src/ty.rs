@@ -198,7 +198,15 @@ impl MirTy {
             return CopyBehavior::None;
         }
         match self {
-            // Primitives + bitwise types.
+            // Primitives + bitwise types. References — both `Ref(_)`
+            // (`&T`) and `RefMut(_)` (`&var T`) — are Bitwise: copying a
+            // reference duplicates the pointer, and Kestrel deliberately
+            // allows reference aliasing (no Rust-style exclusivity
+            // check). The borrow itself is just a pointer; mutating
+            // through it does what mutating through any pointer does.
+            // Two `&var T`s to the same place are legal at the type
+            // system level — region/lifetime analysis is a separate
+            // Phase 2 problem.
             MirTy::I8
             | MirTy::I16
             | MirTy::I32
