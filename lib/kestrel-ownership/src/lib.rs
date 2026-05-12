@@ -28,18 +28,16 @@ pub mod move_path;
 use kestrel_mir::MirModule;
 
 /// Diagnostics produced by the ownership passes.
-///
-/// Stage 1 emits no diagnostics. The shape of this type will mirror
-/// `kestrel-reporting`'s diagnostic surface once Stage 4 (MoveCheck) lands.
 #[derive(Debug, Clone, Default)]
 pub struct Diagnostics {
-    pub messages: Vec<String>,
+    pub diags: Vec<move_check::MoveDiag>,
 }
 
 /// Run all ownership passes on the module. Single entry point.
 ///
-/// Stage 1: rewrites legacy `Deinit`/`DeinitIf`/`SetDeinitFlag` to
-/// `Drop`/`DropIf`/(unchanged). No diagnostics emitted.
+/// Stage 7: move-check emits E500 (use_after_move) and E501 (maybe_moved)
+/// based on the MIR-level move-path dataflow; drop-elab inserts `Drop` /
+/// `DropIf` statements at scope exits.
 pub fn run(module: &mut MirModule) -> Diagnostics {
     let mut diags = Diagnostics::default();
     move_check::run(module, &mut diags);

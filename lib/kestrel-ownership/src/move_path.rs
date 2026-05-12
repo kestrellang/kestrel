@@ -49,6 +49,29 @@ pub struct MovePathSet {
     by_local: HashMap<LocalId, MovePathId>,
 }
 
+/// Returns true if `ty` contains a type whose copy semantics the MIR layer
+/// can't decide locally — abstract `Self`, type parameters, associated
+/// projections, or `MirTy::Error`. Used by [`MovePathSet::build`] to skip
+/// tracking these as move paths, matching the legacy HIR move-tracker's
+/// permissive "treat unresolved as copyable" rule.
+fn has_unresolved_ty(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_)
+        | MirTy::SelfType
+        | MirTy::AssociatedProjection { .. }
+        | MirTy::Error => true,
+        MirTy::Tuple(elems) => elems.iter().any(has_unresolved_ty),
+        MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
+            has_unresolved_ty(inner)
+        },
+        MirTy::Named { type_args, .. } => type_args.iter().any(has_unresolved_ty),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(has_unresolved_ty) || has_unresolved_ty(ret)
+        },
+        _ => false,
+    }
+}
+
 impl MovePathSet {
     /// Build the move-path set for a function body.
     ///
@@ -64,6 +87,16 @@ impl MovePathSet {
             if local.ty.copy_behavior(module) != CopyBehavior::None {
                 // Trivially copyable (or Cloneable, etc.) — moving is
                 // illegal, no ownership transfer to track.
+                continue;
+            }
+            // Types whose copy semantics depend on facts the MIR layer
+            // can't resolve yet (associated-type projections, abstract
+            // `Self`, raw type parameters, `MirTy::Error` from upstream
+            // failures) are treated as copyable for ownership purposes.
+            // The legacy HIR tracker took the same permissive stance for
+            // unresolved types; doing otherwise produces a flurry of
+            // false-positive E500s on perfectly fine generic code.
+            if has_unresolved_ty(&local.ty) {
                 continue;
             }
             let id = MovePathId(paths.len() as u32);

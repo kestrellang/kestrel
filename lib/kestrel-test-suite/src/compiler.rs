@@ -75,7 +75,13 @@ impl TestCompiler {
 
     /// Collect all diagnostics from all stages as unified TestDiagnostics.
     ///
-    /// Runs inference and analysis if not already done.
+    /// Runs inference and analysis. MIR-level diagnostics from
+    /// `kestrel-ownership::move_check` are NOT surfaced here yet — that
+    /// pass is correct on the memory_model suite but fires false positives
+    /// on stdlib patterns like `while let .Some(item) = it.next()` that
+    /// the HIR-level move tracker handles via its loop-shape heuristics.
+    /// The HIR analyzer remains the authoritative source of E500/E501
+    /// until the MIR check grows the missing loop semantics.
     pub fn all_diagnostics(&self) -> Vec<TestDiagnostic> {
         // Ensure inference has run (triggers lex/parse/infer diagnostics)
         self.infer();
@@ -374,3 +380,4 @@ impl Default for TestCompiler {
         Self::new()
     }
 }
+

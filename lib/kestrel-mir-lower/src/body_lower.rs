@@ -15,6 +15,7 @@ use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_pattern_matching::constructor::Constructor;
 use kestrel_pattern_matching::decision_tree::{Binding, DecisionTree, PathElement};
+use kestrel_span::Span;
 use kestrel_type_infer::InferBody;
 use kestrel_type_infer::result::TypedBody;
 
@@ -23,6 +24,47 @@ use kestrel_mir::*;
 use crate::context::LowerCtx;
 use crate::resolved_ty::lower_resolved_ty;
 use crate::ty::lower_type;
+
+/// Extract the span from any [`HirExpr`] variant. Mirrors
+/// `kestrel_analyze::util::expr_span` — duplicated rather than imported so
+/// MIR lowering stays decoupled from the analyzer crate.
+fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
+    match &hir.exprs[id] {
+        HirExpr::Literal { span, .. }
+        | HirExpr::Local(_, span)
+        | HirExpr::Def(_, _, span)
+        | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Field { span, .. }
+        | HirExpr::TupleIndex { span, .. }
+        | HirExpr::ImplicitMember { span, .. }
+        | HirExpr::Call { span, .. }
+        | HirExpr::MethodCall { span, .. }
+        | HirExpr::ProtocolCall { span, .. }
+        | HirExpr::If { span, .. }
+        | HirExpr::Loop { span, .. }
+        | HirExpr::Match { span, .. }
+        | HirExpr::Break { span, .. }
+        | HirExpr::Continue { span, .. }
+        | HirExpr::Return { span, .. }
+        | HirExpr::Assign { span, .. }
+        | HirExpr::Tuple { span, .. }
+        | HirExpr::Array { span, .. }
+        | HirExpr::Dict { span, .. }
+        | HirExpr::Closure { span, .. }
+        | HirExpr::Block { span, .. }
+        | HirExpr::Error { span }
+        | HirExpr::Sugar { span, .. } => span.clone(),
+    }
+}
+
+/// Extract the span from any [`HirStmt`] variant.
+fn stmt_span(hir: &HirBody, id: HirStmtId) -> Span {
+    match &hir.stmts[id] {
+        HirStmt::Let { span, .. } | HirStmt::Expr { span, .. } | HirStmt::Deinit { span, .. } => {
+            span.clone()
+        },
+    }
+}
 
 /// Lower a function entity's body into MIR basic blocks.
 ///
@@ -52,6 +94,7 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         current_block: None,
         loop_stack: Vec::new(),
         temp_counter: 0,
+        current_span: None,
         ctx,
     };
 
@@ -90,6 +133,13 @@ struct BodyLowerCtx<'a, 'b> {
 
     // Counter for generating unique temp names
     temp_counter: u32,
+
+    // Span of the HIR node currently being lowered, propagated onto every
+    // `Statement` emitted underneath. Set/restored by `lower_stmt` and
+    // `lower_expr` so per-statement spans are populated automatically without
+    // each `Statement::new` call site needing to know about spans. Used by
+    // `kestrel-ownership::move_check` to attach source labels to E500/E501.
+    current_span: Option<Span>,
 }
 
 impl<'a, 'b> BodyLowerCtx<'a, 'b> {
@@ -120,14 +170,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }
         }
 
-        // Lower tail expression (the block's return value)
+        // Lower tail expression (the block's return value). Stash the
+        // tail's span before lowering so the synthesized `return`
+        // terminator can carry it — `lower_expr` restores `current_span`
+        // on the way out, so by the time we hit `set_terminator` the
+        // tail's span has already been popped.
         if !self.is_terminated() {
             if let Some(tail) = self.hir.tail_expr {
+                let tail_span = expr_span(self.hir, tail);
                 let value = self.lower_expr(tail);
                 // The tail expression may have set a terminator itself
                 // (e.g., lang.panic_unwind emits Panic). Don't overwrite it.
                 if !self.is_terminated() {
+                    let prev = self.current_span.replace(tail_span);
                     self.set_terminator(Terminator::ret(value));
+                    self.current_span = prev;
                 }
             } else {
                 // No tail → return unit
@@ -159,15 +216,30 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         !matches!(block.terminator.kind, TerminatorKind::Unreachable)
     }
 
-    /// Add a statement to the current block.
-    fn emit_stmt(&mut self, stmt: Statement) {
+    /// Add a statement to the current block. Stamps it with the current HIR
+    /// span (set by `lower_stmt` / `lower_expr`) so downstream MIR passes can
+    /// emit source-located diagnostics.
+    fn emit_stmt(&mut self, mut stmt: Statement) {
+        if stmt.span.is_none()
+            && let Some(span) = self.current_span.clone()
+        {
+            stmt.span = Some(span);
+        }
         if let Some(block_id) = self.current_block {
             self.body.block_mut(block_id).stmts.push(stmt);
         }
     }
 
-    /// Set the terminator of the current block.
-    fn set_terminator(&mut self, term: Terminator) {
+    /// Set the terminator of the current block. Stamps the current HIR span
+    /// onto the terminator (mirrors [`Self::emit_stmt`]) so MIR move-check
+    /// can pin its E500/E501 diagnostics to the terminator's source location
+    /// (e.g. the `return` keyword or the tail expression of the function).
+    fn set_terminator(&mut self, mut term: Terminator) {
+        if term.span.is_none()
+            && let Some(span) = self.current_span.clone()
+        {
+            term.span = Some(span);
+        }
         if let Some(block_id) = self.current_block {
             self.body.block_mut(block_id).terminator = term;
         }
@@ -552,6 +624,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     fn lower_stmt(&mut self, stmt_id: HirStmtId) {
         let stmt = &self.hir.stmts[stmt_id];
+        let span = stmt_span(self.hir, stmt_id);
+        let prev_span = self.current_span.replace(span);
         match stmt {
             HirStmt::Let { local, value, .. } => {
                 let mir_local = self.map_local(*local);
@@ -568,10 +642,25 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // Lower for side effects, discard result
                 let _ = self.lower_expr(*expr);
             },
-            HirStmt::Deinit { .. } => {
-                // Skip — deinit pass handles this later
+            HirStmt::Deinit { local: Some(hir_local), .. } => {
+                // `deinit x;` consumes `x`. Emit a move out to a fresh
+                // temp so the dataflow sees the kill — this is what makes
+                // `deinit x; use(x)` flag E500. The deinit body itself is
+                // wired into the structural drop sequence by drop-elab.
+                let mir_local = self.map_local(*hir_local);
+                let ty = self.body.local(mir_local).ty.clone();
+                let temp = self.fresh_temp(ty);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(temp),
+                    rvalue: Rvalue::Move(Place::local(mir_local)),
+                }));
+            },
+            HirStmt::Deinit { local: None, .. } => {
+                // Unresolved local — HIR lowering already emitted a
+                // diagnostic; nothing to lower.
             },
         }
+        self.current_span = prev_span;
     }
 
     // === Expression lowering ===
@@ -579,7 +668,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// Lower an expression, returning its value (Place or Immediate).
     fn lower_expr(&mut self, expr_id: HirExprId) -> Value {
         let expr = self.hir.exprs[expr_id].clone();
-        match &expr {
+        let span = expr_span(self.hir, expr_id);
+        let prev_span = self.current_span.replace(span);
+        let value = self.lower_expr_inner(expr_id, &expr);
+        self.current_span = prev_span;
+        value
+    }
+
+    fn lower_expr_inner(&mut self, expr_id: HirExprId, expr: &HirExpr) -> Value {
+        match expr {
             HirExpr::Literal { value, .. } => self.lower_literal_expr(expr_id, value),
             HirExpr::Local(hir_local, _) => Value::Copy(Place::local(self.map_local(*hir_local))),
             HirExpr::Tuple { elements, .. } => {
