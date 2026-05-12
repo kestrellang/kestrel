@@ -44,6 +44,13 @@ pub enum ValueResolution {
     /// Static member accessed through associated type (e.g., `Item.zero` where `Item: Addable`)
     /// Preserves the associated type context for Self-substitution in type inference.
     AssociatedTypeStaticMember { entity: Entity, assoc_type: Entity },
+    /// `Self` in value position — resolved to the enclosing type entity
+    /// (struct/enum for direct enclosure, or extension target). Lowers the
+    /// same as `Def(entity)` but carries the Self indirection so diagnostics
+    /// can refer to "Self" rather than the underlying name.
+    SelfValue(Entity),
+    /// `Self` used in value position outside any extension/protocol/type body.
+    SelfNotInScope,
     /// Not found
     NotFound(String),
 }
@@ -83,6 +90,44 @@ impl QueryFn for ResolveValuePath {
     }
 }
 
+/// Resolve `Self` in value position to the enclosing type entity.
+///
+/// Walks parents from `context` looking for an enclosing scope that gives
+/// `Self` a concrete meaning. Mirrors `resolve_self_entity_from` in
+/// `kestrel-type-infer` (which already handles this for type position).
+///
+/// PR #1 supports concrete-type enclosure only. Returns `None` for protocol
+/// enclosures (caller emits a "not supported" diagnostic until PR #2).
+fn try_resolve_self_value(
+    ctx: &QueryContext<'_>,
+    context: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    let mut current = Some(context);
+    while let Some(entity) = current {
+        match ctx.get::<NodeKind>(entity) {
+            Some(&NodeKind::Extension) => {
+                let target = ctx.query(crate::ExtensionTargetEntity {
+                    extension: entity,
+                    root,
+                })?;
+                // Protocol-target extensions need witness dispatch; deferred to PR #2.
+                if ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol) {
+                    return None;
+                }
+                return Some(target);
+            },
+            Some(&NodeKind::Struct | &NodeKind::Enum) => {
+                return Some(entity);
+            },
+            // Protocol body: deferred to PR #2 (needs witness-init dispatch).
+            Some(&NodeKind::Protocol) => return None,
+            _ => current = ctx.parent_of(entity),
+        }
+    }
+    None
+}
+
 /// Resolve a single-segment value name.
 fn resolve_single_segment(
     ctx: &QueryContext<'_>,
@@ -90,6 +135,14 @@ fn resolve_single_segment(
     context: Entity,
     root: Entity,
 ) -> ValueResolution {
+    // Bare `Self` keyword: resolve to the enclosing type entity.
+    if name == "Self" {
+        return match try_resolve_self_value(ctx, context, root) {
+            Some(target) => ValueResolution::SelfValue(target),
+            None => ValueResolution::SelfNotInScope,
+        };
+    }
+
     let result = ctx.query(ResolveName {
         name: name.to_string(),
         context,
@@ -149,6 +202,16 @@ fn resolve_multi_segment(
     context: Entity,
     root: Entity,
 ) -> ValueResolution {
+    // Leading `Self.` resolves to the enclosing type entity; remaining
+    // segments walk through it just like any qualified path.
+    if segments[0] == "Self" {
+        let first_entity = match try_resolve_self_value(ctx, context, root) {
+            Some(target) => target,
+            None => return ValueResolution::SelfNotInScope,
+        };
+        return walk_path_from(ctx, first_entity, segments, context, root);
+    }
+
     // Resolve first segment
     let first = &segments[0];
     let first_result = ctx.query(ResolveName {
@@ -202,7 +265,20 @@ fn resolve_multi_segment(
         },
     };
 
-    // Walk remaining segments
+    walk_path_from(ctx, first_entity, segments, context, root)
+}
+
+/// Walk `segments[1..]` starting from a resolved first-segment entity.
+///
+/// Factored out so `Self`-leading paths (`Self.foo`, `Self.foo.bar`) can
+/// substitute the first entity and reuse the existing walking logic.
+fn walk_path_from(
+    ctx: &QueryContext<'_>,
+    first_entity: Entity,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+) -> ValueResolution {
     let mut current = first_entity;
     for (i, segment) in segments[1..].iter().enumerate() {
         let is_last = i == segments.len() - 2;

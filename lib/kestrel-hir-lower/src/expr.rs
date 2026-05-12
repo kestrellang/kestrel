@@ -341,12 +341,13 @@ impl LowerCtx<'_> {
             .collect();
 
         match result {
-            ValueResolution::Def(entity) | ValueResolution::TypeParameter(entity) => self
-                .alloc_expr(HirExpr::Def(
-                    entity,
-                    explicit_type_args.clone(),
-                    span.clone(),
-                )),
+            ValueResolution::Def(entity)
+            | ValueResolution::TypeParameter(entity)
+            | ValueResolution::SelfValue(entity) => self.alloc_expr(HirExpr::Def(
+                entity,
+                explicit_type_args.clone(),
+                span.clone(),
+            )),
             ValueResolution::Overloaded(entities) => {
                 // Preserve full overload set — type inference disambiguates at call site
                 self.alloc_expr(HirExpr::OverloadSet {
@@ -414,6 +415,19 @@ impl LowerCtx<'_> {
                         "use a fully qualified path to disambiguate".to_string(),
                     ]);
                 self.ctx.accumulate(diag);
+                self.alloc_expr(HirExpr::Error { span: span.clone() })
+            },
+            ValueResolution::SelfNotInScope => {
+                self.ctx.accumulate(
+                    Diagnostic::error()
+                        .with_message(
+                            "'Self' is only valid inside an 'extend' or 'protocol' body",
+                        )
+                        .with_labels(vec![
+                            Label::primary(span.file_id, span.range())
+                                .with_message("'Self' used outside of a type body"),
+                        ]),
+                );
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
             ValueResolution::NotFound(ref seg) => {
