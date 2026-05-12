@@ -19,7 +19,7 @@ func Test.example() -> ()
         %_init__t1 = true
         %b = move %_t1
         %_init__t1 = false
-        drop %b
-        drop %self
+        call Test.Handle.deinit(move %b)
+        call Test.Handle.deinit(move %self)
         return ()
 }

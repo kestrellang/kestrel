@@ -14,7 +14,6 @@ func Test.example() -> ()
         %self = move %_t0
         %_init__t0 = false
         %_t1 = apply partial Test.example.closure.0()
-        drop %_t1
-        drop %self
+        call Test.Handle.deinit(move %self)
         return copy %_t1
 }

@@ -17,6 +17,6 @@ func Test.example() -> ()
         jump bb2
 
     bb2:
-        drop %self
+        call Test.Handle.deinit(move %self)
         return ()
 }

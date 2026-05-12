@@ -4,7 +4,7 @@
 
 use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
-use kestrel_mir::{EnumCaseDef, EnumDef, EnumId, FieldDef, StructDef, TypeParamDef};
+use kestrel_mir::{DeinitBehavior, EnumCaseDef, EnumDef, EnumId, FieldDef, StructDef, TypeParamDef};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_callable_types;
@@ -19,8 +19,14 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) -> EnumId {
     def.type_params = type_params.clone();
 
     // CopyBehavior from `NominalCopySemantics` (same query covers structs +
-    // enums). DeinitBehavior is left default for Stage 1.
+    // enums). DeinitBehavior.user_method comes from the user-defined
+    // `deinit { ... }` child if any; field drops are derived structurally
+    // at drop-expand time from `CopyBehavior::None` payload field types.
     def.copy_behavior = crate::struct_lower::lower_copy_behavior(ctx, entity);
+    def.deinit_behavior = DeinitBehavior {
+        user_method: crate::struct_lower::find_user_deinit(ctx, entity),
+        field_drops: Vec::new(),
+    };
 
     // Cases: children with NodeKind::EnumCase
     let children: Vec<Entity> = ctx.world.children_of(entity).to_vec();

@@ -11,6 +11,6 @@ func Test.use_handle() -> ()
         %_init__t0 = true
         %self = move %_t0
         %_init__t0 = false
-        drop %self
+        call Test.Handle.deinit(move %self)
         return ()
 }

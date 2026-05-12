@@ -16,4 +16,4 @@ pub mod verify;
 
 pub use layout::run_layout_pass;
 pub use thunk::run_thunk_pass;
-pub use verify::{VerifyResult, VerifyStage, verify, verify_with_stage};
+pub use verify::{VerifyResult, VerifyStage, place_type, verify, verify_with_stage};

@@ -13,7 +13,7 @@ func Test.example() -> ()
         %_init__t1 = true
         %self = move %_t1
         %_init__t1 = false
-        drop %_t0
-        drop %self
+        call Test.Inner.deinit(move %_t0)
+        call Test.Outer.deinit(move %self)
         return ()
 }

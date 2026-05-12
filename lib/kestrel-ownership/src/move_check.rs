@@ -89,7 +89,7 @@ pub fn run(module: &mut MirModule, diags: &mut Diagnostics) {
         if body.locals.iter().any(|l| l.ty.contains_error()) {
             continue;
         }
-        let paths = MovePathSet::build(body, module);
+        let paths = MovePathSet::build(body, module, func.where_clause.as_ref());
         if paths.is_empty() {
             continue;
         }

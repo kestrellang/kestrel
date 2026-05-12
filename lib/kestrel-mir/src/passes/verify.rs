@@ -706,7 +706,7 @@ fn copy_behavior_name(behavior: &CopyBehavior) -> &'static str {
 /// `None` as "skip this check" rather than emitting a confusing
 /// secondary diagnostic — the root cause already surfaces via other
 /// rules.
-fn place_type(
+pub fn place_type(
     module: &crate::MirModule,
     body: &MirBody,
     func: &FunctionDef,

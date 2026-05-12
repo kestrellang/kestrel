@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_mir::{CopyBehavior, LocalId, MirBody, MirModule, MirTy, Place};
+use kestrel_mir::{CopyBehavior, LocalId, MirBody, MirModule, MirTy, Place, WhereClause};
 
 /// Per-function identifier for a move path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,29 +52,42 @@ pub struct MovePathSet {
 /// Returns true if `ty` contains a type whose copy semantics the MIR layer
 /// can't decide locally:
 ///
-/// - `MirTy::TypeParam`, `MirTy::SelfType`, `MirTy::AssociatedProjection` —
-///   syntactic placeholders for types that vary per instantiation.
-/// - `MirTy::Error` — upstream inference failure; running move-check on
-///   the broken structure produces noise.
+/// - `MirTy::TypeParam(T)` *unless* the where-clause carries
+///   `T: not Copyable` — in that case the constraint-aware copy check
+///   already classified the local as affine and we should track it.
+/// - `MirTy::SelfType`, `MirTy::AssociatedProjection` — syntactic
+///   placeholders for types that vary per instantiation.
+/// - `MirTy::Error` — upstream inference failure; running move-check
+///   on the broken structure produces noise.
 ///
 /// Used by [`MovePathSet::build`] to skip tracking these as move paths,
 /// matching the legacy HIR tracker's "treat unresolved as copyable" rule.
-fn has_unresolved_ty(ty: &MirTy, module: &MirModule) -> bool {
+fn has_unresolved_ty_for_tracking(
+    ty: &MirTy,
+    module: &MirModule,
+    where_clause: Option<&WhereClause>,
+) -> bool {
     match ty {
-        MirTy::TypeParam(_)
-        | MirTy::SelfType
-        | MirTy::AssociatedProjection { .. }
-        | MirTy::Error => true,
-        MirTy::Tuple(elems) => elems.iter().any(|t| has_unresolved_ty(t, module)),
+        MirTy::TypeParam(_) => {
+            // If the constraint says affine, treat as resolved-and-affine
+            // (track it). Otherwise the param's behavior is unknown.
+            ty.copy_behavior_with_constraints(module, where_clause) != CopyBehavior::None
+        },
+        MirTy::SelfType | MirTy::AssociatedProjection { .. } | MirTy::Error => true,
+        MirTy::Tuple(elems) => elems
+            .iter()
+            .any(|t| has_unresolved_ty_for_tracking(t, module, where_clause)),
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-            has_unresolved_ty(inner, module)
+            has_unresolved_ty_for_tracking(inner, module, where_clause)
         },
-        MirTy::Named { type_args, .. } => {
-            type_args.iter().any(|t| has_unresolved_ty(t, module))
-        },
+        MirTy::Named { type_args, .. } => type_args
+            .iter()
+            .any(|t| has_unresolved_ty_for_tracking(t, module, where_clause)),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().any(|t| has_unresolved_ty(t, module))
-                || has_unresolved_ty(ret, module)
+            params
+                .iter()
+                .any(|t| has_unresolved_ty_for_tracking(t, module, where_clause))
+                || has_unresolved_ty_for_tracking(ret, module, where_clause)
         },
         _ => false,
     }
@@ -88,26 +101,38 @@ impl MovePathSet {
     /// `DefinitelyInit` at function entry. Copyable locals are skipped
     /// because moving them is illegal and they have no ownership-transfer
     /// semantics worth tracking.
-    pub fn build(body: &MirBody, module: &MirModule) -> Self {
+    pub fn build(body: &MirBody, module: &MirModule, where_clause: Option<&WhereClause>) -> Self {
         let mut paths = Vec::new();
         let mut by_local = HashMap::new();
         for (i, local) in body.locals.iter().enumerate() {
-            if local.ty.copy_behavior(module) != CopyBehavior::None {
+            // Constraint-aware copy check: a `TypeParam(T)` constrained
+            // by `: not Copyable` has `copy_behavior == None` and is
+            // intentionally trackable here. Without the where-clause
+            // hookup the previous flat `copy_behavior(module)` call
+            // returned None for *every* unconstrained `T` too, which
+            // tripped a hard-skip via `has_unresolved_ty` below.
+            if local
+                .ty
+                .copy_behavior_with_constraints(module, where_clause)
+                != CopyBehavior::None
+            {
                 // Trivially copyable (or Cloneable, etc.) — moving is
                 // illegal, no ownership transfer to track.
                 continue;
             }
             // Types whose copy semantics depend on facts the MIR layer
             // can't resolve yet (associated-type projections, abstract
-            // `Self`, raw type parameters, `MirTy::Error` from upstream
-            // failures, or `MirTy::Named` referring to an associated-type
-            // entity rather than a `StructDef`/`EnumDef`) are treated as
-            // copyable for ownership purposes. The legacy HIR tracker
-            // took the same permissive stance — doing otherwise produces
-            // a flurry of false-positive E500s on perfectly fine generic
-            // code (e.g. `iter::MapIterator.next` where `item:
-            // Iterator.Item`).
-            if has_unresolved_ty(&local.ty, module) {
+            // `Self`, `MirTy::Error` from upstream failures) are
+            // treated as copyable for ownership purposes. The legacy
+            // HIR tracker took the same permissive stance — doing
+            // otherwise produces a flurry of false-positive E500s on
+            // perfectly fine generic code (e.g. `iter::MapIterator.next`
+            // where `item: Iterator.Item`). `TypeParam(T)` is also
+            // unresolved by default, BUT if the where-clause carries
+            // a `T: not Copyable` bound the constraint-aware copy
+            // check above already returned None — meaning the user
+            // explicitly asked us to track it. Don't suppress it here.
+            if has_unresolved_ty_for_tracking(&local.ty, module, where_clause) {
                 continue;
             }
             let id = MovePathId(paths.len() as u32);

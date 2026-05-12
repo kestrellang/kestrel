@@ -47,7 +47,11 @@ pub fn run(module: &mut MirModule) {
     // else needs `&module`, so the mutation pass below can take `&mut`.
     let mut pre: Vec<Option<Prepared>> = Vec::with_capacity(module.functions.len());
     for func in &module.functions {
-        pre.push(func.body.as_ref().map(|body| prepare(body, module)));
+        pre.push(
+            func.body
+                .as_ref()
+                .map(|body| prepare(body, module, func.where_clause.as_ref())),
+        );
     }
 
     for (i, func) in module.functions.iter_mut().enumerate() {
@@ -64,7 +68,11 @@ struct Prepared {
     moved: HashSet<LocalId>,
 }
 
-fn prepare(body: &MirBody, module: &MirModule) -> Prepared {
+fn prepare(
+    body: &MirBody,
+    module: &MirModule,
+    where_clause: Option<&kestrel_mir::WhereClause>,
+) -> Prepared {
     let drop_locals: Vec<LocalId> = body
         .locals
         .iter()
@@ -73,7 +81,7 @@ fn prepare(body: &MirBody, module: &MirModule) -> Prepared {
         .filter(|(_, l)| l.ty.copy_behavior(module) == CopyBehavior::None)
         .map(|(i, _)| LocalId::new(i))
         .collect();
-    let paths = MovePathSet::build(body, module);
+    let paths = MovePathSet::build(body, module, where_clause);
     let df = dataflow::run(body, &paths);
     let moved = scan_moved_locals(body, &drop_locals);
     Prepared {

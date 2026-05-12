@@ -22,6 +22,7 @@
 
 pub mod dataflow;
 pub mod drop_elab;
+pub mod drop_expand;
 pub mod move_check;
 pub mod move_path;
 
@@ -42,5 +43,11 @@ pub fn run(module: &mut MirModule) -> Diagnostics {
     let mut diags = Diagnostics::default();
     move_check::run(module, &mut diags);
     drop_elab::run(module);
+    // Translate the abstract Drop / DropIf statements drop-elab emitted
+    // into concrete `Call(user_deinit)` plus recursive structural field
+    // drops that codegen knows how to lower. Trivial drops collapse to
+    // nothing here. See `drop_expand` for the limitations (enum payload
+    // drops and DropIf flag-branching are still TODO).
+    drop_expand::run(module);
     diags
 }
