@@ -203,21 +203,25 @@ pub fn run(body: &MirBody, paths: &MovePathSet) -> DataflowResult {
             paths,
         );
 
-        // If exit state changed, propagate to successors.
-        if state != blocks[bi].exit {
-            blocks[bi].exit = state.clone();
-            for &succ in successors(&block.terminator.kind).iter() {
-                let changed = if blocks[succ].entry_seeded {
-                    blocks[succ].entry.join(&state)
-                } else {
-                    blocks[succ].entry = state.clone();
-                    blocks[succ].entry_seeded = true;
-                    true
-                };
-                if changed && !in_queue.contains(&succ) {
-                    worklist.push_back(succ);
-                    in_queue.insert(succ);
-                }
+        // Always store the new exit, then propagate to successors. Fixed-point
+        // termination is governed by `entry_changed` below — the previous
+        // `if state != blocks[bi].exit` guard around propagation was wrong:
+        // the default exit is `InitState::empty()`, so on first-visit a block
+        // whose statements touch only non-tracked locals would compute an
+        // empty exit, match `blocks[bi].exit`, and never seed its successors.
+        // The successors then stuck at default-uninit forever.
+        blocks[bi].exit = state.clone();
+        for &succ in successors(&block.terminator.kind).iter() {
+            let changed = if blocks[succ].entry_seeded {
+                blocks[succ].entry.join(&state)
+            } else {
+                blocks[succ].entry = state.clone();
+                blocks[succ].entry_seeded = true;
+                true
+            };
+            if changed && !in_queue.contains(&succ) {
+                worklist.push_back(succ);
+                in_queue.insert(succ);
             }
         }
     }
