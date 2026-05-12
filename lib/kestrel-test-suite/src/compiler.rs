@@ -409,10 +409,11 @@ impl Default for TestCompiler {
 }
 
 /// Convert a MIR-level [`kestrel_ownership::move_check::MoveDiag`] to the
-/// analyzer-shaped diagnostic the test harness already understands. Wording
-/// is held byte-identical to the legacy HIR `MoveTrackingAnalyzer` so
-/// existing `// ERROR: use of moved value` annotations match against
-/// either source.
+/// analyzer-shaped diagnostic the test harness already understands.
+/// Wording is "use of moved value 'X' [E500]" / "value 'X' may have been
+/// moved [E501]" — frozen so existing `// ERROR: use of moved value`
+/// annotations keep matching the testdata corpus the prior HIR-level
+/// `MoveTrackingAnalyzer` was authored against.
 fn move_diag_to_analyze(
     diag: &kestrel_ownership::move_check::MoveDiag,
 ) -> kestrel_analyze::AnalyzeDiagnostic {

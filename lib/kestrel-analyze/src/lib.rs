@@ -50,7 +50,6 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::definite_assignment::DefiniteAssignmentAnalyzer);
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
-    r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
 
     // Wave 6: Pattern checks
