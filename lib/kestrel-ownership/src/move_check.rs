@@ -106,7 +106,6 @@ fn check_body(
 ) {
     // One diagnostic per (path, body) — matches HIR `state.reported` rule.
     let mut reported: HashSet<MovePathId> = HashSet::new();
-
     for (bi, block) in body.blocks.iter().enumerate() {
         check_block(body, block, bi, paths, df, &mut reported, diags);
     }
@@ -195,9 +194,19 @@ fn check_rvalue(
     diags: &mut Diagnostics,
 ) {
     match rv {
-        Rvalue::Copy(p) | Rvalue::Move(p) | Rvalue::Ref(p) | Rvalue::RefMut(p) => {
+        // Copy / Move are unambiguous reads — observing a moved value is a
+        // bug. `Ref` and `RefMut` *can* be reads, but in MIR they're also
+        // how out-parameters get their storage (`File.init(ref var %t, fd)`
+        // writes into an as-yet-uninit `%t`). Without a way to distinguish
+        // "read this place" from "this place is the destination of a
+        // borrow-passed init", treating them as reads produces false
+        // positives on standard stdlib idioms. Conservatively skip
+        // ref/refmut reads for now — they'll be reinstated once we model
+        // out-params explicitly.
+        Rvalue::Copy(p) | Rvalue::Move(p) => {
             check_place_read(body, p, use_span, state, paths, reported, diags);
         },
+        Rvalue::Ref(_) | Rvalue::RefMut(_) => {},
         Rvalue::Const(_) => {},
         Rvalue::Op1 { arg, .. } => {
             check_value(body, arg, use_span, state, paths, reported, diags);
@@ -244,10 +253,12 @@ fn check_value(
     diags: &mut Diagnostics,
 ) {
     match v {
-        Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+        // See the comment on [`check_rvalue`] for why `Ref` / `RefMut` are
+        // not currently checked as reads.
+        Value::Copy(p) | Value::Move(p) => {
             check_place_read(body, p, use_span, state, paths, reported, diags);
         },
-        Value::Const(_) => {},
+        Value::Ref(_) | Value::RefMut(_) | Value::Const(_) => {},
     }
 }
 

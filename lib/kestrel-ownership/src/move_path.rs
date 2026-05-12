@@ -50,23 +50,38 @@ pub struct MovePathSet {
 }
 
 /// Returns true if `ty` contains a type whose copy semantics the MIR layer
-/// can't decide locally — abstract `Self`, type parameters, associated
-/// projections, or `MirTy::Error`. Used by [`MovePathSet::build`] to skip
-/// tracking these as move paths, matching the legacy HIR move-tracker's
-/// permissive "treat unresolved as copyable" rule.
-fn has_unresolved_ty(ty: &MirTy) -> bool {
+/// can't decide locally:
+///
+/// - `MirTy::TypeParam`, `MirTy::SelfType`, `MirTy::AssociatedProjection` —
+///   syntactic placeholders for types that vary per instantiation.
+/// - `MirTy::Error` — upstream inference failure; running move-check on
+///   the broken structure produces noise.
+/// - `MirTy::Named { entity, .. }` where `entity` is *neither* a
+///   `StructDef` nor an `EnumDef` in `module`. That shape shows up when
+///   lowering produces `Named { Iterator.Item }`-style references to
+///   protocol associated types — semantically equivalent to
+///   `AssociatedProjection`, just with a less precise lowering.
+///
+/// Used by [`MovePathSet::build`] to skip tracking these as move paths,
+/// matching the legacy HIR tracker's "treat unresolved as copyable" rule.
+fn has_unresolved_ty(ty: &MirTy, module: &MirModule) -> bool {
     match ty {
         MirTy::TypeParam(_)
         | MirTy::SelfType
         | MirTy::AssociatedProjection { .. }
         | MirTy::Error => true,
-        MirTy::Tuple(elems) => elems.iter().any(has_unresolved_ty),
+        MirTy::Tuple(elems) => elems.iter().any(|t| has_unresolved_ty(t, module)),
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-            has_unresolved_ty(inner)
+            has_unresolved_ty(inner, module)
         },
-        MirTy::Named { type_args, .. } => type_args.iter().any(has_unresolved_ty),
+        MirTy::Named { entity, type_args } => {
+            let is_real_def = module.structs.iter().any(|s| s.entity == *entity)
+                || module.enums.iter().any(|e| e.entity == *entity);
+            !is_real_def || type_args.iter().any(|t| has_unresolved_ty(t, module))
+        },
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().any(has_unresolved_ty) || has_unresolved_ty(ret)
+            params.iter().any(|t| has_unresolved_ty(t, module))
+                || has_unresolved_ty(ret, module)
         },
         _ => false,
     }
@@ -92,11 +107,14 @@ impl MovePathSet {
             // Types whose copy semantics depend on facts the MIR layer
             // can't resolve yet (associated-type projections, abstract
             // `Self`, raw type parameters, `MirTy::Error` from upstream
-            // failures) are treated as copyable for ownership purposes.
-            // The legacy HIR tracker took the same permissive stance for
-            // unresolved types; doing otherwise produces a flurry of
-            // false-positive E500s on perfectly fine generic code.
-            if has_unresolved_ty(&local.ty) {
+            // failures, or `MirTy::Named` referring to an associated-type
+            // entity rather than a `StructDef`/`EnumDef`) are treated as
+            // copyable for ownership purposes. The legacy HIR tracker
+            // took the same permissive stance — doing otherwise produces
+            // a flurry of false-positive E500s on perfectly fine generic
+            // code (e.g. `iter::MapIterator.next` where `item:
+            // Iterator.Item`).
+            if has_unresolved_ty(&local.ty, module) {
                 continue;
             }
             let id = MovePathId(paths.len() as u32);

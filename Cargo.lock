@@ -1104,6 +1104,7 @@ dependencies = [
  "kestrel-hecs",
  "kestrel-mir",
  "kestrel-mir-lower",
+ "kestrel-ownership",
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-type-infer",

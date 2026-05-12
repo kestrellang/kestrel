@@ -234,6 +234,11 @@ pub fn apply_statement(state: &mut InitState, stmt: &Statement, paths: &MovePath
             // shape like `x = move x` thus ends with `x` still init (the kill
             // is overwritten by the gen on the same path).
             kill_rvalue(state, rvalue, paths, site.as_ref());
+            // `RefMut(p)` in an Rvalue position is Kestrel's out-parameter
+            // shape — the borrowed callee may write into `p`. Conservatively
+            // mark the target init (the data-flow lattice already treats
+            // mark_init as idempotent on already-init paths).
+            gen_rvalue_refmuts(state, rvalue, paths);
             if let Some(p) = paths.lookup_place(dest) {
                 state.mark_init(p);
             }
@@ -241,6 +246,14 @@ pub fn apply_statement(state: &mut InitState, stmt: &Statement, paths: &MovePath
         StatementKind::Call { dest, args, .. } => {
             for arg in args {
                 kill_value(state, arg, paths, site.as_ref());
+            }
+            // After the call returns, every `RefMut(p)` arg leaves `p` in a
+            // state where the callee may have written it. Promote `p`'s
+            // path to `DefinitelyInit` so a subsequent read doesn't trip
+            // E500 on a value the callee just initialised (e.g.
+            // `File.init(ref var %t, fd)` then `copy %t`).
+            for arg in args {
+                gen_value_refmuts(state, arg, paths);
             }
             if let Some(dest_place) = dest
                 && let Some(p) = paths.lookup_place(dest_place)
@@ -250,6 +263,55 @@ pub fn apply_statement(state: &mut InitState, stmt: &Statement, paths: &MovePath
         },
         // Compiler-inserted drops don't move from the user's perspective.
         StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {},
+    }
+}
+
+fn gen_rvalue_refmuts(state: &mut InitState, rv: &Rvalue, paths: &MovePathSet) {
+    match rv {
+        Rvalue::RefMut(p) => {
+            if let Some(path) = paths.lookup_place(p) {
+                state.mark_init(path);
+            }
+        },
+        Rvalue::Op1 { arg, .. } => gen_value_refmuts(state, arg, paths),
+        Rvalue::Op2 { lhs, rhs, .. } => {
+            gen_value_refmuts(state, lhs, paths);
+            gen_value_refmuts(state, rhs, paths);
+        },
+        Rvalue::Op3 { a, b, c, .. } => {
+            gen_value_refmuts(state, a, paths);
+            gen_value_refmuts(state, b, paths);
+            gen_value_refmuts(state, c, paths);
+        },
+        Rvalue::Construct { fields, .. } => {
+            for (_, v) in fields {
+                gen_value_refmuts(state, v, paths);
+            }
+        },
+        Rvalue::Tuple(vs) | Rvalue::ArrayLiteral { values: vs, .. } => {
+            for v in vs {
+                gen_value_refmuts(state, v, paths);
+            }
+        },
+        Rvalue::EnumVariant { payload, .. } => {
+            for v in payload {
+                gen_value_refmuts(state, v, paths);
+            }
+        },
+        Rvalue::ApplyPartial { captures, .. } => {
+            for v in captures {
+                gen_value_refmuts(state, v, paths);
+            }
+        },
+        Rvalue::Move(_) | Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::Const(_) => {},
+    }
+}
+
+fn gen_value_refmuts(state: &mut InitState, v: &Value, paths: &MovePathSet) {
+    if let Value::RefMut(p) = v
+        && let Some(path) = paths.lookup_place(p)
+    {
+        state.mark_init(path);
     }
 }
 
