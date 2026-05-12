@@ -56,11 +56,6 @@ pub struct MovePathSet {
 ///   syntactic placeholders for types that vary per instantiation.
 /// - `MirTy::Error` — upstream inference failure; running move-check on
 ///   the broken structure produces noise.
-/// - `MirTy::Named { entity, .. }` where `entity` is *neither* a
-///   `StructDef` nor an `EnumDef` in `module`. That shape shows up when
-///   lowering produces `Named { Iterator.Item }`-style references to
-///   protocol associated types — semantically equivalent to
-///   `AssociatedProjection`, just with a less precise lowering.
 ///
 /// Used by [`MovePathSet::build`] to skip tracking these as move paths,
 /// matching the legacy HIR tracker's "treat unresolved as copyable" rule.
@@ -74,10 +69,8 @@ fn has_unresolved_ty(ty: &MirTy, module: &MirModule) -> bool {
         MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
             has_unresolved_ty(inner, module)
         },
-        MirTy::Named { entity, type_args } => {
-            let is_real_def = module.structs.iter().any(|s| s.entity == *entity)
-                || module.enums.iter().any(|e| e.entity == *entity);
-            !is_real_def || type_args.iter().any(|t| has_unresolved_ty(t, module))
+        MirTy::Named { type_args, .. } => {
+            type_args.iter().any(|t| has_unresolved_ty(t, module))
         },
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().any(|t| has_unresolved_ty(t, module))
