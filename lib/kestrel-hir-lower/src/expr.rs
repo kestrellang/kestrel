@@ -769,6 +769,74 @@ impl LowerCtx<'_> {
                     }
                 }
 
+                // Type-prefix protocol-extension static method call:
+                // `A.helper()` where `helper` lives in `extend SomeProto` and
+                // `A: SomeProto`. The full-path collapse to `Call(Def(helper))`
+                // loses the receiver `A`, so MIR can't compute the witness
+                // self_type. Emit `MethodCall(Def(A), "helper")` instead, so
+                // `lower_method_call` uses A's type as self_type.
+                {
+                    use kestrel_ast_builder::NodeKind;
+                    if segments.len() >= 2 {
+                        let prefix_names: Vec<String> = segments[..segments.len() - 1]
+                            .iter()
+                            .map(|s| s.name.clone())
+                            .collect();
+                        let prefix_result = self.ctx.query(ResolveValuePath {
+                            segments: prefix_names,
+                            context: self.owner,
+                            root: self.root,
+                        });
+                        let full_names: Vec<String> =
+                            segments.iter().map(|s| s.name.clone()).collect();
+                        let full_result = self.ctx.query(ResolveValuePath {
+                            segments: full_names,
+                            context: self.owner,
+                            root: self.root,
+                        });
+                        let prefix_is_type = matches!(
+                            &prefix_result,
+                            ValueResolution::Def(e) if matches!(
+                                self.ctx.get::<NodeKind>(*e),
+                                Some(&NodeKind::Struct | &NodeKind::Enum)
+                            )
+                        );
+                        let method_via_proto_ext = matches!(
+                            &full_result,
+                            ValueResolution::Def(method)
+                                if self.ctx.get::<NodeKind>(*method) == Some(&NodeKind::Function)
+                                && self.ctx.parent_of(*method).is_some_and(|p|
+                                    self.ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension)
+                                    && self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                                        extension: p,
+                                        root: self.root,
+                                    }).is_some_and(|target|
+                                        self.ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
+                                    )
+                                )
+                        );
+                        if prefix_is_type && method_via_proto_ext {
+                            let prefix_slice = &segments[..segments.len() - 1];
+                            let prefix_span = Span::new(
+                                segments[0].span.file_id,
+                                segments[0].span.start..prefix_slice.last().unwrap().span.end,
+                            );
+                            let receiver = self.lower_path(body, prefix_slice, &prefix_span);
+                            let last = &segments[segments.len() - 1];
+                            let lowered_type_args = last.type_args.as_ref().map(|args| {
+                                args.iter().map(|t| self.lower_type(t)).collect()
+                            });
+                            return self.alloc_expr(HirExpr::MethodCall {
+                                receiver,
+                                method: name_from_ast(last.name.clone()),
+                                type_args: lowered_type_args,
+                                args: lowered_args,
+                                span: span.clone(),
+                            });
+                        }
+                    }
+                }
+
                 // Regular direct call (lowered as-is)
                 let lowered_callee = self.lower_expr(body, callee);
                 self.alloc_expr(HirExpr::Call {

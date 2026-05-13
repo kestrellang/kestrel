@@ -8,6 +8,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
+use crate::conformances::ConformingProtocols;
 use crate::extensions::ExtensionsFor;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
@@ -365,6 +366,43 @@ fn walk_path_from(
                     .collect();
                 if !static_methods.is_empty() {
                     return classify_value_results(ctx, static_methods);
+                }
+            }
+
+            // Static methods declared on extensions of protocols `current`
+            // conforms to. Mirrors how instance-method dispatch already walks
+            // conforming protocols (see `try_resolve_through_protocol` in
+            // kestrel-type-infer). Without this, `A.staticMethod()` fails
+            // when `staticMethod` lives in `extend SomeProtocol { ... }` and
+            // `A: SomeProtocol`.
+            let protocols = ctx.query(ConformingProtocols {
+                entity: current,
+                root,
+            });
+            for &proto in &protocols {
+                let proto_extensions = ctx.query(ExtensionsFor {
+                    target: proto,
+                    root,
+                });
+                for &ext in &proto_extensions {
+                    let ext_children = ctx.query(VisibleChildrenByName {
+                        parent: ext,
+                        name: segment.clone(),
+                        context,
+                    });
+                    let static_methods: Vec<Entity> = ext_children
+                        .into_iter()
+                        .filter(|&e| {
+                            ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
+                                && (ctx.has::<Static>(e)
+                                    || ctx
+                                        .get::<Callable>(e)
+                                        .is_some_and(|c| c.receiver.is_none()))
+                        })
+                        .collect();
+                    if !static_methods.is_empty() {
+                        return classify_value_results(ctx, static_methods);
+                    }
                 }
             }
         }

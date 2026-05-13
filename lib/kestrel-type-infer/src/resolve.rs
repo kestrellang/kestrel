@@ -604,6 +604,29 @@ impl TypeResolver for WorldResolver<'_> {
             all_candidates.extend(ext_children.iter());
         }
 
+        // Also search extensions on protocols this type conforms to —
+        // a static method defined in `extend SomeProto { ... }` is callable
+        // via any conforming type. Mirrors the instance-method case where
+        // `TypeMembersByName` already walks `ProtocolExtension` sources.
+        let conforming = self.ctx.query(kestrel_name_res::ConformingProtocols {
+            entity: *entity,
+            root: self.root,
+        });
+        for &proto in &conforming {
+            let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
+                target: proto,
+                root: self.root,
+            });
+            for &ext in &proto_extensions {
+                let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                    parent: ext,
+                    name: name.to_string(),
+                    context: self.body_owner,
+                });
+                all_candidates.extend(ext_children.iter());
+            }
+        }
+
         // Filter to static members only
         let static_candidates: Vec<kestrel_hecs::Entity> = all_candidates
             .into_iter()
