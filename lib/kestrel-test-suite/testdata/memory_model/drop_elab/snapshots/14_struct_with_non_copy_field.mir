@@ -5,6 +5,8 @@ func Test.example() -> ()
         %_t0: Test.Inner
         %_t1: Test.Outer
         %_init__t1: bool
+        %_drop_arg: Test.Inner
+        %_drop_arg: Test.Outer
 
     bb0:
         %_init__t1 = false
@@ -13,8 +15,9 @@ func Test.example() -> ()
         %_init__t1 = true
         %self = move %_t1
         %_init__t1 = false
-        call Test.Inner.deinit(ref var %_t0)
-        call Test.Outer.deinit(ref var %self)
-        call Test.Inner.deinit(ref var %self.inner)
+        %_drop_arg = move %_t0
+        call __drop$Test.Inner(move %_drop_arg)
+        %_drop_arg = move %self
+        call __drop$Test.Outer(move %_drop_arg)
         return ()
 }

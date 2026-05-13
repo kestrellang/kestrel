@@ -4,6 +4,7 @@ func Test.example() -> ()
         %h: Test.Handle
         %_t0: Test.Handle
         %_init__t0: bool
+        %_drop_arg: Test.Handle
 
     bb0:
         %_init__t0 = false
@@ -11,6 +12,7 @@ func Test.example() -> ()
         %_init__t0 = true
         %self = move %_t0
         %_init__t0 = false
-        call Test.Handle.deinit(ref var %self)
+        %_drop_arg = move %self
+        call __drop$Test.Handle(move %_drop_arg)
         return ()
 }

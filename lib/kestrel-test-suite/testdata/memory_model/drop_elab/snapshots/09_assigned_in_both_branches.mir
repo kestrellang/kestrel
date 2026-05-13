@@ -9,6 +9,7 @@ func Test.example(cond: &bool) -> ()
         %_init__t0: bool
         %_init__t2: bool
         %_init__t3: bool
+        %_drop_arg: Test.Handle
 
     bb0:
         %_init__t0 = false
@@ -37,6 +38,7 @@ func Test.example(cond: &bool) -> ()
         jump bb3
 
     bb3:
-        call Test.Handle.deinit(ref var %h)
+        %_drop_arg = move %h
+        call __drop$Test.Handle(move %_drop_arg)
         return copy %_t1
 }

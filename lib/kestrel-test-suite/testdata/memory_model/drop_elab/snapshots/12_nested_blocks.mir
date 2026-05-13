@@ -6,6 +6,7 @@ func Test.example() -> ()
         %_t0: Test.Handle
         %_t1: func escaping() -> ()
         %_init__t0: bool
+        %_drop_arg: Test.Handle
 
     bb0:
         %_init__t0 = false
@@ -14,6 +15,7 @@ func Test.example() -> ()
         %self = move %_t0
         %_init__t0 = false
         %_t1 = apply partial Test.example.closure.0()
-        call Test.Handle.deinit(ref var %self)
+        %_drop_arg = move %self
+        call __drop$Test.Handle(move %_drop_arg)
         return copy %_t1
 }

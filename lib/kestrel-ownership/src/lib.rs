@@ -23,6 +23,7 @@
 pub mod dataflow;
 pub mod drop_elab;
 pub mod drop_expand;
+pub mod drop_shim;
 pub mod move_check;
 pub mod move_path;
 
@@ -43,11 +44,16 @@ pub fn run(module: &mut MirModule) -> Diagnostics {
     let mut diags = Diagnostics::default();
     move_check::run(module, &mut diags);
     drop_elab::run(module);
-    // Translate the abstract Drop / DropIf statements drop-elab emitted
-    // into concrete `Call(user_deinit)` plus recursive structural field
-    // drops that codegen knows how to lower. Trivial drops collapse to
-    // nothing here. See `drop_expand` for the limitations (enum payload
-    // drops and DropIf flag-branching are still TODO).
-    drop_expand::run(module);
+    // Synthesize one `__drop$T(self: T)` function per non-trivial
+    // nominal type. The shims hold the user-deinit Call, the
+    // structural field drops, and the enum Switch on discriminant —
+    // all the drop-glue logic in one place per type. Returns a
+    // `nominal_entity → shim_entity` map for the next pass.
+    let shim_map = drop_shim::run(module);
+    // Translate the abstract `Drop` / `DropIf` statements into
+    // `Call(__drop$T, [Move(p)])` shim invocations. DropIf splits
+    // the block with a runtime branch on the flag. After this pass
+    // no `Drop` / `DropIf` statements remain.
+    drop_expand::run(module, &shim_map);
     diags
 }
