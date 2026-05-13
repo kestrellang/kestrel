@@ -41,12 +41,20 @@ use crate::move_path::{MovePathId, MovePathSet};
 pub struct InitState {
     pub def_init: HashSet<MovePathId>,
     pub may_init: HashSet<MovePathId>,
-    /// For each path that has been killed somewhere on a path reaching this
-    /// point, the span of (one of) the kill site(s). Used by move-check to
-    /// attach a "value moved here" secondary label to E500/E501. Only one
-    /// site is retained per path; on join, the deeper-into-the-block (later
-    /// inserted) wins arbitrarily — tests only need *some* valid pointer to
-    /// where the move happened.
+    /// Paths that have been moved-out (killed) on at least one reaching CFG
+    /// path AND not subsequently re-initialised. Used by move-check to
+    /// distinguish a real use-after-move from a CFG join over an unbound
+    /// branch (e.g. the body of `while let .Some(x) = … { … }` joins the
+    /// "x bound" Some arm with the "x not bound" None arm — `x` ends up
+    /// `MaybeInit` at the body, but it was never *moved*; reporting that
+    /// as E501 is a false positive). The set is unioned at joins (parallel
+    /// to `may_init`) and cleared per-path on `mark_init` (a fresh
+    /// initialisation overwrites any prior kill).
+    pub moved: HashSet<MovePathId>,
+    /// For each moved path, the span of (one of) the kill site(s). Used by
+    /// move-check to attach a "value moved here" secondary label to
+    /// E500/E501. Only one site is retained per path; on join, the existing
+    /// site wins on collision — tests only need *some* valid pointer.
     pub move_sites: HashMap<MovePathId, Span>,
 }
 
@@ -61,6 +69,7 @@ impl InitState {
     pub fn mark_init(&mut self, path: MovePathId) {
         self.def_init.insert(path);
         self.may_init.insert(path);
+        self.moved.remove(&path);
         self.move_sites.remove(&path);
     }
 
@@ -69,6 +78,7 @@ impl InitState {
     pub fn kill(&mut self, path: MovePathId) {
         self.def_init.remove(&path);
         self.may_init.remove(&path);
+        self.moved.insert(path);
     }
 
     /// Same as [`Self::kill`], but records `site` as the move-site span for
@@ -76,18 +86,20 @@ impl InitState {
     pub fn kill_with_span(&mut self, path: MovePathId, site: Span) {
         self.def_init.remove(&path);
         self.may_init.remove(&path);
+        self.moved.insert(path);
         self.move_sites.insert(path, site);
     }
 
     /// Join with another state (predecessor merge):
     /// - def_init = self ∩ other
     /// - may_init = self ∪ other
-    /// - move_sites = union (predecessor's site wins on collision — arbitrary
-    ///   but stable across runs).
+    /// - moved    = self ∪ other
+    /// - move_sites = union (existing wins on collision — arbitrary but
+    ///   stable across runs).
     ///
-    /// Returns true if either bitset changed. `move_sites` updates don't
-    /// drive worklist propagation, since the dataflow lattice is already
-    /// monotone in the bitsets.
+    /// Returns true if any of the bitsets changed. `move_sites` updates
+    /// don't drive worklist propagation, since the dataflow lattice is
+    /// already monotone in the bitsets.
     pub fn join(&mut self, other: &InitState) -> bool {
         let mut changed = false;
         // Intersect def_init
@@ -100,6 +112,12 @@ impl InitState {
         let len_before = self.may_init.len();
         self.may_init.extend(other.may_init.iter().copied());
         if self.may_init.len() != len_before {
+            changed = true;
+        }
+        // Union moved
+        let len_before = self.moved.len();
+        self.moved.extend(other.moved.iter().copied());
+        if self.moved.len() != len_before {
             changed = true;
         }
         // Union move_sites (existing wins on collision).
@@ -120,6 +138,15 @@ impl InitState {
     /// partition the lattice.
     pub fn is_maybe_init(&self, path: MovePathId) -> bool {
         self.may_init.contains(&path)
+    }
+
+    /// True iff the path has been moved-out somewhere on a reaching CFG
+    /// path *and* not subsequently re-initialised. Used by move-check to
+    /// gate E500/E501 emission so that a path which was never actually
+    /// moved doesn't produce a "may have been moved" diagnostic just from
+    /// a CFG join over an unbound branch.
+    pub fn was_moved(&self, path: MovePathId) -> bool {
+        self.moved.contains(&path)
     }
 
     /// The recorded move site for `path`, if any. `None` means the path

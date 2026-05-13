@@ -305,11 +305,22 @@ fn check_place_read(
     if reported.contains(&path) {
         return;
     }
-    let def_init = state.is_definitely_init(path);
-    let may_init = state.is_maybe_init(path);
-    if def_init {
+    if state.is_definitely_init(path) {
         return;
     }
+    // Suppress when the path was never actually moved on any reaching CFG
+    // path. A `may_init=true, def_init=false, was_moved=false` shape comes
+    // from CFG joins over branches that bind the local in only some arms
+    // (e.g. `while let .Some(x) = … { … }` joins the Some arm — which
+    // binds `x` — with the None arm — which doesn't — before the loop
+    // body). The dataflow can't see that the body is only reached via the
+    // Some arm, but there's no actual move to complain about. The
+    // never-initialised case (`may_init=false, was_moved=false`) is
+    // covered by other analyzers (E102 / E105) that operate on the HIR.
+    if !state.was_moved(path) {
+        return;
+    }
+    let may_init = state.is_maybe_init(path);
     let local = paths.get(path).local;
     let local_name = body.locals[local.index()].name.clone();
     let kind = if may_init {
