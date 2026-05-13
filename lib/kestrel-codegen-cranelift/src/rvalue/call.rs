@@ -487,7 +487,10 @@ fn compile_call_arg(
                     _ => false,
                 };
                 if promoted_to_slot {
-                    let addr = place::compile_place_read(ctx, state, builder, place)?;
+                    // Explicitly want the slot address so we can load the scalar
+                    // out of it below — compile_place_read now loads through
+                    // stack-local non-aggregates, which would double-load.
+                    let addr = place::compile_place_addr(ctx, state, builder, place)?;
                     // For `Ref(scalar)`, the callee expects the inner scalar
                     // type, not the pointer — translate the unwrapped type.
                     let cl_ty =
