@@ -13,5 +13,5 @@ struct Point {
 }
 
 func make() -> Point {
-    Self(x: 0) // ERROR: 'Self'
+    Self(x: 0) // ERROR: 'Self' is only valid
 }

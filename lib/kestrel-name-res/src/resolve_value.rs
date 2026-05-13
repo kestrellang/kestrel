@@ -96,8 +96,10 @@ impl QueryFn for ResolveValuePath {
 /// `Self` a concrete meaning. Mirrors `resolve_self_entity_from` in
 /// `kestrel-type-infer` (which already handles this for type position).
 ///
-/// PR #1 supports concrete-type enclosure only. Returns `None` for protocol
-/// enclosures (caller emits a "not supported" diagnostic until PR #2).
+/// For concrete types (struct/enum, or an extension on a concrete type),
+/// `Self()` is just a name for the type. For protocols, `Self()` is
+/// polymorphic — callers route it through witness dispatch in type-infer,
+/// the same way `T()` works when `T: SomeProtocol`.
 fn try_resolve_self_value(
     ctx: &QueryContext<'_>,
     context: Entity,
@@ -107,21 +109,14 @@ fn try_resolve_self_value(
     while let Some(entity) = current {
         match ctx.get::<NodeKind>(entity) {
             Some(&NodeKind::Extension) => {
-                let target = ctx.query(crate::ExtensionTargetEntity {
+                return ctx.query(crate::ExtensionTargetEntity {
                     extension: entity,
                     root,
-                })?;
-                // Protocol-target extensions need witness dispatch; deferred to PR #2.
-                if ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol) {
-                    return None;
-                }
-                return Some(target);
+                });
             },
-            Some(&NodeKind::Struct | &NodeKind::Enum) => {
+            Some(&NodeKind::Struct | &NodeKind::Enum | &NodeKind::Protocol) => {
                 return Some(entity);
             },
-            // Protocol body: deferred to PR #2 (needs witness-init dispatch).
-            Some(&NodeKind::Protocol) => return None,
             _ => current = ctx.parent_of(entity),
         }
     }

@@ -1660,10 +1660,11 @@ fn solve_call(
             ctx.equal(result, ret, span);
             SolveResult::Solved
         },
-        TyKind::Param { .. } => {
-            // `T(...)` where T is a generic param → init call on the bound.
+        TyKind::Param { .. } | TyKind::SelfType { .. } => {
+            // `T(...)` where T is a generic param, or `Self()` whose callee
+            // already resolved to SelfType — dispatch as init on the bound.
             // The init's declared return is () but the actual result is an
-            // instance of the type param.
+            // instance of the type / Self.
             let init_result = ctx.fresh();
             let res = solve_member(
                 ctx,
@@ -1686,6 +1687,36 @@ fn solve_call(
             ctx.equal(result, final_result, span);
             res
         },
+        TyKind::Protocol { entity, .. } => {
+            // `Self()` in a protocol body or protocol extension reaches
+            // here with the protocol entity as callee. Treat the call as
+            // an init on `Self` (the conforming type, abstract here), so
+            // monomorphization gets `MirTy::SelfType` and substitutes the
+            // caller's concrete type. The protocol entity itself is never
+            // constructible — there's no other path that lands `Def(Protocol)`
+            // as a Call callee.
+            let self_tv = ctx.self_type_ty(entity);
+            let init_result = ctx.fresh();
+            let res = solve_member(
+                ctx,
+                self_tv,
+                "init",
+                args,
+                init_result,
+                expr,
+                true,
+                true,
+                &[],
+                span.clone(),
+            );
+            let final_result = if let Some(&init_entity) = ctx.resolutions.get(&expr) {
+                wrap_init_call_result(ctx, init_entity, self_tv, &[], &span)
+            } else {
+                self_tv
+            };
+            ctx.equal(result, final_result, span);
+            res
+        },
         TyKind::Enum { .. } if args.is_empty() => {
             // Zero-arg call on an enum value is a no-op (e.g., Color.Red())
             ctx.equal(result, callee, span);
@@ -1693,8 +1724,6 @@ fn solve_call(
         },
         TyKind::Struct { .. }
         | TyKind::Enum { .. }
-        | TyKind::Protocol { .. }
-        | TyKind::SelfType { .. }
         | TyKind::TypeAlias { .. }
         | TyKind::AssocProjection { .. } => {
             // Instance subscript call (e.g. dict(key)).

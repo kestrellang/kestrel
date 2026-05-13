@@ -421,7 +421,7 @@ impl LowerCtx<'_> {
                 self.ctx.accumulate(
                     Diagnostic::error()
                         .with_message(
-                            "'Self' is only valid inside an 'extend' or 'protocol' body",
+                            "'Self' is only valid inside a type, extension, or protocol body",
                         )
                         .with_labels(vec![
                             Label::primary(span.file_id, span.range())

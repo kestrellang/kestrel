@@ -1334,6 +1334,39 @@ fn gen_closure(
 /// Instantiate an entity, using explicit type args if provided.
 /// Instantiate a generic entity, returning (entity_type, fresh_type_arg_vars).
 /// The type arg vars can be recorded in ctx.type_args for later retrieval.
+/// True when `protocol` is the enclosing Self for the current body —
+/// i.e. some ancestor of `ctx.owner` is either `protocol` itself or an
+/// `Extension` whose target resolves to `protocol`.
+///
+/// Used to lower `Def(Protocol)` values as `SelfType` rather than `Named`,
+/// so MIR sees `MirTy::SelfType` and monomorphization substitutes the
+/// concrete conforming type at the call site.
+fn is_enclosing_self_protocol(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    let qctx = ctx.query_ctx;
+    let mut current = Some(ctx.owner);
+    while let Some(entity) = current {
+        match qctx.get::<NodeKind>(entity) {
+            Some(&NodeKind::Protocol) if entity == protocol => return true,
+            Some(&NodeKind::Extension) => {
+                if qctx
+                    .query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: entity,
+                        root: ctx.root,
+                    })
+                    == Some(protocol)
+                {
+                    return true;
+                }
+            },
+            // Struct/Enum/Module/etc. — Self refers to those, not the protocol.
+            Some(&NodeKind::Struct | &NodeKind::Enum) => return false,
+            _ => {},
+        }
+        current = qctx.parent_of(entity);
+    }
+    false
+}
+
 fn instantiate_entity_with_args(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -1550,7 +1583,13 @@ fn instantiate_entity_inner(
             }
         },
 
-        // Types (struct, enum, protocol): return Named type with fresh args
+        // Types (struct, enum, protocol): return Named type with fresh args.
+        // Protocols reached as values (`Self()`, `Self.method()`) from inside
+        // the protocol's own body or an extension on it must surface as
+        // `SelfType` so monomorphization substitutes the concrete conformer.
+        Some(NodeKind::Protocol) if is_enclosing_self_protocol(ctx, entity) => {
+            ctx.self_type_ty(entity)
+        },
         Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
             ctx.named(entity, fresh_type_args)
         },
