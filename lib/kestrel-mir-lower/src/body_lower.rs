@@ -1891,6 +1891,36 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// Uses the already-lowered `StructDef` when available; otherwise walks ECS
     /// children directly. Matches the "skip computed/static" rule from
     /// `struct_lower` so the index line up with the memberwise-init arg order.
+    /// Field types in declaration order, with the struct's type params
+    /// substituted out from `result_ty`'s type args. Returns an empty vec
+    /// when the struct hasn't been MIR-lowered yet (memberwise construct
+    /// without field-type info still works via raw `arg` values).
+    fn ordered_field_types(&self, struct_entity: Entity, result_ty: &MirTy) -> Vec<MirTy> {
+        let Some(s) = self
+            .ctx
+            .module
+            .structs
+            .iter()
+            .find(|s| s.entity == struct_entity)
+        else {
+            return Vec::new();
+        };
+        let type_args: Vec<MirTy> = match result_ty {
+            MirTy::Named { type_args, .. } => type_args.clone(),
+            _ => Vec::new(),
+        };
+        let subst: std::collections::HashMap<Entity, MirTy> = s
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(tp, ty)| (tp.entity, ty.clone()))
+            .collect();
+        s.fields
+            .iter()
+            .map(|f| self.substitute_mir_type(&f.ty, &subst))
+            .collect()
+    }
+
     fn ordered_field_names(&self, struct_entity: Entity) -> Vec<String> {
         if let Some(s) = self
             .ctx
@@ -2986,7 +3016,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // (sibling-module ordering; same class of issue as
                 // `resolve_field_type_via_ecs`). Without the fallback, field
                 // names collapse to `_0, _1, …` and codegen rejects them.
+                //
+                // Args arriving here went through `lower_call_args` →
+                // `arg_for_value`, which rewrites non-Copy values as
+                // `Value::Ref`. That's correct for call-arg ABI but wrong
+                // for `Rvalue::Construct`, whose field-value codegen
+                // (`compile_value` → `place_addr` for Ref) would store the
+                // place's *address* rather than its bytes, truncating a
+                // non-Copy aggregate (e.g., a 16-byte `FuncThick`) to an
+                // 8-byte pointer and leaving the rest uninitialized.
+                // Re-mode each arg as if it were the RHS of an assign
+                // statement so the field actually receives its value.
                 let field_names = self.ordered_field_names(*func);
+                let field_tys = self.ordered_field_types(*func, &result_ty);
                 let fields: Vec<(String, Value)> = call_args
                     .into_iter()
                     .enumerate()
@@ -2995,7 +3037,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             .get(i)
                             .cloned()
                             .unwrap_or_else(|| format!("_{i}"));
-                        (name, arg)
+                        let value = match (&arg, field_tys.get(i)) {
+                            (Value::Ref(p) | Value::RefMut(p), Some(field_ty)) => {
+                                if field_ty.copy_behavior(&self.ctx.module)
+                                    == CopyBehavior::None
+                                {
+                                    Value::Move(p.clone())
+                                } else {
+                                    Value::Copy(p.clone())
+                                }
+                            },
+                            _ => arg,
+                        };
+                        (name, value)
                     })
                     .collect();
                 let dest = self.fresh_temp(result_ty.clone());

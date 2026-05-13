@@ -4,19 +4,20 @@ func Test.example() -> ()
         %o: Test.Outer
         %_t0: Test.Inner
         %_t1: Test.Outer
+        %_init__t0: bool
         %_init__t1: bool
-        %_drop_arg: Test.Inner
         %_drop_arg: Test.Outer
 
     bb0:
+        %_init__t0 = false
         %_init__t1 = false
         %_t0 = construct Test.Inner { x: i64.literal 1 }
-        %_t1 = construct Test.Outer { inner: ref %_t0 }
+        %_init__t0 = true
+        %_t1 = construct Test.Outer { inner: move %_t0 }
         %_init__t1 = true
+        %_init__t0 = false
         %self = move %_t1
         %_init__t1 = false
-        %_drop_arg = move %_t0
-        call __drop$Test.Inner(move %_drop_arg)
         %_drop_arg = move %self
         call __drop$Test.Outer(move %_drop_arg)
         return ()
