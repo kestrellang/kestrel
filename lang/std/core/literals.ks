@@ -84,7 +84,13 @@ public protocol _ExpressibleByArrayLiteral {
 
     /// @name Literal Bridge
     /// Compiler-emitted init taking a raw pointer and count.
-    init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount _arrayLiteralCount: lang.i64)
+    ///
+    /// Both params are `consuming`: the compiler hands ownership of the
+    /// stack buffer's address (and the count) over to the implementation,
+    /// which stores them in its own storage. This convention is what the
+    /// MIR lowering's structural predicate looks for — implementations
+    /// that deviate will be silently skipped during literal lowering.
+    init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64)
 }
 
 /// User-facing protocol for array-literal lowering.

@@ -3408,29 +3408,25 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Resolve the internal array-literal initializer and its concrete element type.
     ///
-    /// Stage 5 wraps default-borrowing params in `Ref(_)`, so the bridge init
-    /// `init(_arrayLiteralPointer: ptr[T], _arrayLiteralCount: i64)` shows up
-    /// in MIR as `(&var Self, &Pointer[T], &I64)` rather than the original
-    /// `(&var Self, Pointer[T], I64)`. The predicate and the element-type
-    /// extraction both strip those outer Ref wrappers.
+    /// Matches the exact shape declared by `_ExpressibleByArrayLiteral`:
+    /// `(self: &var Self, _arrayLiteralPointer: consuming ptr[T], _arrayLiteralCount: consuming i64)`.
+    /// The `consuming` annotations leave the param types unwrapped (Stage 5
+    /// only wraps default-borrowing params in `Ref`), so the predicate is
+    /// the literal shape — no peek-through-Ref. Implementations that drift
+    /// from this convention will not be found, and literal lowering will
+    /// fall through to a raw `Rvalue::ArrayLiteral`, which is the desired
+    /// "surface the bug" outcome rather than a silent semantic mismatch.
     fn resolve_array_literal_init(&self, result_ty: &MirTy) -> Option<(Entity, MirTy, Vec<MirTy>)> {
         let MirTy::Named { entity, .. } = result_ty else {
             return None;
         };
 
-        fn unwrap_ref(t: &MirTy) -> &MirTy {
-            match t {
-                MirTy::Ref(inner) | MirTy::RefMut(inner) => inner,
-                other => other,
-            }
-        }
-
         let init_func = self.ctx.module.functions.iter().find(|f| {
             matches!(f.kind, FunctionKind::Initializer { parent } if parent == *entity)
                 && f.params.len() == 3
                 && matches!(f.params[0].ty, MirTy::RefMut(_))
-                && matches!(unwrap_ref(&f.params[1].ty), MirTy::Pointer(_))
-                && matches!(unwrap_ref(&f.params[2].ty), MirTy::I64)
+                && matches!(f.params[1].ty, MirTy::Pointer(_))
+                && matches!(f.params[2].ty, MirTy::I64)
         })?;
         let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
         let subst: HashMap<Entity, MirTy> = init_func
@@ -3439,8 +3435,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             .zip(type_args.iter())
             .map(|(tp, ty)| (tp.entity, ty.clone()))
             .collect();
-        let ptr_ty =
-            self.substitute_mir_type(unwrap_ref(&init_func.params.get(1)?.ty), &subst);
+        let ptr_ty = self.substitute_mir_type(&init_func.params.get(1)?.ty, &subst);
         let MirTy::Pointer(element_ty) = ptr_ty else {
             return None;
         };

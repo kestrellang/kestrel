@@ -414,7 +414,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     /// let arr = [1, 2, 3];   // emitted by the compiler as a call to this init
     /// ```
-    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 
