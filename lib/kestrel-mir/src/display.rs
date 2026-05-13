@@ -620,6 +620,17 @@ impl fmt::Display for FunctionDefDisplay<'_> {
                             self.module.resolve_name(*protocol),
                         )?;
                     },
+                    WhereConstraint::NotImplements {
+                        type_param,
+                        protocol,
+                    } => {
+                        write!(
+                            f,
+                            "{}: not {}",
+                            self.module.resolve_name(*type_param),
+                            self.module.resolve_name(*protocol),
+                        )?;
+                    },
                     WhereConstraint::TypeEquals {
                         base,
                         associated,

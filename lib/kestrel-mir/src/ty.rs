@@ -417,16 +417,40 @@ fn fold_field_copy_behavior<'a, I: IntoIterator<Item = &'a MirTy>>(
 
 /// Walk the where clause for `T: P` constraints and check whether `P`
 /// (or any of its parent protocols) is the builtin `Copyable` or
-/// `Cloneable`. Falls back to `CopyBehavior::None` if no such constraint
-/// applies.
+/// `Cloneable`. Defaults to `CopyBehavior::Bitwise` for unconstrained type
+/// parameters — Kestrel's type system requires `T` to be `Copyable` unless
+/// the user explicitly opts out via `where T: not Copyable`, so the move-
+/// check treats unconstrained `T` as Copy (which avoids false positives on
+/// `let y = self.t; self.t = self.t.successor()` patterns in generic stdlib
+/// iterator code). An explicit `T: not Copyable` `NegativeBound` flips the
+/// answer back to `None` so move-check tracks the affine binding.
 fn type_param_copy_behavior(
     type_param: Entity,
     module: &MirModule,
     where_clause: Option<&WhereClause>,
 ) -> CopyBehavior {
     let Some(where_clause) = where_clause else {
+        // Without constraint info we can't see a `: not Copyable` bound,
+        // so default to the conservative "may be non-Copy" answer — this
+        // path is the verifier's view, where treating an unconstrained
+        // generic as affine is fine (rejecting `Value::Move` on it would
+        // be over-strict but the verifier path doesn't reach here for
+        // typical generic locals).
         return CopyBehavior::None;
     };
+    // Explicit opt-out wins over everything: `T: not Copyable` makes the
+    // type-param affine even if other clauses happen to mention Copyable.
+    for constraint in &where_clause.constraints {
+        if let WhereConstraint::NotImplements {
+            type_param: tp,
+            protocol,
+        } = constraint
+            && *tp == type_param
+            && protocol_implies_copyable(*protocol, module)
+        {
+            return CopyBehavior::None;
+        }
+    }
     for constraint in &where_clause.constraints {
         let WhereConstraint::Implements {
             type_param: tp,
@@ -442,7 +466,9 @@ fn type_param_copy_behavior(
             return CopyBehavior::Bitwise;
         }
     }
-    CopyBehavior::None
+    // Unconstrained type parameters default to Copyable in Kestrel's
+    // semantics; only explicit `: not Copyable` opts out.
+    CopyBehavior::Bitwise
 }
 
 /// True if `protocol` is `Copyable`/`Cloneable` or transitively extends

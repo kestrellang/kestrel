@@ -168,6 +168,17 @@ pub enum WhereConstraint {
         type_param: Entity,
         protocol: Entity,
     },
+    /// `T: not Protocol` — opt-out of an implicit conformance. The MIR
+    /// move-check uses this to distinguish an unconstrained `T` (which
+    /// defaults to `Copyable` in Kestrel's type system, so move-checking
+    /// it would false-positive on every implicit copy) from a `T` the
+    /// user explicitly declared can be non-`Copyable` (`where T: not
+    /// Copyable`), which the lowering treats as affine and the
+    /// move-check tracks for use-after-move.
+    NotImplements {
+        type_param: Entity,
+        protocol: Entity,
+    },
     /// `T.Item = ConcreteType`
     TypeEquals {
         base: Entity,

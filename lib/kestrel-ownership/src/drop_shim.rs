@@ -446,19 +446,30 @@ fn build_enum_shim(
         .push(ParamDef::new("self", self_local, self_ty.clone()));
     body.param_count += 1;
 
+    // Order matters: the cranelift codegen treats the first MIR block
+    // (BlockId(0)) as the function-entry — it's where parameters live and
+    // execution begins. Build the entry block first with a placeholder
+    // terminator, then fill in the actual switch after the per-case
+    // block IDs are known. (Previously the entry was added last, ending
+    // up as BlockId(3) for a 2-variant enum, and cranelift's verifier
+    // tripped on the empty BlockId(0) — "terminator before end of
+    // block3" via the mismatched function-entry slot.)
+    let entry_id = body.add_block(BasicBlock::new());
+    body.entry = entry_id;
+
     // bb_return is the join block; jumped to from each per-case block.
     let mut return_block = BasicBlock::new();
     return_block.terminator = Terminator::ret(Value::Const(kestrel_mir::Immediate::unit()));
     let return_id = body.add_block(return_block);
 
-    // Per-case blocks first (so we have their IDs for the Switch).
+    // Per-case blocks. With Stage 4 root-folding, projecting `self.Variant.f`
+    // for each non-trivial field is enough to give each case its own drop
+    // sequence; the case block jumps to `return_id` when done.
     let subst = build_subst(&e.type_params, &type_args);
     let mut case_blocks: Vec<(SwitchCase, kestrel_mir::BlockId)> = Vec::new();
     for case in &e.cases {
         let payload = &module.structs[case.payload_struct.index()];
         let mut block = BasicBlock::new();
-        // Project the place into this variant's payload struct via
-        // Downcast, then drop each non-trivial payload field.
         let downcast = Place::Downcast {
             parent: Box::new(Place::local(self_local)),
             variant: case.name.clone(),
@@ -479,8 +490,9 @@ fn build_enum_shim(
         case_blocks.push((SwitchCase::Variant(case.name.clone()), block_id));
     }
 
-    // Entry block: user deinit (if any), then switch on discriminant.
-    let mut entry = BasicBlock::new();
+    // Now fill in the entry block: user deinit (if any), then switch on
+    // discriminant. We have all the case block IDs ready.
+    let entry = body.block_mut(entry_id);
     if let Some(user_method) = e.deinit_behavior.user_method {
         let callee = Callee::method(
             user_method,
@@ -497,8 +509,6 @@ fn build_enum_shim(
         }));
     }
     entry.terminator = Terminator::switch(Place::local(self_local), case_blocks);
-    let entry_id = body.add_block(entry);
-    body.entry = entry_id;
 
     def.body = Some(body);
     def

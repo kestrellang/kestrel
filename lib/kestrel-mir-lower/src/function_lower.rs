@@ -3,9 +3,17 @@
 //! Lowers function entities into MIR FunctionDefs with params and return types.
 //! Function bodies are not lowered in this phase.
 
-use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams};
+use kestrel_ast::AstType;
+use kestrel_ast_builder::{
+    Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams,
+    WhereClause as AstWhereClause, WhereConstraint as AstWhereConstraint,
+};
 use kestrel_hecs::Entity;
-use kestrel_mir::{FunctionDef, FunctionId, FunctionKind, ReceiverConvention, TypeParamDef};
+use kestrel_mir::{
+    FunctionDef, FunctionId, FunctionKind, ReceiverConvention, TypeParamDef, WhereClause,
+    WhereConstraint,
+};
+use kestrel_name_res::resolve_type::{ResolveTypePath, TypeResolution};
 
 use crate::context::LowerCtx;
 use crate::ty::{resolve_callable_return_type, resolve_callable_types};
@@ -45,6 +53,15 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
             def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
         }
     }
+
+    // Populate the function's MIR where-clause from the AST. Walks the
+    // function entity *and* its enclosing parents so a method body sees
+    // both its own constraints and the struct/enum/extension's. The
+    // constraint-aware copy check (`MirTy::copy_behavior_with_constraints`)
+    // consults this to decide whether an unconstrained generic `T` (which
+    // defaults to `Copyable` in Kestrel) should be tracked as affine —
+    // only `T: not Copyable` flips the default.
+    populate_where_clause(ctx, entity, &mut def);
 
     // Parameters from Callable component
     if let Some(callable) = ctx.world.get::<Callable>(entity) {
@@ -348,5 +365,109 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
                     def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
                 }
             }
+    }
+}
+
+/// Populate `def.where_clause` from the AST. Walks the function entity
+/// plus its enclosing parents (struct / enum / extension / protocol /
+/// subscript / module — stopping at the root) so the resulting MIR
+/// clause spans constraints inherited from any ancestor scope.
+///
+/// Only the `Bound { subject, protocols }` and `NegativeBound { subject,
+/// protocol }` shapes are translated; `Equality { lhs, rhs }` is left for
+/// a future change. Constraints whose subject doesn't resolve to a type
+/// parameter, and protocol mentions that don't resolve to a protocol
+/// entity, are silently dropped — they're caught upstream by the
+/// name-res / semantics analyzers.
+fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionDef) {
+    let mut wc = WhereClause::new();
+    let mut current = Some(entity);
+    while let Some(e) = current {
+        if let Some(ast_wc) = ctx.world.get::<AstWhereClause>(e) {
+            for ast_constraint in &ast_wc.0 {
+                lower_where_constraint(ctx, ast_constraint, e, &mut wc);
+            }
+        }
+        current = ctx.world.parent_of(e);
+    }
+    if !wc.constraints.is_empty() {
+        def.where_clause = Some(wc);
+    }
+}
+
+/// Translate one AST `WhereConstraint` into zero or more MIR
+/// `WhereConstraint`s. `Bound { subject, protocols }` becomes one
+/// `Implements` per protocol; `NegativeBound { subject, protocol }`
+/// becomes a single `NotImplements`. Unresolvable subjects/protocols
+/// drop the constraint silently — name-res / semantics analyzers
+/// already report those as errors.
+fn lower_where_constraint(
+    ctx: &mut LowerCtx,
+    constraint: &AstWhereConstraint,
+    context: Entity,
+    out: &mut WhereClause,
+) {
+    match constraint {
+        AstWhereConstraint::Bound {
+            subject, protocols, ..
+        } => {
+            let Some(subject_entity) = resolve_ast_type_to_entity(ctx, subject, context) else {
+                return;
+            };
+            for protocol_ty in protocols {
+                let Some(protocol_entity) = resolve_ast_type_to_entity(ctx, protocol_ty, context)
+                else {
+                    continue;
+                };
+                out.add_constraint(WhereConstraint::Implements {
+                    type_param: subject_entity,
+                    protocol: protocol_entity,
+                });
+            }
+        },
+        AstWhereConstraint::NegativeBound {
+            subject, protocol, ..
+        } => {
+            let Some(subject_entity) = resolve_ast_type_to_entity(ctx, subject, context) else {
+                return;
+            };
+            let Some(protocol_entity) = resolve_ast_type_to_entity(ctx, protocol, context) else {
+                return;
+            };
+            out.add_constraint(WhereConstraint::NotImplements {
+                type_param: subject_entity,
+                protocol: protocol_entity,
+            });
+        },
+        AstWhereConstraint::Equality { .. } => {
+            // Stage 9 punt: associated-type equality isn't consulted by
+            // the copy-behavior check, so deferring its lowering doesn't
+            // affect the move-check (the only consumer of MIR where
+            // clauses today). Re-add when a constraint-aware solver
+            // needs it.
+        },
+    }
+}
+
+/// Resolve an `AstType::Named { segments }` to its target entity (type
+/// parameter, struct, enum, protocol, alias …) via the name-res
+/// `ResolveTypePath` query. Non-named or unresolvable types return
+/// `None`.
+fn resolve_ast_type_to_entity(
+    ctx: &LowerCtx,
+    ast_ty: &AstType,
+    context: Entity,
+) -> Option<Entity> {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return None;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    match ctx.query.query(ResolveTypePath {
+        segments: seg_names,
+        context,
+        root: ctx.root,
+    }) {
+        TypeResolution::Found(e) | TypeResolution::NotAType(e) => Some(e),
+        TypeResolution::SelfType | TypeResolution::NotFound(_) => None,
     }
 }
