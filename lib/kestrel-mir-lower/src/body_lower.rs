@@ -1116,11 +1116,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 Value::Copy(Place::local(dest))
             },
 
-            // === Dict literal — lowered as ArrayLiteral of (K, V) tuples ===
+            // === Dict literal ===
+            // Mirrors the array path: stack-alloc a (K, V) buffer, write each
+            // pair, then call the type's `_ExpressibleByDictionaryLiteral`
+            // bridge init. Falling through to a raw `Rvalue::ArrayLiteral`
+            // would leave the destination Dictionary slot uninitialized —
+            // same bug class as the pre-fix array path.
             HirExpr::Dict { entries, .. } => {
                 let result_ty = self.resolve_expr_type(expr_id);
+                if let Some(value) = self.lower_dict_literal_via_init(entries, &result_ty) {
+                    return value;
+                }
 
-                // Extract key/value types from Dictionary[K, V, H] type args
+                // Fallback: result type isn't a recognized dict-literal
+                // implementor. Emit the raw tuple buffer for whatever the
+                // dest expects.
                 let (key_ty, value_ty) = match &result_ty {
                     MirTy::Named { type_args, .. } if type_args.len() >= 2 => {
                         (type_args[0].clone(), type_args[1].clone())
@@ -1130,13 +1140,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
                 let pair_ty = MirTy::Tuple(vec![key_ty.clone(), value_ty.clone()]);
 
-                // Lower each entry to a (K, V) tuple
                 let values: Vec<Value> = entries
                     .iter()
                     .map(|entry| {
                         let key = self.lower_expr(entry.key);
                         let val = self.lower_expr(entry.value);
-                        // Emit a Tuple rvalue for each pair
                         let pair_dest = self.fresh_temp(pair_ty.clone());
                         self.emit_stmt(Statement::new(StatementKind::Assign {
                             dest: Place::local(pair_dest),
@@ -3406,6 +3414,152 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         )
     }
 
+    /// Lower a dict literal via the target type's internal dictionary-literal
+    /// initializer. Mirrors `lower_array_literal_via_init` — see that helper
+    /// for the overall shape; this version writes `(K, V)` tuples into the
+    /// stack buffer.
+    fn lower_dict_literal_via_init(
+        &mut self,
+        entries: &[kestrel_hir::body::HirDictEntry],
+        result_ty: &MirTy,
+    ) -> Option<Value> {
+        let (init_entity, pair_ty, type_args) = self.resolve_dict_literal_init(result_ty)?;
+
+        let MirTy::Tuple(elem_tys) = &pair_ty else {
+            return None;
+        };
+        if elem_tys.len() != 2 {
+            return None;
+        }
+        let key_ty = elem_tys[0].clone();
+        let value_ty = elem_tys[1].clone();
+
+        let ptr_ty = MirTy::Pointer(Box::new(pair_ty.clone()));
+        let ptr_local = self.fresh_temp(ptr_ty);
+        let ptr_place = Place::local(ptr_local);
+        let count_value = Value::Const(Immediate::i64(entries.len() as i64));
+
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest: ptr_place.clone(),
+            rvalue: Rvalue::Op1 {
+                op: Op::StackAlloc(pair_ty.clone()),
+                arg: count_value.clone(),
+            },
+        }));
+
+        let size_local = self.fresh_temp(MirTy::I64);
+        self.emit_stmt(Statement::new(StatementKind::Assign {
+            dest: Place::local(size_local),
+            rvalue: Rvalue::Op1 {
+                op: Op::SizeOf(pair_ty.clone()),
+                arg: Value::Const(Immediate::unit()),
+            },
+        }));
+
+        for (i, entry) in entries.iter().enumerate() {
+            let key = self.lower_expr_with_hint(entry.key, &key_ty);
+            let val = self.lower_expr_with_hint(entry.value, &value_ty);
+
+            let pair_dest = self.fresh_temp(pair_ty.clone());
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(pair_dest),
+                rvalue: Rvalue::Tuple(vec![key, val]),
+            }));
+            let pair_value = Value::Copy(Place::local(pair_dest));
+
+            let element_ptr = if i == 0 {
+                Value::Copy(ptr_place.clone())
+            } else {
+                let offset_local = self.fresh_temp(MirTy::I64);
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(offset_local),
+                    rvalue: Rvalue::Op2 {
+                        op: Op::Mul(IntBits::I64, Signedness::Signed),
+                        lhs: Value::Const(Immediate::i64(i as i64)),
+                        rhs: Value::Copy(Place::local(size_local)),
+                    },
+                }));
+
+                let offset_ptr_local =
+                    self.fresh_temp(MirTy::Pointer(Box::new(pair_ty.clone())));
+                self.emit_stmt(Statement::new(StatementKind::Assign {
+                    dest: Place::local(offset_ptr_local),
+                    rvalue: Rvalue::Op2 {
+                        op: Op::PtrOffset,
+                        lhs: Value::Copy(ptr_place.clone()),
+                        rhs: Value::Copy(Place::local(offset_local)),
+                    },
+                }));
+                Value::Copy(Place::local(offset_ptr_local))
+            };
+
+            let write_local = self.fresh_temp(MirTy::unit());
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest: Place::local(write_local),
+                rvalue: Rvalue::Op2 {
+                    op: Op::PtrWrite(pair_ty.clone()),
+                    lhs: element_ptr,
+                    rhs: pair_value,
+                },
+            }));
+        }
+
+        self.ctx.register_name(init_entity);
+        let callee = Callee::method(init_entity, type_args, result_ty.clone());
+        let call_args = vec![
+            (Value::Copy(ptr_place)).into_copy(),
+            (count_value).into_copy(),
+        ];
+        Some(self.emit_call_maybe_init(callee, call_args, result_ty.clone()))
+    }
+
+    /// Resolve the internal dict-literal initializer and the concrete `(K, V)`
+    /// pair type. Mirrors `resolve_array_literal_init` but matches a
+    /// `Pointer<Tuple<_, _>>` shape at `params[1]`.
+    fn resolve_dict_literal_init(&self, result_ty: &MirTy) -> Option<(Entity, MirTy, Vec<MirTy>)> {
+        let MirTy::Named { entity, .. } = result_ty else {
+            return None;
+        };
+
+        let init_func = self.ctx.module.functions.iter().find(|f| {
+            let FunctionKind::Initializer { parent } = f.kind else {
+                return false;
+            };
+            if !self.init_parent_matches(parent, *entity) {
+                return false;
+            }
+            if f.params.len() != 3 {
+                return false;
+            }
+            if !matches!(f.params[0].ty, MirTy::RefMut(_)) {
+                return false;
+            }
+            let MirTy::Pointer(inner) = &f.params[1].ty else {
+                return false;
+            };
+            let MirTy::Tuple(elems) = inner.as_ref() else {
+                return false;
+            };
+            if elems.len() != 2 {
+                return false;
+            }
+            matches!(f.params[2].ty, MirTy::I64)
+        })?;
+        let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
+        let subst: HashMap<Entity, MirTy> = init_func
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(tp, ty)| (tp.entity, ty.clone()))
+            .collect();
+        let ptr_ty = self.substitute_mir_type(&init_func.params.get(1)?.ty, &subst);
+        let MirTy::Pointer(pair_ty) = ptr_ty else {
+            return None;
+        };
+
+        Some((init_func.entity, *pair_ty, type_args))
+    }
+
     /// Resolve the internal array-literal initializer and its concrete element type.
     ///
     /// Matches the exact shape declared by `_ExpressibleByArrayLiteral`:
@@ -3422,7 +3576,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         };
 
         let init_func = self.ctx.module.functions.iter().find(|f| {
-            matches!(f.kind, FunctionKind::Initializer { parent } if parent == *entity)
+            let FunctionKind::Initializer { parent } = f.kind else {
+                return false;
+            };
+            self.init_parent_matches(parent, *entity)
                 && f.params.len() == 3
                 && matches!(f.params[0].ty, MirTy::RefMut(_))
                 && matches!(f.params[1].ty, MirTy::Pointer(_))
@@ -3441,6 +3598,32 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         };
 
         Some((init_func.entity, *element_ty, type_args))
+    }
+
+    /// True if a `FunctionKind::Initializer { parent }` belongs to
+    /// `target_type` — either directly (the init was declared in the type's
+    /// own body) or transitively via an extension that targets `target_type`.
+    /// Without the extension hop, bridges declared in `extend T: Protocol`
+    /// blocks are invisible to the literal-init predicates.
+    fn init_parent_matches(&self, init_parent: Entity, target_type: Entity) -> bool {
+        if init_parent == target_type {
+            return true;
+        }
+        use kestrel_ast_builder::NodeKind;
+        if self.ctx.world.get::<NodeKind>(init_parent) != Some(&NodeKind::Extension) {
+            return false;
+        }
+        let Some(target) = self
+            .ctx
+            .query
+            .query(kestrel_name_res::extensions::ExtensionTargetEntity {
+                extension: init_parent,
+                root: self.ctx.root,
+            })
+        else {
+            return false;
+        };
+        target == target_type
     }
 
     /// Lower an if expression.

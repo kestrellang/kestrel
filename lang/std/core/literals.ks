@@ -122,7 +122,13 @@ public protocol _ExpressibleByDictionaryLiteral {
 
     /// @name Literal Bridge
     /// Compiler-emitted init taking a raw `(Key, Value)` pointer and count.
-    init(_dictionaryLiteralPointer: lang.ptr[(Key, Value)], _dictionaryLiteralCount: lang.i64)
+    ///
+    /// Both params are `consuming` for the same reason as the array
+    /// bridge: the compiler hands ownership of the stack buffer to the
+    /// implementation. MIR lowering matches on the unwrapped param
+    /// shape, so an impl that deviates from this convention will be
+    /// skipped during literal lowering.
+    init(consuming _dictionaryLiteralPointer: lang.ptr[(Key, Value)], consuming _dictionaryLiteralCount: lang.i64)
 }
 
 /// User-facing protocol for dictionary-literal lowering. Mirrors
