@@ -50,14 +50,31 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     if let Some(callable) = ctx.world.get::<Callable>(entity) {
         // Self parameter for methods
         if let Some(receiver) = &callable.receiver {
-            let self_ty = match receiver {
-                kestrel_ast_builder::ReceiverKind::Borrowing => {
-                    kestrel_mir::MirTy::Ref(Box::new(kestrel_mir::MirTy::SelfType))
-                },
-                kestrel_ast_builder::ReceiverKind::Mutating => {
-                    kestrel_mir::MirTy::RefMut(Box::new(kestrel_mir::MirTy::SelfType))
-                },
-                kestrel_ast_builder::ReceiverKind::Consuming => kestrel_mir::MirTy::SelfType,
+            let is_user_deinit = matches!(
+                ctx.world.get::<NodeKind>(entity),
+                Some(NodeKind::Deinit)
+            );
+            let self_ty = if is_user_deinit {
+                // User `deinit { ... }` always lowers with `&var Self`.
+                // The AST builder defaults its receiver to Consuming
+                // (no explicit keyword), but the memory-model
+                // architecture is "drop glue runs user deinit on a
+                // mutable borrow, then drops the fields after the user
+                // body returns". So the body sees a live, valid `self`
+                // throughout; the glue handles cleanup.
+                kestrel_mir::MirTy::RefMut(Box::new(kestrel_mir::MirTy::SelfType))
+            } else {
+                match receiver {
+                    kestrel_ast_builder::ReceiverKind::Borrowing => {
+                        kestrel_mir::MirTy::Ref(Box::new(kestrel_mir::MirTy::SelfType))
+                    },
+                    kestrel_ast_builder::ReceiverKind::Mutating => {
+                        kestrel_mir::MirTy::RefMut(Box::new(kestrel_mir::MirTy::SelfType))
+                    },
+                    kestrel_ast_builder::ReceiverKind::Consuming => {
+                        kestrel_mir::MirTy::SelfType
+                    },
+                }
             };
 
             let param = kestrel_mir::ParamDef::new(

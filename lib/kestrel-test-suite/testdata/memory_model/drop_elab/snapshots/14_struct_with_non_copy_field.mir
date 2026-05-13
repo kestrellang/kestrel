@@ -13,7 +13,8 @@ func Test.example() -> ()
         %_init__t1 = true
         %self = move %_t1
         %_init__t1 = false
-        call Test.Inner.deinit(move %_t0)
-        call Test.Outer.deinit(move %self)
+        call Test.Inner.deinit(ref var %_t0)
+        call Test.Outer.deinit(ref var %self)
+        call Test.Inner.deinit(ref var %self.inner)
         return ()
 }

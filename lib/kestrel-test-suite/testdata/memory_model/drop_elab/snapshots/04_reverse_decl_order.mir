@@ -19,7 +19,7 @@ func Test.example() -> ()
         %_init__t1 = true
         %b = move %_t1
         %_init__t1 = false
-        call Test.Handle.deinit(move %b)
-        call Test.Handle.deinit(move %self)
+        call Test.Handle.deinit(ref var %b)
+        call Test.Handle.deinit(ref var %self)
         return ()
 }

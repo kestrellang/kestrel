@@ -37,6 +37,6 @@ func Test.example(cond: &bool) -> ()
         jump bb3
 
     bb3:
-        call Test.Handle.deinit(move %h)
+        call Test.Handle.deinit(ref var %h)
         return copy %_t1
 }

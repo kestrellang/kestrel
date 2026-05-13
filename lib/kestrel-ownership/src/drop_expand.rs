@@ -266,9 +266,12 @@ fn expand_drop_struct(
     if !is_self_in_own_deinit
         && let Some(user_method) = s.deinit_behavior.user_method
     {
-        // Call user deinit, consuming the place. Type args from the
-        // place's instantiation, self_type is the place's own
-        // resolved type so monomorphization picks the right body.
+        // Call user deinit on a mutable borrow of the place. The user
+        // deinit signature is `(self: &var Self) -> ()`; field drops
+        // happen *after* the user body returns, emitted as additional
+        // structural drops below. The user can read/mutate fields but
+        // not move them out (move-out would be caught by the move
+        // check on the borrow).
         let callee = Callee::method(
             user_method,
             type_args.to_vec(),
@@ -281,14 +284,12 @@ fn expand_drop_struct(
             StatementKind::Call {
                 dest: None,
                 callee,
-                args: vec![Value::Move(place.clone())],
+                args: vec![Value::RefMut(place.clone())],
             },
             span.clone(),
         ));
-        // User deinit owns the value end-to-end (consuming self).
-        // Field drops happen inside the deinit body via this same
-        // pass running over that body — don't double-drop here.
-        return;
+        // Fall through to structural field drops — user deinit
+        // borrowed self; fields are still live and need cleanup.
     }
 
     // Structural-only path: drop each non-trivial field in declaration
