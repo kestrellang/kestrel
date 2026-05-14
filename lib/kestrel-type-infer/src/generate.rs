@@ -512,7 +512,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 let val_tv = gen_expr(ctx, hir, *val);
-                ctx.coerce(val_tv, ctx.return_ty, id, span.clone());
+                ctx.coerce(val_tv, ctx.return_ty, *val, span.clone());
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
@@ -530,7 +530,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
-            ctx.coerce(value_tv, target_tv, id, span.clone());
+            ctx.coerce(value_tv, target_tv, *value, span.clone());
             ctx.tuple(vec![]) // assignment returns unit
         },
 
@@ -1057,7 +1057,7 @@ fn gen_struct_init(
                 for (arg, param_ty) in args.iter().zip(param_tys.iter()) {
                     if let Some(hir_ty) = param_ty {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
-                        ctx.coerce(arg.ty, param_tv, expr_id, span.clone());
+                        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
                     }
                 }
             }
@@ -1146,7 +1146,7 @@ fn gen_struct_init(
                 root,
             }) {
                 let field_tv = lower_hir_ty_with_subs(ctx, &hir_ty, &struct_subs);
-                ctx.coerce(arg.ty, field_tv, expr_id, span.clone());
+                ctx.coerce(arg.ty, field_tv, arg.value, span.clone());
             }
         }
     }
@@ -1217,6 +1217,7 @@ fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> 
             CallArg {
                 label: arg.label.clone(),
                 ty,
+                value: arg.value,
             }
         })
         .collect()

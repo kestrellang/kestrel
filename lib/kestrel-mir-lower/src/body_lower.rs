@@ -553,7 +553,41 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     // === Expression lowering ===
 
     /// Lower an expression, returning its value (Place or Immediate).
+    ///
+    /// If type-infer recorded a `FromValue` promotion at this expression
+    /// site (e.g. `let v: Int64? = 42` — the literal is `Int64` but the
+    /// slot is `Optional[Int64]`), wrap the result by calling the recorded
+    /// promotion method. Without this step the raw source value would be
+    /// stored into the target slot and downstream operations (matches,
+    /// field access) would read garbage discriminants.
     fn lower_expr(&mut self, expr_id: HirExprId) -> Value {
+        let value = self.lower_expr_no_promote(expr_id);
+        self.apply_promotion(expr_id, value)
+    }
+
+    /// Apply a recorded `FromValue.from(value)` promotion if type-infer
+    /// stored one for this expression. Returns `value` unchanged otherwise.
+    fn apply_promotion(&mut self, expr_id: HirExprId, value: Value) -> Value {
+        let Some(typed) = self.typed else {
+            return value;
+        };
+        let Some(promotion) = typed.promotions.get(&expr_id) else {
+            return value;
+        };
+        let method = promotion.method;
+        let target_ty = lower_resolved_ty(self.ctx, &promotion.target);
+        self.ctx.register_name(method);
+        let type_args = self.prepend_receiver_type_args(&target_ty, vec![]);
+        let callee = Callee::direct_generic(method, type_args);
+        let call_args = vec![CallArg::copy(value)];
+        self.emit_call(callee, call_args, target_ty)
+    }
+
+    /// Inner lowering — does not apply promotion. Use `lower_expr` to get
+    /// promotion handling. Internal recursive calls inside this function
+    /// route back through `lower_expr` so each sub-expression's own
+    /// promotion is honored.
+    fn lower_expr_no_promote(&mut self, expr_id: HirExprId) -> Value {
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
             HirExpr::Literal { value, .. } => self.lower_literal_expr(expr_id, value),
