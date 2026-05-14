@@ -192,6 +192,8 @@ pub enum SyntaxKind {
     RangePattern,        // 0..=9 or 0..<10 (range pattern)
     EnumPattern,         // .Case or .Case(args)
     EnumPatternArg,      // Single arg in enum pattern: label or label: pattern
+    NullPattern,         // null (sugar for .None on Optional)
+    SomePattern,         // some PAT (sugar for .Some(PAT) on Optional)
     StructPattern,       // Point { x, y } or Point { x: a, y: b }
     StructPatternField,  // Single field: name or name: pattern
     StructPatternRest,   // .. (ignore remaining fields)
@@ -213,6 +215,7 @@ pub enum SyntaxKind {
     Float,
     Boolean,
     Null,
+    Some,
 
     // Keywords
     As,
@@ -356,6 +359,7 @@ impl From<Token> for SyntaxKind {
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,
             Token::Null => SyntaxKind::Null,
+            Token::Some => SyntaxKind::Some,
             // Keywords
             Token::As => SyntaxKind::As,
             Token::Break => SyntaxKind::Break,
@@ -599,6 +603,8 @@ impl Language for KestrelLanguage {
         const RANGE_PATTERN: u16 = SyntaxKind::RangePattern as u16;
         const ENUM_PATTERN: u16 = SyntaxKind::EnumPattern as u16;
         const ENUM_PATTERN_ARG: u16 = SyntaxKind::EnumPatternArg as u16;
+        const NULL_PATTERN: u16 = SyntaxKind::NullPattern as u16;
+        const SOME_PATTERN: u16 = SyntaxKind::SomePattern as u16;
         const STRUCT_PATTERN: u16 = SyntaxKind::StructPattern as u16;
         const STRUCT_PATTERN_FIELD: u16 = SyntaxKind::StructPatternField as u16;
         const STRUCT_PATTERN_REST: u16 = SyntaxKind::StructPatternRest as u16;
@@ -617,6 +623,7 @@ impl Language for KestrelLanguage {
         const FLOAT: u16 = SyntaxKind::Float as u16;
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
+        const SOME: u16 = SyntaxKind::Some as u16;
         const AS: u16 = SyntaxKind::As as u16;
         const BREAK: u16 = SyntaxKind::Break as u16;
         const CASE: u16 = SyntaxKind::Case as u16;
@@ -855,6 +862,8 @@ impl Language for KestrelLanguage {
             RANGE_PATTERN => SyntaxKind::RangePattern,
             ENUM_PATTERN => SyntaxKind::EnumPattern,
             ENUM_PATTERN_ARG => SyntaxKind::EnumPatternArg,
+            NULL_PATTERN => SyntaxKind::NullPattern,
+            SOME_PATTERN => SyntaxKind::SomePattern,
             STRUCT_PATTERN => SyntaxKind::StructPattern,
             STRUCT_PATTERN_FIELD => SyntaxKind::StructPatternField,
             STRUCT_PATTERN_REST => SyntaxKind::StructPatternRest,
@@ -873,6 +882,7 @@ impl Language for KestrelLanguage {
             FLOAT => SyntaxKind::Float,
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
+            SOME => SyntaxKind::Some,
             AS => SyntaxKind::As,
             BREAK => SyntaxKind::Break,
             CASE => SyntaxKind::Case,

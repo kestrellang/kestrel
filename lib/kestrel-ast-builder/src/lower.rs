@@ -1481,6 +1481,8 @@ impl LowerCtx {
             SyntaxKind::LiteralPattern => self.lower_literal_pattern(&node),
             SyntaxKind::RangePattern => self.lower_range_pattern(&node),
             SyntaxKind::EnumPattern => self.lower_enum_pattern(&node),
+            SyntaxKind::NullPattern => self.lower_null_pattern(&node),
+            SyntaxKind::SomePattern => self.lower_some_pattern(&node),
             SyntaxKind::StructPattern => self.lower_struct_pattern(&node),
             SyntaxKind::ArrayPattern => self.lower_array_pattern(&node),
             SyntaxKind::AtPattern => self.lower_at_pattern(&node),
@@ -1713,6 +1715,38 @@ impl LowerCtx {
         self.alloc_pat(AstPat::Enum {
             case_name,
             args,
+            span,
+        })
+    }
+
+    /// Lower the `null` keyword pattern to `AstPat::Enum { case_name: "None" }`.
+    /// Bare sugar for matching `Optional.None`; type-checking enforces the
+    /// scrutinee is `Optional[T]` via existing enum-case resolution.
+    fn lower_null_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+        self.alloc_pat(AstPat::Enum {
+            case_name: "None".to_string(),
+            args: vec![],
+            span,
+        })
+    }
+
+    /// Lower `some PAT` to `AstPat::Enum { case_name: "Some", args: [PAT] }`.
+    /// The inner pattern is lowered recursively; nested sugar like `some some x`
+    /// or `some null` flows through naturally.
+    fn lower_some_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+        let inner = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Pattern || is_pattern_kind(c.kind()))
+            .map(|p| self.lower_pat(&p))
+            .unwrap_or_else(|| self.alloc_pat(AstPat::Error { span: span.clone() }));
+        self.alloc_pat(AstPat::Enum {
+            case_name: "Some".to_string(),
+            args: vec![EnumPatArg {
+                label: None,
+                pattern: inner,
+            }],
             span,
         })
     }
@@ -2014,6 +2048,8 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::LiteralPattern
             | SyntaxKind::RangePattern
             | SyntaxKind::EnumPattern
+            | SyntaxKind::NullPattern
+            | SyntaxKind::SomePattern
             | SyntaxKind::StructPattern
             | SyntaxKind::ArrayPattern
             | SyntaxKind::AtPattern

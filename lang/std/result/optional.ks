@@ -70,10 +70,10 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// let opt = Optional.some(42);   // Some(42)
+    /// let opt = Optional.wrap(42);   // Some(42)
     /// let opt: Int64? = 42;                 // identical, preferred
     /// ```
-    public static func some(value: T) -> Optional[T] {
+    public static func wrap(value: T) -> Optional[T] {
         .Some(value)
     }
 

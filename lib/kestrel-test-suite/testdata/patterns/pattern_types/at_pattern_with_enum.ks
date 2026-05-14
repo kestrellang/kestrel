@@ -10,7 +10,7 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) -> Option[lang.i64] {
     match opt {
-        some @ .Some(_) => some,
+        bound @ .Some(_) => bound,
         .None => .None
     }
 }

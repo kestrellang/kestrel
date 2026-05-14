@@ -53,6 +53,7 @@ pub fn format_token_for_display(token: &Token) -> String {
         Token::Float => "float".to_string(),
         Token::Boolean => "boolean".to_string(),
         Token::Null => "'null'".to_string(),
+        Token::Some => "'some'".to_string(),
 
         // Declaration Keywords
         Token::Extend => "'extend'".to_string(),

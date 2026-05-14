@@ -160,6 +160,13 @@ pub enum PatternVariant {
         /// The `or` keyword spans
         or_spans: Vec<Span>,
     },
+    /// `null` keyword pattern — sugar for `.None` on `Optional[T]`
+    Null(Span),
+    /// `some PAT` keyword pattern — sugar for `.Some(PAT)` on `Optional[T]`
+    Some {
+        some_span: Span,
+        inner: Box<PatternVariant>,
+    },
     /// @-pattern: `name @ subpattern` or `var name @ subpattern`
     At {
         /// Optional `var` keyword span (if mutable)
@@ -559,11 +566,29 @@ pub fn pattern_parser<'tokens>()
             })
             .boxed();
 
+        // `null` pattern — sugar for `.None` on `Optional[T]`
+        let null_pattern = skip_trivia()
+            .ignore_then(just(Token::Null).map_with(|_, e| to_kestrel_span(e.span())))
+            .map(PatternVariant::Null);
+
+        // `some PAT` pattern — sugar for `.Some(PAT)` on `Optional[T]`
+        // Recurses through `pattern` so nested sugar (`some some x`, `some null`,
+        // `some (a, b)`) all work.
+        let some_pattern = skip_trivia()
+            .ignore_then(just(Token::Some).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(pattern.clone())
+            .map(|(some_span, inner)| PatternVariant::Some {
+                some_span,
+                inner: Box::new(inner),
+            });
+
         // Order matters: try more specific patterns first
         // - wildcard (single underscore)
         // - range pattern (literal followed by ..= or ..<)
         // - rest pattern (.. - for tuples)
         // - literal (numbers, strings, bools)
+        // - null sugar (null keyword)
+        // - some sugar (some keyword + inner pattern)
         // - enum pattern (starts with dot)
         // - struct pattern (identifier followed by braces)
         // - array pattern (starts with lbracket)
@@ -574,6 +599,8 @@ pub fn pattern_parser<'tokens>()
             .or(rest_pattern)
             .or(range_pattern)
             .or(literal)
+            .or(null_pattern)
+            .or(some_pattern)
             .or(enum_pattern)
             .or(struct_pattern)
             .or(array_pattern)
@@ -821,6 +848,17 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             sink.add_token(SyntaxKind::DotDot, span.clone());
             sink.finish_node();
         },
+        PatternVariant::Null(span) => {
+            sink.start_node(SyntaxKind::NullPattern);
+            sink.add_token(SyntaxKind::Null, span.clone());
+            sink.finish_node();
+        },
+        PatternVariant::Some { some_span, inner } => {
+            sink.start_node(SyntaxKind::SomePattern);
+            sink.add_token(SyntaxKind::Some, some_span.clone());
+            emit_pattern_variant_inner(sink, inner);
+            sink.finish_node();
+        },
         PatternVariant::Error(span) => {
             sink.start_node(SyntaxKind::ErrorPattern);
             sink.error_at_span("Invalid pattern".to_string(), span.clone());
@@ -1055,6 +1093,17 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
         PatternVariant::Rest(span) => {
             sink.start_node(SyntaxKind::RestPattern);
             sink.add_token(SyntaxKind::DotDot, span.clone());
+            sink.finish_node();
+        },
+        PatternVariant::Null(span) => {
+            sink.start_node(SyntaxKind::NullPattern);
+            sink.add_token(SyntaxKind::Null, span.clone());
+            sink.finish_node();
+        },
+        PatternVariant::Some { some_span, inner } => {
+            sink.start_node(SyntaxKind::SomePattern);
+            sink.add_token(SyntaxKind::Some, some_span.clone());
+            emit_pattern_variant_inner(sink, inner);
             sink.finish_node();
         },
         PatternVariant::Error(span) => {
