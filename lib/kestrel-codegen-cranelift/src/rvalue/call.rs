@@ -592,11 +592,7 @@ fn is_aggregate_for_call(ty: &MirTy) -> bool {
     };
     matches!(
         inner,
-        MirTy::Tuple(_)
-            | MirTy::Named { .. }
-            | MirTy::Str
-            | MirTy::FuncThick { .. }
-            | MirTy::Pointer(_)
+        MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
     )
 }
 
