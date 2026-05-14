@@ -571,42 +571,50 @@ pub fn pattern_parser<'tokens>()
             .ignore_then(just(Token::Null).map_with(|_, e| to_kestrel_span(e.span())))
             .map(PatternVariant::Null);
 
-        // `some PAT` pattern — sugar for `.Some(PAT)` on `Optional[T]`
-        // Recurses through `pattern` so nested sugar (`some some x`, `some null`,
-        // `some (a, b)`) all work.
-        let some_pattern = skip_trivia()
-            .ignore_then(just(Token::Some).map_with(|_, e| to_kestrel_span(e.span())))
-            .then(pattern.clone())
-            .map(|(some_span, inner)| PatternVariant::Some {
-                some_span,
-                inner: Box::new(inner),
-            });
-
         // Order matters: try more specific patterns first
         // - wildcard (single underscore)
         // - range pattern (literal followed by ..= or ..<)
         // - rest pattern (.. - for tuples)
         // - literal (numbers, strings, bools)
         // - null sugar (null keyword)
-        // - some sugar (some keyword + inner pattern)
+        // - some sugar (some keyword + inner base-level pattern)
         // - enum pattern (starts with dot)
         // - struct pattern (identifier followed by braces)
         // - array pattern (starts with lbracket)
         // - mutable binding (starts with var)
         // - tuple pattern (starts with lparen)
         // - immutable binding (identifier - least specific)
-        let base_pattern = wildcard
-            .or(rest_pattern)
-            .or(range_pattern)
-            .or(literal)
-            .or(null_pattern)
-            .or(some_pattern)
-            .or(enum_pattern)
-            .or(struct_pattern)
-            .or(array_pattern)
-            .or(mutable_binding)
-            .or(tuple_pattern)
-            .or(immutable_binding);
+        //
+        // `some PAT` recurses to `base_pattern` (not the or-level `pattern`) so
+        // `some 1 or some 2` parses as `(some 1) or (some 2)` rather than
+        // `some (1 or some 2)`. Users who want an inner or-pattern write
+        // `some (1 or 2)`. This mirrors the precedence expected from the dot
+        // form `.Some(1) or .Some(2)`.
+        let base_pattern = recursive(|base| {
+            // `some PAT` sugar — PAT is a base-level pattern (no top-level or)
+            let some_pattern = skip_trivia()
+                .ignore_then(just(Token::Some).map_with(|_, e| to_kestrel_span(e.span())))
+                .then(base.clone())
+                .map(|(some_span, inner)| PatternVariant::Some {
+                    some_span,
+                    inner: Box::new(inner),
+                });
+
+            wildcard
+                .clone()
+                .or(rest_pattern.clone())
+                .or(range_pattern.clone())
+                .or(literal.clone())
+                .or(null_pattern.clone())
+                .or(some_pattern)
+                .or(enum_pattern.clone())
+                .or(struct_pattern.clone())
+                .or(array_pattern.clone())
+                .or(mutable_binding.clone())
+                .or(tuple_pattern.clone())
+                .or(immutable_binding.clone())
+                .boxed()
+        });
 
         // Or-pattern: base_pattern (or base_pattern)*
         // The `or` keyword has lowest precedence in pattern context
