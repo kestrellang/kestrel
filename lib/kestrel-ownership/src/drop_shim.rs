@@ -138,10 +138,11 @@ fn collect_needed_shims(module: &MirModule) -> Vec<Entity> {
             if needed.contains(&s.entity) {
                 continue;
             }
+            let mut visiting = HashSet::new();
             if s.deinit_behavior.user_method.is_some()
                 || s.fields
                     .iter()
-                    .any(|f| ty_needs_drop_work(&f.ty, module, &needed))
+                    .any(|f| ty_needs_drop_work(&f.ty, module, &needed, &mut visiting))
             {
                 needed.insert(s.entity);
             }
@@ -150,12 +151,13 @@ fn collect_needed_shims(module: &MirModule) -> Vec<Entity> {
             if needed.contains(&e.entity) {
                 continue;
             }
+            let mut visiting = HashSet::new();
             let any_case_needs = e.cases.iter().any(|c| {
                 let payload = &module.structs[c.payload_struct.index()];
                 payload
                     .fields
                     .iter()
-                    .any(|f| ty_needs_drop_work(&f.ty, module, &needed))
+                    .any(|f| ty_needs_drop_work(&f.ty, module, &needed, &mut visiting))
             });
             if e.deinit_behavior.user_method.is_some() || any_case_needs {
                 needed.insert(e.entity);
@@ -172,42 +174,33 @@ fn collect_needed_shims(module: &MirModule) -> Vec<Entity> {
 /// fixed-point above: `known_nontrivial` is the set we've decided so
 /// far; an as-yet-undecided nominal that's in there counts as
 /// non-trivial. Bitwise types short-circuit to false.
-fn ty_needs_drop_work(ty: &MirTy, module: &MirModule, known_nontrivial: &HashSet<Entity>) -> bool {
+///
+/// `visiting` tracks entities currently on the recursion stack to break
+/// cycles from recursive types (e.g. `enum Tree { case Node(Tree, Tree) }`).
+/// A cycle back to an already-visiting entity means the type doesn't
+/// independently need drop work — if it did, a non-recursive child would
+/// have triggered it.
+fn ty_needs_drop_work(
+    ty: &MirTy,
+    module: &MirModule,
+    known_nontrivial: &HashSet<Entity>,
+    visiting: &mut HashSet<Entity>,
+) -> bool {
     match ty {
         MirTy::Named { entity, .. } => {
             if known_nontrivial.contains(entity) {
                 return true;
             }
-            // Direct lookup: if user deinit, trivially needs work.
-            if let Some(s) = module.structs.iter().find(|s| s.entity == *entity) {
-                if s.deinit_behavior.user_method.is_some() {
-                    return true;
-                }
-                return s
-                    .fields
-                    .iter()
-                    .any(|f| ty_needs_drop_work(&f.ty, module, known_nontrivial));
+            if !visiting.insert(*entity) {
+                return false;
             }
-            if let Some(e) = module.enums.iter().find(|e| e.entity == *entity) {
-                if e.deinit_behavior.user_method.is_some() {
-                    return true;
-                }
-                return e.cases.iter().any(|c| {
-                    let payload = &module.structs[c.payload_struct.index()];
-                    payload
-                        .fields
-                        .iter()
-                        .any(|f| ty_needs_drop_work(&f.ty, module, known_nontrivial))
-                });
-            }
-            // Primitives + lang types — copy_behavior tells us. Bitwise
-            // → no drop. None → tracked-affine; if no def found at all
-            // we conservatively say "no work" (unresolved types skip).
-            ty.copy_behavior(module) == CopyBehavior::None
+            let result = ty_needs_drop_work_named(*entity, module, known_nontrivial, visiting);
+            visiting.remove(entity);
+            result
         },
         MirTy::Tuple(elems) => elems
             .iter()
-            .any(|t| ty_needs_drop_work(t, module, known_nontrivial)),
+            .any(|t| ty_needs_drop_work(t, module, known_nontrivial, visiting)),
         // Refs and pointers are Bitwise — never drop their referent.
         MirTy::Ref(_)
         | MirTy::RefMut(_)
@@ -224,6 +217,46 @@ fn ty_needs_drop_work(ty: &MirTy, module: &MirModule, known_nontrivial: &HashSet
         // Primitives — no work.
         _ => false,
     }
+}
+
+/// Inner helper for `Named` types, factored out so the visiting-set
+/// insert/remove stays in the caller.
+fn ty_needs_drop_work_named(
+    entity: Entity,
+    module: &MirModule,
+    known_nontrivial: &HashSet<Entity>,
+    visiting: &mut HashSet<Entity>,
+) -> bool {
+    if let Some(s) = module.structs.iter().find(|s| s.entity == entity) {
+        if s.deinit_behavior.user_method.is_some() {
+            return true;
+        }
+        return s
+            .fields
+            .iter()
+            .any(|f| ty_needs_drop_work(&f.ty, module, known_nontrivial, visiting));
+    }
+    if let Some(e) = module.enums.iter().find(|e| e.entity == entity) {
+        if e.deinit_behavior.user_method.is_some() {
+            return true;
+        }
+        return e.cases.iter().any(|c| {
+            let payload = &module.structs[c.payload_struct.index()];
+            payload
+                .fields
+                .iter()
+                .any(|f| ty_needs_drop_work(&f.ty, module, known_nontrivial, visiting))
+        });
+    }
+    // Primitives + lang types — copy_behavior tells us. Bitwise
+    // → no drop. None → tracked-affine; if no def found at all
+    // we conservatively say "no work" (unresolved types skip).
+    MirTy::Named {
+        entity,
+        type_args: vec![],
+    }
+    .copy_behavior(module)
+        == CopyBehavior::None
 }
 
 fn lookup_nominal_name(entity: Entity, module: &MirModule) -> String {

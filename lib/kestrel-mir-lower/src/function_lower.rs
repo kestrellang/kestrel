@@ -381,6 +381,7 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
 /// name-res / semantics analyzers.
 fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionDef) {
     let mut wc = WhereClause::new();
+    let mut has_type_params = false;
     let mut current = Some(entity);
     while let Some(e) = current {
         if let Some(ast_wc) = ctx.world.get::<AstWhereClause>(e) {
@@ -388,9 +389,22 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
                 lower_where_constraint(ctx, ast_constraint, e, &mut wc);
             }
         }
+        if ctx
+            .world
+            .get::<TypeParams>(e)
+            .is_some_and(|tp| !tp.0.is_empty())
+        {
+            has_type_params = true;
+        }
         current = ctx.world.parent_of(e);
     }
-    if !wc.constraints.is_empty() {
+    // Always set the where clause when type params exist (even if no
+    // constraints), so `type_param_copy_behavior` sees `Some(empty)`
+    // and defaults unconstrained T to Copyable. Without this, functions
+    // on generic types get `where_clause = None`, which the copy-behavior
+    // check treats as "no info → assume non-copyable" — producing false
+    // E500s on perfectly valid generic code.
+    if !wc.constraints.is_empty() || has_type_params {
         def.where_clause = Some(wc);
     }
 }

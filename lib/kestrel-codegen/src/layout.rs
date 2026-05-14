@@ -498,9 +498,19 @@ fn substitute_type_inner(
             if is_concrete(&sub_base)
                 && let Some(resolved) = module.resolve_associated_type(*protocol, &sub_base, name)
             {
-                // Chained projection (I.Item.Inner): re-run the walker so the
-                // witness's bound type is itself fully reduced.
                 return rec(&resolved);
+            }
+            // When base is SelfType and self_type is absent (Direct struct
+            // method), try resolving via subst values. This handles abstract
+            // projections like I.Item that MIR-lower stored as Self.Item.
+            if matches!(sub_base, MirTy::SelfType) {
+                for value in subst.values() {
+                    if let Some(resolved) =
+                        module.resolve_associated_type(*protocol, value, name)
+                    {
+                        return rec(&resolved);
+                    }
+                }
             }
             MirTy::AssociatedProjection {
                 base: Box::new(sub_base),

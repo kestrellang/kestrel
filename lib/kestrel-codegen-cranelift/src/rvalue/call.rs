@@ -653,6 +653,29 @@ fn resolve_associated_self_type(
     _protocol: Entity,
     self_type: &MirTy,
 ) -> MirTy {
+    // AssociatedProjection { base: SelfType } — MIR-lower used SelfType as a
+    // fallback base for abstract associated type projections (e.g., I.Item
+    // lowered as Self.Item). Resolve via subst values to get the correct
+    // single-level resolution.
+    if let MirTy::AssociatedProjection {
+        base,
+        protocol,
+        name,
+    } = self_type
+    {
+        let sub_base =
+            substitute_type_with_self(base, &state.subst, state.self_type.as_ref(), ctx.module);
+        if matches!(sub_base, MirTy::SelfType) {
+            for candidate in state.subst.values() {
+                if let Ok(resolved) =
+                    witness::resolve_associated_type(ctx.module, *protocol, candidate, name)
+                {
+                    return resolved;
+                }
+            }
+        }
+    }
+
     // Check if self_type is Named with no type args (bare associated type entity)
     let entity = match self_type {
         MirTy::Named { entity, type_args } if type_args.is_empty() => *entity,

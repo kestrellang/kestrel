@@ -139,20 +139,19 @@ pub fn lower_named_type_from_entity(
         }
         // An abstract associated-type alias (TypeAlias child of a Protocol)
         // that leaks through inference as `TyKind::TypeAlias` → `ResolvedTy::Named`.
-        // Codegen and ownership analysis both expect this to be expressed as
-        // `MirTy::AssociatedProjection` over an abstract `Self`, so the
-        // monomorphizer can resolve it via the witness table for the concrete
-        // implementing type. Sources that hand us this shape: type inference's
-        // `kind_to_resolved` (`ResolvedTy::Named { entity: <Item alias> }` for
-        // unreducible projections); `body_lower.rs::type_from_type_ref` for
-        // TypeAlias static-ref bases. Mirror the HirTy::AssocProjection
-        // lowering at `lower_type` so the two paths agree.
+        // Wrap in `AssociatedProjection` so the move checker and ownership
+        // analysis see this as an abstract type (not a concrete Named that
+        // would be treated as non-copyable). The base is `SelfType` as a
+        // fallback — `resolve_assoc_type_substs` pre-resolves the entity in
+        // the subst map, and `substitute_type_with_self` substitutes the bare
+        // `Named { entity }` BEFORE the outer AssociatedProjection is reached.
         if kind == NodeKind::TypeAlias
             && let Some(parent) = ctx.world.parent_of(entity)
             && ctx.world.get::<NodeKind>(parent) == Some(&NodeKind::Protocol)
             && let Some(name) = ctx.world.get::<Name>(entity).map(|n| n.0.clone())
         {
             ctx.register_name(parent);
+            ctx.register_name(entity);
             return MirTy::AssociatedProjection {
                 base: Box::new(MirTy::SelfType),
                 protocol: parent,

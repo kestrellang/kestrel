@@ -184,5 +184,6 @@ fn describe_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
         ResolvedTy::Param { .. } => "type parameter".into(),
         ResolvedTy::SelfType { .. } => "Self".into(),
         ResolvedTy::Function { .. } => "function type".into(),
+        ResolvedTy::AssocProjection { .. } => "associated type".into(),
     }
 }
