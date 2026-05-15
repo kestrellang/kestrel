@@ -18,8 +18,8 @@ struct Wrapper {
 }
 
 func main() -> lang.i64 {
-    let some = Wrapper(from: 42);
-    match some {
+    let someOpt = Wrapper(from: 42);
+    match someOpt {
         .Some(w) => {
             if w.value != 42 { return 1 }
         },

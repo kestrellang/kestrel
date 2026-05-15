@@ -4,11 +4,11 @@
 module Test
 
         func main() -> lang.i64 {
-            let some: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let someOpt: std.result.Optional[std.numeric.Int64] = .Some(42);
             let none: std.result.Optional[std.numeric.Int64] = .None;
 
             // Format Some
-            let someStr = some.formatted();
+            let someStr = someOpt.formatted();
             if someStr.isEqual(to: "Some(42)") == false { return 1 }
 
             // Format None

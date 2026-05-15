@@ -1655,7 +1655,7 @@ fn solve_call(
             }
             // Normal function call — unify params and return
             for (arg, param) in args.iter().zip(params.iter()) {
-                ctx.coerce(arg.ty, *param, expr, span.clone());
+                ctx.coerce(arg.ty, *param, arg.value, span.clone());
             }
             ctx.equal(result, ret, span);
             SolveResult::Solved
@@ -1938,7 +1938,7 @@ fn emit_resolved_call(
         for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
             if let Some(hir_ty) = param_ty {
                 let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
-                ctx.coerce(arg.ty, param_tv, expr, span.clone());
+                ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
             }
         }
     }
@@ -2663,7 +2663,7 @@ fn solve_member(
     // Equate argument types with parameter types
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
         let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
-        ctx.coerce(arg.ty, param_tv, expr, span.clone());
+        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
     }
 
     // Equate result with return type
@@ -2773,7 +2773,7 @@ fn solve_implicit(
     let self_entity = resolution.self_type;
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
         let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, expected, &subs);
-        ctx.coerce(arg.ty, param_tv, expr, span.clone());
+        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
     }
 
     // Equate result with the expected type

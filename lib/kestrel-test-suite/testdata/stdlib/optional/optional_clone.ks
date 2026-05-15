@@ -4,11 +4,11 @@
 module Test
 
         func main() -> lang.i64 {
-            let some: std.result.Optional[std.numeric.Int64] = .Some(42);
+            let someOpt: std.result.Optional[std.numeric.Int64] = .Some(42);
             let none: std.result.Optional[std.numeric.Int64] = .None;
 
             // Clone of Some
-            let clonedSome = some.clone();
+            let clonedSome = someOpt.clone();
             if clonedSome.isNone() { return 1 }
             if clonedSome.unwrap() != 42 { return 2 }
 

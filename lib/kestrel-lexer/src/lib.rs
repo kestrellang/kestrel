@@ -447,6 +447,9 @@ pub enum Token {
     #[token("null")]
     Null,
 
+    #[token("some")]
+    Some,
+
     // ===== Declaration Keywords =====
     #[token("extend")]
     Extend,
