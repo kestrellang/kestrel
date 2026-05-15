@@ -107,6 +107,10 @@ pub struct LocalDef {
     pub name: String,
     /// Type of this local.
     pub ty: MirTy,
+    /// True for locals loaded from a closure env struct. These are
+    /// borrowed views of the parent scope's values — the closure does
+    /// not own them and drop elaboration must skip them.
+    pub borrowed: bool,
 }
 
 impl LocalDef {
@@ -114,6 +118,15 @@ impl LocalDef {
         Self {
             name: name.into(),
             ty,
+            borrowed: false,
+        }
+    }
+
+    pub fn borrowed(name: impl Into<String>, ty: MirTy) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            borrowed: true,
         }
     }
 }

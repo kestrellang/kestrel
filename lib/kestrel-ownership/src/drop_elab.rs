@@ -78,7 +78,7 @@ fn prepare(
         .iter()
         .enumerate()
         .skip(body.param_count)
-        .filter(|(_, l)| l.ty.copy_behavior(module) == CopyBehavior::None)
+        .filter(|(_, l)| l.ty.copy_behavior(module) == CopyBehavior::None && !l.borrowed)
         .map(|(i, _)| LocalId::new(i))
         .collect();
     let paths = MovePathSet::build(body, module, where_clause);

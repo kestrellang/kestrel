@@ -3934,7 +3934,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         for &captured in &captured_locals {
             let cap_ty = self.resolve_local_type(captured);
             let cap_name = self.hir.locals[captured].name.clone();
-            let closure_local = closure_body.add_local(LocalDef::new(&cap_name, cap_ty));
+            let closure_local = closure_body.add_local(LocalDef::borrowed(&cap_name, cap_ty));
             closure_local_map.insert(captured, closure_local);
             capture_local_ids.push(closure_local);
         }

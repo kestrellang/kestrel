@@ -138,6 +138,19 @@ enum DumpKind {
 }
 
 // ============================================================================
+// MIR pipeline
+// ============================================================================
+
+fn lower_with_ownership(
+    world: &kestrel_hecs::World,
+    root: kestrel_hecs::Entity,
+) -> kestrel_mir::MirModule {
+    let mut mir = lower_module(world, root);
+    kestrel_ownership::run(&mut mir);
+    mir.with_all_passes()
+}
+
+// ============================================================================
 // Build
 // ============================================================================
 
@@ -163,7 +176,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
         eprintln!("  Building {}...", output_path.display());
     }
 
-    let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+    let mir = lower_with_ownership(compiler.world(), compiler.root());
     let target = globals.codegen_target()?;
     let options = CodegenOptions {
         opt_level: args.opt_level,
@@ -209,11 +222,11 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
     match args.kind {
         DumpKind::Mir => {
-            let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+            let mir = lower_with_ownership(compiler.world(), compiler.root());
             print!("{}", mir.display());
         },
         DumpKind::Cranelift => {
-            let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+            let mir = lower_with_ownership(compiler.world(), compiler.root());
             let target = globals.codegen_target()?;
             let options = CodegenOptions {
                 emit_clif: true,
