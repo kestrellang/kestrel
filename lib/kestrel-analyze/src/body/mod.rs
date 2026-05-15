@@ -13,7 +13,6 @@ pub mod access_mode;
 pub mod closure;
 pub mod definite_assignment;
 pub mod initializer;
-pub mod move_tracking;
 
 // Wave 6: Pattern checks
 pub mod exhaustiveness;

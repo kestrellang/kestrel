@@ -1,7 +1,7 @@
 //! Enum definitions.
 
 use crate::id::StructId;
-use crate::item::TypeParamDef;
+use crate::item::{CopyBehavior, DeinitBehavior, TypeParamDef};
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
@@ -18,6 +18,15 @@ pub struct EnumDef {
     pub cases: Vec<EnumCaseDef>,
     /// Case lookup by name.
     pub cases_by_name: IndexMap<String, usize>,
+    /// How this enum is duplicated. Populated by `kestrel-mir-lower` from
+    /// `kestrel_semantics::NominalCopySemantics`. The semantics fold across
+    /// all variant payloads — any non-copyable payload makes the enum
+    /// non-copyable.
+    pub copy_behavior: CopyBehavior,
+    /// How this enum is destroyed. Populated by `kestrel-mir-lower` from the
+    /// `deinit` method (if any) plus the union of payload-field drops across
+    /// variants.
+    pub deinit_behavior: DeinitBehavior,
 }
 
 impl EnumDef {
@@ -28,6 +37,8 @@ impl EnumDef {
             type_params: Vec::new(),
             cases: Vec::new(),
             cases_by_name: IndexMap::new(),
+            copy_behavior: CopyBehavior::None,
+            deinit_behavior: DeinitBehavior::default(),
         }
     }
 

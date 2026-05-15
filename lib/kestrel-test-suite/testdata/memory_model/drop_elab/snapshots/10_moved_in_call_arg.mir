@@ -1,0 +1,12 @@
+func Test.example() -> ()
+{
+    locals:
+        %h: Test.Handle
+        %_t0: Test.Handle
+
+    bb0:
+        %_t0 = construct Test.Handle { fd: i64.literal 1 }
+        %self = move %_t0
+        call Test.take(move %self)
+        return ()
+}

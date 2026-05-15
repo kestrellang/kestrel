@@ -3,6 +3,7 @@
 //! ResolvedTy comes from type inference results. It has the same shape as HirTy
 //! but without spans and without Infer.
 
+use kestrel_ast_builder::Name;
 use kestrel_mir::MirTy;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -25,6 +26,22 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> MirTy {
             // `substitute_type_with_self` against the enclosing function's
             // concrete self_type.
             MirTy::SelfType
+        },
+        ResolvedTy::AssocProjection { base, assoc } => {
+            let base_ty = lower_resolved_ty(ctx, base);
+            let (protocol, name) = match (
+                ctx.world.parent_of(*assoc),
+                ctx.world.get::<Name>(*assoc).map(|n| n.0.clone()),
+            ) {
+                (Some(p), Some(n)) => (p, n),
+                _ => return MirTy::Error,
+            };
+            ctx.register_name(protocol);
+            MirTy::AssociatedProjection {
+                base: Box::new(base_ty),
+                protocol,
+                name,
+            }
         },
         ResolvedTy::Tuple(elems) => {
             let lowered: Vec<MirTy> = elems.iter().map(|t| lower_resolved_ty(ctx, t)).collect();

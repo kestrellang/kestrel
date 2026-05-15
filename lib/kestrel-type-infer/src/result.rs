@@ -88,6 +88,13 @@ pub enum ResolvedTy {
     SelfType {
         entity: Entity,
     },
+    /// Abstract associated-type projection: `base.assoc` (e.g. `I.Item`).
+    /// Preserved so MIR lowering can build `MirTy::AssociatedProjection`
+    /// with the correct base instead of defaulting to `SelfType`.
+    AssocProjection {
+        base: Box<ResolvedTy>,
+        assoc: Entity,
+    },
     Tuple(Vec<ResolvedTy>),
     Function {
         params: Vec<ResolvedTy>,
@@ -141,7 +148,10 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
         },
         TyKind::Param { entity } => ResolvedTy::Param { entity: *entity },
         TyKind::SelfType { entity } => ResolvedTy::SelfType { entity: *entity },
-        TyKind::AssocProjection { .. } => ResolvedTy::Error,
+        TyKind::AssocProjection { base, assoc } => ResolvedTy::AssocProjection {
+            base: Box::new(resolve_to_concrete(ctx, *base)),
+            assoc: *assoc,
+        },
         TyKind::Tuple(elems) => ResolvedTy::Tuple(
             elems
                 .iter()

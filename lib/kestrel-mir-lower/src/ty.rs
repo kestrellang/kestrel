@@ -132,11 +132,33 @@ pub fn lower_named_type_from_entity(
     }
 
     // TypeParameter entities → MirTy::TypeParam
-    if let Some(kind) = ctx.world.get::<NodeKind>(entity)
-        && *kind == NodeKind::TypeParameter {
+    if let Some(kind) = ctx.world.get::<NodeKind>(entity).cloned() {
+        if kind == NodeKind::TypeParameter {
             ctx.register_name(entity);
             return MirTy::TypeParam(entity);
         }
+        // An abstract associated-type alias (TypeAlias child of a Protocol)
+        // that leaks through inference as `TyKind::TypeAlias` → `ResolvedTy::Named`.
+        // Wrap in `AssociatedProjection` so the move checker and ownership
+        // analysis see this as an abstract type (not a concrete Named that
+        // would be treated as non-copyable). The base is `SelfType` as a
+        // fallback — `resolve_assoc_type_substs` pre-resolves the entity in
+        // the subst map, and `substitute_type_with_self` substitutes the bare
+        // `Named { entity }` BEFORE the outer AssociatedProjection is reached.
+        if kind == NodeKind::TypeAlias
+            && let Some(parent) = ctx.world.parent_of(entity)
+            && ctx.world.get::<NodeKind>(parent) == Some(&NodeKind::Protocol)
+            && let Some(name) = ctx.world.get::<Name>(entity).map(|n| n.0.clone())
+        {
+            ctx.register_name(parent);
+            ctx.register_name(entity);
+            return MirTy::AssociatedProjection {
+                base: Box::new(MirTy::SelfType),
+                protocol: parent,
+                name,
+            };
+        }
+    }
 
     // Register the entity name for display
     ctx.register_name(entity);

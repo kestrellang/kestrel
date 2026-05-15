@@ -47,6 +47,7 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) -> ProtocolId {
 
         match *kind {
             NodeKind::TypeAlias => {
+                ctx.register_name(child);
                 let assoc_name = ctx
                     .world
                     .get::<kestrel_ast_builder::Name>(child)

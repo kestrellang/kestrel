@@ -23,6 +23,8 @@ impl MirModule {
         self_type: &MirTy,
         name: &str,
     ) -> Option<MirTy> {
+        // Look up the protocol def to map protocol_type_args names → entities
+        let protocol_def = self.protocols.iter().find(|p| p.entity == protocol);
         for witness in &self.witnesses {
             if witness.protocol != protocol {
                 continue;
@@ -31,8 +33,23 @@ impl MirModule {
             if !witness_match_pattern(&witness.implementing_type, self_type, &mut bindings) {
                 continue;
             }
+            // Merge protocol type arg bindings: when `type SeqOutput = T` and
+            // `protocol_type_args = {"T": TypeParam(Range.T)}`, the protocol's
+            // T entity needs to map to the concrete type. The protocol_type_arg
+            // value may itself be a TypeParam already bound by the pattern match
+            // (e.g., Range[TypeParam(X)] matched Range[Int64] → X=Int64), so
+            // substitute it through the existing bindings first.
+            if let Some(pdef) = protocol_def {
+                for tp in &pdef.type_params {
+                    if let Some(proto_arg) = witness.protocol_type_args.get(&tp.name) {
+                        let resolved = substitute_params_pure(proto_arg, &bindings);
+                        bindings.entry(tp.entity).or_insert(resolved);
+                    }
+                }
+            }
             let bound = witness.type_bindings.get(name)?;
-            return Some(substitute_params_pure(bound, &bindings));
+            let result = substitute_params_pure(bound, &bindings);
+            return Some(result);
         }
         None
     }

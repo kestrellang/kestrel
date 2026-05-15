@@ -8,8 +8,11 @@ kestrel-compiler = { path = "lib/kestrel-compiler" }
 kestrel-compiler-driver = { path = "lib/kestrel-compiler-driver" }
 kestrel-ast-builder = { path = "lib/kestrel-ast-builder" }
 kestrel-analyze = { path = "lib/kestrel-analyze" }
+kestrel-hecs = { path = "lib/kestrel-hecs" }
+kestrel-mir = { path = "lib/kestrel-mir" }
 kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
+kestrel-ownership = { path = "lib/kestrel-ownership" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
 codespan-reporting = { workspace = true }
@@ -60,12 +63,13 @@ members = [
     "lib/kestrel-reporting",
     "lib/kestrel-mir",
     "lib/kestrel-mir-lower",
+    "lib/kestrel-ownership",
     "lib/kestrel-codegen",
     "lib/kestrel-codegen-cranelift",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
     "lib/kestrel-test-suite",
-    "external/triage",
+    # "external/triage",  # TEMP: excluded during memory-model rewrite; restore before merging
 ]
 exclude = ["registry", "external/flock-registry"]
 

@@ -1,51 +1,123 @@
-//! Values — either places or immediates.
+//! Values — operand-level reads of places, with ownership and borrow modes
+//! folded directly into the variants.
+//!
+//! Stage 3 of the greenfield memory model: the previous `Value::Place(Place)`
+//! was ownership-agnostic, with passing modes carried separately via
+//! `CallArg.mode`. Now every value-producing position in the IR records its
+//! own mode at the leaf, and `CallArg` / `PassingMode` are gone.
+//!
+//! Variant choice at each site is driven by the source type's
+//! `CopyBehavior`. The verifier (Stage 6) enforces the legality rules; the
+//! summary is:
+//!
+//! - `Value::Move(p)` is legal only when `p.ty.copy_behavior() == None`.
+//! - `Value::Copy(p)` requires the place's type to have a non-`None` copy
+//!   behavior.
+//! - `Value::Ref(p)` / `Value::RefMut(p)` borrow the place without
+//!   transferring ownership.
+//! - `Value::Const(_)` is a literal — no place involved.
 
 use crate::immediate::Immediate;
 use crate::place::Place;
 
-/// A value is either a place (memory location) or an immediate (constant).
+/// Operand-level read of a place (or a constant).
 ///
-/// No `Unreachable` variant — divergence is represented at the terminator level.
+/// Reads carry their ownership/borrow mode inline. See the module docs for
+/// the legality rules.
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// A memory location.
-    Place(Place),
+    /// `copy <place>` — read the value at `place` without invalidating the
+    /// source. Legal when the type's `CopyBehavior` is `Bitwise` or
+    /// `Clone(_)`.
+    Copy(Place),
+    /// `move <place>` — take ownership of `place`'s value, invalidating the
+    /// source. Legal only when the type's `CopyBehavior` is `None`.
+    Move(Place),
+    /// `&<place>` — immutable borrow.
+    Ref(Place),
+    /// `&var <place>` — mutable borrow.
+    RefMut(Place),
     /// A constant value.
-    Immediate(Immediate),
+    Const(Immediate),
 }
 
 impl Value {
-    pub fn is_place(&self) -> bool {
-        matches!(self, Value::Place(_))
+    /// True iff this value reads from a place (any variant except `Const`).
+    pub fn is_place_read(&self) -> bool {
+        !matches!(self, Value::Const(_))
     }
 
-    pub fn is_immediate(&self) -> bool {
-        matches!(self, Value::Immediate(_))
+    /// True iff this value is a constant.
+    pub fn is_const(&self) -> bool {
+        matches!(self, Value::Const(_))
     }
 
+    /// Return the underlying place for any place-reading variant, else
+    /// `None` for `Const`.
     pub fn as_place(&self) -> Option<&Place> {
         match self {
-            Value::Place(p) => Some(p),
-            _ => None,
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Some(p),
+            Value::Const(_) => None,
         }
     }
 
+    /// Return the underlying immediate, if this is a `Const`.
     pub fn as_immediate(&self) -> Option<&Immediate> {
         match self {
-            Value::Immediate(i) => Some(i),
+            Value::Const(i) => Some(i),
             _ => None,
         }
     }
-}
 
-impl From<Place> for Value {
-    fn from(p: Place) -> Self {
-        Value::Place(p)
+    /// Re-mode a place-reading value as a `Copy`. Constants are unchanged.
+    pub fn into_copy(self) -> Value {
+        match self {
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Copy(p),
+            Value::Const(_) => self,
+        }
+    }
+
+    /// Re-mode a place-reading value as a `Move`. Constants are unchanged
+    /// (and constructing a Move of a constant is meaningless; the verifier
+    /// (Stage 6) will reject Move on non-affine types).
+    pub fn into_move(self) -> Value {
+        match self {
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Move(p),
+            Value::Const(_) => self,
+        }
+    }
+
+    /// Re-mode a place-reading value as a `Ref`. Constants are unchanged.
+    pub fn into_ref(self) -> Value {
+        match self {
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Ref(p),
+            Value::Const(_) => self,
+        }
+    }
+
+    /// Re-mode a place-reading value as a `RefMut`. Constants are unchanged.
+    pub fn into_ref_mut(self) -> Value {
+        match self {
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::RefMut(p),
+            Value::Const(_) => self,
+        }
     }
 }
 
 impl From<Immediate> for Value {
     fn from(i: Immediate) -> Self {
-        Value::Immediate(i)
+        Value::Const(i)
+    }
+}
+
+/// Convenience: a bare `Place` defaults to `Value::Copy(place)`.
+///
+/// Used by the MIR builder helpers (`assign_op*`, `branch`, `ret`) where the
+/// caller has a `Place` in hand and the operand is a pure read on a
+/// Bitwise-copyable type (primitive op args, branch conditions, etc.). Sites
+/// that need a different mode must construct the `Value` variant explicitly.
+impl From<Place> for Value {
+    fn from(p: Place) -> Self {
+        Value::Copy(p)
     }
 }
