@@ -322,6 +322,21 @@ impl<'a> Mangler<'a> {
     }
 }
 
+/// True if the type contains any unresolved TypeParam or AssociatedProjection.
+/// These should never appear in a concrete instantiation's type args.
+pub fn has_abstract_type(ty: &MirTy) -> bool {
+    match ty {
+        MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedProjection { .. } => true,
+        MirTy::Pointer(t) | MirTy::Ref(t) | MirTy::RefMut(t) => has_abstract_type(t),
+        MirTy::Tuple(elems) => elems.iter().any(has_abstract_type),
+        MirTy::Named { type_args, .. } => type_args.iter().any(has_abstract_type),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(has_abstract_type) || has_abstract_type(ret)
+        },
+        _ => false,
+    }
+}
+
 /// Strip `$` disambiguation suffix from a path segment.
 fn strip_dollar(segment: &str) -> &str {
     segment.split('$').next().unwrap_or(segment)

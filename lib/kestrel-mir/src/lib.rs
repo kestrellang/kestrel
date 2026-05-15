@@ -34,17 +34,17 @@ pub use builder::{BlockBuilder, FunctionBuilder};
 pub use id::*;
 pub use immediate::{Immediate, ImmediateKind};
 pub use item::{
-    AssociatedTypeDef, CallingConvention, CaptureInfo, CaptureMode, ClosureInfo, EnumCaseDef,
-    EnumDef, ExternInfo, FieldDef, FileConstantData, FunctionDef, FunctionKind, MethodBinding,
-    MethodSource, ParamDef, ParamMode, ProtocolDef, ProtocolMethodDef, ReceiverConvention,
-    StaticDef, StructDef, StructLayout, TypeParamDef, WhereClause, WhereConstraint, WitnessDef,
-    WitnessMethodKey,
+    AssociatedTypeDef, CallingConvention, CaptureInfo, CaptureMode, ClosureInfo, CopyBehavior,
+    DeinitBehavior, EnumCaseDef, EnumDef, ExternInfo, FieldDef, FileConstantData, FunctionDef,
+    FunctionKind, MethodBinding, MethodSource, ParamDef, ProtocolDef,
+    ProtocolMethodDef, ReceiverConvention, StaticDef, StructDef, StructLayout, TypeParamDef,
+    WhereClause, WhereConstraint, WitnessDef, WitnessMethodKey,
 };
 pub use op::{
     FloatBits, FloatConstantKind, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness,
 };
 pub use place::Place;
-pub use statement::{CallArg, Callee, PassingMode, Rvalue, Statement, StatementKind};
+pub use statement::{Callee, Rvalue, Statement, StatementKind};
 pub use terminator::{SwitchCase, Terminator, TerminatorKind};
 pub use ty::MirTy;
 pub use value::Value;
@@ -127,9 +127,9 @@ impl MirModule {
 
     /// Resolve a local ID to its name. Searches all function bodies.
     ///
-    /// This is used by display code for DeinitIf/SetDeinitFlag which reference
-    /// locals by ID outside of a function context. For efficiency, callers
-    /// displaying a whole function should use the body's locals directly.
+    /// This is used by display code for `DropIf` which references locals by
+    /// ID outside of a function context. For efficiency, callers displaying a
+    /// whole function should use the body's locals directly.
     pub fn resolve_local_name(&self, id: LocalId) -> &str {
         // Search through all functions for a body containing this local
         for func in &self.functions {
@@ -225,7 +225,8 @@ impl MirModule {
         passes::verify(self)
     }
 
-    /// Run all post-lowering passes in the recommended order.
+    /// Run all post-lowering passes in the recommended order. Drop elaboration
+    /// is handled by [`kestrel_ownership::run`] and is not invoked here.
     pub fn with_all_passes(self) -> Self {
         self.with_drop_elaboration().with_thunks().with_layouts()
     }

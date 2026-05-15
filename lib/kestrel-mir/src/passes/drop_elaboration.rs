@@ -9,9 +9,9 @@ use std::collections::{HashMap, HashSet};
 use crate::MirModule;
 use crate::body::{BasicBlock, LocalDef, MirBody, ScopeId};
 use crate::id::{BlockId, LocalId};
-use crate::item::{FunctionKind, ParamMode};
+use crate::item::FunctionKind;
 use crate::place::Place;
-use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
+use crate::statement::{Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::{SwitchCase, Terminator, TerminatorKind};
 use crate::ty::MirTy;
 use crate::value::Value;
@@ -214,14 +214,15 @@ fn identify_droppable_locals(
         }
     }
 
-    // Step 4: add consuming params (including consuming-self receivers whose
-    // ParamMode isn't set to Consuming — see function_lower.rs comment).
+    // Step 4: add consuming params (including consuming-self receivers).
+    // A consuming param's type is not Ref/RefMut — ownership is baked into the type.
     let is_consuming_self_method = matches!(
         &func.kind,
         FunctionKind::Method { receiver: crate::item::ReceiverConvention::Consuming, .. }
     );
     for (pi, param) in func.params.iter().enumerate() {
-        let dominated = param.mode == ParamMode::Consuming
+        let is_consuming = !matches!(&param.ty, MirTy::Ref(_) | MirTy::RefMut(_));
+        let dominated = is_consuming
             || (is_consuming_self_method && pi == 0);
         if dominated {
             let local_id = param.local;
@@ -258,7 +259,8 @@ fn identify_droppable_locals(
             if is_param {
                 // Only keep params that Step 4 explicitly added (consuming or consuming-self)
                 let dominated = func.params.iter().enumerate().any(|(pi, p)| {
-                    p.local == *id && (p.mode == ParamMode::Consuming
+                    let is_consuming = !matches!(&p.ty, MirTy::Ref(_) | MirTy::RefMut(_));
+                    p.local == *id && (is_consuming
                         || (is_consuming_self_method && pi == 0))
                 });
                 dominated
@@ -499,10 +501,12 @@ fn transfer_block(
         transfer_statement(&stmt.kind, local_to_idx, state, consuming_receiver_funcs);
     }
     // Return terminator consumes the returned local
-    if let TerminatorKind::Return(Value::Place(place)) = &block.terminator.kind {
-        if let Some(local) = place.root_local() {
-            if let Some(&idx) = local_to_idx.get(&local) {
-                state[idx] = InitState::Dead;
+    if let TerminatorKind::Return(val) = &block.terminator.kind {
+        if let Some(place) = val.as_place() {
+            if let Some(local) = place.root_local() {
+                if let Some(&idx) = local_to_idx.get(&local) {
+                    state[idx] = InitState::Dead;
+                }
             }
         }
     }
@@ -525,7 +529,7 @@ fn transfer_statement(
             // Construct consumes field values
             if let Rvalue::Construct { fields, .. } = rvalue {
                 for (_, value) in fields {
-                    if let Value::Place(place) = value {
+                    if let Some(place) = value.as_place() {
                         if let Some(local) = place.root_local() {
                             if let Some(&idx) = local_to_idx.get(&local) {
                                 state[idx] = InitState::Dead;
@@ -537,7 +541,7 @@ fn transfer_statement(
             // EnumVariant consumes payload values
             if let Rvalue::EnumVariant { payload, .. } = rvalue {
                 for value in payload {
-                    if let Value::Place(place) = value {
+                    if let Some(place) = value.as_place() {
                         if let Some(local) = place.root_local() {
                             if let Some(&idx) = local_to_idx.get(&local) {
                                 state[idx] = InitState::Dead;
@@ -549,7 +553,7 @@ fn transfer_statement(
             // ApplyPartial consumes capture values
             if let Rvalue::ApplyPartial { captures, .. } = rvalue {
                 for value in captures {
-                    if let Value::Place(place) = value {
+                    if let Some(place) = value.as_place() {
                         if let Some(local) = place.root_local() {
                             if let Some(&idx) = local_to_idx.get(&local) {
                                 state[idx] = InitState::Dead;
@@ -559,7 +563,7 @@ fn transfer_statement(
                 }
             }
         }
-        // Call with PassingMode::Move or consuming receiver consumes the argument
+        // Call with Value::Move or consuming receiver consumes the argument
         StatementKind::Call { args, callee, .. } => {
             // Check for consuming receiver: first arg is self, consumed by the method
             let has_consuming_receiver = match callee {
@@ -567,10 +571,10 @@ fn transfer_statement(
                 _ => false,
             };
             for (ai, arg) in args.iter().enumerate() {
-                let is_consumed = arg.mode == crate::statement::PassingMode::Move
+                let is_consumed = matches!(arg, Value::Move(_))
                     || (ai == 0 && has_consuming_receiver);
                 if is_consumed {
-                    if let Value::Place(place) = &arg.value {
+                    if let Some(place) = arg.as_place() {
                         if let Some(local) = place.root_local() {
                             if let Some(&idx) = local_to_idx.get(&local) {
                                 state[idx] = InitState::Dead;
@@ -603,6 +607,10 @@ fn transfer_statement(
             }
         }
         StatementKind::SetDeinitFlag { .. } => {}
+        // Drop/DropIf are emitted by the ownership pass, not by drop elaboration.
+        // They should not appear during the elaboration dataflow, but handle them
+        // gracefully as no-ops for the init-state transfer.
+        StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {}
     }
 }
 
@@ -642,17 +650,17 @@ fn insert_flag_updates(
                         }
                     }
                 }
-                // Call with Move args or consuming receiver → flag = true (skip deinit)
+                // Call with Move args or consuming receiver -> flag = true (skip deinit)
                 StatementKind::Call { args, callee, .. } => {
                     let has_consuming_receiver = match callee {
                         Callee::Direct { func, .. } => consuming_receiver_funcs.contains(func),
                         _ => false,
                     };
                     for (ai, arg) in args.iter().enumerate() {
-                        let is_consumed = arg.mode == crate::statement::PassingMode::Move
+                        let is_consumed = matches!(arg, Value::Move(_))
                             || (ai == 0 && has_consuming_receiver);
                         if is_consumed {
-                            if let Value::Place(place) = &arg.value {
+                            if let Some(place) = arg.as_place() {
                                 if let Some(local) = place.root_local() {
                                     if let Some(&flag) = flags.get(&local) {
                                         insertions.push((si + 1, Statement::new(
@@ -754,7 +762,7 @@ fn collect_consumed_locals(rvalue: &Rvalue) -> Vec<LocalId> {
     match rvalue {
         Rvalue::Construct { fields, .. } => {
             for (_, value) in fields {
-                if let Value::Place(place) = value {
+                if let Some(place) = value.as_place() {
                     if let Some(local) = place.root_local() {
                         consumed.push(local);
                     }
@@ -763,7 +771,7 @@ fn collect_consumed_locals(rvalue: &Rvalue) -> Vec<LocalId> {
         }
         Rvalue::EnumVariant { payload, .. } => {
             for value in payload {
-                if let Value::Place(place) = value {
+                if let Some(place) = value.as_place() {
                     if let Some(local) = place.root_local() {
                         consumed.push(local);
                     }
@@ -772,7 +780,7 @@ fn collect_consumed_locals(rvalue: &Rvalue) -> Vec<LocalId> {
         }
         Rvalue::ApplyPartial { captures, .. } => {
             for value in captures {
-                if let Value::Place(place) = value {
+                if let Some(place) = value.as_place() {
                     if let Some(local) = place.root_local() {
                         consumed.push(local);
                     }
@@ -805,10 +813,7 @@ fn insert_deinits_at_exits(
         match term {
             TerminatorKind::Return(ret_val) => {
                 // Return: clean up ALL droppable locals except the returned one
-                let returned_local = match ret_val {
-                    Value::Place(p) => p.root_local(),
-                    _ => None,
-                };
+                let returned_local = ret_val.as_place().and_then(|p| p.root_local());
 
                 // Compute state just before the return (after all stmts, before terminator)
                 let mut state = block_entry_states[bi].clone();
@@ -825,10 +830,9 @@ fn insert_deinits_at_exits(
                     // If the return value is not a simple local (e.g., a global or
                     // field read), capture it into a temp before cleanup so the
                     // cleanup deinits don't modify it before it's read.
-                    let needs_capture = match ret_val {
-                        Value::Place(p) => p.root_local().is_none(),
-                        Value::Immediate(_) => false,
-                    };
+                    let needs_capture = ret_val.as_place()
+                        .map(|p| p.root_local().is_none())
+                        .unwrap_or(false);
                     if needs_capture {
                         let ret_temp = body.add_local(LocalDef::new("_ret_capture", ret_ty.clone()));
                         body.blocks[bi].stmts.push(Statement::new(StatementKind::Assign {
@@ -836,7 +840,7 @@ fn insert_deinits_at_exits(
                             rvalue: Rvalue::Copy(ret_val.as_place().unwrap().clone()),
                         }));
                         body.blocks[bi].terminator.kind =
-                            TerminatorKind::Return(Value::Place(Place::local(ret_temp)));
+                            TerminatorKind::Return(Value::Copy(Place::local(ret_temp)));
                     }
                 }
                 body.blocks[bi].stmts.extend(deinit_stmts);
@@ -1228,7 +1232,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                     body.blocks[block].stmts[stmt] = Statement::new(StatementKind::Call {
                         dest: None,
                         callee,
-                        args: vec![CallArg::mutating(Value::Place(place.clone()))],
+                        args: vec![Value::RefMut(place.clone())],
                     });
                     // Insert extra field cascade calls after the deinit call
                     for (i, (field_path, df, ft)) in extra_field_drops.into_iter().enumerate() {
@@ -1240,7 +1244,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                         body.blocks[block].stmts.insert(stmt + 1 + i, Statement::new(StatementKind::Call {
                             dest: None,
                             callee,
-                            args: vec![CallArg::mutating(Value::Place(field_place))],
+                            args: vec![Value::RefMut(field_place)],
                         }));
                     }
                 } else {
@@ -1269,7 +1273,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                 deinit_block.stmts.push(Statement::new(StatementKind::Call {
                     dest: None,
                     callee,
-                    args: vec![CallArg::mutating(Value::Place(place))],
+                    args: vec![Value::RefMut(place)],
                 }));
                 deinit_block.terminator = Terminator::jump(cont_block_id);
                 body.blocks.push(deinit_block);
@@ -1277,7 +1281,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                 // flag=true → skip (dead/moved); flag=false → deinit (live)
                 body.blocks[block].terminator = Terminator {
                     kind: TerminatorKind::Branch {
-                        condition: Value::Place(Place::local(flag)),
+                        condition: Value::Copy(Place::local(flag)),
                         then_block: cont_block_id,    // flag=true → skip
                         else_block: deinit_block_id,  // flag=false → deinit
                     },
@@ -1317,7 +1321,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                                 deinit_block.stmts.push(Statement::new(StatementKind::Call {
                                     dest: None,
                                     callee,
-                                    args: vec![CallArg::mutating(Value::Place(field_place))],
+                                    args: vec![Value::RefMut(field_place)],
                                 }));
                             } else {
                                 // Nested enum: emit Deinit for iterative expansion
@@ -1346,7 +1350,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                 if let Some(flag_id) = flag {
                     body.blocks[block].terminator = Terminator {
                         kind: TerminatorKind::Branch {
-                            condition: Value::Place(Place::local(flag_id)),
+                            condition: Value::Copy(Place::local(flag_id)),
                             then_block: cont_block_id,    // flag=true → skip
                             else_block: switch_block_id,  // flag=false → drop
                         },
@@ -1380,7 +1384,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                         deinit_block.stmts.push(Statement::new(StatementKind::Call {
                             dest: None,
                             callee,
-                            args: vec![CallArg::mutating(Value::Place(field_place))],
+                            args: vec![Value::RefMut(field_place)],
                         }));
                     }
                     deinit_block.terminator = Terminator::jump(cont_block_id);
@@ -1388,7 +1392,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
 
                     body.blocks[block].terminator = Terminator {
                         kind: TerminatorKind::Branch {
-                            condition: Value::Place(Place::local(flag_id)),
+                            condition: Value::Copy(Place::local(flag_id)),
                             then_block: cont_block_id,    // flag=true → skip
                             else_block: deinit_block_id,  // flag=false → deinit
                         },
@@ -1405,7 +1409,7 @@ fn apply_expansions(body: &mut MirBody, expansions: Vec<Expansion>) {
                         body.blocks[block].stmts.insert(stmt + i, Statement::new(StatementKind::Call {
                             dest: None,
                             callee,
-                            args: vec![CallArg::mutating(Value::Place(field_place))],
+                            args: vec![Value::RefMut(field_place)],
                         }));
                     }
                 }
@@ -1457,7 +1461,7 @@ fn inject_field_deinits(module: &mut MirModule, deinit_funcs: &HashMap<Entity, E
                 body.blocks[block_idx].stmts.push(Statement::new(StatementKind::Call {
                     dest: None,
                     callee,
-                    args: vec![CallArg::mutating(Value::Place(place))],
+                    args: vec![Value::RefMut(place)],
                 }));
             }
         }

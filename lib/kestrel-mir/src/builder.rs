@@ -7,7 +7,7 @@ use crate::immediate::Immediate;
 use crate::item::{ParamDef, WhereClause, WhereConstraint};
 use crate::op::Op;
 use crate::place::Place;
-use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
+use crate::statement::{Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::Terminator;
 use crate::ty::MirTy;
 use crate::value::Value;
@@ -253,29 +253,14 @@ impl<'a> BlockBuilder<'a> {
     }
 
     /// `[dest =] call callee(args...)`
-    pub fn call(&mut self, dest: Option<Place>, callee: Callee, args: Vec<CallArg>) {
+    pub fn call(&mut self, dest: Option<Place>, callee: Callee, args: Vec<Value>) {
         self.add_statement(Statement::new(StatementKind::Call { dest, callee, args }));
     }
 
-    /// `dest = call func(args...)` — convenience for direct calls with borrow mode.
+    /// `dest = call func(args...)` — convenience for direct calls. Callers
+    /// supply already-classified `Value` operands (Copy/Move/Ref/RefMut/Const).
     pub fn call_direct(&mut self, dest: Option<Place>, func: Entity, args: Vec<Value>) {
-        let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
-        self.call(dest, Callee::direct(func), call_args);
-    }
-
-    /// `deinit <place>`
-    pub fn deinit(&mut self, place: Place) {
-        self.add_statement(Statement::new(StatementKind::Deinit { place }));
-    }
-
-    /// `deinit <place> if <flag>`
-    pub fn deinit_if(&mut self, place: Place, flag: LocalId) {
-        self.add_statement(Statement::new(StatementKind::DeinitIf { place, flag }));
-    }
-
-    /// `<flag> = true/false`
-    pub fn set_deinit_flag(&mut self, flag: LocalId, value: bool) {
-        self.add_statement(Statement::new(StatementKind::SetDeinitFlag { flag, value }));
+        self.call(dest, Callee::direct(func), args);
     }
 
     // === Terminators ===

@@ -1,0 +1,6 @@
+func Test.consume(h: Test.Handle) -> ()
+{
+    bb0:
+        call Test.sink(move %self)
+        return ()
+}

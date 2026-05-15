@@ -1,0 +1,18 @@
+func Test.example() -> ()
+{
+    locals:
+        %h: Test.Handle
+        %_t0: Test.Handle
+        %_init__t0: bool
+        %_drop_arg: Test.Handle
+
+    bb0:
+        %_init__t0 = false
+        %_t0 = construct Test.Handle { fd: i64.literal 1 }
+        %_init__t0 = true
+        %self = move %_t0
+        %_init__t0 = false
+        %_drop_arg = move %self
+        call __drop$Test.Handle(move %_drop_arg)
+        return ()
+}

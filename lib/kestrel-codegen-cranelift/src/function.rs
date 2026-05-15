@@ -17,10 +17,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::Module;
 use kestrel_codegen::{LayoutCache, substitute_type_with_self};
 use kestrel_hecs::Entity;
-use kestrel_mir::{
-    BlockId, FunctionDef, LocalId, MirBody, MirTy, PassingMode, Rvalue,
-    StatementKind,
-};
+use kestrel_mir::{BlockId, FunctionDef, LocalId, MirBody, MirTy, Rvalue, StatementKind};
 use std::collections::{HashMap, HashSet};
 
 /// Per-function compilation state.
@@ -493,18 +490,16 @@ pub fn compile_function(
     // Collect address-taken locals
     let stack_locals = collect_address_taken_locals(body, subst, self_type, &mut ctx.layouts);
 
-    // `mutating` (InOut) and aggregate `In` parameters receive a pointer to
-    // caller storage. The local Cranelift Variable holds that pointer; reads/
-    // writes deref through it. This matches lib1's Borrow→Ref convention and
-    // ensures `lang.ptr_to(in_param)` returns the caller's address, not a
-    // dangling pointer to a callee-local copy.
+    // Ownership encoded in the type — see `common::param_passed_by_ptr`:
+    // `RefMut`, `Ref(aggregate)`, and owned aggregate params receive a
+    // pointer to caller storage. The local Cranelift Variable holds that
+    // pointer; reads/writes deref through it. Matches lib1's Borrow→Ref
+    // convention so `lang.ptr_to(in_param)` returns the caller's address.
+    // Scalar `Ref` params flow by value and live in a scalar local.
     let mut inout_param_locals: HashSet<LocalId> = HashSet::new();
     for p in &func_def.params {
         let pty = substitute_type_with_self(&p.ty, subst, self_type, ctx.module);
-        let pass_as_ptr = matches!(p.mode, kestrel_mir::ParamMode::InOut)
-            || (matches!(p.mode, kestrel_mir::ParamMode::In)
-                && is_aggregate(&pty, &mut ctx.layouts));
-        if pass_as_ptr {
+        if common::param_passed_by_ptr(&pty, &mut ctx.layouts) {
             inout_param_locals.insert(p.local);
         }
     }
@@ -594,6 +589,14 @@ pub fn compile_function(
         }
 
         let ty = substitute_type_with_self(&local.ty, subst, self_type, ctx.module);
+        // Catch unresolved abstract types that should have been substituted.
+        // AssociatedProjection → null stack slot (SIGSEGV); TypeParam → wrong layout.
+        if matches!(ty, MirTy::AssociatedProjection { .. }) {
+            return Err(CodegenError::Unsupported(format!(
+                "unresolved AssociatedProjection in local {} of {}: {:?}",
+                local.name, func_def.name, ty
+            )));
+        }
         if is_aggregate(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -715,19 +718,20 @@ fn collect_address_taken_locals(
                 },
                 StatementKind::Call { args, .. } => {
                     for arg in args {
-                        if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef)
-                            && let kestrel_mir::Value::Place(place) = &arg.value
-                                && let Some(id) = place.root_local() {
-                                    let ty = substitute_type_with_self(
-                                        &body.locals[id.index()].ty,
-                                        subst,
-                                        self_type,
-                                        layouts.module(),
-                                    );
-                                    if !is_aggregate(&ty, layouts) {
-                                        result.insert(id);
-                                    }
-                                }
+                        if let kestrel_mir::Value::Ref(place) | kestrel_mir::Value::RefMut(place) =
+                            arg
+                            && let Some(id) = place.root_local()
+                        {
+                            let ty = substitute_type_with_self(
+                                &body.locals[id.index()].ty,
+                                subst,
+                                self_type,
+                                layouts.module(),
+                            );
+                            if !is_aggregate(&ty, layouts) {
+                                result.insert(id);
+                            }
+                        }
                     }
                 },
                 _ => {},

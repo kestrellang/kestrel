@@ -208,8 +208,46 @@ impl Compiler {
     ///
     /// Call after inference has been run (e.g. via
     /// `CompilerDriver::infer_all()` from `kestrel-compiler-driver`).
+    ///
+    /// Pipeline order:
+    /// 1. MIR lowering
+    /// 2. `kestrel-ownership` — emits `Drop` / `DropIf` (move check + drop
+    ///    elaboration). This is the only pass that produces destructor
+    ///    statements; lowering itself must never emit them.
+    /// 3. Thunk + layout passes
+    ///
+    /// Set `KESTREL_VERIFY_MIR=1` to run [`MirModule::verify`] at the
+    /// pre-drop-elab and post-pass stages. Stage 6 keeps verification
+    /// warn-only — diagnostics print to stderr but don't fail the build.
+    /// Stage 8 will flip the pre-drop-elab "no Drop/DropIf" check to a
+    /// hard error.
     pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
-        kestrel_mir_lower::lower_module(self.world(), self.root()).with_all_passes()
+        self.lower_to_mir_with_diagnostics().0
+    }
+
+    /// Same as [`Self::lower_to_mir`] but also returns the
+    /// [`kestrel_ownership::Diagnostics`] (E500/E501) accumulated by the
+    /// move-check pass. Callers that surface user diagnostics (the CLI,
+    /// the test harness) use this variant; callers that just need the
+    /// MIR module for codegen / inspection can use the plain wrapper.
+    pub fn lower_to_mir_with_diagnostics(
+        &self,
+    ) -> (kestrel_mir::MirModule, kestrel_ownership::Diagnostics) {
+        let verify_on = std::env::var_os("KESTREL_VERIFY_MIR").is_some();
+        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
+        if verify_on {
+            kestrel_mir::passes::verify_with_stage(
+                &mir,
+                kestrel_mir::passes::VerifyStage::PreDropElab,
+            )
+            .dump_if_errors();
+        }
+        let diags = kestrel_ownership::run(&mut mir);
+        let mir = mir.with_thunks().with_layouts();
+        if verify_on {
+            mir.verify().dump_if_errors();
+        }
+        (mir, diags)
     }
 
     /// Lower to MIR, run all passes, and compile to native object code.

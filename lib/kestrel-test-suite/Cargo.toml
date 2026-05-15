@@ -15,6 +15,7 @@ kestrel-mir-lower = { path = "../kestrel-mir-lower" }
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
 kestrel-analyze = { path = "../kestrel-analyze" }
+kestrel-ownership = { path = "../kestrel-ownership" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }

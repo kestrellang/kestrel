@@ -1,0 +1,44 @@
+func Test.example(cond: &bool) -> ()
+{
+    locals:
+        %h: Test.Handle
+        %_t0: Test.Handle
+        %_t1: ()
+        %_t2: Test.Handle
+        %_t3: Test.Handle
+        %_init__t0: bool
+        %_init__t2: bool
+        %_init__t3: bool
+        %_drop_arg: Test.Handle
+
+    bb0:
+        %_init__t0 = false
+        %_init__t2 = false
+        %_init__t3 = false
+        %_t0 = construct Test.Handle { fd: i64.literal 0 }
+        %_init__t0 = true
+        %h = move %_t0
+        %_init__t0 = false
+        branch if copy %self, bb1 else bb2
+
+    bb1:
+        %_t2 = construct Test.Handle { fd: i64.literal 1 }
+        %_init__t2 = true
+        %h = move %_t2
+        %_init__t2 = false
+        %_t1 = ()
+        jump bb3
+
+    bb2:
+        %_t3 = construct Test.Handle { fd: i64.literal 2 }
+        %_init__t3 = true
+        %h = move %_t3
+        %_init__t3 = false
+        %_t1 = ()
+        jump bb3
+
+    bb3:
+        %_drop_arg = move %h
+        call __drop$Test.Handle(move %_drop_arg)
+        return copy %_t1
+}
