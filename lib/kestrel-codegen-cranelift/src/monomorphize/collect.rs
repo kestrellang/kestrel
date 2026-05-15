@@ -480,7 +480,9 @@ impl<'a> CollectionContext<'a> {
                 // Self.Item would produce (Self.Item = I.Item.Item for types
                 // like FlattenIterator where Self.Item ≠ I.Item).
                 if matches!(concrete_base, MirTy::SelfType) {
-                    for value in subst.values() {
+                    let mut sorted_entries: Vec<_> = subst.iter().collect();
+                    sorted_entries.sort_by_key(|(e, _)| e.index());
+                    for (_, value) in &sorted_entries {
                         if let Ok(resolved) = witness::resolve_associated_type(
                             self.module,
                             *protocol,
@@ -519,7 +521,9 @@ impl<'a> CollectionContext<'a> {
         // resolution level. parent_self (e.g. FlattenIterator) can resolve
         // the same associated type name to a DIFFERENT level (Self.Item vs
         // I.Item when both Self and I conform to the same protocol).
-        let subst_values: Vec<&MirTy> = subst.values().collect();
+        let mut sorted_entries: Vec<_> = subst.iter().collect();
+        sorted_entries.sort_by_key(|(e, _)| e.index());
+        let subst_values: Vec<&MirTy> = sorted_entries.into_iter().map(|(_, v)| v).collect();
         let parent_candidates: Vec<&MirTy> = parent_self.into_iter().collect();
         for candidate in subst_values.iter().chain(parent_candidates.iter()) {
             if let Ok(resolved) =
