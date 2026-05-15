@@ -22,15 +22,15 @@ struct Handle: not Copyable {
 }
 
 enum Opt: not Copyable {
-    case some(h: Handle)
-    case none
+    case value(h: Handle)
+    case empty
 }
 
 func consume(consuming h: Handle) {}
 
 func example(o: Opt) {
     match o {
-        .some(h: payload) => consume(payload),
-        .none => {}
+        .value(h: payload) => consume(payload),
+        .empty => {}
     }
 }
