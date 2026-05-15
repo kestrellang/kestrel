@@ -618,6 +618,14 @@ pub fn compile_function(
         }
 
         let ty = substitute_type_with_self(&local.ty, subst, self_type, ctx.module);
+        // Catch unresolved abstract types that should have been substituted.
+        // AssociatedProjection → null stack slot (SIGSEGV); TypeParam → wrong layout.
+        if matches!(ty, MirTy::AssociatedProjection { .. }) {
+            return Err(CodegenError::Unsupported(format!(
+                "unresolved AssociatedProjection in local {} of {}: {:?}",
+                local.name, func_def.name, ty
+            )));
+        }
         if is_aggregate(&ty, &mut ctx.layouts) || stack_locals.contains(&local_id) {
             let layout = ctx.layouts.layout_of(&ty);
             let slot = builder.create_sized_stack_slot(StackSlotData::new(

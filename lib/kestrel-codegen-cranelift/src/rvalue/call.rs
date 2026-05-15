@@ -19,7 +19,7 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen::{mangle_function_with_self, substitute_type_with_self};
+use kestrel_codegen::{has_abstract_type, mangle_function_with_self, substitute_type_with_self};
 use kestrel_hecs::Entity;
 use kestrel_mir::{Callee, MirTy, Place, Value};
 use std::collections::HashMap;
@@ -88,6 +88,13 @@ pub fn compile_call(
                     }
                 });
 
+            if let Some(bad) = concrete_type_args.iter().find(|t| has_abstract_type(t)) {
+                return Err(CodegenError::Unsupported(format!(
+                    "unsubstituted type arg {:?} in call to {}",
+                    bad, func_def.name
+                )));
+            }
+
             let mangled = mangle_function_with_self(
                 ctx.module,
                 func_def,
@@ -149,6 +156,12 @@ pub fn compile_call(
                     ))
                 })?;
             let func_def = &ctx.module.functions[func_id_mir.index()];
+            if let Some(bad) = resolved.type_args.iter().find(|t| has_abstract_type(t)) {
+                return Err(CodegenError::Unsupported(format!(
+                    "unsubstituted type arg {:?} in witness call to {}",
+                    bad, func_def.name
+                )));
+            }
             let mangled = mangle_function_with_self(
                 ctx.module,
                 func_def,

@@ -495,18 +495,39 @@ fn substitute_type_inner(
                 _ => base.as_ref().clone(),
             };
             let sub_base = rec(&raw_base);
+            // When the original base is SelfType, it's a placeholder from
+            // lower_named_type_from_entity (the actual base was lost during
+            // inference). Try subst values first — they represent actual type
+            // params (like `I: Iterable` in `Set.init[I](from: I)`), whereas
+            // self_type may coincidentally conform to the same protocol with
+            // different associated types (Set conforms to Iterable too, but
+            // its TargetIterator is SetIterator, not ArrayIterator).
+            if matches!(base.as_ref(), MirTy::SelfType) {
+                for value in subst.values() {
+                    let sub_val = rec(value);
+                    if is_concrete(&sub_val)
+                        && let Some(resolved) =
+                            module.resolve_associated_type(*protocol, &sub_val, name)
+                    {
+                        return rec(&resolved);
+                    }
+                }
+            }
+            // Try the substituted base directly.
             if is_concrete(&sub_base)
                 && let Some(resolved) = module.resolve_associated_type(*protocol, &sub_base, name)
             {
                 return rec(&resolved);
             }
-            // When base is SelfType and self_type is absent (Direct struct
-            // method), try resolving via subst values. This handles abstract
-            // projections like I.Item that MIR-lower stored as Self.Item.
-            if matches!(sub_base, MirTy::SelfType) {
+            // Fallback for non-SelfType bases that didn't resolve: try subst
+            // values. Handles cases like `Self.BytesYield` where Self=BytesView
+            // doesn't conform to BytesIndex but Range[Int64] (a subst value) does.
+            if !matches!(base.as_ref(), MirTy::SelfType) && is_concrete(&sub_base) {
                 for value in subst.values() {
-                    if let Some(resolved) =
-                        module.resolve_associated_type(*protocol, value, name)
+                    let sub_val = rec(value);
+                    if is_concrete(&sub_val)
+                        && let Some(resolved) =
+                            module.resolve_associated_type(*protocol, &sub_val, name)
                     {
                         return rec(&resolved);
                     }
