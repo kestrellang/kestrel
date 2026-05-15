@@ -444,7 +444,14 @@ fn substitute_type_inner(
             // TypeParams. Without recursion, layout would see the intermediate
             // TypeParam and DIAG.
             Some(concrete) => rec(concrete),
-            None => ty.clone(),
+            None => {
+                // Entity might be an associated type alias (e.g. Iterator.Item)
+                // that needs witness resolution rather than direct substitution.
+                match try_resolve_assoc_type_entity(*entity, subst, self_type, module) {
+                    Some(resolved) => rec(&resolved),
+                    None => ty.clone(),
+                }
+            },
         },
 
         MirTy::SelfType => self_type.cloned().unwrap_or_else(|| ty.clone()),
@@ -463,10 +470,17 @@ fn substitute_type_inner(
             // only does a single witness lookup, so for chained projections
             // (FuseIterator[X].Item → X.Item) the cached value is itself an
             // unresolved AssociatedProjection that needs further reduction.
-            if type_args.is_empty()
-                && let Some(concrete) = subst.get(entity)
-            {
-                return rec(concrete);
+            if type_args.is_empty() {
+                if let Some(concrete) = subst.get(entity) {
+                    return rec(concrete);
+                }
+                // Bare Named entity might be an associated type alias that
+                // needs witness resolution (same as the TypeParam case).
+                if let Some(resolved) =
+                    try_resolve_assoc_type_entity(*entity, subst, self_type, module)
+                {
+                    return rec(&resolved);
+                }
             }
             MirTy::Named {
                 entity: *entity,
@@ -495,12 +509,98 @@ fn substitute_type_inner(
                 _ => base.as_ref().clone(),
             };
             let sub_base = rec(&raw_base);
+            // Sort subst values by entity key for deterministic iteration —
+            // monomorphizer and codegen both scan these to resolve SelfType
+            // projections; HashMap order is random so they can disagree.
+            let sorted_values: Vec<&MirTy> = {
+                let mut entries: Vec<_> = subst.iter().collect();
+                entries.sort_by_key(|(e, _)| e.index());
+                entries.into_iter().map(|(_, v)| v).collect()
+            };
+            // When the original base is SelfType, it's a placeholder from
+            // lower_named_type_from_entity (the actual base was lost during
+            // inference). Try subst values first — they represent actual type
+            // params (like `I: Iterable` in `Set.init[I](from: I)`), whereas
+            // self_type may coincidentally conform to the same protocol with
+            // different associated types (Set conforms to Iterable too, but
+            // its TargetIterator is SetIterator, not ArrayIterator).
+            if matches!(base.as_ref(), MirTy::SelfType) {
+                for value in &sorted_values {
+                    let sub_val = rec(value);
+                    if is_concrete(&sub_val)
+                        && let Some(resolved) =
+                            module.resolve_associated_type(*protocol, &sub_val, name)
+                    {
+                        // Witness bindings may contain protocol-internal
+                        // TypeParams (e.g. SeqOutput = T where T is the
+                        // protocol's type param). `rec` substitutes them
+                        // through the caller's subst; skip if still abstract.
+                        let fully = rec(&resolved);
+                        if is_concrete(&fully) {
+                            return fully;
+                        }
+                    }
+                }
+            }
+            // Try the substituted base directly.
             if is_concrete(&sub_base)
                 && let Some(resolved) = module.resolve_associated_type(*protocol, &sub_base, name)
             {
-                // Chained projection (I.Item.Inner): re-run the walker so the
-                // witness's bound type is itself fully reduced.
-                return rec(&resolved);
+                let fully = rec(&resolved);
+                if is_concrete(&fully) {
+                    return fully;
+                }
+            }
+            // Fallback for non-SelfType bases that didn't resolve: try subst
+            // values. Handles cases like `Self.BytesYield` where Self=BytesView
+            // doesn't conform to BytesIndex but Range[Int64] (a subst value) does.
+            if !matches!(base.as_ref(), MirTy::SelfType) && is_concrete(&sub_base) {
+                for value in &sorted_values {
+                    let sub_val = rec(value);
+                    if is_concrete(&sub_val)
+                        && let Some(resolved) =
+                            module.resolve_associated_type(*protocol, &sub_val, name)
+                    {
+                        let fully = rec(&resolved);
+                        if is_concrete(&fully) {
+                            return fully;
+                        }
+                    }
+                }
+            }
+            // Protocol-fallback: MIR lowering can pick the wrong protocol
+            // when an associated type name (e.g. "Item") appears in both a
+            // parent and child protocol (Iterator vs Iterable). Try all
+            // protocols that declare the same associated type.
+            let candidates: Vec<&MirTy> = if is_concrete(&sub_base) {
+                std::iter::once(&sub_base)
+                    .chain(sorted_values.iter().map(|v| *v))
+                    .collect()
+            } else {
+                sorted_values.iter().map(|v| *v).collect()
+            };
+            for alt_proto in &module.protocols {
+                if alt_proto.entity == *protocol {
+                    continue;
+                }
+                if alt_proto.associated_type_by_name(name).is_none() {
+                    continue;
+                }
+                for candidate in &candidates {
+                    let sub_val = rec(candidate);
+                    if is_concrete(&sub_val)
+                        && let Some(resolved) = module.resolve_associated_type(
+                            alt_proto.entity,
+                            &sub_val,
+                            name,
+                        )
+                    {
+                        let fully = rec(&resolved);
+                        if is_concrete(&fully) {
+                            return fully;
+                        }
+                    }
+                }
             }
             MirTy::AssociatedProjection {
                 base: Box::new(sub_base),
@@ -518,6 +618,44 @@ fn substitute_type_inner(
             ret: Box::new(rec(ret)),
         },
     }
+}
+
+/// Try to resolve `entity` as an associated type via witness tables.
+/// Handles `TypeParam(assoc_entity)` and bare `Named{assoc_entity, []}` that
+/// represent associated type aliases (e.g. `Iterator.Item`) not present in
+/// the substitution map. Finds the owning protocol, then tries subst values
+/// and self_type as witness candidates.
+fn try_resolve_assoc_type_entity(
+    entity: Entity,
+    subst: &HashMap<Entity, MirTy>,
+    self_type: Option<&MirTy>,
+    module: &MirModule,
+) -> Option<MirTy> {
+    let assoc_name = module.resolve_name(entity);
+    let short = assoc_name.rsplit('.').next().unwrap_or(assoc_name);
+    let owning_protocol = module
+        .protocols
+        .iter()
+        .find(|p| p.associated_type_by_name(short).is_some())?
+        .entity;
+    // Sort by entity key for deterministic iteration
+    let mut entries: Vec<_> = subst.iter().collect();
+    entries.sort_by_key(|(e, _)| e.index());
+    for (_, value) in &entries {
+        if is_concrete(value)
+            && let Some(resolved) = module.resolve_associated_type(owning_protocol, value, short)
+        {
+            return Some(resolved);
+        }
+    }
+    if let Some(st) = self_type {
+        if is_concrete(st)
+            && let Some(resolved) = module.resolve_associated_type(owning_protocol, st, short)
+        {
+            return Some(resolved);
+        }
+    }
+    None
 }
 
 /// A type is "concrete enough" to use as a witness self-type — no abstract

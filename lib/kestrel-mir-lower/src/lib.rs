@@ -438,16 +438,23 @@ extend S: P { }
             .count();
         eprintln!("Thunks: {}", thunk_count);
 
-        // Deinit pass should have inserted deinit statements
-        let deinit_count: usize = mir
+        // `with_all_passes` no longer runs drop elaboration — that lives in
+        // `kestrel-ownership`. The MIR text here is pre-drop-elab and
+        // therefore contains zero `Drop` / `DropIf` statements.
+        let drop_count: usize = mir
             .functions
             .iter()
             .filter_map(|f| f.body.as_ref())
             .flat_map(|b| &b.blocks)
             .flat_map(|b| &b.stmts)
-            .filter(|s| matches!(s.kind, kestrel_mir::StatementKind::Deinit { .. }))
+            .filter(|s| {
+                matches!(
+                    s.kind,
+                    kestrel_mir::StatementKind::Drop { .. } | kestrel_mir::StatementKind::DropIf { .. }
+                )
+            })
             .count();
-        eprintln!("Deinit statements: {}", deinit_count);
+        eprintln!("Drop statements (expect 0 pre-drop-elab): {}", drop_count);
 
         // All passes should complete without panic
         assert!(

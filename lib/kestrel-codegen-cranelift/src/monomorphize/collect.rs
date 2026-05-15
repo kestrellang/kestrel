@@ -86,36 +86,32 @@ impl<'a> CollectionContext<'a> {
                 continue;
             }
 
-            if !self.func_uses_self_type(func) {
-                // No SelfType — seed as concrete
-                let inst = FunctionInstantiation::concrete(FunctionId::new(i));
-                if self.result.functions.insert(inst.clone()) {
-                    self.queue.push_back(inst);
-                }
-            } else {
-                // Uses SelfType — for init/deinit/method of non-generic types,
-                // resolve SelfType to the parent struct/enum type
-                let parent = match &func.kind {
-                    FunctionKind::Initializer { parent }
-                    | FunctionKind::Deinit { parent }
-                    | FunctionKind::Method { parent, .. }
-                    | FunctionKind::StaticMethod { parent } => Some(*parent),
-                    _ => None,
-                };
-                if let Some(parent_entity) = parent {
-                    // Only seed if parent is a concrete type (struct/enum).
-                    // Protocol extension methods have parent = Extension entity
-                    // (not a type) — they're discovered through witness calls
-                    // with concrete self_types at call sites.
-                    let is_concrete_nongeneric_type = self
+            // Methods on non-concrete parents (protocol/extension targets)
+            // must not be seeded directly — they reference associated types
+            // that can only be resolved through witness calls with a concrete
+            // self_type. Skip them here; BFS discovers them at call sites.
+            let parent = match &func.kind {
+                FunctionKind::Initializer { parent }
+                | FunctionKind::Deinit { parent }
+                | FunctionKind::Method { parent, .. }
+                | FunctionKind::StaticMethod { parent } => Some(*parent),
+                _ => None,
+            };
+            if let Some(parent_entity) = parent {
+                let is_concrete_nongeneric_type = self
+                    .module
+                    .structs
+                    .iter()
+                    .any(|s| s.entity == parent_entity && s.type_params.is_empty())
+                    || self
                         .module
-                        .structs
+                        .enums
                         .iter()
-                        .any(|s| s.entity == parent_entity)
-                        || self.module.enums.iter().any(|e| e.entity == parent_entity);
-                    if !is_concrete_nongeneric_type {
-                        continue;
-                    }
+                        .any(|e| e.entity == parent_entity && e.type_params.is_empty());
+                if !is_concrete_nongeneric_type {
+                    continue;
+                }
+                if self.func_uses_self_type(func) {
                     let self_ty = MirTy::Named {
                         entity: parent_entity,
                         type_args: Vec::new(),
@@ -128,7 +124,13 @@ impl<'a> CollectionContext<'a> {
                     if self.result.functions.insert(inst.clone()) {
                         self.queue.push_back(inst);
                     }
+                    continue;
                 }
+            }
+
+            let inst = FunctionInstantiation::concrete(FunctionId::new(i));
+            if self.result.functions.insert(inst.clone()) {
+                self.queue.push_back(inst);
             }
         }
 
@@ -285,49 +287,13 @@ impl<'a> CollectionContext<'a> {
                 // Substitute type params AND SelfType using parent's self_type
                 let mut concrete_self =
                     substitute_type_with_self(self_type, subst, parent_self.as_ref(), self.module);
-                // Resolve associated types (e.g., Iterator.Item → concrete type)
-                // via witness table. Search all protocols for the owning one,
-                // not just the protocol being called (handles cross-protocol
-                // cases like Iterable.Iter used as self_type for Iterator.next)
-                if let MirTy::Named {
-                    entity,
-                    ref type_args,
-                } = concrete_self
-                    && type_args.is_empty() {
-                        let assoc_name = self.module.resolve_name(entity);
-                        let short = common::short_name(assoc_name);
-
-                        // Find which protocol owns this associated type
-                        let owning_protocol = self
-                            .module
-                            .protocols
-                            .iter()
-                            .find(|p| p.associated_type_by_name(short).is_some())
-                            .map(|p| p.entity);
-
-                        if let Some(owner_proto) = owning_protocol {
-                            // Try parent_self first, then search the subst map for a
-                            // concrete type that implements the owning protocol
-                            let candidates: Vec<&MirTy> = if let Some(ps) = parent_self {
-                                vec![ps]
-                            } else {
-                                vec![]
-                            };
-                            // Also try all concrete types from the substitution map
-                            let subst_values: Vec<&MirTy> = subst.values().collect();
-                            for candidate in candidates.iter().chain(subst_values.iter()) {
-                                if let Ok(resolved) = witness::resolve_associated_type(
-                                    self.module,
-                                    owner_proto,
-                                    candidate,
-                                    short,
-                                ) {
-                                    concrete_self = resolved;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                // Resolve associated types to concrete types via witness
+                // tables. Three shapes reach here:
+                //   1. Named { entity: <assoc-type-alias>, type_args: [] }
+                //   2. TypeParam(<assoc-type-alias>)
+                //   3. AssociatedProjection { base, protocol, name }
+                concrete_self =
+                    self.resolve_assoc_self(concrete_self, subst, parent_self.as_ref());
                 let concrete_method_args: Vec<MirTy> = method_type_args
                     .iter()
                     .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref(), self.module))
@@ -464,6 +430,109 @@ impl<'a> CollectionContext<'a> {
             })
             .or_else(|| self.entity_to_func.get(&original).copied())
             .expect("ApplyPartial target must resolve to a function")
+    }
+
+    /// Resolve an associated-type self to a concrete type. Three shapes:
+    ///   - `Named { entity: <assoc-alias>, [] }` — bare entity ref
+    ///   - `TypeParam(<assoc-alias>)` — type param that is actually an
+    ///     associated type (e.g. `Iterator.Item` inside an extension body)
+    ///   - `AssociatedProjection { base, protocol, name }` — explicit T.Item
+    fn resolve_assoc_self(
+        &self,
+        ty: MirTy,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: Option<&MirTy>,
+    ) -> MirTy {
+        match &ty {
+            MirTy::Named {
+                entity,
+                type_args,
+            } if type_args.is_empty() => {
+                self.try_resolve_assoc_entity(*entity, subst, parent_self)
+                    .unwrap_or(ty)
+            },
+            MirTy::TypeParam(entity) => {
+                self.try_resolve_assoc_entity(*entity, subst, parent_self)
+                    .unwrap_or(ty)
+            },
+            MirTy::AssociatedProjection {
+                base,
+                protocol,
+                name,
+            } => {
+                let substituted_base =
+                    substitute_type_with_self(base, subst, parent_self, self.module);
+                let concrete_base = self.resolve_assoc_self(substituted_base, subst, parent_self);
+                if has_type_param(&concrete_base) {
+                    return ty;
+                }
+                if let Ok(resolved) =
+                    witness::resolve_associated_type(self.module, *protocol, &concrete_base, name)
+                {
+                    return resolved;
+                }
+                // When the base is SelfType and parent_self is absent (Direct
+                // struct method resolved via witness), MIR-lower used SelfType
+                // as a fallback base for what is actually a type-param projection
+                // (e.g., I.Item stored as Self.Item). Resolve by trying the
+                // subst values — the type param bindings give the correct
+                // single-level resolution without the double-projection that
+                // Self.Item would produce (Self.Item = I.Item.Item for types
+                // like FlattenIterator where Self.Item ≠ I.Item).
+                if matches!(concrete_base, MirTy::SelfType) {
+                    let mut sorted_entries: Vec<_> = subst.iter().collect();
+                    sorted_entries.sort_by_key(|(e, _)| e.index());
+                    for (_, value) in &sorted_entries {
+                        if let Ok(resolved) = witness::resolve_associated_type(
+                            self.module,
+                            *protocol,
+                            value,
+                            name,
+                        ) {
+                            return resolved;
+                        }
+                    }
+                }
+                ty
+            },
+            _ => ty,
+        }
+    }
+
+    /// Check if `entity` is an associated type of some protocol and resolve
+    /// it to a concrete type via the witness table for `parent_self` or a
+    /// substitution-map value.
+    fn try_resolve_assoc_entity(
+        &self,
+        entity: Entity,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: Option<&MirTy>,
+    ) -> Option<MirTy> {
+        let assoc_name = self.module.resolve_name(entity);
+        let short = common::short_name(assoc_name);
+        let owning_protocol = self
+            .module
+            .protocols
+            .iter()
+            .find(|p| p.associated_type_by_name(short).is_some())?
+            .entity;
+        // Try subst values first: for struct methods on generic types,
+        // the type param bindings (e.g. I → MapIterator) give the correct
+        // resolution level. parent_self (e.g. FlattenIterator) can resolve
+        // the same associated type name to a DIFFERENT level (Self.Item vs
+        // I.Item when both Self and I conform to the same protocol).
+        let mut sorted_entries: Vec<_> = subst.iter().collect();
+        sorted_entries.sort_by_key(|(e, _)| e.index());
+        let subst_values: Vec<&MirTy> = sorted_entries.into_iter().map(|(_, v)| v).collect();
+        let parent_candidates: Vec<&MirTy> = parent_self.into_iter().collect();
+        for candidate in subst_values.iter().chain(parent_candidates.iter()) {
+            if let Ok(resolved) =
+                witness::resolve_associated_type(self.module, owning_protocol, candidate, short)
+            {
+                return Some(resolved);
+            }
+        }
+        None
     }
 }
 

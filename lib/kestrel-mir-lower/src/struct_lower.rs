@@ -2,7 +2,8 @@
 
 use kestrel_ast_builder::{Callable, NodeKind, Static, TypeParams};
 use kestrel_hecs::Entity;
-use kestrel_mir::{FieldDef, StructDef, StructId, TypeParamDef};
+use kestrel_mir::{CopyBehavior, DeinitBehavior, FieldDef, StructDef, StructId, TypeParamDef};
+use kestrel_semantics::{CopySemantics, NominalCopySemantics};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_type_annotation;
@@ -11,6 +12,21 @@ use crate::ty::resolve_type_annotation;
 pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) -> StructId {
     let name = ctx.register_name(entity);
     let mut def = StructDef::new(entity, name);
+
+    // Populate copy_behavior from the semantic layer's NominalCopySemantics.
+    def.copy_behavior = lower_copy_behavior(ctx, entity);
+
+    // Populate DeinitBehavior's user_method from the type's children. The
+    // user-defined `deinit { ... }` body is a child entity with
+    // NodeKind::Deinit. `drop_expand` consults this to emit
+    // `Call(user_method, [move %place])` for non-trivial drops. Field
+    // drops are derived structurally at expansion time from
+    // `CopyBehavior::None` field types, so we don't pre-populate
+    // field_drops here.
+    def.deinit_behavior = DeinitBehavior {
+        user_method: find_user_deinit(ctx, entity),
+        field_drops: Vec::new(),
+    };
 
     // Type parameters
     if let Some(type_params) = ctx.world.get::<TypeParams>(entity) {
@@ -54,4 +70,36 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) -> StructId {
     }
 
     ctx.module.add_struct(def)
+}
+
+/// Resolve a nominal entity's [`CopyBehavior`] using `kestrel-semantics`.
+///
+/// - `Copyable` → `Bitwise`
+/// - `Cloneable` → `Clone(entity)` — Stage 1 uses the nominal entity itself as
+///   a placeholder for the clone-method reference; Stage 5+ resolves the
+///   actual method through the witness table.
+/// - `NotCopyable` → `None`
+pub(crate) fn lower_copy_behavior(ctx: &mut LowerCtx, entity: Entity) -> CopyBehavior {
+    let info = ctx.query.query(NominalCopySemantics {
+        entity,
+        root: ctx.root,
+    });
+    match info.semantics {
+        CopySemantics::Copyable => CopyBehavior::Bitwise,
+        CopySemantics::Cloneable => CopyBehavior::Clone(entity),
+        CopySemantics::NotCopyable => CopyBehavior::None,
+    }
+}
+
+/// Find the user-defined `deinit { ... }` child of a struct/enum entity,
+/// if any. Returns the entity of the deinit function so `drop_expand`
+/// can later emit `Call(callee=method(user_deinit, ...))` against it.
+/// Both structs and enums use this — no kind-specific logic.
+pub(crate) fn find_user_deinit(ctx: &LowerCtx, entity: Entity) -> Option<Entity> {
+    for &child in ctx.world.children_of(entity) {
+        if ctx.world.get::<NodeKind>(child) == Some(&NodeKind::Deinit) {
+            return Some(child);
+        }
+    }
+    None
 }

@@ -1,0 +1,35 @@
+func Test.example(cond: &bool) -> ()
+{
+    locals:
+        %h: Test.Handle
+        %_t0: Test.Handle
+        %_t1: ()
+        %_drop_flag_h: bool
+
+    bb0:
+        %_drop_flag_h = true
+        %_t0 = construct Test.Handle { fd: i64.literal 1 }
+        %h = move %_t0
+        %_drop_flag_h = false
+        branch if copy %self, bb1 else bb2
+
+    bb1:
+        call Test.consume(move %h)
+        %_drop_flag_h = true
+        %_t1 = ()
+        jump bb3
+
+    bb2:
+        %_t1 = ()
+        jump bb3
+
+    bb3:
+        branch if copy %_drop_flag_h, bb4 else bb5
+
+    bb4:
+        return copy %_t1
+
+    bb5:
+        call Test.Handle.deinit(ref var %h)
+        jump bb4
+}

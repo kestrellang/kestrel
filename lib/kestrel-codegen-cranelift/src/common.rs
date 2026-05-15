@@ -83,6 +83,30 @@ pub fn needs_sret(ret: &MirTy, layouts: &mut LayoutCache) -> bool {
     !(ret.is_unit() || matches!(ret, MirTy::Never)) && is_aggregate(ret, layouts)
 }
 
+/// Strip a `Ref`/`RefMut` wrapper to expose the inner "logical" type that
+/// the body operates on. For owned params, returns the type unchanged.
+///
+/// Stage 5b folded ownership into the param's MIR type: `Ref(T)` for
+/// default-borrow, `RefMut(T)` for mutating, `T` for consuming. The body's
+/// local for the param still holds `T` (HIR's view); helpers reaching for
+/// the underlying type go through here.
+pub fn param_inner_ty(ty: &MirTy) -> &MirTy {
+    match ty {
+        MirTy::Ref(t) | MirTy::RefMut(t) => t,
+        other => other,
+    }
+}
+
+/// True iff the param is delivered through a pointer in the ABI:
+///   - `RefMut(_)`: always, for write-back.
+///   - `Ref(t)` or owned `t`: when `t` is aggregate.
+///
+/// Scalar `Ref(t)` flows by value — the caller delivers the scalar
+/// directly, matching pre-Stage-5b behavior.
+pub fn param_passed_by_ptr(param_ty: &MirTy, layouts: &mut LayoutCache) -> bool {
+    matches!(param_ty, MirTy::RefMut(_)) || is_aggregate(param_inner_ty(param_ty), layouts)
+}
+
 /// Get the Cranelift pointer type for the target.
 pub fn ptr_type(target: &TargetConfig) -> ir::Type {
     if target.is_64bit() {

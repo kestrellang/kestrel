@@ -1,0 +1,30 @@
+func Test.example(o: &Test.Opt) -> ()
+{
+    locals:
+        %payload: Test.Handle
+        %_t0: ()
+
+    bb0:
+        switch %self {
+    Test.Opt.some => bb2
+    Test.Opt.none => bb3
+}
+
+    bb1:
+        return copy %_t0
+
+    bb2:
+        switch %self.some.0 {
+    _ => bb4
+}
+
+    bb3:
+        %_t0 = ()
+        jump bb1
+
+    bb4:
+        %payload = copy %self.some.0
+        call Test.consume(move %payload)
+        %_t0 = ()
+        jump bb1
+}

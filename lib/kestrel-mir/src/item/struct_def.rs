@@ -1,7 +1,7 @@
 //! Struct definitions.
 
 use crate::id::FieldId;
-use crate::item::TypeParamDef;
+use crate::item::{CopyBehavior, DeinitBehavior, TypeParamDef};
 use crate::ty::MirTy;
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;
@@ -21,10 +21,12 @@ pub struct StructDef {
     pub fields_by_name: IndexMap<String, FieldId>,
     /// Precomputed layout (filled by the layout pass).
     pub layout: Option<StructLayout>,
-    /// Fields that need dropping, in drop order (filled by the layout pass).
-    pub drop_fields: Vec<FieldId>,
-    /// Whether this type needs drop code at all.
-    pub needs_drop: bool,
+    /// How this struct is duplicated. Populated by `kestrel-mir-lower` from
+    /// `kestrel_semantics::NominalCopySemantics`.
+    pub copy_behavior: CopyBehavior,
+    /// How this struct is destroyed. Populated by `kestrel-mir-lower` from
+    /// the `deinit` method (if any) plus structural field drops.
+    pub deinit_behavior: DeinitBehavior,
 }
 
 impl StructDef {
@@ -36,8 +38,11 @@ impl StructDef {
             fields: Vec::new(),
             fields_by_name: IndexMap::new(),
             layout: None,
-            drop_fields: Vec::new(),
-            needs_drop: false,
+            // Default to `None` (affine) until lowering populates the real
+            // behavior. Primitives and types built directly by the MIR test
+            // helpers can override after `new`.
+            copy_behavior: CopyBehavior::None,
+            deinit_behavior: DeinitBehavior::default(),
         }
     }
 

@@ -1,0 +1,18 @@
+func Test.example() -> ()
+{
+    locals:
+        %h: Test.Handle
+        %_t0: Test.Handle
+
+    bb0:
+        %_t0 = construct Test.Handle { fd: i64.literal 1 }
+        %self = move %_t0
+        jump bb1
+
+    bb1:
+        jump bb2
+
+    bb2:
+        call Test.Handle.deinit(ref var %self)
+        return ()
+}

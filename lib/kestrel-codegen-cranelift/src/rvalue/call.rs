@@ -19,9 +19,9 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_codegen::{mangle_function_with_self, substitute_type_with_self};
+use kestrel_codegen::{has_abstract_type, mangle_function_with_self, substitute_type_with_self};
 use kestrel_hecs::Entity;
-use kestrel_mir::{CallArg, Callee, MirTy, PassingMode, Place, Value};
+use kestrel_mir::{Callee, MirTy, Place, Value};
 use std::collections::HashMap;
 
 /// Compile a function call statement.
@@ -30,7 +30,7 @@ pub fn compile_call(
     state: &FunctionState,
     builder: &mut FunctionBuilder,
     callee: &Callee,
-    args: &[CallArg],
+    args: &[Value],
     dest: Option<&Place>,
 ) -> Result<(), CodegenError> {
     match callee {
@@ -87,6 +87,13 @@ pub fn compile_call(
                         None
                     }
                 });
+
+            if let Some(bad) = concrete_type_args.iter().find(|t| has_abstract_type(t)) {
+                return Err(CodegenError::Unsupported(format!(
+                    "unsubstituted type arg {:?} in call to {}",
+                    bad, func_def.name
+                )));
+            }
 
             let mangled = mangle_function_with_self(
                 ctx.module,
@@ -149,6 +156,12 @@ pub fn compile_call(
                     ))
                 })?;
             let func_def = &ctx.module.functions[func_id_mir.index()];
+            if let Some(bad) = resolved.type_args.iter().find(|t| has_abstract_type(t)) {
+                return Err(CodegenError::Unsupported(format!(
+                    "unsubstituted type arg {:?} in witness call to {}",
+                    bad, func_def.name
+                )));
+            }
             let mangled = mangle_function_with_self(
                 ctx.module,
                 func_def,
@@ -191,7 +204,7 @@ fn compile_resolved_call(
     func_def: &kestrel_mir::FunctionDef,
     callee_type_args: &[MirTy],
     callee_self_type: Option<&MirTy>,
-    args: &[CallArg],
+    args: &[Value],
     dest: Option<&Place>,
 ) -> Result<(), CodegenError> {
     let ptr_ty = common::ptr_type(ctx.target);
@@ -325,7 +338,7 @@ fn compile_indirect_call(
     state: &FunctionState,
     builder: &mut FunctionBuilder,
     callee_place: &Place,
-    args: &[CallArg],
+    args: &[Value],
     dest: Option<&Place>,
     is_thick: bool,
 ) -> Result<(), CodegenError> {
@@ -464,128 +477,135 @@ fn compile_call_arg(
     ctx: &mut CodegenContext,
     state: &FunctionState,
     builder: &mut FunctionBuilder,
-    arg: &CallArg,
+    arg: &Value,
     expected_param_ty: Option<&MirTy>,
 ) -> Result<CrValue, CodegenError> {
-    // ABI reconciliation: MIR construction encodes args as Ref/MutRef when
-    // the callee's formal param type is abstract (TypeParam / SelfType /
-    // unresolved AssociatedProjection). After substitution at this call
-    // site, the param may collapse to a scalar (e.g., `value: T` with
-    // `T = i64` after binding the conformance's free TypeParam). Spilling a
-    // scalar to a stack slot and passing the slot's address would deliver a
-    // pointer where the callee expects an i64 — the callee then writes the
-    // pointer-as-i64 to wherever the body stores it. Detect the collapse and
-    // pass by value instead.
-    if matches!(arg.mode, PassingMode::Ref | PassingMode::MutRef)
-        && let Some(expected) = expected_param_ty
-        && let Value::Place(place) = &arg.value
-        && !is_aggregate_for_call(expected)
-    {
-        // The callee receives a scalar in a register. If the source local got
-        // promoted to a stack slot (because `collect_address_taken_locals` saw
-        // a Ref arg referencing a non-aggregate local), `compile_place_read`
-        // returns the slot's pointer — which would be passed as the scalar,
-        // delivering a pointer where the callee reads a value. Detect that
-        // case and load through the pointer.
-        let promoted_to_slot = match place {
-            Place::Local(id) => state.stack_locals.contains(id),
-            _ => false,
-        };
-        if promoted_to_slot {
-            let addr = place::compile_place_read(ctx, state, builder, place)?;
-            let cl_ty = types::translate_type(expected, ctx.target);
-            return Ok(builder
-                .ins()
-                .load(cl_ty, ir::MemFlags::new(), addr, Offset32::new(0)));
-        }
-        return rvalue::compile_value(ctx, state, builder, &arg.value);
-    }
-
-    match arg.mode {
-        PassingMode::Ref | PassingMode::MutRef => {
-            // Pass by reference: take the address
-            match &arg.value {
-                Value::Place(p) => place::compile_place_addr(ctx, state, builder, p),
-                Value::Immediate(imm) => {
-                    let ptr_ty = common::ptr_type(ctx.target);
-                    let ptr_size = ctx.target.pointer_size();
-
-                    // Coerce FunctionRef → FuncThick when a closure is expected.
-                    // Without this, we'd materialize an 8-byte fn pointer into a slot the
-                    // callee reads as 16 bytes, reading 8 bytes of stack garbage as the env.
-                    let is_funcref =
-                        matches!(&imm.kind, kestrel_mir::ImmediateKind::FunctionRef { .. });
-                    let is_thick_expected =
-                        matches!(expected_param_ty, Some(MirTy::FuncThick { .. }));
-                    if is_funcref && is_thick_expected {
-                        let func_addr = rvalue::compile_value(ctx, state, builder, &arg.value)?;
-                        let thick_size = ptr_size * 2;
-                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            thick_size as u32,
-                            common::align_to_shift(ptr_size),
-                        ));
-                        let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
-                        builder
-                            .ins()
-                            .store(MemFlags::new(), func_addr, addr, Offset32::new(0));
-                        let null = builder.ins().iconst(ptr_ty, 0);
-                        builder.ins().store(
-                            MemFlags::new(),
-                            null,
-                            addr,
-                            Offset32::new(ptr_size as i32),
-                        );
-                        return Ok(addr);
-                    }
-
-                    // General case: size the slot to the expected param type so aggregate
-                    // immediates (thick closures, wrapper structs) land in a large-enough slot.
-                    let val = rvalue::compile_value(ctx, state, builder, &arg.value)?;
-                    let (slot_size, slot_align) = match expected_param_ty {
-                        Some(ty) => {
-                            let layout = ctx.layouts.layout_of(ty);
-                            (layout.size.max(1), layout.align.max(1))
-                        },
-                        None => (ptr_size, ptr_size),
-                    };
-                    let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                        StackSlotKind::ExplicitSlot,
-                        slot_size as u32,
-                        common::align_to_shift(slot_align),
-                    ));
-                    let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
-                    if slot_size > ptr_size {
-                        common::zero_memory(builder, addr, slot_size, ptr_ty);
-                    }
-                    builder
+    match arg {
+        // Pass-by-reference: deliver the place's address — modulo the ABI
+        // reconciliation below.
+        Value::Ref(place) | Value::RefMut(place) => {
+            // ABI reconciliation: MIR construction encodes args as Ref/RefMut
+            // when the callee's formal param type is abstract (TypeParam /
+            // SelfType / unresolved AssociatedProjection). After substitution
+            // at this call site, the param may collapse to a scalar (e.g.,
+            // `value: T` with `T = i64`). Spilling a scalar to a stack slot
+            // and passing the slot's address would deliver a pointer where
+            // the callee expects an i64. Detect the collapse and pass by
+            // value instead.
+            if let Some(expected) = expected_param_ty
+                && !is_aggregate_for_call(expected)
+            {
+                let promoted_to_slot = match place {
+                    Place::Local(id) => state.stack_locals.contains(id),
+                    _ => false,
+                };
+                if promoted_to_slot {
+                    // Explicitly want the slot address so we can load the scalar
+                    // out of it below — compile_place_read now loads through
+                    // stack-local non-aggregates, which would double-load.
+                    let addr = place::compile_place_addr(ctx, state, builder, place)?;
+                    // For `Ref(scalar)`, the callee expects the inner scalar
+                    // type, not the pointer — translate the unwrapped type.
+                    let cl_ty =
+                        types::translate_type(common::param_inner_ty(expected), ctx.target);
+                    return Ok(builder
                         .ins()
-                        .store(MemFlags::new(), val, addr, Offset32::new(0));
-                    Ok(addr)
-                },
+                        .load(cl_ty, ir::MemFlags::new(), addr, Offset32::new(0)));
+                }
+                return place::compile_place_read(ctx, state, builder, place);
             }
+            place::compile_place_addr(ctx, state, builder, place)
         },
 
-        PassingMode::Copy | PassingMode::Move => {
-            rvalue::compile_value(ctx, state, builder, &arg.value)
+        // Pass-by-value with a place source: read the place.
+        Value::Copy(p) | Value::Move(p) => place::compile_place_read(ctx, state, builder, p),
+
+        // Pass-by-value with a constant source. May need to spill into a
+        // stack slot when the expected param type is an aggregate (thick
+        // closure, wrapper struct, etc.), or when a `FunctionRef` immediate
+        // needs to be wrapped into a `FuncThick` to satisfy the callee's
+        // closure ABI. Without this, we'd materialize an 8-byte fn pointer
+        // into a slot the callee reads as 16 bytes, reading 8 bytes of stack
+        // garbage as the env.
+        Value::Const(imm) => {
+            let needs_spill = matches!(
+                expected_param_ty,
+                Some(MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. })
+            );
+            let is_funcref = matches!(&imm.kind, kestrel_mir::ImmediateKind::FunctionRef { .. });
+            let is_thick_expected = matches!(expected_param_ty, Some(MirTy::FuncThick { .. }));
+            if !needs_spill && !is_thick_expected {
+                return rvalue::compile_value(ctx, state, builder, arg);
+            }
+
+            let ptr_ty = common::ptr_type(ctx.target);
+            let ptr_size = ctx.target.pointer_size();
+            if is_funcref && is_thick_expected {
+                let func_addr = rvalue::compile_value(ctx, state, builder, arg)?;
+                let thick_size = ptr_size * 2;
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    thick_size as u32,
+                    common::align_to_shift(ptr_size),
+                ));
+                let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+                builder
+                    .ins()
+                    .store(MemFlags::new(), func_addr, addr, Offset32::new(0));
+                let null = builder.ins().iconst(ptr_ty, 0);
+                builder.ins().store(
+                    MemFlags::new(),
+                    null,
+                    addr,
+                    Offset32::new(ptr_size as i32),
+                );
+                return Ok(addr);
+            }
+
+            let val = rvalue::compile_value(ctx, state, builder, arg)?;
+            let (slot_size, slot_align) = match expected_param_ty {
+                Some(ty) => {
+                    let layout = ctx.layouts.layout_of(ty);
+                    (layout.size.max(1), layout.align.max(1))
+                },
+                None => (ptr_size, ptr_size),
+            };
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                slot_size as u32,
+                common::align_to_shift(slot_align),
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+            if slot_size > ptr_size {
+                common::zero_memory(builder, addr, slot_size, ptr_ty);
+            }
+            builder
+                .ins()
+                .store(MemFlags::new(), val, addr, Offset32::new(0));
+            Ok(addr)
         },
     }
 }
 
 /// Aggregate-or-pointer test for ABI reconciliation. Returns true when the
-/// callee receives the value via a pointer (aggregate, raw pointer, ref). A
-/// `false` result means the callee expects a scalar in a register, so the
-/// caller must deliver a value rather than an address.
+/// callee receives the value via a pointer (aggregate, raw pointer, mut
+/// ref, ref-to-aggregate). A `false` result means the callee expects a
+/// scalar in a register, so the caller must deliver a value rather than an
+/// address.
+///
+/// `Ref(scalar)` flows by value: it carries no ownership at the ABI level,
+/// so the caller delivers the scalar directly.
 fn is_aggregate_for_call(ty: &MirTy) -> bool {
+    if matches!(ty, MirTy::RefMut(_)) {
+        return true;
+    }
+    let inner = match ty {
+        MirTy::Ref(t) => t.as_ref(),
+        other => other,
+    };
     matches!(
-        ty,
-        MirTy::Tuple(_)
-            | MirTy::Named { .. }
-            | MirTy::Str
-            | MirTy::FuncThick { .. }
-            | MirTy::Pointer(_)
-            | MirTy::Ref(_)
-            | MirTy::RefMut(_)
+        inner,
+        MirTy::Tuple(_) | MirTy::Named { .. } | MirTy::Str | MirTy::FuncThick { .. }
     )
 }
 
@@ -609,10 +629,10 @@ fn compile_extern_call_arg(
     ctx: &mut CodegenContext,
     state: &FunctionState,
     builder: &mut FunctionBuilder,
-    arg: &CallArg,
+    arg: &Value,
     expected_param_ty: Option<&MirTy>,
 ) -> Result<CrValue, CodegenError> {
-    let val = rvalue::compile_value(ctx, state, builder, &arg.value)?;
+    let val = rvalue::compile_value(ctx, state, builder, arg)?;
     let Some(expected) = expected_param_ty else {
         return Ok(val);
     };
@@ -642,6 +662,29 @@ fn resolve_associated_self_type(
     _protocol: Entity,
     self_type: &MirTy,
 ) -> MirTy {
+    // AssociatedProjection { base: SelfType } — MIR-lower used SelfType as a
+    // fallback base for abstract associated type projections (e.g., I.Item
+    // lowered as Self.Item). Resolve via subst values to get the correct
+    // single-level resolution.
+    if let MirTy::AssociatedProjection {
+        base,
+        protocol,
+        name,
+    } = self_type
+    {
+        let sub_base =
+            substitute_type_with_self(base, &state.subst, state.self_type.as_ref(), ctx.module);
+        if matches!(sub_base, MirTy::SelfType) {
+            for candidate in state.subst.values() {
+                if let Ok(resolved) =
+                    witness::resolve_associated_type(ctx.module, *protocol, candidate, name)
+                {
+                    return resolved;
+                }
+            }
+        }
+    }
+
     // Check if self_type is Named with no type args (bare associated type entity)
     let entity = match self_type {
         MirTy::Named { entity, type_args } if type_args.is_empty() => *entity,

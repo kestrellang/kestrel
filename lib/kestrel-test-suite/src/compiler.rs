@@ -73,9 +73,11 @@ impl TestCompiler {
             .get_or_init(|| CompilerDriver::new(&self.compiler).analyze_all())
     }
 
-    /// Collect all diagnostics from all stages as unified TestDiagnostics.
-    ///
-    /// Runs inference and analysis if not already done.
+    /// Collect all diagnostics from all stages as unified TestDiagnostics:
+    /// codespan (lex / parse / infer), HIR-level analyzers, and the
+    /// MIR-level `kestrel-ownership::move_check`. We deliberately surface
+    /// every MIR diagnostic — even when it overlaps with the HIR tracker
+    /// or fires on stdlib code. Hiding them masks bugs we want to see.
     pub fn all_diagnostics(&self) -> Vec<TestDiagnostic> {
         // Ensure inference has run (triggers lex/parse/infer diagnostics)
         self.infer();
@@ -114,6 +116,37 @@ impl TestCompiler {
             });
             if !duplicate {
                 result.push(a);
+            }
+        }
+
+        // MIR-level move-check diagnostics. `lower_to_mir_with_diagnostics`
+        // is wrapped in `catch_unwind` because upstream type-inference
+        // failures can leave HIR in a state where lowering panics — we
+        // still want the codespan/analyzer stream to surface in that
+        // case. MIR diags get the same (file_id, line, severity, message)
+        // dedup as analyzer diags so identical reports from both phases
+        // collapse cleanly.
+        let lower_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.compiler.lower_to_mir_with_diagnostics()
+        }));
+        if let Ok((_mir, ownership_diags)) = lower_result {
+            let ownership_analyze: Vec<kestrel_analyze::AnalyzeDiagnostic> = ownership_diags
+                .diags
+                .iter()
+                .map(move_diag_to_analyze)
+                .collect();
+            let ownership_test_diags =
+                from_analyze_diagnostics_with_source(&ownership_analyze, &sources);
+            for a in ownership_test_diags {
+                let duplicate = result.iter().any(|c| {
+                    c.file_id == a.file_id
+                        && c.line == a.line
+                        && c.severity == a.severity
+                        && c.message == a.message
+                });
+                if !duplicate {
+                    result.push(a);
+                }
             }
         }
 
@@ -374,3 +407,66 @@ impl Default for TestCompiler {
         Self::new()
     }
 }
+
+/// Convert a MIR-level [`kestrel_ownership::move_check::MoveDiag`] to the
+/// analyzer-shaped diagnostic the test harness already understands.
+/// Wording is "use of moved value 'X' [E500]" / "value 'X' may have been
+/// moved [E501]" — frozen so existing `// ERROR: use of moved value`
+/// annotations keep matching the testdata corpus the prior HIR-level
+/// `MoveTrackingAnalyzer` was authored against.
+fn move_diag_to_analyze(
+    diag: &kestrel_ownership::move_check::MoveDiag,
+) -> kestrel_analyze::AnalyzeDiagnostic {
+    use kestrel_analyze::{AnalyzeDiagnostic, Severity};
+    use kestrel_ownership::move_check::{
+        E500_USE_AFTER_MOVE, E501_MAYBE_MOVED, MoveDiagKind,
+    };
+    match diag.kind {
+        MoveDiagKind::UseAfterMove => AnalyzeDiagnostic {
+            descriptor_id: E500_USE_AFTER_MOVE,
+            severity: Severity::Error,
+            message: format!("use of moved value '{}'", diag.local_name),
+            labels: build_move_labels(
+                &diag.use_site,
+                diag.move_site.as_ref(),
+                "value used here after move",
+                "value moved here",
+            ),
+            notes: vec!["non-copyable values can only be used once".into()],
+        },
+        MoveDiagKind::MaybeMoved => AnalyzeDiagnostic {
+            descriptor_id: E501_MAYBE_MOVED,
+            severity: Severity::Error,
+            message: format!("value '{}' may have been moved", diag.local_name),
+            labels: build_move_labels(
+                &diag.use_site,
+                diag.move_site.as_ref(),
+                "value used here, but may have been moved",
+                "value potentially moved here",
+            ),
+            notes: vec!["value was moved in one branch but not another".into()],
+        },
+    }
+}
+
+fn build_move_labels(
+    use_site: &kestrel_span::Span,
+    move_site: Option<&kestrel_span::Span>,
+    primary_msg: &str,
+    secondary_msg: &str,
+) -> Vec<kestrel_analyze::DiagLabel> {
+    let mut labels = vec![kestrel_analyze::DiagLabel {
+        span: use_site.clone(),
+        message: primary_msg.into(),
+        is_primary: true,
+    }];
+    if let Some(site) = move_site {
+        labels.push(kestrel_analyze::DiagLabel {
+            span: site.clone(),
+            message: secondary_msg.into(),
+            is_primary: false,
+        });
+    }
+    labels
+}
+

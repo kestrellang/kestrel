@@ -85,8 +85,14 @@ pub fn compile_value(
     value: &Value,
 ) -> Result<CrValue, CodegenError> {
     match value {
-        Value::Place(p) => place::compile_place_read(ctx, state, builder, p),
-        Value::Immediate(imm) => immediate::compile_immediate(ctx, state, builder, imm),
+        // Copy and Move have identical pass-by-value codegen (the ownership
+        // distinction is purely for the move-check / drop-elaboration
+        // passes). Same for Ref/RefMut — both produce the place's address —
+        // but those are handled in the call-arg dispatch (`rvalue/call.rs`),
+        // not here.
+        Value::Copy(p) | Value::Move(p) => place::compile_place_read(ctx, state, builder, p),
+        Value::Ref(p) | Value::RefMut(p) => place::compile_place_addr(ctx, state, builder, p),
+        Value::Const(imm) => immediate::compile_immediate(ctx, state, builder, imm),
     }
 }
 

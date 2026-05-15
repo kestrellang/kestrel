@@ -108,7 +108,21 @@ fn compile_place_read_inner(
     }
 
     match place {
-        Place::Local(id) => Ok(builder.use_var(state.local_vars[id.index()])),
+        Place::Local(id) => {
+            let var_val = builder.use_var(state.local_vars[id.index()]);
+            // For aggregates and SSA scalars, `var_val` is already the canonical
+            // representation (address-of-slot for aggregates, value for scalars).
+            // For stack-local non-aggregates (address-taken scalars), the var
+            // holds the slot's address — load through it to get the scalar value.
+            if state.stack_locals.contains(id) && !is_aggregate(&ty, &mut ctx.layouts) {
+                let cl_ty = types::translate_type(&ty, ctx.target);
+                Ok(builder
+                    .ins()
+                    .load(cl_ty, MemFlags::new(), var_val, Offset32::new(0)))
+            } else {
+                Ok(var_val)
+            }
+        },
         Place::Global(entity) => read_global(ctx, builder, entity, &ty),
         Place::Field { parent, name } => read_field(ctx, state, builder, parent, name),
         Place::Index { parent, index } => read_index(ctx, state, builder, parent, *index),
