@@ -730,8 +730,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         self.ctx.register_name(method);
         let type_args = self.prepend_receiver_type_args(&target_ty, vec![]);
         let callee = Callee::direct_generic(method, type_args);
-        let call_args = vec![CallArg::copy(value)];
-        self.emit_call(callee, call_args, target_ty)
+        self.emit_call(callee, vec![value], target_ty)
     }
 
     /// Inner lowering — does not apply promotion. Use `lower_expr` to get
