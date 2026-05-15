@@ -4,23 +4,18 @@ func Test.example(cond: &bool) -> ()
         %h: Test.Handle
         %_t0: Test.Handle
         %_t1: ()
-        %_init_h: bool
-        %_init__t0: bool
-        %_drop_arg: Test.Handle
+        %_drop_flag_h: bool
 
     bb0:
-        %_init_h = false
-        %_init__t0 = false
+        %_drop_flag_h = true
         %_t0 = construct Test.Handle { fd: i64.literal 1 }
-        %_init__t0 = true
         %h = move %_t0
-        %_init_h = true
-        %_init__t0 = false
+        %_drop_flag_h = false
         branch if copy %self, bb1 else bb2
 
     bb1:
         call Test.consume(move %h)
-        %_init_h = false
+        %_drop_flag_h = true
         %_t1 = ()
         jump bb3
 
@@ -29,13 +24,12 @@ func Test.example(cond: &bool) -> ()
         jump bb3
 
     bb3:
-        branch if copy %_init_h, bb5 else bb4
+        branch if copy %_drop_flag_h, bb4 else bb5
 
     bb4:
         return copy %_t1
 
     bb5:
-        %_drop_arg = move %h
-        call __drop$Test.Handle(move %_drop_arg)
+        call Test.Handle.deinit(ref var %h)
         jump bb4
 }

@@ -255,6 +255,10 @@ fn identify_droppable_locals(
     let mut result: Vec<DroppableLocal> = result_set
         .into_iter()
         .filter(|id| {
+            // Closure-captured locals are borrowed views — skip them.
+            if body.locals[id.index()].borrowed {
+                return false;
+            }
             let is_param = id.index() < body.param_count;
             if is_param {
                 // Only keep params that Step 4 explicitly added (consuming or consuming-self)

@@ -4,22 +4,14 @@ func Test.example(cond: &bool) -> ()
         %h: Test.Handle
         %_t0: ()
         %_t1: Test.Handle
-        %_init_h: bool
-        %_init__t1: bool
 
     bb0:
-        %_init_h = false
-        %_init__t1 = false
         branch if copy %self, bb1 else bb2
 
     bb1:
         %_t1 = construct Test.Handle { fd: i64.literal 1 }
-        %_init__t1 = true
         %h = move %_t1
-        %_init_h = true
-        %_init__t1 = false
         call Test.consume(move %h)
-        %_init_h = false
         return ()
 
     bb2:

@@ -243,7 +243,7 @@ impl Compiler {
             .dump_if_errors();
         }
         let diags = kestrel_ownership::run(&mut mir);
-        let mir = mir.with_thunks().with_layouts();
+        let mir = mir.with_all_passes();
         if verify_on {
             mir.verify().dump_if_errors();
         }

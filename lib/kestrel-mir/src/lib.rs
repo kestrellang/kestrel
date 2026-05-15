@@ -225,8 +225,7 @@ impl MirModule {
         passes::verify(self)
     }
 
-    /// Run all post-lowering passes in the recommended order. Drop elaboration
-    /// is handled by [`kestrel_ownership::run`] and is not invoked here.
+    /// Run all post-lowering passes in the recommended order.
     pub fn with_all_passes(self) -> Self {
         self.with_drop_elaboration().with_thunks().with_layouts()
     }

@@ -3,18 +3,10 @@ func Test.example() -> ()
     locals:
         %h: Test.Handle
         %_t0: Test.Handle
-        %_init_h: bool
-        %_init__t0: bool
 
     bb0:
-        %_init_h = false
-        %_init__t0 = false
         %_t0 = construct Test.Handle { fd: i64.literal 1 }
-        %_init__t0 = true
         %self = move %_t0
-        %_init_h = true
-        %_init__t0 = false
         call Test.take(move %self)
-        %_init_h = false
         return ()
 }

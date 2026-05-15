@@ -43,17 +43,8 @@ pub struct Diagnostics {
 pub fn run(module: &mut MirModule) -> Diagnostics {
     let mut diags = Diagnostics::default();
     move_check::run(module, &mut diags);
-    drop_elab::run(module);
-    // Synthesize one `__drop$T(self: T)` function per non-trivial
-    // nominal type. The shims hold the user-deinit Call, the
-    // structural field drops, and the enum Switch on discriminant —
-    // all the drop-glue logic in one place per type. Returns a
-    // `nominal_entity → shim_entity` map for the next pass.
-    let shim_map = drop_shim::run(module);
-    // Translate the abstract `Drop` / `DropIf` statements into
-    // `Call(__drop$T, [Move(p)])` shim invocations. DropIf splits
-    // the block with a runtime branch on the flag. After this pass
-    // no `Drop` / `DropIf` statements remain.
-    drop_expand::run(module, &shim_map);
+    // Drop elaboration (deinit insertion, shim synthesis, expansion)
+    // is handled by `MirModule::with_drop_elaboration()` which runs
+    // after this pass. Only move-checking lives here.
     diags
 }
