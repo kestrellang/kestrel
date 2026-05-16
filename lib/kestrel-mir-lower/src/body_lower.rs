@@ -618,10 +618,25 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 Some(kestrel_ast_builder::NodeKind::TypeParameter) => {
                     return MirTy::TypeParam(entity);
                 },
+                Some(kestrel_ast_builder::NodeKind::Protocol) => {
+                    // A protocol-as-receiver is a `Self.X` static call from
+                    // within the protocol's body or an extension on it. The
+                    // type-infer side already lowers such uses to `SelfType`,
+                    // so prefer the inferred type here — it carries the
+                    // right `MirTy::SelfType` for witness substitution.
+                    let inferred = self.resolve_expr_type(expr_id);
+                    if matches!(inferred, MirTy::SelfType) {
+                        return MirTy::SelfType;
+                    }
+                    let type_args = hir_type_args
+                        .iter()
+                        .map(|t| lower_type(self.ctx, t))
+                        .collect();
+                    return MirTy::Named { entity, type_args };
+                },
                 Some(kestrel_ast_builder::NodeKind::Struct)
                 | Some(kestrel_ast_builder::NodeKind::Enum)
-                | Some(kestrel_ast_builder::NodeKind::TypeAlias)
-                | Some(kestrel_ast_builder::NodeKind::Protocol) => {
+                | Some(kestrel_ast_builder::NodeKind::TypeAlias) => {
                     let type_args = hir_type_args
                         .iter()
                         .map(|t| lower_type(self.ctx, t))

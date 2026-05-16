@@ -263,6 +263,17 @@ fn check_protocol_requirements(
             continue;
         }
         let child = member.entity;
+        // A protocol method with an inline body is rejected separately by
+        // E417 (`protocol_method_has_body`). Emitting E454 in addition would
+        // double-flag the same mistake and tell the user to re-implement a
+        // method that's already (illegally) implemented. Skip — the body is
+        // visible to readers as a (would-be) default, so the conformance is
+        // not missing in the sense E454 is meant to flag.
+        if cx.query.get::<kestrel_ast_builder::Body>(child).is_some()
+            || cx.query.get::<kestrel_ast_builder::Valued>(child).is_some()
+        {
+            continue;
+        }
         let child_kind = cx.query.get::<NodeKind>(child);
         let Some(name) = member_lookup_name(cx, child) else {
             continue;

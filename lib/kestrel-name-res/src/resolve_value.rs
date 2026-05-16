@@ -8,6 +8,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
+use crate::conformances::ConformingProtocols;
 use crate::extensions::ExtensionsFor;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
@@ -44,6 +45,13 @@ pub enum ValueResolution {
     /// Static member accessed through associated type (e.g., `Item.zero` where `Item: Addable`)
     /// Preserves the associated type context for Self-substitution in type inference.
     AssociatedTypeStaticMember { entity: Entity, assoc_type: Entity },
+    /// `Self` in value position — resolved to the enclosing type entity
+    /// (struct/enum for direct enclosure, or extension target). Lowers the
+    /// same as `Def(entity)` but carries the Self indirection so diagnostics
+    /// can refer to "Self" rather than the underlying name.
+    SelfValue(Entity),
+    /// `Self` used in value position outside any extension/protocol/type body.
+    SelfNotInScope,
     /// Not found
     NotFound(String),
 }
@@ -83,6 +91,39 @@ impl QueryFn for ResolveValuePath {
     }
 }
 
+/// Resolve `Self` in value position to the enclosing type entity.
+///
+/// Walks parents from `context` looking for an enclosing scope that gives
+/// `Self` a concrete meaning. Mirrors `resolve_self_entity_from` in
+/// `kestrel-type-infer` (which already handles this for type position).
+///
+/// For concrete types (struct/enum, or an extension on a concrete type),
+/// `Self()` is just a name for the type. For protocols, `Self()` is
+/// polymorphic — callers route it through witness dispatch in type-infer,
+/// the same way `T()` works when `T: SomeProtocol`.
+fn try_resolve_self_value(
+    ctx: &QueryContext<'_>,
+    context: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    let mut current = Some(context);
+    while let Some(entity) = current {
+        match ctx.get::<NodeKind>(entity) {
+            Some(&NodeKind::Extension) => {
+                return ctx.query(crate::ExtensionTargetEntity {
+                    extension: entity,
+                    root,
+                });
+            },
+            Some(&NodeKind::Struct | &NodeKind::Enum | &NodeKind::Protocol) => {
+                return Some(entity);
+            },
+            _ => current = ctx.parent_of(entity),
+        }
+    }
+    None
+}
+
 /// Resolve a single-segment value name.
 fn resolve_single_segment(
     ctx: &QueryContext<'_>,
@@ -90,6 +131,14 @@ fn resolve_single_segment(
     context: Entity,
     root: Entity,
 ) -> ValueResolution {
+    // Bare `Self` keyword: resolve to the enclosing type entity.
+    if name == "Self" {
+        return match try_resolve_self_value(ctx, context, root) {
+            Some(target) => ValueResolution::SelfValue(target),
+            None => ValueResolution::SelfNotInScope,
+        };
+    }
+
     let result = ctx.query(ResolveName {
         name: name.to_string(),
         context,
@@ -149,6 +198,16 @@ fn resolve_multi_segment(
     context: Entity,
     root: Entity,
 ) -> ValueResolution {
+    // Leading `Self.` resolves to the enclosing type entity; remaining
+    // segments walk through it just like any qualified path.
+    if segments[0] == "Self" {
+        let first_entity = match try_resolve_self_value(ctx, context, root) {
+            Some(target) => target,
+            None => return ValueResolution::SelfNotInScope,
+        };
+        return walk_path_from(ctx, first_entity, segments, context, root);
+    }
+
     // Resolve first segment
     let first = &segments[0];
     let first_result = ctx.query(ResolveName {
@@ -202,7 +261,20 @@ fn resolve_multi_segment(
         },
     };
 
-    // Walk remaining segments
+    walk_path_from(ctx, first_entity, segments, context, root)
+}
+
+/// Walk `segments[1..]` starting from a resolved first-segment entity.
+///
+/// Factored out so `Self`-leading paths (`Self.foo`, `Self.foo.bar`) can
+/// substitute the first entity and reuse the existing walking logic.
+fn walk_path_from(
+    ctx: &QueryContext<'_>,
+    first_entity: Entity,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+) -> ValueResolution {
     let mut current = first_entity;
     for (i, segment) in segments[1..].iter().enumerate() {
         let is_last = i == segments.len() - 2;
@@ -294,6 +366,43 @@ fn resolve_multi_segment(
                     .collect();
                 if !static_methods.is_empty() {
                     return classify_value_results(ctx, static_methods);
+                }
+            }
+
+            // Static methods declared on extensions of protocols `current`
+            // conforms to. Mirrors how instance-method dispatch already walks
+            // conforming protocols (see `try_resolve_through_protocol` in
+            // kestrel-type-infer). Without this, `A.staticMethod()` fails
+            // when `staticMethod` lives in `extend SomeProtocol { ... }` and
+            // `A: SomeProtocol`.
+            let protocols = ctx.query(ConformingProtocols {
+                entity: current,
+                root,
+            });
+            for &proto in &protocols {
+                let proto_extensions = ctx.query(ExtensionsFor {
+                    target: proto,
+                    root,
+                });
+                for &ext in &proto_extensions {
+                    let ext_children = ctx.query(VisibleChildrenByName {
+                        parent: ext,
+                        name: segment.clone(),
+                        context,
+                    });
+                    let static_methods: Vec<Entity> = ext_children
+                        .into_iter()
+                        .filter(|&e| {
+                            ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
+                                && (ctx.has::<Static>(e)
+                                    || ctx
+                                        .get::<Callable>(e)
+                                        .is_some_and(|c| c.receiver.is_none()))
+                        })
+                        .collect();
+                    if !static_methods.is_empty() {
+                        return classify_value_results(ctx, static_methods);
+                    }
                 }
             }
         }
