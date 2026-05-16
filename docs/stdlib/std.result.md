@@ -408,10 +408,10 @@ none.replace(value: 1);   // None;    none is now Some(1)
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `some`
+#### function `wrap`
 
 ```kestrel
-public static func some(T) -> Optional[T]
+public static func wrap(T) -> Optional[T]
 ```
 
 Wraps `value` in `.Some`. Rarely needed in practice — bare values
@@ -421,7 +421,7 @@ right thing.
 ##### Examples
 
 ```
-let opt = Optional.some(value: 42);   // Some(42)
+let opt = Optional.wrap(value: 42);   // Some(42)
 let opt: Int64? = 42;                 // identical, preferred
 ```
 

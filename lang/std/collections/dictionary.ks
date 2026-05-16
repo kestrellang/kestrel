@@ -2132,7 +2132,7 @@ extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.E
     ///
     /// The compiler guarantees `_dictionaryLiteralPointer` points to
     /// exactly `_dictionaryLiteralCount` initialized `(K, V)` pairs.
-    public init(_dictionaryLiteralPointer: lang.ptr[(K, V)], _dictionaryLiteralCount: lang.i64) {
+    public init(consuming _dictionaryLiteralPointer: lang.ptr[(K, V)], consuming _dictionaryLiteralCount: lang.i64) {
         self.init(dictionaryLiteral: std.memory.LiteralSlice(pointer: _dictionaryLiteralPointer, count: _dictionaryLiteralCount))
     }
 

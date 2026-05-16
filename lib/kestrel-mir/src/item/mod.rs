@@ -1,5 +1,6 @@
 //! Top-level item definitions in MIR.
 
+mod behavior;
 mod closure;
 mod enum_def;
 mod function;
@@ -8,6 +9,7 @@ mod static_def;
 mod struct_def;
 mod witness;
 
+pub use behavior::*;
 pub use closure::*;
 pub use enum_def::*;
 pub use function::*;

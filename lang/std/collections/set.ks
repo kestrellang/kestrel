@@ -1422,7 +1422,7 @@ extend Set[T, H]: ExpressibleByArrayLiteral where T: Hashable, H: Hasher, H: Def
     ///
     /// The compiler guarantees `_arrayLiteralPointer` covers exactly
     /// `_arrayLiteralCount` initialized elements of `T`.
-    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 }

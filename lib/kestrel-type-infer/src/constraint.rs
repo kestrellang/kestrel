@@ -152,11 +152,17 @@ pub enum Constraint {
     },
 }
 
-/// Argument in a call: optional label + type variable.
+/// Argument in a call: optional label + type variable + source expression.
+///
+/// `value` is the HIR id of the argument expression itself. The solver keys
+/// `Coerce` constraints on it so per-argument promotions (e.g.
+/// `FromValue.from()` for `takes(x: Int64?)` called as `takes(42)`) survive
+/// to MIR-lower instead of colliding under the outer call's expr id.
 #[derive(Clone, Debug)]
 pub struct CallArg {
     pub label: Option<String>,
     pub ty: TyVar,
+    pub value: HirExprId,
 }
 
 /// Check if call arg labels match a callable's param labels.

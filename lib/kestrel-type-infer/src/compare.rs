@@ -231,6 +231,7 @@ fn contains_error(ty: &ResolvedTy) -> bool {
         ResolvedTy::Function { params, ret } => {
             params.iter().any(contains_error) || contains_error(ret)
         },
+        ResolvedTy::AssocProjection { base, .. } => contains_error(base),
         ResolvedTy::Param { .. } | ResolvedTy::SelfType { .. } | ResolvedTy::Never => false,
     }
 }

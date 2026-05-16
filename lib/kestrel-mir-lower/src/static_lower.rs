@@ -186,7 +186,7 @@ fn synthesize_master_init(
             }));
     }
 
-    body.block_mut(entry).terminator = Terminator::ret(Value::Immediate(Immediate::unit()));
+    body.block_mut(entry).terminator = Terminator::ret(Value::Const(Immediate::unit()));
     ctx.module.functions[func_id.index()].body = Some(body);
 
     func_id
