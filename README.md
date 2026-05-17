@@ -1,5 +1,5 @@
 <p align="center">
-<img src="external/kestrel-website/public/kestrel-hovering.png" alt="Kestrel" width="180">
+<img src="https://kestrel-lang.com/kestrel-hovering.png" alt="Kestrel" width="180">
 </p>
 
 <h1 align="center">Kestrel</h1>
@@ -40,7 +40,8 @@ Currently in its first preview release, Kestrel can be used to write 2D games, C
 curl --proto '=https' --tlsv1.2 -sSf https://kestrel-lang.com/install.sh | sh
 
 # Run a program
-kestrel run hello.ks
+kestrel build hello.ks
+./hello
 
 # Or use Flock (package manager)
 flock new myproject && cd myproject && flock run
