@@ -85,6 +85,27 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         root: ctx.root,
     });
 
+    // Check if this function lives inside a protocol extension
+    let in_protocol_extension = ctx.world.parent_of(entity).is_some_and(|parent| {
+        matches!(
+            ctx.world.get::<kestrel_ast_builder::NodeKind>(parent),
+            Some(kestrel_ast_builder::NodeKind::Extension)
+        ) && {
+            use kestrel_name_res::extensions::ExtensionTargetEntity;
+            ctx.query
+                .query(ExtensionTargetEntity {
+                    extension: parent,
+                    root: ctx.root,
+                })
+                .is_some_and(|target| {
+                    matches!(
+                        ctx.world.get::<kestrel_ast_builder::NodeKind>(target),
+                        Some(kestrel_ast_builder::NodeKind::Protocol)
+                    )
+                })
+        }
+    });
+
     let mut body_ctx = BodyLowerCtx {
         hir: &hir,
         typed: typed.as_ref(),
@@ -97,6 +118,7 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         init_field_flags: HashMap::new(),
         is_effectful_init: false,
         current_span: None,
+        in_protocol_extension,
         ctx,
     };
 
@@ -149,6 +171,12 @@ struct BodyLowerCtx<'a, 'b> {
     // each `Statement::new` call site needing to know about spans. Used by
     // `kestrel-ownership::move_check` to attach source labels to E500/E501.
     current_span: Option<Span>,
+
+    // True when the function being lowered lives inside a protocol extension.
+    // Controls whether protocol-typed receivers are replaced with SelfType
+    // (correct for abstract Self inside extensions, wrong for protocol
+    // existentials outside).
+    in_protocol_extension: bool,
 }
 
 impl<'a, 'b> BodyLowerCtx<'a, 'b> {
@@ -2894,16 +2922,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        // If the receiver type resolves to a protocol entity (happens inside protocol
-        // extensions where self is abstract), replace with SelfType so monomorphization
-        // can substitute the concrete type
-        if let MirTy::Named { entity, type_args } = &receiver_ty
-            && type_args.is_empty()
-                && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::Protocol)
-                {
-                    receiver_ty = MirTy::SelfType;
-                }
+        // Inside protocol extension bodies, `self` is abstract — replace the
+        // protocol-named receiver with SelfType so monomorphization substitutes
+        // the concrete type.  Outside protocol extensions (protocol existentials
+        // like `func f(h: Proto)`), keep the protocol type so the witness lookup
+        // matches on the erased existential.
+        if self.in_protocol_extension {
+            if let MirTy::Named { entity, type_args } = &receiver_ty
+                && type_args.is_empty()
+                    && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                        == Some(&kestrel_ast_builder::NodeKind::Protocol)
+                    {
+                        receiver_ty = MirTy::SelfType;
+                    }
+        }
 
         // Check for function-typed field calls BEFORE lowering receiver into call_args,
         // since field calls use the receiver differently (to access the field, not as self)
