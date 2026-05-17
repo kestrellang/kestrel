@@ -173,6 +173,13 @@ pub struct Static;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Subscript;
 
+/// The enclosing type-level container (Struct, Enum, Extension, Protocol,
+/// Module) for entities that sit more than one hop below it in the tree.
+/// Set at build time on Setter entities (Setter → Subscript/Field → Container)
+/// so downstream code doesn't need to walk parents and remember the extra hop.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EnclosingContainer(pub Entity);
+
 /// Whether a Field was declared with `var` (mutable) or `let` (read-only).
 /// Captured at build time so downstream analyzers don't have to inspect
 /// tokens. Only present on entities with NodeKind::Field.

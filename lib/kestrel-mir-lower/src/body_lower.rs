@@ -85,6 +85,27 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         root: ctx.root,
     });
 
+    // Check if this function lives inside a protocol extension
+    let in_protocol_extension = ctx.world.parent_of(entity).is_some_and(|parent| {
+        matches!(
+            ctx.world.get::<kestrel_ast_builder::NodeKind>(parent),
+            Some(kestrel_ast_builder::NodeKind::Extension)
+        ) && {
+            use kestrel_name_res::extensions::ExtensionTargetEntity;
+            ctx.query
+                .query(ExtensionTargetEntity {
+                    extension: parent,
+                    root: ctx.root,
+                })
+                .is_some_and(|target| {
+                    matches!(
+                        ctx.world.get::<kestrel_ast_builder::NodeKind>(target),
+                        Some(kestrel_ast_builder::NodeKind::Protocol)
+                    )
+                })
+        }
+    });
+
     let mut body_ctx = BodyLowerCtx {
         hir: &hir,
         typed: typed.as_ref(),
@@ -97,6 +118,7 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_id: Function
         init_field_flags: HashMap::new(),
         is_effectful_init: false,
         current_span: None,
+        in_protocol_extension,
         ctx,
     };
 
@@ -149,6 +171,12 @@ struct BodyLowerCtx<'a, 'b> {
     // each `Statement::new` call site needing to know about spans. Used by
     // `kestrel-ownership::move_check` to attach source labels to E500/E501.
     current_span: Option<Span>,
+
+    // True when the function being lowered lives inside a protocol extension.
+    // Controls whether protocol-typed receivers are replaced with SelfType
+    // (correct for abstract Self inside extensions, wrong for protocol
+    // existentials outside).
+    in_protocol_extension: bool,
 }
 
 impl<'a, 'b> BodyLowerCtx<'a, 'b> {
@@ -496,12 +524,22 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let receiver_ty = self.resolve_expr_type(callee_expr);
                     let receiver_arg = (self.lower_expr(callee_expr)).into_ref_mut();
                     let type_args = self.resolve_type_args(target_id);
-                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
-                    let callee = Callee::method(setter, type_args, receiver_ty);
                     let mut call_args = vec![receiver_arg];
                     call_args.append(&mut subscript_args);
                     call_args.push(newval_arg);
-                    self.emit_call(callee, call_args, MirTy::unit());
+                    // Protocol-extension subscript setter → witness dispatch
+                    if let Some(protocol) = self.find_protocol_for_method(setter) {
+                        self.ctx.register_name(protocol);
+                        let method_key = self.witness_method_key_of(setter);
+                        let callee =
+                            Callee::witness(protocol, method_key, receiver_ty, type_args);
+                        self.emit_call(callee, call_args, MirTy::unit());
+                    } else {
+                        let type_args =
+                            self.prepend_receiver_type_args(&receiver_ty, type_args);
+                        let callee = Callee::method(setter, type_args, receiver_ty);
+                        self.emit_call(callee, call_args, MirTy::unit());
+                    }
                 }
                 Some(Value::Const(Immediate::unit()))
             },
@@ -590,12 +628,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let mut subscript_args = self.lower_call_args(&args);
                 let newval_arg = self.lower_expr(value_id).into_copy();
                 let type_args = self.resolve_type_args(target_id);
-                let type_args = self.prepend_receiver_type_args(&field_ty, type_args);
-                let callee = Callee::method(setter, type_args, field_ty);
                 let mut call_args = vec![receiver_arg];
                 call_args.append(&mut subscript_args);
                 call_args.push(newval_arg);
-                self.emit_call(callee, call_args, MirTy::unit());
+                if let Some(protocol) = self.find_protocol_for_method(setter) {
+                    self.ctx.register_name(protocol);
+                    let method_key = self.witness_method_key_of(setter);
+                    let callee =
+                        Callee::witness(protocol, method_key, field_ty, type_args);
+                    self.emit_call(callee, call_args, MirTy::unit());
+                } else {
+                    let type_args =
+                        self.prepend_receiver_type_args(&field_ty, type_args);
+                    let callee = Callee::method(setter, type_args, field_ty);
+                    self.emit_call(callee, call_args, MirTy::unit());
+                }
                 Some(Value::Const(Immediate::unit()))
             },
             _ => None,
@@ -2143,6 +2190,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     fn witness_method_key_of(&self, entity: Entity) -> WitnessMethodKey {
+        // Setters (identified by EnclosingContainer) use `<accessor>.set`
+        // with the *subscript's* param labels (not the setter's, which
+        // includes newValue) to match the witness table.
+        if self.ctx.world.get::<kestrel_ast_builder::EnclosingContainer>(entity).is_some() {
+            if let Some(parent) = self.ctx.world.parent_of(entity) {
+                let parent_name = self.method_name_of(parent);
+                let parent_labels = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Callable>(parent)
+                    .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+                    .unwrap_or_default();
+                return WitnessMethodKey::new(
+                    format!("{parent_name}.set"),
+                    parent_labels,
+                );
+            }
+        }
         let name = self.method_name_of(entity);
         let labels = self
             .ctx
@@ -2207,7 +2272,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// need Witness dispatch so the witness table can route to the correct implementation.
     fn find_protocol_for_method(&self, method: Entity) -> Option<Entity> {
         use kestrel_ast_builder::NodeKind;
-        let parent = self.ctx.world.parent_of(method)?;
+        // EnclosingContainer (set at build time on Setters) jumps
+        // straight to the container; everything else uses direct parent.
+        let parent = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::EnclosingContainer>(method)
+            .map(|ec| ec.0)
+            .or_else(|| self.ctx.world.parent_of(method))?;
         let parent_kind = self.ctx.world.get::<NodeKind>(parent)?;
         match parent_kind {
             // Abstract protocol method (no body) — always needs Witness
@@ -2850,16 +2922,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        // If the receiver type resolves to a protocol entity (happens inside protocol
-        // extensions where self is abstract), replace with SelfType so monomorphization
-        // can substitute the concrete type
-        if let MirTy::Named { entity, type_args } = &receiver_ty
-            && type_args.is_empty()
-                && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::Protocol)
-                {
-                    receiver_ty = MirTy::SelfType;
-                }
+        // Inside protocol extension bodies, `self` is abstract — replace the
+        // protocol-named receiver with SelfType so monomorphization substitutes
+        // the concrete type.  Outside protocol extensions (protocol existentials
+        // like `func f(h: Proto)`), keep the protocol type so the witness lookup
+        // matches on the erased existential.
+        if self.in_protocol_extension {
+            if let MirTy::Named { entity, type_args } = &receiver_ty
+                && type_args.is_empty()
+                    && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                        == Some(&kestrel_ast_builder::NodeKind::Protocol)
+                    {
+                        receiver_ty = MirTy::SelfType;
+                    }
+        }
 
         // Check for function-typed field calls BEFORE lowering receiver into call_args,
         // since field calls use the receiver differently (to access the field, not as self)

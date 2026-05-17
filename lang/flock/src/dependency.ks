@@ -100,7 +100,28 @@ func parseSingleDep(name name: String, value value: Value) -> Result[Dependency,
         .None => {}
     }
 
+    // Object value: look for "version" key
+    match value.value(forKey: "version") {
+        .Some(versionVal) => {
+            match versionVal.asString() {
+                .Some(versionStr) => {
+                    match parseConstraint(s: versionStr) {
+                        .Ok(constraint) => return .Ok(Dependency(
+                            name: name,
+                            spec: DependencySpec.Registry(constraint)
+                        )),
+                        .Err(e) => return .Err(e)
+                    }
+                },
+                .None => return .Err(FlockError.ManifestParse(
+                    "dependency '" + name + "' version must be a string"
+                ))
+            }
+        },
+        .None => {}
+    }
+
     .Err(FlockError.ManifestParse(
-        "dependency '" + name + "' must be a version string or object with 'path'"
+        "dependency '" + name + "' must be a version string or object with 'path' or 'version'"
     ))
 }

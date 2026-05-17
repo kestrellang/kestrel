@@ -353,6 +353,9 @@ extend ArraySlice[T]: Slice[T], Iterable {
 
     /// Returns `self` — `ArraySlice` is already the borrowed view.
     public func asSlice() -> ArraySlice[T] { self }
+
+    /// No-op — `ArraySlice` is a non-owning view with no COW barrier.
+    public mutating func ensureUnique() { }
 }
 
 /// Element-wise equality when the element type is `Equatable`. `isEqual`

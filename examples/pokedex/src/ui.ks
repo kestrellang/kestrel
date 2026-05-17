@@ -9,7 +9,7 @@ import pokedex.data.(PokemonEntry, kantoPokedex, kantoEntryById,
                     statLabel, statPercent, statColor, statShortLabel,
                     unitX, unitY, statAngleIdx, angleToStatIdx, roundInt,
                     getField, getArrayField, getString, getInt)
-import pokedex.util.(padId, formatMeters, formatKilos, capitalize, containsLower, toLower)
+import pokedex.util.(padId, formatMeters, formatKilos, capitalize, containsLower)
 
 // ============================================================================
 // SHARED CSS
@@ -123,7 +123,7 @@ public func gridItemsHtml(entries: Array[PokemonEntry]) -> String {
     while i < entries.count {
         let e = entries(unchecked: i);
         t.setInt("id", e.id);
-        t.setRaw("idPad", padId(e.id, 3));
+        t.setRaw("idPad", padId(e.id));
         t.put("name", e.displayName);
         t.setInt("delay", i * 8);
         t.setRaw("color", typeColor(e.primaryType));
@@ -139,7 +139,7 @@ public func gridItemsHtml(entries: Array[PokemonEntry]) -> String {
 // ============================================================================
 
 public func filterKanto(query: String, typeFilter: String) -> Array[PokemonEntry] {
-    let q = toLower(query);
+    let q = query.lowercasedAscii();
     var out = Array[PokemonEntry]();
     let all = kantoPokedex();
     var i: Int64 = 0;
@@ -396,7 +396,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
     // Art window with corner decorations
     t.setInt("id", id);
     t.put("name", display);
-    t.setRaw("idPad", padId(id, 3));
+    t.setRaw("idPad", padId(id));
     t.put("primaryType", capitalize(primaryType));
     h.append(t.render(##"<div class="tcg-art"><span class="tcg-corner tl">No. {idPad}</span><span class="tcg-corner tr">{primaryType}</span><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/{id}.png" alt="{name}" loading="eager"><span class="tcg-corner bl">KANTO</span><span class="tcg-corner br">GEN I</span></div>"##));
 
@@ -434,13 +434,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
         };
         let cls = if isHidden { "ability-chip hidden" } else { "ability-chip" };
         // Replace kebab-case dashes with spaces for display
-        var displayAb = String();
-        var k: Int64 = 0;
-        while k < abName.byteCount {
-            let b = abName.bytes(unchecked: k);
-            if b == 45 { displayAb.appendByte(32) } else { displayAb.appendByte(b) };
-            k = k + 1
-        }
+        let displayAb = abName.replaced("-", with: " ");
         t.setRaw("cls", cls);
         t.put("ab", displayAb);
         h.append(t.render(##"<span class="{cls}">{ab}</span>"##));
@@ -449,7 +443,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
     h.append("</div></div>");
 
     // Footer
-    t.setRaw("idPad", padId(id, 3));
+    t.setRaw("idPad", padId(id));
     h.append(t.render(##"<div class="tcg-footer"><span>Kestrel Pokédex<span class="dot"></span>Kanto</span><span>#{idPad} / 151</span></div>"##));
 
     h.append(##"</div></div>"##); // close .tcg-inner, .tcg-card
@@ -458,7 +452,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
     h.append(##"<div class="tcg-side">"##);
     h.append(##"<a href="/" class="tcg-back">← Back to Kanto Pokédex</a>"##);
 
-    t.setRaw("idPad", padId(id, 3));
+    t.setRaw("idPad", padId(id));
     t.put("name", display);
     h.append(t.render(##"<div><div class="tcg-side-id">#{idPad}</div><div class="tcg-side-name">{name}</div></div>"##));
 

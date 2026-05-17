@@ -6,7 +6,7 @@ module perch.parse
 import http.method.(HttpMethod, parseMethod)
 import http.headers.(Headers)
 import http.url.(parseUrl, ParsedUrl)
-import http.wire.(findHeaderEnd, bytesToString, parseDecimal)
+import http.wire.(findHeaderEnd, parseDecimal)
 import perch.request.(Request)
 import std.io.error.(IoError)
 
@@ -35,7 +35,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
     var headerEnd: Int64 = -1;
 
     loop {
-        let slice = Slice(pointer: chunk.asPointer(), count: 4096);
+        let slice = ArraySlice(pointer: chunk.asPointer(), count: 4096);
         let bytesRead = recv(fileDescriptor, slice.pointer, slice.count, 0);
         if bytesRead <= 0 {
             return .Err(invalidInput())
@@ -55,7 +55,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
         }
     }
 
-    let headerStr = bytesToString(buffer, from: 0, to: headerEnd);
+    let headerStr = String(fromUtf8: buffer.asSlice()(0..<headerEnd)) ?? String();
 
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
         return .Err(invalidInput());
@@ -91,7 +91,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
                     readSize = remaining
                 }
                 var bodyChunk = Array[UInt8](repeating: 0, count: readSize);
-                let bodySlice = Slice(pointer: bodyChunk.asPointer(), count: readSize);
+                let bodySlice = ArraySlice(pointer: bodyChunk.asPointer(), count: readSize);
                 let bytesRead = recv(fileDescriptor, bodySlice.pointer, bodySlice.count, 0);
                 if bytesRead <= 0 {
                     break
@@ -101,7 +101,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
                 }
             }
 
-            body = bytesToString(bodyBytes, from: 0, to: bodyBytes.count)
+            body = String(fromUtf8: bodyBytes.asSlice()) ?? String()
         }
     }
 

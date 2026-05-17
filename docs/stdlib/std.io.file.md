@@ -186,9 +186,9 @@ hole on filesystems that support sparse files).
 
 ```
 var file = try File.openReadWrite("data.bin");
-try file.seek(.Start(0));        // rewind
-try file.seek(.Current(100));    // skip 100 bytes
-let size = try file.seek(.End(0));   // size of file
+try file.seek(to: .Start(0));        // rewind
+try file.seek(to: .Current(100));    // skip 100 bytes
+let size = try file.seek(to: .End(0));   // size of file
 ```
 
 _Defined in `lang/std/io/file.ks`._
@@ -198,7 +198,7 @@ _Defined in `lang/std/io/file.ks`._
 #### function `read`
 
 ```kestrel
-public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `read(2)`. Advances the file position by the byte count
@@ -226,7 +226,7 @@ _Defined in `lang/std/io/file.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `write(2)`. May write fewer bytes than supplied — wrap with
@@ -247,9 +247,9 @@ offset in bytes (signed, so backwards seeks work).
 ### Examples
 
 ```
-try file.seek(.Start(0));        // beginning
-try file.seek(.Current(-10));    // back 10 bytes
-try file.seek(.End(0));          // end of file
+try file.seek(to: .Start(0));        // beginning
+try file.seek(to: .Current(-10));    // back 10 bytes
+try file.seek(to: .End(0));          // end of file
 ```
 
 _Defined in `lang/std/io/file.ks`._

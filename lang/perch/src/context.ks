@@ -29,10 +29,17 @@ import perch.response.(Response)
 ///     }
 /// }
 /// ```
-public enum MiddlewareResult {
+public enum MiddlewareResult: Cloneable {
     /// Continue to the next middleware or handler with this request.
     case Continue(Request)
 
     /// Short-circuit the pipeline and return this response to the client.
     case Respond(Response)
+
+    public func clone() -> MiddlewareResult {
+        match self {
+            .Continue(req) => .Continue(req.clone()),
+            .Respond(res) => .Respond(res.clone())
+        }
+    }
 }

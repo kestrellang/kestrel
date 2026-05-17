@@ -26,7 +26,7 @@ public struct Version: Cloneable {
 
     /// Returns "major.minor.patch" string representation.
     public func toString() -> String {
-        var s = String(); s.append(self.major.format()); s.append("."); s.append(self.minor.format()); s.append("."); s.append(self.patch.format()); s
+        "\(self.major).\(self.minor).\(self.patch)"
     }
 
     /// Returns true if this version equals another.
@@ -193,7 +193,7 @@ func splitOnDot(s: String) -> Array[String] {
 
 /// Parses a non-negative integer from a string. Returns None on failure.
 func parseInt(s: String) -> Optional[Int64] {
-    match Int64.parse(s) {
+    match Int64(parsing: s) {
         .Some(n) => {
             if n >= 0 { .Some(n) } else { .None }
         },

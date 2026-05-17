@@ -12,7 +12,7 @@ import perch.middleware.(logger)
 import swoop.swoop.(Swoop)
 import quill.json.parser.(parseJson)
 import pokedex.ui.(landingPageHtml, gridItemsHtml, detailPageHtml, errorPageHtml, filterKanto)
-import pokedex.util.(urlDecode)
+import http.url.(percentDecode)
 
 // ============================================================================
 // CONTEXT
@@ -33,11 +33,11 @@ struct Ctx: Cloneable {
 
 func handleSearch(req: Request, ctx: Ctx) -> Response {
     let q = match req.query("q") {
-        .Some(v) => urlDecode(v),
+        .Some(v) => percentDecode(v),
         .None => ""
     };
     let typeFilter = match req.query("type") {
-        .Some(v) => urlDecode(v),
+        .Some(v) => percentDecode(v),
         .None => ""
     };
     let entries = filterKanto(q, typeFilter);
@@ -49,7 +49,7 @@ func handlePokemon(req: Request, ctx: Ctx) -> Response {
         .Some(v) => v,
         .None => return Response.ok(html: errorPageHtml("Missing pokemon id."))
     };
-    let id = match Int64.parse(idStr) {
+    let id = match Int64(parsing: idStr) {
         .Some(n) => n,
         .None => return Response.ok(html: errorPageHtml("Invalid pokemon id."))
     };

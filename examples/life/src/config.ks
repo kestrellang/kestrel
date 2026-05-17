@@ -81,7 +81,7 @@ func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default f
         return fallback;
     }
 
-    guard let .Some(n) = Int64.parse(s) else {
+    guard let .Some(n) = Int64(parsing: s) else {
         return fallback;
     }
 

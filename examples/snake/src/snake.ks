@@ -7,6 +7,13 @@ import std.core.Range
 import Tui.(Style, StyleOption, Box, moveTo, home, clearScreen, hideCursor, showCursor, clearLine, repeatStr)
 import Input.(Key, InputManager)
 
+// Workaround for cross-module ExpressibleByArrayLiteral compiler bug:
+// Array literal syntax for Style doesn't resolve element types across modules.
+func makeStyle(options: Array[StyleOption]) -> Style {
+    let ptr = lang.cast_ptr[_, StyleOption](options.asPointer().asRaw().raw);
+    Style(_arrayLiteralPointer: ptr, _arrayLiteralCount: options.count.raw)
+}
+
 // ============================================
 // Configuration
 // ============================================
@@ -20,16 +27,18 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles {
-    static var border: Style { [.White] }
-    static var title: Style { [.Yellow, .Bold] }
-    static var score: Style { [.White, .Bold] }
-    static var label: Style { [.Gray] }
-    static var head: Style { [.Green, .Bold] }
-    static var body: Style { [.Green] }
-    static var food: Style { [.Red, .Bold] }
-    static var gameOver: Style { [.Red, .Bold] }
-    static var prompt: Style { [.Yellow] }
+struct Styles : Cloneable {
+    static var border: Style { makeStyle([.White]) }
+    static var title: Style { makeStyle([.Yellow, .Bold]) }
+    static var score: Style { makeStyle([.White, .Bold]) }
+    static var label: Style { makeStyle([.Gray]) }
+    static var head: Style { makeStyle([.Green, .Bold]) }
+    static var body: Style { makeStyle([.Green]) }
+    static var food: Style { makeStyle([.Red, .Bold]) }
+    static var gameOver: Style { makeStyle([.Red, .Bold]) }
+    static var prompt: Style { makeStyle([.Yellow]) }
+
+    func clone() -> Styles { Styles() }
 }
 
 // ============================================

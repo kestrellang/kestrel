@@ -127,13 +127,12 @@ struct Score {
     }
 
     func render(renderer: Renderer) {
-        let text = self.formatted();
+        let text = "\(self.player1) - \(self.player2)";
         renderer.drawText(text, 350, 20, 4);
     }
 
     func format() -> String {
-        var result = self.player1.formatted() + " - " + self.player2.formatted();
-        result
+        "\(self.player1) - \(self.player2)"
     }
 }
 

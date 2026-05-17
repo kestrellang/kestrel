@@ -24,7 +24,7 @@ pub mod where_clauses;
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, EnclosingContainer, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir_lower::{
     LowerBody, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
@@ -36,17 +36,13 @@ use resolve::WorldResolver;
 use result::TypedBody;
 
 /// Resolve the logical enclosing container for a function-like entity.
-/// For a Setter (child of Field/Subscript), skip through the accessor-owner
-/// parent so the true container (Struct/Enum/Extension/Protocol/Module) is
-/// used for `self` typing, type-param inheritance, and where-clause resolution.
-/// For plain Functions/Initializers/Deinits/Fields/Subscripts, returns the
-/// direct parent unchanged.
+/// Setters have an `EnclosingContainer` component set at build time;
+/// everything else just uses its direct parent.
 fn accessor_enclosing_container(qctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
-    let direct = qctx.parent_of(entity)?;
-    match qctx.get::<NodeKind>(direct) {
-        Some(NodeKind::Field) | Some(NodeKind::Subscript) => qctx.parent_of(direct),
-        _ => Some(direct),
+    if let Some(ec) = qctx.get::<EnclosingContainer>(entity) {
+        return Some(ec.0);
     }
+    qctx.parent_of(entity)
 }
 
 // ===== InferBody query =====
@@ -223,10 +219,23 @@ fn create_param_types(
 /// Handles bounds (`I: Iterable`), associated type equalities (`I.Item = E`),
 /// and direct type param equalities (`V = Array[E]`).
 fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_>, entity: Entity) {
-    let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+    let mut clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
         entity,
         root: ctx.root,
     });
+    // Setters inherit the subscript/field parent's where clauses (e.g.
+    // `where I: SeqIndex[T]` on the subscript). The accessor owner is
+    // the direct parent (Subscript/Field); EnclosingContainer skips
+    // one further to the type container — we need the intermediate one.
+    if query_ctx.get::<EnclosingContainer>(entity).is_some() {
+        if let Some(accessor_owner) = query_ctx.parent_of(entity) {
+            let owner_clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+                entity: accessor_owner,
+                root: ctx.root,
+            });
+            clauses.extend(owner_clauses);
+        }
+    }
     if clauses.is_empty() {
         return;
     }

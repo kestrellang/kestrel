@@ -104,8 +104,7 @@ public struct Cookie: Cloneable {
         result.append("; Path=");
         result.append(self.path);
         if self.maxAge >= 0 {
-            result.append("; Max-Age=");
-            result.append(self.maxAge.format())
+            result.append("; Max-Age=\(self.maxAge)")
         }
         if self.httpOnly {
             result.append("; HttpOnly")
