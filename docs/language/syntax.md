@@ -115,7 +115,7 @@ enum Shape {
 // Recursive enum (must be marked indirect) - (Future)
 // enum List[T] {
 //     case Cons(T, indirect List[T])
-//     case Nil
+//     case Empty
 // }
 
 // Implicit Member Access
@@ -278,7 +278,7 @@ private struct C { ... }    // Visible in this file/scope
 // Casting - (Future)
 // let y = x as Float64
 
-// Nil Coalescing
+// Null Coalescing
 let val = optional ?? defaultVal;
 
 // Chaining - (Future)

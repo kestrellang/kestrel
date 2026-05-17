@@ -1,18 +1,20 @@
-//! Backend-agnostic code generation infrastructure for Kestrel.
+//! Backend-agnostic code generation infrastructure for Kestrel (lib).
 //!
-//! This crate provides shared utilities used by all code generation backends:
-//! - Target configuration and host detection
-//! - Name mangling for linker symbols
-//! - Type layout calculation (size and alignment)
-//! - Generic instantiation collection for monomorphization
+//! Shared utilities used by all code generation backends:
+//! - **Target configuration** — host detection and target triple handling
+//! - **Type layout** — size, alignment, and field offset computation
+//! - **Name mangling** — unique linker-safe symbol names
 //!
-//! Individual backends (like `kestrel-codegen-cranelift`) use these utilities
-//! to generate target-specific code.
+//! Consumes `MirModule` from `kestrel-mir`. Individual backends (like
+//! a future Cranelift backend) use these utilities to generate target-specific code.
 
 pub mod layout;
 pub mod mangle;
 pub mod target;
 
-pub use layout::{Layout, LayoutCache};
+pub use layout::{
+    DetailedStructLayout, Layout, LayoutCache, NamedKind, substitute_type,
+    substitute_type_with_self,
+};
 pub use mangle::{Mangler, mangle_function, mangle_function_with_self, mangle_name};
 pub use target::TargetConfig;

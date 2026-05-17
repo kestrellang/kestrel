@@ -1,15 +1,19 @@
 // Unicode case mapping tables
-// Uses @fileconstant to load binary data from data/*.bin files
-// Run generate_data.py to regenerate the binary files if needed
+//
+// Two-stage trie tables (block index + delta) loaded via `@fileconstant`,
+// plus a small literal expansion array for the codepoints that do not
+// case-map 1:1. Generated from the Unicode data files by
+// `generate_data.py`; do not edit the `data/*.bin` files by hand.
 
 module std.text.unicode
 
 import std.text.(Char, String)
-import std.num.(Int64, Int32, UInt32)
+import std.numeric.(Int64, Int32, UInt32)
 import std.core.(Bool)
 import std.memory.(LiteralSlice)
 
-/// The Unicode version these tables were generated from.
+/// Unicode version these tables track. Bump alongside the regeneration
+/// of the underlying `data/*.bin` files.
 public let unicodeVersion: String = "15.1.0"
 
 // ============================================================================
@@ -214,9 +218,22 @@ let TITLE_EXPANSIONS: std.collections.Array[(Int32, Int32, Int32, Int32, Int32)]
 // CASE CONVERSION FUNCTIONS
 // ============================================================================
 
-/// Returns the uppercase version of a character.
-/// For characters with multi-char expansions, returns the first char.
-/// Use hasUppercaseExpansion() and uppercaseExpansion() for full support.
+/// Single-codepoint uppercase mapping for `c`. Falls back to `c` for
+/// characters with no mapping and for codepoints above `U+10FFFF`.
+///
+/// For characters whose Unicode uppercase form expands to multiple
+/// codepoints (e.g. `ß → SS`, `ﬁ → FI`), this returns only the first
+/// codepoint of the expansion. Use `hasUppercaseExpansion(c:)` to detect
+/// the multi-char case and `uppercaseExpansion(c:)` to retrieve the full
+/// `String`.
+///
+/// # Examples
+///
+/// ```
+/// toUppercase('a')           // 'A'
+/// toUppercase('ß')           // 'S' — see uppercaseExpansion for "SS"
+/// toUppercase('1')           // '1' — no mapping
+/// ```
 public func toUppercase(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path
@@ -225,13 +242,15 @@ public func toUppercase(c: Char) -> Char {
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = UPPER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let stage2_idx = Int64(from: blockIdx).multiply(Int64(intLiteral: 256)).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = UPPER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
-/// Returns the lowercase version of a character.
+/// Single-codepoint lowercase mapping for `c`. Same caveats as
+/// `toUppercase`: codepoints with multi-char lowercase forms return
+/// only the first codepoint — see `lowercaseExpansion`.
 public func toLowercase(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path
@@ -240,13 +259,16 @@ public func toLowercase(c: Char) -> Char {
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = LOWER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let stage2_idx = Int64(from: blockIdx).multiply(Int64(intLiteral: 256)).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = LOWER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
-/// Returns the titlecase version of a character.
+/// Single-codepoint titlecase mapping for `c`. Differs from
+/// `toUppercase` only for the codepoints (mostly Greek/Croatian
+/// digraphs) where Unicode defines a distinct "Title" form. Multi-char
+/// expansions live in `titlecaseExpansion`.
 public func toTitlecase(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path (same as uppercase)
@@ -255,13 +277,16 @@ public func toTitlecase(c: Char) -> Char {
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = TITLE_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let stage2_idx = Int64(from: blockIdx).multiply(Int64(intLiteral: 256)).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = TITLE_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
-/// Returns true if the character has a multi-character uppercase expansion.
+/// `true` iff uppercasing `c` produces more than one codepoint.
+/// Linear scan over `UPPER_EXPANSIONS` (~100 entries); fine for
+/// per-character calls in normal text but quadratic if applied to a
+/// large codepoint set.
 public func hasUppercaseExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
@@ -273,8 +298,18 @@ public func hasUppercaseExpansion(c: Char) -> Bool {
     false
 }
 
-/// Returns the multi-character uppercase expansion for a character.
-/// Returns empty string if no expansion exists.
+/// Full Unicode uppercase expansion for `c` as a `String`. Returns the
+/// empty string when `c` has no multi-codepoint expansion — pair with
+/// `hasUppercaseExpansion` (or call `toUppercase` instead) to avoid the
+/// scan when you only need the single-codepoint form.
+///
+/// # Examples
+///
+/// ```
+/// uppercaseExpansion('ß')          // "SS"
+/// uppercaseExpansion('ﬁ')          // "FI"
+/// uppercaseExpansion('a')          // ""  (use toUppercase for 'A')
+/// ```
 public func uppercaseExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;
@@ -292,7 +327,8 @@ public func uppercaseExpansion(c: Char) -> String {
     ""
 }
 
-/// Returns true if the character has a multi-character lowercase expansion.
+/// `true` iff lowercasing `c` produces more than one codepoint.
+/// Same scan caveats as `hasUppercaseExpansion`.
 public func hasLowercaseExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
@@ -304,7 +340,9 @@ public func hasLowercaseExpansion(c: Char) -> Bool {
     false
 }
 
-/// Returns the multi-character lowercase expansion for a character.
+/// Full Unicode lowercase expansion for `c`. Empty string when no
+/// multi-codepoint expansion applies — see `uppercaseExpansion` for
+/// the same shape.
 public func lowercaseExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;
@@ -322,7 +360,7 @@ public func lowercaseExpansion(c: Char) -> String {
     ""
 }
 
-/// Returns true if the character has a multi-character titlecase expansion.
+/// `true` iff titlecasing `c` produces more than one codepoint.
 public func hasTitlecaseExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
@@ -334,7 +372,8 @@ public func hasTitlecaseExpansion(c: Char) -> Bool {
     false
 }
 
-/// Returns the multi-character titlecase expansion for a character.
+/// Full Unicode titlecase expansion for `c`. Empty string when no
+/// multi-codepoint expansion applies.
 public func titlecaseExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;

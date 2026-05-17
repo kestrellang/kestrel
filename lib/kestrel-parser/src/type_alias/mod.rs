@@ -34,13 +34,17 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
-    AssociatedTypeBoundsData, AssociatedTypeTargetData, TypeAliasDeclarationData,
-    emit_type_alias_declaration, identifier, token, visibility_parser_internal,
+    AttributeData, emit_attribute_list, emit_name, emit_visibility, identifier, token,
+    visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::ty::{TyVariant, ty_parser};
-use crate::type_param::{type_parameter_list_parser, where_clause_parser};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
+use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, emit_type_parameter_list, emit_where_clause,
+    type_parameter_list_parser, where_clause_parser,
+};
 
 /// Represents a type alias declaration: (visibility)? type Name[T]? = Type;
 ///
@@ -137,6 +141,49 @@ impl TypeAliasDeclaration {
             Some(segments.join("."))
         }
     }
+}
+
+/// Raw parsed data for type alias declaration internals.
+#[derive(Debug, Clone)]
+pub struct TypeAliasDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub type_span: Span,
+    /// The target of the type alias - simple name or qualified path.
+    pub target: AssociatedTypeTargetData,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    /// Optional bounds for associated types (: Equatable, Hashable).
+    pub bounds: Option<AssociatedTypeBoundsData>,
+    /// Optional where clause for associated types (where Iter.Item = Item).
+    pub where_clause: Option<WhereClauseData>,
+    /// Optional equals span and aliased type (= Type).
+    /// For associated types in protocols, this may be None (abstract associated type).
+    pub aliased: Option<(Span, TyVariant)>,
+    pub semicolon_span: Option<Span>,
+}
+
+/// Target for type alias - either simple name or qualified path.
+#[derive(Debug, Clone)]
+pub enum AssociatedTypeTargetData {
+    /// Simple name: `type Item`.
+    Simple(Span),
+    /// Qualified path: `type Iterator.Item` or `type Add[Int].Output`.
+    Qualified {
+        /// The protocol path (may include type arguments).
+        protocol_path: TyVariant,
+        /// The dot before the name.
+        dot_span: Span,
+        /// The associated type name.
+        name_span: Span,
+    },
+}
+
+/// Bounds for associated types (: Equatable, Hashable).
+#[derive(Debug, Clone)]
+pub struct AssociatedTypeBoundsData {
+    pub colon_span: Span,
+    /// The bound types (protocols).
+    pub bounds: Vec<TyVariant>,
 }
 
 /// Parser for associated type bounds (: Equatable, Hashable)
@@ -270,21 +317,109 @@ pub fn parse_type_alias_declaration<I>(source: &str, tokens: I, sink: &mut Event
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        type_alias_declaration_parser_internal(),
+        emit_type_alias_declaration
+    );
+}
 
-    match type_alias_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_type_alias_declaration(sink, data);
+/// Emit events for an associated type target.
+fn emit_associated_type_target(sink: &mut EventSink, target: &AssociatedTypeTargetData) {
+    match target {
+        AssociatedTypeTargetData::Simple(name_span) => {
+            emit_name(sink, name_span.clone());
         },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
+        AssociatedTypeTargetData::Qualified {
+            protocol_path,
+            dot_span,
+            name_span,
+        } => {
+            sink.start_node(SyntaxKind::AssociatedTypeTarget);
+            emit_ty_variant(sink, protocol_path);
+            sink.add_token(SyntaxKind::Dot, dot_span.clone());
+            emit_name(sink, name_span.clone());
+            sink.finish_node();
         },
+    }
+}
+
+/// Emit events for associated type bounds (: Equatable, Hashable).
+fn emit_associated_type_bounds(sink: &mut EventSink, bounds: &AssociatedTypeBoundsData) {
+    sink.start_node(SyntaxKind::ConformanceList);
+    sink.add_token(SyntaxKind::Colon, bounds.colon_span.clone());
+    for (i, bound) in bounds.bounds.iter().enumerate() {
+        if i > 0 {
+            let prev_end = bounds.colon_span.end + i;
+            sink.add_token(
+                SyntaxKind::Comma,
+                Span::new(bounds.colon_span.file_id, prev_end..prev_end + 1),
+            );
+        }
+        sink.start_node(SyntaxKind::ConformanceItem);
+        emit_ty_variant(sink, bound);
+        sink.finish_node();
+    }
+    sink.finish_node();
+}
+
+/// Emit events for a type alias declaration.
+///
+/// Destructures `TypeAliasDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
+pub(crate) fn emit_type_alias_declaration(sink: &mut EventSink, data: TypeAliasDeclarationData) {
+    let TypeAliasDeclarationData {
+        attributes,
+        visibility,
+        type_span,
+        target,
+        type_params,
+        bounds,
+        where_clause,
+        aliased,
+        semicolon_span,
+    } = data;
+
+    sink.start_node(SyntaxKind::TypeAliasDeclaration);
+
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Type, type_span);
+
+    emit_associated_type_target(sink, &target);
+
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(ref bounds) = bounds {
+        emit_associated_type_bounds(sink, bounds);
+    }
+
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    if let Some((equals_span, ref aliased_type)) = aliased {
+        sink.add_token(SyntaxKind::Equals, equals_span);
+        sink.start_node(SyntaxKind::AliasedType);
+        emit_ty_variant(sink, aliased_type);
+        sink.finish_node();
+    }
+
+    if let Some(semicolon_span) = semicolon_span {
+        sink.add_token(SyntaxKind::Semicolon, semicolon_span);
+    }
+
+    sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for TypeAliasDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_type_alias_declaration(sink, self);
     }
 }
 

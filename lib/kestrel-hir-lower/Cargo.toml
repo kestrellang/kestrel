@@ -1,0 +1,22 @@
+[package]
+name = "kestrel-hir-lower"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-ast = { path = "../kestrel-ast" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-debug = { path = "../kestrel-debug" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+
+[dev-dependencies]
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

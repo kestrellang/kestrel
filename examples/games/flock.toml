@@ -1,0 +1,7 @@
+[package]
+name = "games"
+version = "0.1.0"
+description = "Shared game utilities (TUI, input)"
+
+[build]
+c-sources = ["game_input.c"]

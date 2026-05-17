@@ -21,23 +21,31 @@ jobs:
 
       - name: Determine branch prefix
         id: prefix
+        env:
+          LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
         run: |
-          LABELS="${{ join(github.event.issue.labels.*.name, ',') }}"
-          if echo "$LABELS" | grep -q "bug"; then
-            echo "prefix=fix" >> $GITHUB_OUTPUT
+          if echo "$LABELS" | grep -qw "bug"; then
+            echo "prefix=fix" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -qw "refactor"; then
+            echo "prefix=refactor" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -qw "chore"; then
+            echo "prefix=chore" >> "$GITHUB_OUTPUT"
           else
-            echo "prefix=feature" >> $GITHUB_OUTPUT
+            echo "prefix=feature" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create branch name
         id: branch
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
           # Sanitize title for branch name
-          TITLE="${{ github.event.issue.title }}"
-          SANITIZED=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
-          ISSUE_NUM=$(printf "%04d" "${{ github.event.issue.number }}")
-          BRANCH="${{ steps.prefix.outputs.prefix }}/${ISSUE_NUM}-${SANITIZED}"
-          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+          SANITIZED=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
+          ISSUE_NUM_PADDED=$(printf "%04d" "$ISSUE_NUMBER")
+          BRANCH="${PREFIX}/${ISSUE_NUM_PADDED}-${SANITIZED}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Configure git
         run: |
@@ -45,44 +53,90 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Create branch and issue file
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_CREATED: ${{ github.event.issue.created_at }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
         run: |
-          git checkout -b "${{ steps.branch.outputs.name }}"
-
+          git checkout -b "$BRANCH_NAME"
           mkdir -p .issues
 
-          cat > ".issues/${{ github.event.issue.number }}.md" << 'EOF'
-          # Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+          # Use python to write the file safely without shell expansion of user input.
+          python3 - <<'PY'
+          import os, pathlib
+          n = os.environ["ISSUE_NUMBER"]
+          path = pathlib.Path(".issues") / f"{n}.md"
+          path.write_text(
+              f"# Issue #{n}: {os.environ['ISSUE_TITLE']}\n\n"
+              f"**Author:** @{os.environ['ISSUE_AUTHOR']}\n"
+              f"**Created:** {os.environ['ISSUE_CREATED']}\n"
+              f"**URL:** {os.environ['ISSUE_URL']}\n\n"
+              f"## Description\n\n"
+              f"{os.environ['ISSUE_BODY']}\n"
+          )
+          PY
 
-          **Author:** @${{ github.event.issue.user.login }}
-          **Created:** ${{ github.event.issue.created_at }}
-          **URL:** ${{ github.event.issue.html_url }}
-
-          ## Description
-
-          ${{ github.event.issue.body }}
-          EOF
-
-          git add ".issues/${{ github.event.issue.number }}.md"
-          git commit -m "issue: add description for #${{ github.event.issue.number }}"
-          git push origin "${{ steps.branch.outputs.name }}"
+          git add ".issues/${ISSUE_NUMBER}.md"
+          git commit -m "issue: add description for #${ISSUE_NUMBER}"
+          git push origin "$BRANCH_NAME"
 
       - name: Create draft PR
+        id: pr
         uses: actions/github-script@v7
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          PREFIX: ${{ steps.prefix.outputs.prefix }}
         with:
           script: |
+            const title = process.env.ISSUE_TITLE;
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER, 10);
+            const branch = process.env.BRANCH_NAME;
+            const prefix = process.env.PREFIX;
+
             const pr = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `${{ steps.prefix.outputs.prefix }}: ${{ github.event.issue.title }}`,
-              head: '${{ steps.branch.outputs.name }}',
+              title: `${prefix}: ${title}`,
+              head: branch,
               base: 'nightly',
-              body: `Closes #${{ github.event.issue.number }}\n\n## Summary\n\n_Describe your changes here_\n\n## Test Plan\n\n- [ ] Tests pass\n- [ ] Formatted with \`cargo fmt\`\n- [ ] No clippy warnings`,
-              draft: true
+              body: `Closes #${issueNumber}\n\n## Summary\n\n_Describe your changes here_\n\n## Test Plan\n\n- [ ] Tests pass\n- [ ] Formatted with \`cargo fmt\`\n- [ ] No clippy warnings`,
+              draft: true,
             });
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `Branch created: \`${{ steps.branch.outputs.name }}\`\nDraft PR: ${pr.data.html_url}\n\nTo start working:\n\`\`\`bash\ngit fetch origin\ngit checkout ${{ steps.branch.outputs.name }}\n\`\`\``
+              issue_number: issueNumber,
+              body: `Branch created: \`${branch}\`\nDraft PR: ${pr.data.html_url}\n\nTo start working:\n\`\`\`bash\ngit fetch origin\ngit checkout ${branch}\n\`\`\``,
             });
+
+            core.setOutput('pr_url', pr.data.html_url);
+
+      - name: Set Project status to "In Progress"
+        if: ${{ vars.PROJECT_ID != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_ID: ${{ vars.PROJECT_ID }}
+          STATUS_FIELD_ID: ${{ vars.PROJECT_STATUS_FIELD_ID }}
+          STATUS_OPTION_ID: ${{ vars.PROJECT_STATUS_IN_PROGRESS_ID }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+        run: |
+          set -euo pipefail
+          ITEM_ID=$(gh api graphql \
+            -f query='mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: {projectId: $project, contentId: $content}) { item { id } } }' \
+            -F project="$PROJECT_ID" \
+            -F content="$ISSUE_NODE_ID" \
+            --jq '.data.addProjectV2ItemById.item.id')
+
+          gh api graphql \
+            -f query='mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option }}) { projectV2Item { id } } }' \
+            -F project="$PROJECT_ID" \
+            -F item="$ITEM_ID" \
+            -F field="$STATUS_FIELD_ID" \
+            -F option="$STATUS_OPTION_ID"

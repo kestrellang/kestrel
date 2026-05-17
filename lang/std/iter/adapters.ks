@@ -1,30 +1,42 @@
 // Iterator adapter types
-// These types provide lazy transformation and filtering of sequences.
+// These structs are the concrete iterators returned by the lazy
+// adapter combinators on `Iterator`. End users normally reach for the
+// builder methods (`it.map(...)`, `it.filter(...)`, …) rather than
+// constructing these directly — the public surface lives in
+// `iterator.ks`.
 
 module std.iter
 
 import std.result.(Optional)
 import std.core.(Bool, Copyable, Cloneable)
-import std.num.(Int64)
+import std.numeric.(Int64)
 
 // ============================================================================
 // TRANSFORMATION ADAPTERS
 // ============================================================================
 
-/// Transforms each element using a function.
+/// Lazy `map` — applies a transform to each element of `inner` as values
+/// are pulled. Returned by `Iterator.map(_:)`.
+///
+/// # Representation
+///
+/// Wraps the source iterator and the transform closure. No buffering —
+/// elements pass through one at a time.
 public struct MapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
     internal var inner: I
     internal var transform: (I.Item) -> U
 
-    /// Creates a map iterator that applies transform to each element of inner.
-    public init(inner inner: I, transform transform: (I.Item) -> U) {
+    /// @name From Source
+    /// Builds a `MapIterator` from `inner` and `transform`. Prefer
+    /// `inner.map(transform)`.
+    public init(inner inner: I, mapping transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
     }
 
-    /// Returns the next transformed element, or None if exhausted.
+    /// Pulls the next element from `inner` and runs `transform` on it.
     public mutating func next() -> U? {
         if let .Some(item) = self.inner.next() {
             .Some(self.transform(item))
@@ -38,20 +50,28 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
 // FILTERING ADAPTERS
 // ============================================================================
 
-/// Yields only elements matching a predicate.
+/// Lazy `filter` — yields only elements where the predicate returns
+/// `true`. Returned by `Iterator.filter(_:)`.
+///
+/// # Representation
+///
+/// Source iterator + predicate closure. `next()` skips ahead until the
+/// predicate accepts.
 public struct FilterIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var predicate: (I.Item) -> Bool
 
-    /// Creates a filter iterator that yields only elements where predicate returns true.
-    public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
+    /// @name From Source
+    /// Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
+    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
     }
 
-    /// Returns the next matching element, or None if exhausted.
+    /// Pulls until an element satisfies `predicate`, returning it. `None`
+    /// when the source is exhausted with no further match.
     public mutating func next() -> I.Item? {
         while let .Some(value) = self.inner.next() {
             if self.predicate(value) {
@@ -62,21 +82,29 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Filters and transforms in one step.
-/// Elements where transform returns None are skipped.
+/// Lazy `filterMap` / `compactMap` — runs a transform that returns
+/// `Optional[U]` and drops `None`s. Returned by both
+/// `Iterator.filterMap(_:)` and `Iterator.compactMap()`.
+///
+/// # Representation
+///
+/// Source iterator + transform closure. `next()` skips ahead until the
+/// transform yields `Some`.
 public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     type Item = U
 
     internal var inner: I
     internal var transform: (I.Item) -> U?
 
-    /// Creates an iterator that applies transform and yields only Some results.
-    public init(inner inner: I, transform transform: (I.Item) -> U?) {
+    /// @name From Source
+    /// Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
+    /// `inner.compactMap()`.
+    public init(inner inner: I, mapping transform: (I.Item) -> U?) {
         self.inner = inner;
         self.transform = transform;
     }
 
-    /// Returns the next transformed element, or None if exhausted.
+    /// Pulls until `transform` returns `Some`, then yields it.
     public mutating func next() -> U? {
         while let .Some(item) = self.inner.next() {
             let transformed = self.transform(item);
@@ -92,7 +120,13 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
 // CONDITIONAL ADAPTERS
 // ============================================================================
 
-/// Takes elements while predicate is true, then stops.
+/// Lazy `takeWhile` — yields elements until the predicate first returns
+/// `false`, then permanently stops. Returned by `Iterator.takeWhile(_:)`.
+///
+/// # Representation
+///
+/// Source iterator + predicate + a one-bit `done` flag that latches once
+/// the predicate fails.
 public struct TakeWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
@@ -100,14 +134,17 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
     internal var predicate: (I.Item) -> Bool
     internal var done: Bool
 
-    /// Creates an iterator that yields elements until predicate returns false.
-    public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
+    /// @name From Source
+    /// Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.
+    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.done = false;
     }
 
-    /// Returns the next element if predicate is still true, or None.
+    /// Returns the next element if `predicate` still accepts; latches
+    /// `done = true` and returns `None` on the first rejection or
+    /// underlying exhaustion.
     public mutating func next() -> I.Item? {
         if self.done {
             return .None
@@ -127,7 +164,14 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Skips elements while predicate is true, then yields all remaining.
+/// Lazy `skipWhile` — drops a leading run of elements satisfying the
+/// predicate, then yields *every* remaining element. Returned by
+/// `Iterator.skipWhile(_:)`.
+///
+/// # Representation
+///
+/// Source iterator + predicate + a one-bit `doneSkipping` flag that
+/// latches once the skipping phase ends.
 public struct SkipWhileIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
@@ -135,14 +179,17 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
     internal var predicate: (I.Item) -> Bool
     internal var doneSkipping: Bool
 
-    /// Creates an iterator that skips elements until predicate returns false.
-    public init(inner inner: I, predicate predicate: (I.Item) -> Bool) {
+    /// @name From Source
+    /// Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
+    public init(inner inner: I, matching predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.doneSkipping = false;
     }
 
-    /// Returns the next element after skipping is complete, or None.
+    /// On first call, drains source elements that match `predicate` and
+    /// returns the first one that doesn't. After that, forwards `next()`
+    /// directly.
     public mutating func next() -> I.Item? {
         if self.doneSkipping {
             return self.inner.next()
@@ -164,21 +211,27 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
 // COMBINING ADAPTERS
 // ============================================================================
 
-/// Pairs elements from two iterators.
-/// Stops when either iterator is exhausted.
+/// Lazy `zip` — pairs elements from two iterators. Stops at the shorter
+/// one. Returned by `Iterator.zip(other:)`.
+///
+/// # Representation
+///
+/// Holds both source iterators. No buffering.
 public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
     type Item = (A.Item, B.Item)
 
     internal var first: A
     internal var second: B
 
-    /// Creates an iterator that pairs elements from first and second.
+    /// @name From Sources
+    /// Builds a `ZipIterator`. Prefer `first.zip(other: second)`.
     public init(first first: A, second second: B) {
         self.first = first;
         self.second = second;
     }
 
-    /// Returns the next pair, or None if either iterator is exhausted.
+    /// Pulls one element from each side and pairs them. `None` if either
+    /// runs out.
     public mutating func next() -> (A.Item, B.Item)? {
         if let .Some(a) = self.first.next() {
             if let .Some(b) = self.second.next() {
@@ -192,24 +245,32 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
     }
 }
 
-/// Yields (index, item) pairs.
+/// Lazy `enumerate` — pairs each element with its zero-based position.
+/// Returned by `Iterator.enumerate()`.
+///
+/// # Representation
+///
+/// Source iterator + a running `Int64` index that ticks per element.
 public struct EnumerateIterator[I]: Iterator where I: Iterator {
     type Item = (Int64, I.Item)
 
     internal var inner: I
     internal var index: Int64
 
-    /// Creates an iterator that pairs each element with its zero-based index.
+    /// @name From Source
+    /// Builds an `EnumerateIterator` with the index starting at 0.
+    /// Prefer `inner.enumerate()`.
     public init(inner inner: I) {
         self.inner = inner;
-        self.index = Int64(intLiteral: 0);
+        self.index = 0;
     }
 
-    /// Returns the next (index, element) pair, or None if exhausted.
+    /// Pulls the next element and pairs it with the current index, then
+    /// increments the index.
     public mutating func next() -> (Int64, I.Item)? {
         if let .Some(item) = self.inner.next() {
             let i = self.index;
-            self.index = self.index + Int64(intLiteral: 1);
+            self.index = self.index + 1;
             .Some((i, item))
         } else {
             .None
@@ -221,23 +282,30 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
 // SLICING ADAPTERS
 // ============================================================================
 
-/// Takes only the first n elements.
+/// Lazy `take` — yields at most `count` elements from the source.
+/// Returned by `Iterator.take(count:)`.
+///
+/// # Representation
+///
+/// Source iterator + a counter that ticks down to zero.
 public struct TakeIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var remaining: Int64
 
-    /// Creates an iterator that yields at most count elements.
+    /// @name From Source
+    /// Builds a `TakeIterator` with `count` capacity.
     public init(inner inner: I, count count: Int64) {
         self.inner = inner;
         self.remaining = count;
     }
 
-    /// Returns the next element if count not reached, or None.
+    /// Decrements `remaining` and forwards `next()`; returns `None` once
+    /// the budget hits zero.
     public mutating func next() -> I.Item? {
-        if self.remaining > Int64(intLiteral: 0) {
-            self.remaining = self.remaining - Int64(intLiteral: 1);
+        if self.remaining > 0 {
+            self.remaining = self.remaining - 1;
             self.inner.next()
         } else {
             .None
@@ -245,25 +313,34 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Skips the first n elements.
+/// Lazy `skip` — drops the first `count` elements, then yields the rest.
+/// Returned by `Iterator.skip(count:)`.
+///
+/// # Representation
+///
+/// Source iterator + a counter; the first `next()` call drains the
+/// budget by pulling the source.
 public struct SkipIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var remaining: Int64
 
-    /// Creates an iterator that skips the first count elements.
+    /// @name From Source
+    /// Builds a `SkipIterator` that will drop `count` elements before
+    /// yielding.
     public init(inner inner: I, count count: Int64) {
         self.inner = inner;
         self.remaining = count;
     }
 
-    /// Returns the next element after skipping, or None if exhausted.
+    /// On first call, walks past `remaining` source elements; subsequent
+    /// calls forward `next()` directly.
     public mutating func next() -> I.Item? {
         // Skip remaining elements first
-        while self.remaining > Int64(intLiteral: 0) {
+        while self.remaining > 0 {
             if let .Some(_) = self.inner.next() {
-                self.remaining = self.remaining - Int64(intLiteral: 1)
+                self.remaining = self.remaining - 1
             } else {
                 return .None
             }
@@ -272,8 +349,13 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Chains two iterators together.
-/// First yields all elements from first, then all from second.
+/// Lazy `chain` — yields all of `first`, then all of `second`. Returned
+/// by `Iterator.chain(other:)`.
+///
+/// # Representation
+///
+/// Both source iterators + a one-bit `firstDone` flag that latches when
+/// the first iterator runs out.
 public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item {
     type Item = A.Item
 
@@ -281,14 +363,15 @@ public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.It
     internal var second: B
     internal var firstDone: Bool
 
-    /// Creates an iterator that chains first and second together.
+    /// @name From Sources
+    /// Builds a `ChainIterator`. Prefer `first.chain(other: second)`.
     public init(first first: A, second second: B) {
         self.first = first;
         self.second = second;
         self.firstDone = false;
     }
 
-    /// Returns the next element from first, or from second if first is exhausted.
+    /// Pulls from `first` until it's empty, then forwards to `second`.
     public mutating func next() -> A.Item? {
         if not self.firstDone {
             if let .Some(item) = self.first.next() {
@@ -304,20 +387,29 @@ public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.It
 // UTILITY ADAPTERS
 // ============================================================================
 
-/// Allows peeking at the next element without consuming it.
+/// Iterator wrapper that lets you peek at the next element without
+/// consuming it. Returned by `Iterator.peekable()`.
+///
+/// # Representation
+///
+/// Source iterator + a one-slot lookahead buffer (`peeked`). `peek()`
+/// fills the buffer; `next()` drains it before pulling the source.
 public struct PeekableIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var peeked: Optional[I.Item]?
 
-    /// Creates a peekable iterator wrapping inner.
+    /// @name From Source
+    /// Builds a `PeekableIterator` with no value buffered.
     public init(inner inner: I) {
         self.inner = inner;
         self.peeked = .None;
     }
 
-    /// Returns the next element without consuming it.
+    /// Returns the next element without consuming it. Subsequent
+    /// `peek()` calls keep returning the same value until `next()` is
+    /// called.
     public mutating func peek() -> I.Item? {
         if let .None = self.peeked {
             self.peeked = .Some(self.inner.next())
@@ -329,7 +421,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
         }
     }
 
-    /// Returns and consumes the next element.
+    /// Returns the buffered value if present, otherwise pulls the source.
     public mutating func next() -> I.Item? {
         if let .Some(peeked) = self.peeked {
             if let .Some(value) = peeked {
@@ -343,20 +435,28 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Repeats an iterator forever by cloning it when exhausted.
+/// Repeats a finite iterator forever by copying it on each lap. Returned
+/// by `Iterator.cycle()`.
+///
+/// # Representation
+///
+/// Two copies of the source: `original` (immutable template) and
+/// `current` (the working iterator). When `current` exhausts, it is
+/// reset from `original`.
 public struct CycleIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var original: I
     internal var current: I
 
-    /// Creates an iterator that repeats iter infinitely.
+    /// @name From Source
+    /// Builds a `CycleIterator` that will replay `iter` forever.
     public init(iter iter: I) {
         self.original = iter;
         self.current = iter;
     }
 
-    /// Returns the next element, restarting from the beginning if needed.
+    /// Pulls the current lap; on exhaustion, restarts and pulls again.
     public mutating func next() -> I.Item? {
         if let .Some(item) = self.current.next() {
             return .Some(item)
@@ -366,21 +466,27 @@ public struct CycleIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Stops permanently after yielding None once.
-/// Useful for iterators that might resume after None.
-public struct FuseIterator[I]: Iterator where I: Iterator {
+/// Wraps a source so that once `None` is returned, future calls also
+/// return `None`. Returned by `Iterator.fuse()`.
+///
+/// # Representation
+///
+/// Source iterator + a one-bit latch.
+public struct FusedIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var done: Bool
 
-    /// Creates a fused iterator that stops permanently after the first None.
+    /// @name From Source
+    /// Builds a `FusedIterator` in the "still active" state.
     public init(inner inner: I) {
         self.inner = inner;
         self.done = false;
     }
 
-    /// Returns the next element, or None permanently after first exhaustion.
+    /// Forwards `next()`; latches `done = true` on the first `None` and
+    /// returns `None` forever afterwards.
     public mutating func next() -> I.Item? {
         if self.done {
             return .None
@@ -399,31 +505,42 @@ public struct FuseIterator[I]: Iterator where I: Iterator {
 // SOURCE ITERATORS
 // ============================================================================
 
-/// An iterator that yields nothing.
+/// Iterator that yields no elements. Returned by `empty()`.
+///
+/// # Representation
+///
+/// Zero-sized — no fields.
 public struct EmptyIterator[T]: Iterator {
     type Item = T
 
-    /// Creates an empty iterator.
+    /// @name Default
+    /// Builds an `EmptyIterator`. Prefer the free `empty()` function.
     public init() {}
 
-    /// Always returns None.
+    /// Always `None`.
     public mutating func next() -> T? {
         .None
     }
 }
 
-/// An iterator that yields a single value.
+/// Iterator that yields a single value, then nothing. Returned by
+/// `once(value:)`.
+///
+/// # Representation
+///
+/// One `Optional[T]` field. `next()` empties it on first call.
 public struct OnceIterator[T]: Iterator {
     type Item = T
 
     internal var value: T?
 
-    /// Creates an iterator that yields value exactly once.
+    /// @name From Value
+    /// Builds a `OnceIterator` carrying `value`.
     public init(value value: T) {
         self.value = .Some(value);
     }
 
-    /// Returns the value on first call, None thereafter.
+    /// Returns the value once, then `None` forever after.
     public mutating func next() -> T? {
         let result = self.value;
         self.value = .None;
@@ -431,40 +548,54 @@ public struct OnceIterator[T]: Iterator {
     }
 }
 
-/// An iterator that yields the same value forever.
+/// Iterator that yields the same value indefinitely. Returned by
+/// `repeatValue(value:)`.
+///
+/// # Representation
+///
+/// One `T` field that is copied on every `next()` call.
 public struct RepeatIterator[T]: Iterator {
     type Item = T
 
     internal var value: T
 
-    /// Creates an iterator that yields value forever.
+    /// @name From Value
+    /// Builds a `RepeatIterator` over `value`.
     public init(value value: T) {
         self.value = value;
     }
 
-    /// Returns a copy of the value.
+    /// Returns a fresh copy of the stored value every call.
     public mutating func next() -> T? {
         .Some(self.value)
     }
 }
 
-/// An iterator that yields the same value n times.
+/// Iterator that yields the same value `count` times, then stops.
+/// Returned by `repeatN(value:count:)`.
+///
+/// # Representation
+///
+/// `T` payload + an `Int64` countdown.
 public struct RepeatNIterator[T]: Iterator {
     type Item = T
 
     internal var value: T
     internal var remaining: Int64
 
-    /// Creates an iterator that yields value exactly count times.
+    /// @name From Value
+    /// Builds a `RepeatNIterator` that will yield `value` exactly
+    /// `count` times.
     public init(value value: T, count count: Int64) {
         self.value = value;
         self.remaining = count;
     }
 
-    /// Returns a copy of the value, or None after count iterations.
+    /// Decrements `remaining` and returns a fresh copy of the value;
+    /// returns `None` once the counter hits zero.
     public mutating func next() -> T? {
-        if self.remaining > Int64(intLiteral: 0) {
-            self.remaining = self.remaining - Int64(intLiteral: 1);
+        if self.remaining > 0 {
+            self.remaining = self.remaining - 1;
             .Some(self.value)
         } else {
             .None
@@ -476,10 +607,13 @@ public struct RepeatNIterator[T]: Iterator {
 // FLATMAPPING ADAPTERS
 // ============================================================================
 
-/// Transforms each element into an iterator and flattens the results.
+/// Lazy `flatMap` — turns each element of the source into an iterator
+/// and concatenates the results. Returned by `Iterator.flatMap(_:)`.
 ///
-/// Each element is transformed into an iterator, and all resulting
-/// elements are yielded sequentially.
+/// # Representation
+///
+/// Source iterator + transform closure + a one-slot buffer (`current`)
+/// holding the inner iterator currently being drained.
 public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
     type Item = U.Item
 
@@ -487,14 +621,17 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
     internal var transform: (I.Item) -> U
     internal var current: U?
 
-    /// Creates an iterator that applies transform to each element and flattens.
-    public init(inner inner: I, transform transform: (I.Item) -> U) {
+    /// @name From Source
+    /// Builds a `FlatMapIterator` with no inner iterator buffered.
+    public init(inner inner: I, mapping transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
         self.current = .None;
     }
 
-    /// Returns the next element from the flattened sequence, or None if exhausted.
+    /// Drains the buffered inner iterator; when it runs out, pulls the
+    /// next source element, transforms it into a fresh inner iterator,
+    /// and continues.
     public mutating func next() -> U.Item? {
         while true {
             if let .Some(existing) = self.current {
@@ -521,23 +658,28 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 // FLATTENING ADAPTERS
 // ============================================================================
 
-/// Flattens nested iterators into a single iterator.
+/// Lazy `flatten` — concatenates the inner iterators of an
+/// iterator-of-iterators. Returned by `Iterator.flatten()`.
 ///
-/// Takes an iterator of iterators and yields all elements from each
-/// inner iterator sequentially.
+/// # Representation
+///
+/// Source iterator + a one-slot buffer holding the inner iterator
+/// currently being drained.
 public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
     type Item = I.Item.Item
 
     internal var inner: I
     internal var current: I.Item?
 
-    /// Creates an iterator that flattens nested iterators.
+    /// @name From Source
+    /// Builds a `FlattenIterator` with no inner iterator buffered.
     public init(inner inner: I) {
         self.inner = inner;
         self.current = .None;
     }
 
-    /// Returns the next element from the flattened sequence.
+    /// Drains the buffered inner iterator, then pulls the next inner
+    /// iterator from the source.
     public mutating func next() -> I.Item.Item? {
         while true {
             if let .Some(existing) = self.current {
@@ -564,23 +706,27 @@ public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
 // INSPECTING ADAPTERS
 // ============================================================================
 
-/// Calls a function on each element as it passes through.
+/// Side-effecting passthrough. Calls `inspector` on each element and
+/// then yields it unchanged. Returned by `Iterator.inspect(_:)`.
 ///
-/// Useful for debugging or logging without affecting the iterator chain.
-/// The inspector function receives a reference to each element.
+/// # Representation
+///
+/// Source iterator + inspector closure. No buffering.
 public struct InspectIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
     internal var inner: I
     internal var inspector: (I.Item) -> ()
 
-    /// Creates an iterator that calls inspector on each element.
+    /// @name From Source
+    /// Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
     public init(inner inner: I, inspector inspector: (I.Item) -> ()) {
         self.inner = inner;
         self.inspector = inspector;
     }
 
-    /// Returns the next element after calling the inspector on it.
+    /// Pulls from the source, calls `inspector` on the value, and yields
+    /// it.
     public mutating func next() -> I.Item? {
         if let .Some(item) = self.inner.next() {
             self.inspector(item);
@@ -595,7 +741,14 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 // STEPPING ADAPTERS
 // ============================================================================
 
-/// Yields every nth element, starting with the first.
+/// Lazy `stepBy` — yields every `step`-th element, starting with the
+/// first. Returned by `Iterator.stepBy(n:)`.
+///
+/// # Representation
+///
+/// Source iterator + step size + a one-bit `first` flag (the first
+/// element is always emitted; subsequent ones consume `step - 1` extra
+/// pulls).
 public struct StepByIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
@@ -603,25 +756,27 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
     internal var step: Int64
     internal var first: Bool
 
-    /// Creates an iterator that yields every `step` elements.
-    /// Panics if step is 0.
+    /// @name From Source
+    /// Builds a `StepByIterator`. Caller guarantees `step >= 1`; `step
+    /// == 0` produces undefined behaviour.
     public init(inner inner: I, step step: Int64) {
         self.inner = inner;
         self.step = step;
         self.first = true;
     }
 
-    /// Returns every nth element.
+    /// Yields the first element on the first call; subsequently drains
+    /// `step - 1` elements and yields the next.
     public mutating func next() -> I.Item? {
         if self.first {
             self.first = false;
             return self.inner.next()
         }
 
-        var i = Int64(intLiteral: 0);
-        while i < self.step - Int64(intLiteral: 1) {
+        var i = 0;
+        while i < self.step - 1 {
             let _ = self.inner.next();
-            i = i + Int64(intLiteral: 1);
+            i = i + 1;
         }
         self.inner.next()
     }
@@ -631,15 +786,21 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
 // REVERSAL ADAPTERS
 // ============================================================================
 
-/// Reverses a double-ended iterator.
+/// Wraps a `DoubleEndedIterator` to walk it back to front. The
+/// `Iterator` conformance is added by the `extend ReversedIterator[I]:
+/// DoubleEndedIterator` block in `iterator.ks`. Returned by
+/// `DoubleEndedIterator.rev()`.
 ///
-/// Yields elements by calling `nextBack()` on the inner iterator.
-public struct RevIterator[I] where I: DoubleEndedIterator {
+/// # Representation
+///
+/// Just the inner iterator — no buffering.
+public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator {
     type Item = I.Item
 
     internal var inner: I
 
-    /// Creates an iterator that yields elements in reverse order.
+    /// @name From Source
+    /// Builds a `ReversedIterator`. Prefer `inner.rev()`.
     public init(inner inner: I) {
         self.inner = inner;
     }
@@ -651,9 +812,13 @@ public struct RevIterator[I] where I: DoubleEndedIterator {
 // SCANNING ADAPTERS
 // ============================================================================
 
-/// Yields running accumulator values during a fold.
+/// Lazy `scan` — yields the running fold accumulator after each step.
+/// Returned by `Iterator.scan(initial:combine:)`.
 ///
-/// Like fold, but yields each intermediate accumulator value.
+/// # Representation
+///
+/// Source iterator + the running accumulator state + the combine
+/// closure.
 public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
     type Item = Acc
 
@@ -661,14 +826,16 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
     internal var state: Acc
     internal var combine: (Acc, I.Item) -> Acc
 
-    /// Creates an iterator that yields running fold values.
-    public init(inner inner: I, initial initial: Acc, combine combine: (Acc, I.Item) -> Acc) {
+    /// @name From Source
+    /// Builds a `ScanIterator` seeded with `initial`.
+    public init(inner inner: I, from initial: Acc, combining combine: (Acc, I.Item) -> Acc) {
         self.inner = inner;
         self.state = initial;
         self.combine = combine;
     }
 
-    /// Returns the next accumulated value.
+    /// Pulls the next element, updates `state`, and yields the new
+    /// state.
     public mutating func next() -> Acc? {
         if let .Some(item) = self.inner.next() {
             self.state = self.combine(self.state, item);
@@ -683,7 +850,14 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
 // INTERSPERSING ADAPTERS
 // ============================================================================
 
-/// Inserts a separator between each element.
+/// Lazy `intersperse` — inserts a copy of `separator` between
+/// consecutive elements. Returned by `Iterator.intersperse(separator:)`.
+///
+/// # Representation
+///
+/// Source iterator + separator value + a `needsSeparator` flag + a
+/// one-slot pending-element buffer (used to remember an element while a
+/// separator is being yielded).
 public struct IntersperseIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
@@ -692,15 +866,18 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator {
     internal var needsSeparator: Bool
     internal var pendingItem: I.Item?
 
-    /// Creates an iterator that inserts separator between elements.
-    public init(inner inner: I, separator separator: I.Item) {
+    /// @name From Source
+    /// Builds an `IntersperseIterator`.
+    public init(inner inner: I, with separator: I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;
         self.pendingItem = .None;
     }
 
-    /// Returns the next element or separator.
+    /// Returns the buffered element if one is pending, otherwise pulls
+    /// the next source element — yielding a separator instead the second
+    /// time around.
     public mutating func next() -> I.Item? {
         if let .Some(item) = self.pendingItem {
             self.pendingItem = .None;
@@ -721,7 +898,14 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator {
     }
 }
 
-/// Inserts a lazily-generated separator between each element.
+/// Lazy `intersperseWith` — like `IntersperseIterator`, but builds each
+/// separator on demand by calling a closure. Returned by
+/// `Iterator.intersperseWith(separator:)`.
+///
+/// # Representation
+///
+/// Same as `IntersperseIterator`, except the stored value is a
+/// zero-arg closure producing fresh separators.
 public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
     type Item = I.Item
 
@@ -730,15 +914,17 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
     internal var needsSeparator: Bool
     internal var pendingItem: I.Item?
 
-    /// Creates an iterator that inserts separators generated by the function.
-    public init(inner inner: I, separator separator: () -> I.Item) {
+    /// @name From Source
+    /// Builds an `IntersperseWithIterator`.
+    public init(inner inner: I, with separator: () -> I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;
         self.pendingItem = .None;
     }
 
-    /// Returns the next element or generated separator.
+    /// Same logic as `IntersperseIterator.next`, but each separator is
+    /// produced by calling `separator()`.
     public mutating func next() -> I.Item? {
         if let .Some(item) = self.pendingItem {
             self.pendingItem = .None;
@@ -763,22 +949,26 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
 // CONVENIENCE FUNCTIONS
 // ============================================================================
 
-/// Creates an iterator that yields nothing.
+/// Returns an `EmptyIterator[T]`. Useful as a "neutral element" in
+/// iterator algebra (`a.chain(other: empty())`).
 public func empty[T]() -> EmptyIterator[T] {
     EmptyIterator()
 }
 
-/// Creates an iterator that yields value exactly once.
+/// Returns a `OnceIterator` that yields `value` and then nothing.
+/// Equivalent to `[value].iter()` without the array allocation.
 public func once[T](value: T) -> OnceIterator[T] {
     OnceIterator(value: value)
 }
 
-/// Creates an iterator that yields value forever.
+/// Returns a `RepeatIterator` that yields copies of `value` forever.
+/// Combine with `take` to cap it.
 public func repeatValue[T](value: T) -> RepeatIterator[T] {
     RepeatIterator(value: value)
 }
 
-/// Creates an iterator that yields value exactly count times.
+/// Returns a `RepeatNIterator` that yields `count` copies of `value`,
+/// then stops.
 public func repeatN[T](value: T, count: Int64) -> RepeatNIterator[T] {
     RepeatNIterator(value: value, count: count)
 }

@@ -1,0 +1,7 @@
+[package]
+name = "pong"
+version = "0.1.0"
+description = "Terminal pong game"
+
+[dependencies]
+games = { path = "../games" }

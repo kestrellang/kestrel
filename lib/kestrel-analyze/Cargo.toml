@@ -1,0 +1,24 @@
+[package]
+name = "kestrel-analyze"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-ast = { path = "../kestrel-ast" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
+kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-semantics = { path = "../kestrel-semantics" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+
+[dev-dependencies]
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }

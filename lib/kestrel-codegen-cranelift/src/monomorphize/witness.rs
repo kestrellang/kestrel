@@ -1,155 +1,341 @@
-//! Witness resolution for monomorphization.
+//! Protocol witness resolution.
 //!
-//! This module provides functions to find and resolve witnesses during
-//! monomorphization. When we encounter a `Callee::Witness` in the MIR,
-//! we need to:
+//! Resolves `Callee::Witness` calls to concrete function instantiations
+//! by searching the witness table for matching implementations.
 //!
-//! 1. Find the witness that proves the type implements the protocol
-//! 2. Extract any type parameter bindings from pattern matching
-//! 3. Look up the implementing method
-//! 4. Return the direct call target with its type arguments
+//! Key improvement over lib1: uses `MethodSource::Extension` enum directly
+//! instead of the fragile `impl_func_name.contains(protocol_name)` heuristic.
 
 use super::error::MonomorphizeError;
-use super::substitute::Substitution;
-use kestrel_execution_graph::{Id, MirContext, MirTy, QualifiedName, Ty, TypeParam, Witness};
+use kestrel_codegen::substitute_type;
+use kestrel_hecs::Entity;
+use kestrel_mir::{MethodSource, MirModule, MirTy, WitnessDef, WitnessMethodKey};
 use std::collections::HashMap;
 
-/// Result of finding a witness.
-pub struct WitnessMatch {
-    /// The witness that was found.
-    pub witness_id: Id<Witness>,
-    /// Type argument bindings extracted from pattern matching.
-    /// For example, if the witness is for `Box[T]: Cloneable` and we're
-    /// looking for `Box[Int]`, this will be `{T → Int}`.
-    pub type_bindings: HashMap<Id<TypeParam>, Id<Ty>>,
+/// Result of resolving a witness method call.
+#[derive(Debug, Clone)]
+pub struct ResolvedWitnessCall {
+    /// The concrete function entity.
+    pub func_entity: Entity,
+    /// Type arguments for the function.
+    pub type_args: Vec<MirTy>,
+    /// Self type for protocol extension methods.
+    pub self_type: Option<MirTy>,
 }
 
-/// Find a witness that proves `for_type` implements `protocol`.
-///
-/// This performs a linear scan over all witnesses, trying to pattern match
-/// each witness's `implementing_type` against `for_type`.
-///
-/// For generic witnesses like `Box[T]: Cloneable`, we use pattern matching
-/// to extract the type parameter bindings.
-pub fn find_witness(
-    mir: &MirContext,
-    protocol: Id<QualifiedName>,
-    for_type: Id<Ty>,
-) -> Result<WitnessMatch, MonomorphizeError> {
-    for (witness_id, witness_def) in mir.witnesses.iter() {
-        // Check if this witness is for the right protocol
-        if witness_def.protocol != protocol {
-            continue;
-        }
+/// Resolve a witness method call to a concrete function.
+pub fn resolve_witness_call(
+    module: &MirModule,
+    protocol: Entity,
+    method: &WitnessMethodKey,
+    self_type: &MirTy,
+    method_type_args: &[MirTy],
+) -> Result<ResolvedWitnessCall, MonomorphizeError> {
+    // Find a witness that matches the self type and protocol, and has the method.
+    // First try exact protocol, then any witness for this type that has the method
+    // (handles protocol inheritance: Comparable witness contains Less.lessThan).
+    let (witness, mut bindings) =
+        find_witness_with_method(module, protocol, method, self_type, method_type_args)?;
 
-        // Try to match the implementing type against for_type
-        let mut bindings = HashMap::new();
-        if match_pattern(mir, witness_def.implementing_type, for_type, &mut bindings).is_ok() {
-            return Ok(WitnessMatch {
-                witness_id,
-                type_bindings: bindings,
-            });
+    let method_binding = witness.method_bindings.get(method).unwrap();
+    let proto_param_count = protocol_type_param_count(module, protocol);
+    let concrete_method_type_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
+
+    // For `extend ConcreteType: Proto[FreeParams]`, the extension introduces
+    // free TypeParams on the conformance RHS that the implementing type's
+    // pattern doesn't bind (e.g., `extend Slot: Indexer[T]` — Slot has no
+    // params, so match_pattern leaves T_ext unbound). Recover those bindings
+    // by matching each witness `protocol_type_args` value against the
+    // corresponding call-site `method_type_args` slot. Pattern entries are
+    // typically `Param(T_ext)`; this binds T_ext to the call-site's concrete
+    // type so the Direct/Extension branches below see it in `bindings`.
+    if proto_param_count > 0 {
+        let proto_call_args = method_type_args.get(..proto_param_count).unwrap_or(&[]);
+        for (witness_arg, call_arg) in witness
+            .protocol_type_args
+            .values()
+            .zip(proto_call_args.iter())
+        {
+            match_pattern(witness_arg, call_arg, &mut bindings);
         }
     }
 
-    // Get human-readable names for the error message
-    let protocol_name = Some(mir.name(protocol).to_string());
-    let type_name = Some(format!("{}", mir.ty(for_type).display(mir)));
+    // Build the type args for the concrete function.
+    //
+    // The incoming `method_type_args` may contain BOTH protocol-level type params
+    // (e.g., Convertible[From] → From=Int64) and method-level type params.
+    // Only the method-level ones should be passed through — protocol-level params
+    // are already resolved through the witness bindings.
+    let concrete_func = module
+        .functions
+        .iter()
+        .find(|f| f.entity == method_binding.implementation);
+    let concrete_param_count = concrete_func.map(|f| f.type_params.len()).unwrap_or(0);
 
-    Err(MonomorphizeError::WitnessNotFound {
-        protocol,
-        for_type,
-        protocol_name,
-        type_name,
+    let mut type_args = Vec::new();
+
+    match &method_binding.source {
+        MethodSource::Direct => {
+            // Direct implementation: prepend witness type param bindings,
+            // then append the method-level type args
+            for tp in &witness.type_params {
+                if let Some(bound) = bindings.get(&tp.entity) {
+                    type_args.push(bound.clone());
+                }
+            }
+            type_args.extend(concrete_method_type_args.iter().cloned());
+        },
+        MethodSource::Extension { .. } => {
+            // Protocol-extension default (`extend Proto { default impl }`):
+            // the implementation function's `type_params` mirror the protocol's
+            // (inherited via `collect_inherited_type_params` when the extension
+            // targets a protocol), followed by the method's own params. So the
+            // call-site's `method_type_args` — already laid out as
+            // `[proto_args.., method_args..]` — feeds straight through. The
+            // implementing type's params (witness.type_params) flow in via
+            // `Self`/`parent_self` at the dispatch site, not here.
+            type_args.extend(method_type_args.iter().cloned());
+        },
+    }
+
+    // Also include the binding's own type_args
+    for ta in &method_binding.type_args {
+        let substituted = substitute_type(ta, &bindings, module);
+        type_args.push(substituted);
+    }
+
+    // Cap to the concrete function's actual type param count — protocol-level
+    // type params (e.g., Convertible[From]) get resolved through bindings and
+    // shouldn't leak into the concrete function's instantiation
+    type_args.truncate(concrete_param_count);
+
+    let needs_self = matches!(method_binding.source, MethodSource::Extension { .. });
+
+    Ok(ResolvedWitnessCall {
+        func_entity: method_binding.implementation,
+        type_args,
+        self_type: if needs_self {
+            Some(self_type.clone())
+        } else {
+            None
+        },
     })
 }
 
-/// Pattern match a witness type against a concrete type to extract type parameter bindings.
+/// Resolve an associated type through a witness table.
 ///
-/// For example:
-/// - Pattern `Box[T]`, Concrete `Box[Int]` → binds `T → Int`
-/// - Pattern `Int`, Concrete `Int` → matches, no bindings
-/// - Pattern `T`, Concrete `String` → binds `T → String`
-/// - Pattern `Box[T]`, Concrete `Option[Int]` → fails
-fn match_pattern(
-    mir: &MirContext,
-    pattern: Id<Ty>,
-    concrete: Id<Ty>,
-    bindings: &mut HashMap<Id<TypeParam>, Id<Ty>>,
-) -> Result<(), MonomorphizeError> {
-    let pattern_ty = mir.ty(pattern);
-    let concrete_ty = mir.ty(concrete);
+/// Thin `Result` wrapper over `MirModule::resolve_associated_type` (in
+/// `kestrel-mir`) so existing callers that need structured error info keep
+/// working. The underlying lookup logic lives in `kestrel-mir` because
+/// witness tables are MIR data.
+pub fn resolve_associated_type(
+    module: &MirModule,
+    protocol: Entity,
+    self_type: &MirTy,
+    assoc_name: &str,
+) -> Result<MirTy, MonomorphizeError> {
+    module
+        .resolve_associated_type(protocol, self_type, assoc_name)
+        .ok_or_else(|| MonomorphizeError::MethodNotFound {
+            protocol_name: module.resolve_name(protocol).to_string(),
+            method: assoc_name.to_string(),
+            type_description: format!("{self_type:?}"),
+        })
+}
 
-    match (pattern_ty, concrete_ty) {
-        // Type parameter in pattern - bind it to the concrete type
-        (MirTy::TypeParam(tp), _) => {
-            // Check for conflicting bindings
-            if let Some(&existing) = bindings.get(tp) {
-                if existing != concrete {
-                    return Err(MonomorphizeError::TypeMismatch {
-                        expected: existing,
-                        found: concrete,
-                    });
-                }
-            } else {
-                bindings.insert(*tp, concrete);
+/// Find a witness for `self_type` that has the given method.
+///
+/// Selection considers, in order:
+/// 1. Protocol entity match
+/// 2. Self-type pattern match (via `match_pattern`, which binds the
+///    witness's implementation-type params)
+/// 3. Protocol type-args match — the first N values of `method_type_args`
+///    (where N = the protocol's type-param count) must equal the witness's
+///    `protocol_type_args.values()` pairwise. This is what distinguishes
+///    `Convertible[Int8]` from `Convertible[Int16]` on the same self type.
+/// 4. Presence of the requested method binding
+///
+/// Falls back to descendant-protocol witnesses for protocol inheritance
+/// (e.g. `Comparable` witness contains `Less.lessThan`).
+fn find_witness_with_method<'a>(
+    module: &'a MirModule,
+    protocol: Entity,
+    method: &WitnessMethodKey,
+    self_type: &MirTy,
+    method_type_args: &[MirTy],
+) -> Result<(&'a WitnessDef, HashMap<Entity, MirTy>), MonomorphizeError> {
+    let proto_param_count = protocol_type_param_count(module, protocol);
+    let expected_proto_args = method_type_args.get(..proto_param_count).unwrap_or(&[]);
+
+    // Pass 1: exact protocol match with protocol_type_args filter
+    for witness in &module.witnesses {
+        if witness.protocol != protocol {
+            continue;
+        }
+        if !witness_protocol_args_match(witness, expected_proto_args) {
+            continue;
+        }
+        let mut bindings = HashMap::new();
+        if match_pattern(&witness.implementing_type, self_type, &mut bindings)
+            && witness.method_bindings.contains_key(method)
+        {
+            return Ok((witness, bindings));
+        }
+    }
+
+    // Pass 2: a witness for a descendant protocol on the same type that has
+    // the method (e.g. Comparable witness contains Less.lessThan). The type
+    // args of the inherited protocol live on the descendant witness, so we
+    // can't filter the same way; fall back to the old first-match behavior.
+    for witness in &module.witnesses {
+        if witness.protocol == protocol {
+            continue;
+        }
+        if !protocol_inherits(module, witness.protocol, protocol) {
+            continue;
+        }
+        if !witness.method_bindings.contains_key(method) {
+            continue;
+        }
+        let mut bindings = HashMap::new();
+        if match_pattern(&witness.implementing_type, self_type, &mut bindings) {
+            return Ok((witness, bindings));
+        }
+    }
+
+    // Include entity name and debug info for debugging
+    let type_name = match self_type {
+        MirTy::Named { entity, type_args } => {
+            let name = module.resolve_name(*entity);
+            format!(
+                "{} (entity {:?}, {} type_args)",
+                name,
+                entity,
+                type_args.len()
+            )
+        },
+        other => format!("{other:?}"),
+    };
+
+    Err(MonomorphizeError::MethodNotFound {
+        protocol_name: module.resolve_name(protocol).to_string(),
+        method: method.to_string(),
+        type_description: type_name,
+    })
+}
+
+/// Return the number of type parameters declared on `protocol` in `module`,
+/// or 0 if the protocol isn't registered.
+fn protocol_type_param_count(module: &MirModule, protocol: Entity) -> usize {
+    module
+        .protocols
+        .iter()
+        .find(|p| p.entity == protocol)
+        .map(|p| p.type_params.len())
+        .unwrap_or(0)
+}
+
+/// Compare a witness's `protocol_type_args` values (in declaration order)
+/// against `expected`. Empty `expected` matches any witness (back-compat for
+/// non-generic protocols and callers that don't know the protocol args).
+///
+/// Witness args may contain `TypeParam` wildcards when the conformance was
+/// declared in an `extend ConcreteType: Proto[FreeParams]` block — the free
+/// param has no concrete value at witness-construction time, only at the
+/// call site. Treat those wildcards as matching anything; concrete args
+/// still require strict equality.
+fn witness_protocol_args_match(witness: &WitnessDef, expected: &[MirTy]) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
+    // A witness whose `protocol_type_args` is empty was constructed from a
+    // conformance that didn't spell the protocol args explicitly (`extend
+    // Int64: Addable` — Addable's `Rhs` defaults to `Self`, but the witness
+    // lowering doesn't synthesize the default). Treat the empty case as
+    // wildcards so callers that DO know the proto args (post-Phase-1
+    // prepending) still match.
+    if witness.protocol_type_args.is_empty() {
+        return true;
+    }
+    if witness.protocol_type_args.len() != expected.len() {
+        return false;
+    }
+    witness
+        .protocol_type_args
+        .values()
+        .zip(expected.iter())
+        .all(|(w, e)| matches!(w, MirTy::TypeParam(_)) || w == e)
+}
+
+fn protocol_inherits(module: &MirModule, candidate: Entity, target: Entity) -> bool {
+    if candidate == target {
+        return true;
+    }
+
+    let mut stack = vec![candidate];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(protocol) = stack.pop() {
+        if !seen.insert(protocol) {
+            continue;
+        }
+        let Some(def) = module.protocols.iter().find(|p| p.entity == protocol) else {
+            continue;
+        };
+        for parent in &def.parent_protocols {
+            if *parent == target {
+                return true;
             }
-            Ok(())
+            stack.push(*parent);
+        }
+    }
+
+    false
+}
+
+/// Structural pattern matching for witness type resolution.
+///
+/// The `pattern` may contain `TypeParam` entries that act as wildcards,
+/// binding to the corresponding part of the `concrete` type.
+fn match_pattern(pattern: &MirTy, concrete: &MirTy, bindings: &mut HashMap<Entity, MirTy>) -> bool {
+    match (pattern, concrete) {
+        // Type parameter in pattern: bind to the concrete type
+        (MirTy::TypeParam(entity), _) => {
+            if let Some(existing) = bindings.get(entity) {
+                existing == concrete
+            } else {
+                bindings.insert(*entity, concrete.clone());
+                true
+            }
         },
 
-        // SelfType in pattern - matches any concrete type
-        // (SelfType is used in protocol method signatures)
-        (MirTy::SelfType, _) => Ok(()),
-
-        // Named types - match name and recurse into type args
+        // Named types must match entity and recurse on type args
         (
             MirTy::Named {
-                name: n1,
+                entity: e1,
                 type_args: args1,
             },
             MirTy::Named {
-                name: n2,
+                entity: e2,
                 type_args: args2,
             },
         ) => {
-            if n1 != n2 {
-                return Err(MonomorphizeError::TypeMismatch {
-                    expected: pattern,
-                    found: concrete,
-                });
-            }
-            if args1.len() != args2.len() {
-                return Err(MonomorphizeError::TypeMismatch {
-                    expected: pattern,
-                    found: concrete,
-                });
-            }
-            for (a1, a2) in args1.iter().zip(args2.iter()) {
-                match_pattern(mir, *a1, *a2, bindings)?;
-            }
-            Ok(())
+            e1 == e2
+                && args1.len() == args2.len()
+                && args1
+                    .iter()
+                    .zip(args2)
+                    .all(|(p, c)| match_pattern(p, c, bindings))
         },
 
-        // Structural types - recurse
-        (MirTy::Ref(a), MirTy::Ref(b)) => match_pattern(mir, *a, *b, bindings),
-        (MirTy::RefMut(a), MirTy::RefMut(b)) => match_pattern(mir, *a, *b, bindings),
-        (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(mir, *a, *b, bindings),
+        // Structural types recurse element-wise
+        (MirTy::Ref(a), MirTy::Ref(b))
+        | (MirTy::RefMut(a), MirTy::RefMut(b))
+        | (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(a, b, bindings),
 
-        // Tuples - match element-wise
-        (MirTy::Tuple(elems1), MirTy::Tuple(elems2)) => {
-            if elems1.len() != elems2.len() {
-                return Err(MonomorphizeError::TypeMismatch {
-                    expected: pattern,
-                    found: concrete,
-                });
-            }
-            for (e1, e2) in elems1.iter().zip(elems2.iter()) {
-                match_pattern(mir, *e1, *e2, bindings)?;
-            }
-            Ok(())
+        (MirTy::Tuple(a), MirTy::Tuple(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(p, c)| match_pattern(p, c, bindings))
         },
 
-        // Function types - match params and return
         (
             MirTy::FuncThin {
                 params: p1,
@@ -159,20 +345,8 @@ fn match_pattern(
                 params: p2,
                 ret: r2,
             },
-        ) => {
-            if p1.len() != p2.len() {
-                return Err(MonomorphizeError::TypeMismatch {
-                    expected: pattern,
-                    found: concrete,
-                });
-            }
-            for (p1, p2) in p1.iter().zip(p2.iter()) {
-                match_pattern(mir, *p1, *p2, bindings)?;
-            }
-            match_pattern(mir, *r1, *r2, bindings)
-        },
-
-        (
+        )
+        | (
             MirTy::FuncThick {
                 params: p1,
                 ret: r1,
@@ -182,282 +356,128 @@ fn match_pattern(
                 ret: r2,
             },
         ) => {
-            if p1.len() != p2.len() {
-                return Err(MonomorphizeError::TypeMismatch {
-                    expected: pattern,
-                    found: concrete,
-                });
-            }
-            for (p1, p2) in p1.iter().zip(p2.iter()) {
-                match_pattern(mir, *p1, *p2, bindings)?;
-            }
-            match_pattern(mir, *r1, *r2, bindings)
+            p1.len() == p2.len()
+                && p1
+                    .iter()
+                    .zip(p2)
+                    .all(|(p, c)| match_pattern(p, c, bindings))
+                && match_pattern(r1, r2, bindings)
         },
 
-        // Primitives - must be equal
-        (MirTy::I8, MirTy::I8) => Ok(()),
-        (MirTy::I16, MirTy::I16) => Ok(()),
-        (MirTy::I32, MirTy::I32) => Ok(()),
-        (MirTy::I64, MirTy::I64) => Ok(()),
-        (MirTy::F16, MirTy::F16) => Ok(()),
-        (MirTy::F32, MirTy::F32) => Ok(()),
-        (MirTy::F64, MirTy::F64) => Ok(()),
-        (MirTy::Bool, MirTy::Bool) => Ok(()),
-        (MirTy::Unit, MirTy::Unit) => Ok(()),
-        (MirTy::Never, MirTy::Never) => Ok(()),
-        (MirTy::Str, MirTy::Str) => Ok(()),
-        (MirTy::Error, MirTy::Error) => Ok(()),
-
-        // Associated type projections - not expected in witness patterns,
-        // but handle for completeness
-        (
-            MirTy::AssociatedTypeProjection {
-                base: b1,
-                protocol: p1,
-                associated: a1,
-            },
-            MirTy::AssociatedTypeProjection {
-                base: b2,
-                protocol: p2,
-                associated: a2,
-            },
-        ) => {
-            if p1 != p2 || a1 != a2 {
-                return Err(MonomorphizeError::TypeMismatch {
-                    expected: pattern,
-                    found: concrete,
-                });
-            }
-            match_pattern(mir, *b1, *b2, bindings)
-        },
-
-        // Anything else doesn't match
-        _ => Err(MonomorphizeError::TypeMismatch {
-            expected: pattern,
-            found: concrete,
-        }),
-    }
-}
-
-/// Resolve a witness method call to a direct call.
-///
-/// Given a witness call like `Cloneable.clone for Box[Int]`, this:
-/// 1. Finds the witness `Box[T]: Cloneable`
-/// 2. Extracts the binding `T → Int`
-/// 3. Looks up the method binding for `clone` → `Box.clone`
-/// 4. Returns `(Box.clone, [Int])` as the direct call target
-///
-/// The returned type arguments are the bindings for the witness's type parameters,
-/// in the order they appear in the witness definition.
-pub fn resolve_witness(
-    mir: &MirContext,
-    protocol: Id<QualifiedName>,
-    method: &str,
-    for_type: Id<Ty>,
-) -> Result<(Id<QualifiedName>, Vec<Id<Ty>>), MonomorphizeError> {
-    // Resolve associated type projections before witness lookup.
-    let mut resolved_for_type = for_type;
-    while let MirTy::AssociatedTypeProjection {
-        base,
-        protocol,
-        associated,
-    } = mir.ty(resolved_for_type)
-    {
-        resolved_for_type = resolve_associated_type(mir, *base, *protocol, associated)?;
-    }
-
-    // Find the witness
-    let witness_match = find_witness(mir, protocol, resolved_for_type)?;
-    let witness_def = &mir.witnesses[witness_match.witness_id];
-
-    // Look up the method binding
-    let (impl_func_name, method_type_args) =
-        witness_def.method_bindings.get(method).ok_or_else(|| {
-            MonomorphizeError::MethodNotFoundInWitness {
-                protocol,
-                method: method.to_string(),
-                for_type: resolved_for_type,
-                protocol_name: Some(mir.name(protocol).to_string()),
-                type_name: Some(format!("{}", mir.ty(resolved_for_type).display(mir))),
-            }
-        })?;
-
-    // Build the type arguments:
-    //
-    // For direct implementations (e.g., Box[T].clone implementing Cloneable.clone):
-    //   - Include witness type params (e.g., [T] from Box[T])
-    //   - Then append method-specific type args
-    //
-    // For extension methods (e.g., Iterator.map from extend Iterator):
-    //   - Do NOT include witness type params
-    //   - Only use method-specific type args (which handle Self through self_type)
-    //
-    // Detection: Extension methods come from protocol extensions, so their
-    // qualified name includes the protocol name (e.g., std.iter.Iterator.map).
-    // Direct implementations come from the implementing type.
-    let protocol_name_str = mir.name(protocol).to_string();
-    let impl_func_name_str = mir.name(*impl_func_name).to_string();
-
-    // Check if this is an extension method by seeing if the implementation
-    // is defined within the protocol (protocol extensions)
-    let is_extension_method = impl_func_name_str.contains(&protocol_name_str);
-
-    let type_args = if is_extension_method {
-        // Extension methods: only use method-specific type args
-        // (Self is handled via self_type substitution, not type_args)
-        method_type_args.clone()
-    } else {
-        // Direct implementations: include witness type params + method type args
-        let mut type_args: Vec<_> = witness_def
-            .type_params
-            .iter()
-            .map(|tp| {
-                witness_match
-                    .type_bindings
-                    .get(tp)
-                    .copied()
-                    // If a type param wasn't bound, it means it wasn't used in the
-                    // implementing type pattern (rare but possible). In this case,
-                    // we can't determine the type arg - this is an error.
-                    .unwrap_or_else(|| {
-                        // This shouldn't happen with well-formed witnesses
-                        panic!(
-                            "witness type param {:?} not bound during matching",
-                            mir.type_param(*tp).name
-                        )
-                    })
-            })
-            .collect();
-
-        // Add method-specific type arguments
-        type_args.extend(method_type_args.iter().cloned());
-        type_args
-    };
-
-    Ok((*impl_func_name, type_args))
-}
-
-/// Resolve an associated type projection to its concrete type (mutable version).
-///
-/// Given a projection like `T.Element` where `T: Container` and `T` is substituted
-/// to `MyVec`, this finds the witness `MyVec: Container` and looks up the binding
-/// for `Element`.
-///
-/// This version can intern new types when substituting witness type parameters.
-/// Use this during the collection phase.
-pub fn resolve_associated_type_mut(
-    mir: &mut MirContext,
-    base_type: Id<Ty>,
-    protocol: Id<QualifiedName>,
-    associated: &str,
-) -> Result<Id<Ty>, MonomorphizeError> {
-    // Find the witness
-    let witness_match = find_witness(mir, protocol, base_type)?;
-    let witness_def = &mir.witnesses[witness_match.witness_id];
-
-    // Look up the associated type binding
-    let assoc_ty = *witness_def.type_bindings.get(associated).ok_or_else(|| {
-        MonomorphizeError::MethodNotFoundInWitness {
-            protocol,
-            method: format!("type {}", associated),
-            for_type: base_type,
-            protocol_name: Some(mir.name(protocol).to_string()),
-            type_name: Some(format!("{}", mir.ty(base_type).display(mir))),
-        }
-    })?;
-
-    // Copy the type params we need before releasing the borrow on witness_def
-    let witness_type_params: Vec<_> = witness_def.type_params.clone();
-
-    // If the witness has type parameters, we need to substitute them
-    // in the associated type binding
-    if !witness_type_params.is_empty() {
-        // The associated type might reference the witness's type params
-        // e.g., witness Box[T]: Container { type Element = T }
-        // If we matched Box[Int], we need to substitute T → Int
-        let mut subst = Substitution::new();
-        for tp in &witness_type_params {
-            if let Some(&binding) = witness_match.type_bindings.get(tp) {
-                subst.insert(*tp, binding);
-            }
-        }
-
-        // Use apply_ty which can intern new types
-        Ok(subst.apply_ty(mir, assoc_ty))
-    } else {
-        Ok(assoc_ty)
-    }
-}
-
-/// Resolve an associated type projection to its concrete type (readonly version).
-///
-/// Given a projection like `T.Element` where `T: Container` and `T` is substituted
-/// to `MyVec`, this finds the witness `MyVec: Container` and looks up the binding
-/// for `Element`.
-///
-/// This version cannot intern new types. Use during codegen when all types should
-/// already be interned.
-pub fn resolve_associated_type(
-    mir: &MirContext,
-    base_type: Id<Ty>,
-    protocol: Id<QualifiedName>,
-    associated: &str,
-) -> Result<Id<Ty>, MonomorphizeError> {
-    // Find the witness
-    let witness_match = find_witness(mir, protocol, base_type)?;
-    let witness_def = &mir.witnesses[witness_match.witness_id];
-
-    // Look up the associated type binding
-    let assoc_ty = witness_def.type_bindings.get(associated).ok_or_else(|| {
-        MonomorphizeError::MethodNotFoundInWitness {
-            protocol,
-            method: format!("type {}", associated),
-            for_type: base_type,
-            protocol_name: Some(mir.name(protocol).to_string()),
-            type_name: Some(format!("{}", mir.ty(base_type).display(mir))),
-        }
-    })?;
-
-    // If the witness has type parameters, we need to substitute them
-    // in the associated type binding
-    if !witness_def.type_params.is_empty() {
-        // The associated type might reference the witness's type params
-        // e.g., witness Box[T]: Container { type Element = T }
-        // If we matched Box[Int], we need to substitute T → Int
-        let mut subst = Substitution::new();
-        for tp in &witness_def.type_params {
-            if let Some(&binding) = witness_match.type_bindings.get(tp) {
-                subst.insert(*tp, binding);
-            }
-        }
-
-        // We can't intern new types here since we only have &MirContext,
-        // but the associated type should already be a concrete type or
-        // only reference the witness's own type params which we can substitute.
-        // If the type was already interned (which it should be), lookup will work.
-        subst
-            .apply_ty_readonly(mir, *assoc_ty)
-            .map_err(|e| MonomorphizeError::TypeNotInterned {
-                description: format!(
-                    "associated type {} in witness for {:?}: {}",
-                    associated, protocol, e
-                ),
-            })
-    } else {
-        Ok(*assoc_ty)
+        // Primitives and other leaves: exact equality
+        _ => pattern == concrete,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_match_pattern_primitives() {
+    use super::*;
+    use kestrel_mir::{FunctionDef, MethodBinding, ProtocolDef, TypeParamDef};
 
-        // We can't easily test primitives without interning,
-        // so this is a placeholder for more comprehensive tests
-        // that would be added with a proper test fixture.
+    fn entity(id: u32) -> Entity {
+        Entity::from_raw(id)
     }
 
-    // More comprehensive tests would require setting up a MirContext
-    // with witnesses, which is better done as integration tests.
+    #[test]
+    fn match_concrete_types() {
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&MirTy::I64, &MirTy::I64, &mut bindings));
+        assert!(!match_pattern(&MirTy::I64, &MirTy::I32, &mut bindings));
+    }
+
+    #[test]
+    fn match_type_param_binds() {
+        let t = entity(1);
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(
+            &MirTy::TypeParam(t),
+            &MirTy::I64,
+            &mut bindings
+        ));
+        assert_eq!(bindings.get(&t), Some(&MirTy::I64));
+    }
+
+    #[test]
+    fn match_named_with_type_args() {
+        let array_e = entity(1);
+        let t = entity(2);
+        let mut bindings = HashMap::new();
+
+        let pattern = MirTy::Named {
+            entity: array_e,
+            type_args: vec![MirTy::TypeParam(t)],
+        };
+        let concrete = MirTy::Named {
+            entity: array_e,
+            type_args: vec![MirTy::I64],
+        };
+        assert!(match_pattern(&pattern, &concrete, &mut bindings));
+        assert_eq!(bindings.get(&t), Some(&MirTy::I64));
+    }
+
+    #[test]
+    fn match_ref_structural() {
+        let t = entity(1);
+        let mut bindings = HashMap::new();
+
+        let pattern = MirTy::Ref(Box::new(MirTy::TypeParam(t)));
+        let concrete = MirTy::Ref(Box::new(MirTy::I32));
+        assert!(match_pattern(&pattern, &concrete, &mut bindings));
+        assert_eq!(bindings.get(&t), Some(&MirTy::I32));
+    }
+
+    #[test]
+    fn match_rejects_conflicting_bindings() {
+        let t = entity(1);
+        let mut bindings = HashMap::new();
+
+        // Bind T = I64
+        let pattern1 = MirTy::TypeParam(t);
+        assert!(match_pattern(&pattern1, &MirTy::I64, &mut bindings));
+
+        // Try to match T against I32 (should fail)
+        assert!(!match_pattern(&pattern1, &MirTy::I32, &mut bindings));
+    }
+
+    #[test]
+    fn witness_resolution_does_not_forward_protocol_type_args_to_method() {
+        let protocol = entity(1);
+        let protocol_param = entity(2);
+        let implementation = entity(3);
+        let method_param = entity(4);
+
+        let mut module = MirModule::new("test");
+        let mut protocol_def = ProtocolDef::new(protocol, "Factory");
+        protocol_def
+            .type_params
+            .push(TypeParamDef::new(protocol_param, "Product"));
+        module.protocols.push(protocol_def);
+
+        let mut function = FunctionDef::new(implementation, "Thing.make", MirTy::unit());
+        function
+            .type_params
+            .push(TypeParamDef::new(method_param, "T"));
+        module.functions.push(function);
+
+        let mut witness = WitnessDef::new(MirTy::I64, protocol);
+        witness
+            .protocol_type_args
+            .insert("Product".into(), MirTy::Bool);
+        witness.bind_method(
+            WitnessMethodKey::bare("make"),
+            MethodBinding::direct(implementation, vec![]),
+        );
+        module.add_witness(witness);
+
+        let resolved = resolve_witness_call(
+            &module,
+            protocol,
+            &WitnessMethodKey::bare("make"),
+            &MirTy::I64,
+            &[MirTy::Bool, MirTy::I64],
+        )
+        .expect("witness method should resolve");
+
+        assert_eq!(resolved.type_args, vec![MirTy::I64]);
+    }
 }

@@ -662,7 +662,7 @@ def generate_grapheme_tables(
         "    case LV   // Hangul LV syllable",
         "    case LVT  // Hangul LVT syllable",
         "",
-        "    public func equals(other: GraphemeBreakProperty) -> Bool {",
+        "    public func isEqual(to other: GraphemeBreakProperty) -> Bool {",
         "        self.ordinal() == other.ordinal()",
         "    }",
         "",

@@ -12,50 +12,40 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{
-    EnumDeclarationData,
-    ExtensionDeclarationData,
-    FieldDeclarationData,
-    FunctionDeclarationData,
-    ProtocolDeclarationData,
-    // Shared data types
-    StructDeclarationData,
-    SubscriptDeclarationData,
-    TypeAliasDeclarationData,
-    emit_enum_declaration,
-    emit_extension_declaration,
-    emit_field_declaration,
-    emit_function_declaration,
-    emit_import_declaration,
-    // Shared emitters
-    emit_module_declaration,
-    emit_protocol_declaration,
-    emit_struct_declaration,
-    emit_subscript_declaration,
-    emit_type_alias_declaration,
-    field_declaration_parser_internal,
-    function_declaration_parser_internal,
-    import_declaration_parser_internal,
-    module_declaration_parser_internal,
-    subscript_declaration_parser_internal,
-};
-use crate::enum_decl::{EnumDeclaration, parse_enum_declaration};
+use crate::enum_decl::{EnumDeclaration, EnumDeclarationData, emit_enum_declaration};
 use crate::event::EventSink;
 use crate::extension::{
-    ExtensionDeclaration, extension_declaration_parser_internal, parse_extension_declaration,
+    ExtensionDeclaration, ExtensionDeclarationData, emit_extension_declaration,
+    extension_declaration_parser_internal,
 };
-use crate::field::{FieldDeclaration, parse_field_declaration};
-use crate::function::{FunctionDeclaration, parse_function_declaration};
-use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::module::{ModuleDeclaration, parse_module_declaration};
+use crate::field::{
+    FieldDeclaration, FieldDeclarationData, emit_field_declaration,
+    field_declaration_parser_internal,
+};
+use crate::function::{
+    FunctionDeclaration, FunctionDeclarationData, emit_function_declaration,
+    function_declaration_parser_internal,
+};
+use crate::import::{
+    ImportDeclaration, emit_import_declaration, import_declaration_parser_internal,
+};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::module::{
+    ModuleDeclaration, emit_module_declaration, module_declaration_parser_internal,
+};
+use crate::parse_and_emit;
 use crate::protocol::{
-    ProtocolDeclaration, parse_protocol_declaration, protocol_declaration_parser_internal,
+    ProtocolDeclaration, ProtocolDeclarationData, emit_protocol_declaration,
+    protocol_declaration_parser_internal,
 };
-use crate::r#struct::{StructDeclaration, parse_struct_declaration};
-use crate::subscript::{SubscriptDeclaration, parse_subscript_declaration};
+use crate::r#struct::{StructDeclaration, StructDeclarationData, emit_struct_declaration};
+use crate::subscript::{
+    SubscriptDeclaration, SubscriptDeclarationData, emit_subscript_declaration,
+    subscript_declaration_parser_internal,
+};
 use crate::type_alias::{
-    TypeAliasDeclaration, parse_type_alias_declaration, type_alias_declaration_parser_internal,
+    TypeAliasDeclaration, TypeAliasDeclarationData, emit_type_alias_declaration,
+    type_alias_declaration_parser_internal,
 };
 use crate::type_decl::{TypeDeclarationData, type_declaration_parser_internal};
 
@@ -126,39 +116,41 @@ enum DeclarationItemData {
     Function(FunctionDeclarationData),
     Subscript(SubscriptDeclarationData),
     TypeAlias(TypeAliasDeclarationData),
+    /// Recovered range: tokens skipped by the top-level recovery strategy
+    /// because they couldn't start a valid declaration.
+    Error(Span),
 }
 
-/// Helper to copy events from one sink to another
-fn copy_events(from: EventSink, to: &mut EventSink) {
-    for event in from.into_events() {
-        match event {
-            crate::event::Event::StartNode(kind) => to.start_node(kind),
-            crate::event::Event::AddToken(kind, span) => to.add_token(kind, span),
-            crate::event::Event::FinishNode => to.finish_node(),
-            crate::event::Event::Error { message, span } => to.error(message, span),
-        }
-    }
-}
-
-/// Try to parse with a given parser, returns true if successful
-fn try_parse<I, F>(source: &str, tokens: I, sink: &mut EventSink, parse_fn: F) -> bool
-where
-    I: Iterator<Item = (Token, Span)> + Clone,
-    F: FnOnce(&str, I, &mut EventSink),
-{
-    let mut temp_sink = EventSink::new(0);
-    parse_fn(source, tokens, &mut temp_sink);
-
-    let has_errors = temp_sink
-        .events()
-        .iter()
-        .any(|e| matches!(e, crate::event::Event::Error { .. }));
-    if !has_errors {
-        copy_events(temp_sink, sink);
-        true
-    } else {
-        false
-    }
+/// Tokens that can start a top-level declaration (or a modifier that precedes
+/// one). Used as recovery anchors: if declaration parsing fails, we skip
+/// forward until we see one of these so the next declaration can parse
+/// independently instead of the failure poisoning the rest of the file.
+fn is_declaration_starter(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Module
+            | Token::Import
+            | Token::Protocol
+            | Token::Struct
+            | Token::Enum
+            | Token::Extend
+            | Token::Func
+            | Token::Init
+            | Token::Deinit
+            | Token::Subscript
+            | Token::Type
+            | Token::Let
+            | Token::Var
+            | Token::Public
+            | Token::Private
+            | Token::Internal
+            | Token::Fileprivate
+            | Token::Static
+            | Token::Mutating
+            | Token::Consuming
+            | Token::Indirect
+            | Token::At
+    )
 }
 
 /// Parser that skips trivia tokens
@@ -225,11 +217,42 @@ fn declaration_item_parser_internal<'tokens>()
         .boxed()
 }
 
+/// Recovery parser for the top-level declaration loop.
+///
+/// When `declaration_item_parser_internal` fails, this kicks in: it skips any
+/// leading trivia, requires at least one non-trivia token (so progress is
+/// guaranteed and we don't fire on trailing-whitespace-only tails), then
+/// consumes following tokens until a declaration starter is the next token or
+/// EOF is reached. The consumed span is recorded as a
+/// `DeclarationItemData::Error` so the tree preserves the skipped source text
+/// as an `Error` node rather than silently swallowing it.
+fn declaration_recovery<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
+    let next_is_starter = any().filter(is_declaration_starter).ignored();
+    let non_trivia = any().filter(|t: &Token| {
+        !matches!(
+            t,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        )
+    });
+    skip_trivia()
+        .ignore_then(non_trivia)
+        .then(any().and_is(next_is_starter.not()).repeated())
+        .map_with(|_, e| DeclarationItemData::Error(to_kestrel_span(e.span())))
+        .boxed()
+}
+
 /// Internal Chumsky parser for multiple declaration items
+///
+/// Uses `.recover_with(via_parser(declaration_recovery()))` so a malformed
+/// item doesn't prevent the rest of the file from parsing — we emit an Error
+/// range covering the skipped bytes and resume at the next declaration
+/// starter.
 fn declaration_items_parser_internal<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<DeclarationItemData>, ParserExtra<'tokens>> + Clone
 {
     declaration_item_parser_internal()
+        .recover_with(via_parser(declaration_recovery()))
         .repeated()
         .at_least(0)
         .collect()
@@ -272,51 +295,35 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         DeclarationItemData::TypeAlias(data) => {
             emit_type_alias_declaration(sink, data);
         },
+        DeclarationItemData::Error(span) => {
+            // Chumsky's primary parse error already explains *what* the token
+            // was (e.g. "expected 'module', 'import', ..., found 'throw'");
+            // the recovery just wraps the skipped range as an `Error` node so
+            // the tree round-trips and downstream consumers can see the gap.
+            // Mirrors `block_item_recovery`'s no-extra-diagnostic behaviour.
+            let span = Span::new(sink.file_id(), span.start..span.end);
+            sink.start_node(SyntaxKind::Error);
+            sink.add_token(SyntaxKind::Error, span);
+            sink.finish_node();
+        },
     }
 }
 
 /// Parse a declaration item and emit events
 ///
 /// This is the primary event-driven parser function.
-/// Tries to parse as each declaration type until one succeeds.
+/// Uses the same Chumsky declaration router as source-file parsing.
 pub fn parse_declaration_item<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    // Try each parser in order until one succeeds
-    if try_parse(source, tokens.clone(), sink, parse_module_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_import_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_protocol_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_struct_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_enum_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_extension_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_function_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_subscript_declaration) {
-        return;
-    }
-    if try_parse(source, tokens.clone(), sink, parse_field_declaration) {
-        return;
-    }
-    if try_parse(source, tokens, sink, parse_type_alias_declaration) {
-        return;
-    }
-
-    // All failed - emit error
-    sink.error_no_span("Expected module, import, protocol, struct, enum, extension, function, subscript, field, or type alias declaration".to_string());
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        declaration_item_parser_internal().then_ignore(skip_trivia()),
+        emit_declaration_item
+    );
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -326,27 +333,19 @@ pub fn parse_source_file<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    sink.start_node(SyntaxKind::SourceFile);
-
-    match declaration_items_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(items) => {
-            for item_data in items {
-                emit_declaration_item(sink, item_data);
-            }
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
+    fn emit_items(sink: &mut EventSink, items: Vec<DeclarationItemData>) {
+        for item_data in items {
+            emit_declaration_item(sink, item_data);
+        }
     }
-
+    sink.start_node(SyntaxKind::SourceFile);
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        declaration_items_parser_internal(),
+        emit_items
+    );
     sink.finish_node();
 }
 

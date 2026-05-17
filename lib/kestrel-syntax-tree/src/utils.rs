@@ -27,11 +27,14 @@ pub fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
         .map(|tok| tok.text().to_string())
 }
 
-/// Check if a `SyntaxKind` is trivia (whitespace or comment).
+/// Check if a `SyntaxKind` is trivia (whitespace, newline, or comment).
 pub fn is_trivia(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
+        SyntaxKind::Whitespace
+            | SyntaxKind::Newline
+            | SyntaxKind::LineComment
+            | SyntaxKind::BlockComment
     )
 }
 
@@ -67,6 +70,50 @@ pub fn get_node_span(node: &SyntaxNode, file_id: usize) -> Span {
     Span::new(file_id, start..end)
 }
 
+/// Get the declaration span of a syntax node, excluding leading attributes and trivia.
+/// Use this for DeclSpan so diagnostics point at the `func`/`struct`/etc keyword
+/// rather than at a leading `@attribute`.
+pub fn get_decl_span(node: &SyntaxNode, file_id: usize) -> Span {
+    let text_range = node.text_range();
+    let end: usize = text_range.end().into();
+
+    // Find the first non-trivia, non-attribute child
+    let start = node
+        .children_with_tokens()
+        .find_map(|child| match child {
+            SyntaxElement::Token(t) if !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error => {
+                Some(t.text_range().start().into())
+            },
+            SyntaxElement::Node(n) if n.kind() != SyntaxKind::AttributeList => {
+                find_first_non_trivia_start(&n)
+            },
+            _ => None,
+        })
+        .unwrap_or_else(|| text_range.start().into());
+
+    Span::new(file_id, start..end)
+}
+
+/// Span of a declaration's identifier token (`foo` in `func foo(...)`).
+///
+/// Reads the `Name` child and returns its `Identifier` token span. Returns
+/// `None` for declarations without a `Name` child (e.g. `Module`, anonymous
+/// initializers) or when the name is missing — callers can fall back to
+/// [`get_decl_span`] for those cases.
+///
+/// Used by the LSP for `textDocument/rename` (to compute the edit range) and
+/// `documentSymbol.selectionRange` (to highlight just the name when an
+/// outline item is selected).
+pub fn get_name_span(node: &SyntaxNode, file_id: usize) -> Option<Span> {
+    let name_node = find_child(node, SyntaxKind::Name)?;
+    let ident = name_node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|tok| tok.kind() == SyntaxKind::Identifier)?;
+    let range = ident.text_range();
+    Some(Span::new(file_id, range.start().into()..range.end().into()))
+}
+
 /// Get the span of the visibility node.
 pub fn get_visibility_span(syntax: &SyntaxNode, file_id: usize) -> Option<Span> {
     let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
@@ -92,7 +139,7 @@ fn find_first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
     for child in node.children_with_tokens() {
         match child {
             SyntaxElement::Token(t) => {
-                if !is_trivia(t.kind()) {
+                if !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error {
                     return Some(t.text_range().start().into());
                 }
             },

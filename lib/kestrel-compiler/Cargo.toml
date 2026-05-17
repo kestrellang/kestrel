@@ -7,17 +7,21 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-parser = { path = "../kestrel-parser" }
-kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
-kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
-kestrel-semantic-tree-builder = { path = "../kestrel-semantic-tree-builder" }
-kestrel-semantic-tree-binder = { path = "../kestrel-semantic-tree-binder" }
-kestrel-semantic-model = { path = "../kestrel-semantic-model" }
-kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }
-kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-span = { path = "../kestrel-span" }
-kestrel-execution-graph = { path = "../kestrel-execution-graph" }
-kestrel-execution-graph-lowering = { path = "../kestrel-execution-graph-lowering" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-analyze = { path = "../kestrel-analyze" }
+kestrel-debug = { path = "../kestrel-debug" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-mir = { path = "../kestrel-mir" }
+kestrel-mir-lower = { path = "../kestrel-mir-lower" }
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
+codespan-reporting = { workspace = true }

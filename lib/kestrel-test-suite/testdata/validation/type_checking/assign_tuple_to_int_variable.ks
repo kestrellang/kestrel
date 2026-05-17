@@ -1,0 +1,9 @@
+// test: diagnostics
+// stdlib: false
+
+module Main
+
+func test() {
+    var x: lang.i64 = 0;
+    x = (1, 2); // ERROR
+}

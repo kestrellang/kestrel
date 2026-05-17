@@ -1,0 +1,16 @@
+// test: diagnostics
+// stdlib: false
+// include: operator_prelude.ks
+
+module Test
+struct Number: Prelude.AddOperatorProtocol {
+    var value: lang.i64
+    func add(rhs: Number) -> Number {
+        Number(value: lang.i64_add(self.value, rhs.value))
+    }
+}
+func test() -> Number {
+    let a = Number(value: 1);
+    let b = Number(value: 2);
+    a + b
+}

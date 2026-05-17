@@ -1,271 +1,179 @@
 # Quick Reference
 
-## Key File Locations
+File paths and commands for common tasks. All paths relative to the repo root.
 
-| Task | File Path |
-|------|-----------|
-| Add token/keyword | `lib/kestrel-lexer/src/lib.rs` |
-| Add syntax node kind | `lib/kestrel-syntax-tree/src/lib.rs` |
-| Add parser for feature | `lib/kestrel-parser/src/{feature}/mod.rs` |
-| Add to declaration items | `lib/kestrel-parser/src/declaration_item/mod.rs` |
-| Shared parser utilities | `lib/kestrel-parser/src/common/` |
-| Expression parsing | `lib/kestrel-parser/src/expr/mod.rs` |
-| Statement parsing | `lib/kestrel-parser/src/stmt/mod.rs` |
-| Add semantic symbol | `lib/kestrel-semantic-tree/src/symbol/{name}.rs` |
-| Add symbol kind | `lib/kestrel-semantic-tree/src/symbol/kind.rs` |
-| Add behavior | `lib/kestrel-semantic-tree/src/behavior/{name}.rs` |
-| Add builder (BUILD) | `lib/kestrel-semantic-tree-builder/src/builders/{name}.rs` |
-| Register builder (BUILD) | `lib/kestrel-semantic-tree-builder/src/lowerer.rs` |
-| Add binder (BIND) | `lib/kestrel-semantic-tree-binder/src/binders/{name}.rs` |
-| Register binder (BIND) | `lib/kestrel-semantic-tree-binder/src/declaration_binder.rs` |
-| Body resolution (BIND) | `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs` |
-| Type resolution (BIND) | `lib/kestrel-semantic-tree-binder/src/resolution/type_resolver.rs` |
-| Add analyzer (VALIDATE) | `lib/kestrel-semantic-analyzers/src/analyzers/{name}/mod.rs` |
-| Register analyzer (VALIDATE) | `lib/kestrel-semantic-analyzers/src/lib.rs` |
-| Type representation | `lib/kestrel-semantic-tree/src/ty/mod.rs` (Ty, TyId) |
-| Type variants | `lib/kestrel-semantic-tree/src/ty/kind.rs` (TyKind enum) |
-| Type substitutions | `lib/kestrel-semantic-tree/src/ty/substitutions.rs` (Substitutions) |
-| Self type substitution | `lib/kestrel-semantic-tree/src/ty/mod.rs` → `substitute_self()` |
-| Type alias expansion | `lib/kestrel-semantic-tree/src/ty/mod.rs` → `expand_aliases()` |
-| Where clauses | `lib/kestrel-semantic-tree/src/ty/where_clause.rs` |
-| Inference context | `lib/kestrel-semantic-type-inference/src/context.rs` |
-| Constraint types | `lib/kestrel-semantic-type-inference/src/constraint.rs` |
-| Constraint generation | `lib/kestrel-semantic-type-inference/src/constraint_generator.rs` |
-| Constraint solver | `lib/kestrel-semantic-type-inference/src/solver.rs` |
-| Type oracle trait | `lib/kestrel-semantic-type-inference/src/oracle.rs` |
-| Solution application | `lib/kestrel-semantic-type-inference/src/apply.rs` |
-| TypeInference analyzer | `lib/kestrel-semantic-analyzers/src/analyzers/type_inference/mod.rs` |
-| Pattern exhaustiveness | `lib/kestrel-semantic-pattern-matching/src/lib.rs` |
-| MIR types | `lib/kestrel-execution-graph/src/lib.rs` |
-| MIR lowering entry point | `lib/kestrel-execution-graph-lowering/src/lib.rs` |
-| Codegen entry point | `lib/kestrel-codegen-cranelift/src/lib.rs` |
-| Monomorphization | `lib/kestrel-codegen-cranelift/src/monomorphize.rs` |
-| Type layout / mangling | `lib/kestrel-codegen/src/lib.rs` |
-| Primitive types | `lib/kestrel-prelude/src/lib.rs` |
-| Add integration test | `lib/kestrel-test-suite/tests/{name}.rs` |
-| Test utilities | `lib/kestrel-test-suite/src/lib.rs` |
-| Stdlib source | `lang/std/{module}/{type}.ks` |
-| Stdlib tests | `lib/kestrel-test-suite/tests/stdlib/{type}.rs` |
+## Pipeline tasks
 
-## Common Imports
+| Task | File |
+|------|------|
+| Add a token / keyword | `lib/kestrel-lexer/src/lib.rs` |
+| Add a `SyntaxKind` | `lib/kestrel-syntax-tree/src/` |
+| Add a parser for a declaration / expression | `lib/kestrel-parser/src/` |
+| Add an AST type or body node | `lib/kestrel-ast/src/` |
+| Add a component to declaration entities | `lib/kestrel-ast-builder/src/components.rs` |
+| Register a new `NodeKind` | `lib/kestrel-ast-builder/src/components.rs` (`NodeKind` enum) |
+| Build an entity from a CST node | `lib/kestrel-ast-builder/src/` |
+| Resolve a name from scope | `lib/kestrel-name-res/src/` |
+| Extend HIR (new `HirExpr` / `HirStmt` / `HirPat`) | `lib/kestrel-hir/src/body.rs` |
+| Lower AST body → HIR body | `lib/kestrel-hir-lower/src/` |
+| Lower a type annotation | `lib/kestrel-hir-lower/src/` (`LowerTypeAnnotation`) |
+| Add a type-inference `Constraint` | `lib/kestrel-type-infer/src/constraint.rs` |
+| Add a solver rule for a constraint | `lib/kestrel-type-infer/src/solver.rs` |
+| Add an `InferError` variant | see `lib/kestrel-type-infer/AGENTS.md` (updates **5** files) |
+| Add a body-level analyzer | `lib/kestrel-analyze/src/body/<name>.rs` |
+| Add a declaration-level analyzer | `lib/kestrel-analyze/src/decl/<name>.rs` |
+| Add a whole-compilation analyzer | `lib/kestrel-analyze/src/compilation/<name>.rs` |
+| Register an analyzer | `lib/kestrel-analyze/src/lib.rs` (`default_analyzers`) |
+| MIR types (`Place`, `Rvalue`, `Terminator`) | `lib/kestrel-mir/src/` |
+| Lower entities → MIR | `lib/kestrel-mir-lower/src/` |
+| Type layout | `lib/kestrel-codegen/src/layout.rs` |
+| Symbol mangling | `lib/kestrel-codegen/src/mangle.rs` |
+| Cranelift codegen | `lib/kestrel-codegen-cranelift/src/` |
+| Monomorphization | `lib/kestrel-codegen-cranelift/src/` |
+| Diagnostic formatting | `lib/kestrel-reporting/src/` |
 
-### Lexer (`kestrel-lexer`)
-```rust
-use logos::Logos;
-use kestrel_span::{Span, Spanned};
+## Tests and stdlib
+
+| Task | Location |
+|------|----------|
+| Add a `.ks` test | `lib/kestrel-test-suite/testdata/<category>/<subdir>/<name>.ks` |
+| Test harness internals | `lib/kestrel-test-suite/src/` |
+| Test format conventions | `lib/kestrel-test-suite/AGENTS.md` |
+| Stdlib source (Kestrel code) | `lang/std/<module>/<type>.ks` |
+
+Testdata categories (`lib/kestrel-test-suite/testdata/`):
+
+```
+attributes/   builtins/        codegen/         declarations/
+diagnostics/  execution/       execution_graph/ expressions/
+inference/    instantiation/   memory_model/    mir/
+patterns/     statements/      stdlib/          types/
+validation/
 ```
 
-### Parser (`kestrel-parser`)
-```rust
-use chumsky::prelude::*;
-use kestrel_lexer::Token;
-use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxKind;
-use crate::event::{Event, EventSink, TreeBuilder};
-```
+## hECS API cheatsheet
 
-### Syntax Tree (`kestrel-syntax-tree`)
-```rust
-use rowan::{GreenNode, GreenNodeBuilder, Language, SyntaxNode as RowanSyntaxNode};
-```
+Inside a query (`fn execute(&self, ctx: &QueryContext)`):
 
-### Semantic Tree (`kestrel-semantic-tree`)
-```rust
-use std::sync::Arc;
-use kestrel_span::{Name, Span, Spanned};
-use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
-use crate::behavior::{KestrelBehavior, KestrelBehaviorKind};
-use crate::language::KestrelLanguage;
-use crate::symbol::kind::KestrelSymbolKind;
-```
+| Call | Purpose |
+|------|---------|
+| `ctx.get::<C>(entity)` | Fetch component `C` from an entity. Returns `Option<&C>`. |
+| `ctx.parent_of(entity)` | Walk up the entity tree. |
+| `ctx.iter_component::<C>()` | Iterate every entity that has component `C`. |
+| `ctx.query(OtherQuery { … })` | Call another memoized query. Results cached per revision. |
+| `registry.0.find_body_check(id)` | Look up an analyzer by id (from `AnalyzerRegistryRef`). |
 
-### Semantic Tree Builder (BUILD) (`kestrel-semantic-tree-builder`)
-```rust
-use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree_builder::builder::Builder;
-use kestrel_syntax_tree::SyntaxNode;
-```
+## Test annotations
 
-### Semantic Tree Binder (BIND) (`kestrel-semantic-tree-binder`)
-```rust
-use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_model::SemanticModel;
-use kestrel_semantic_tree_binder::SemanticBinder;
-```
+```kestrel
+// test: diagnostics        // or: compiles, runs
+// stdlib: false             // opt out of stdlib for unit-ish diagnostic tests
 
-### Semantic Analyzers (VALIDATE) (`kestrel-semantic-analyzers`)
-```rust
-use kestrel_semantic_analyzers::{AnalysisContext, Analyzer, default_analyzers, run_all};
-```
+module Main
 
-### Tests (`kestrel-test-suite`)
-```rust
-use kestrel_test_suite::{Test, Compiles, HasError, Symbol, SymbolKind, Behavior, Visibility};
-```
+struct Foo { let x: Int64 }
 
-## Token Categories (in order)
-
-```rust
-pub enum Token {
-    // 1. Literals
-    Identifier, String, Integer, Float, Boolean,
-
-    // 2. Declaration Keywords
-    Fn, Import, Let, Module, Protocol, Struct, Type, Var, ...
-
-    // 3. Visibility Keywords
-    Public, Private, Internal, Fileprivate,
-
-    // 4. Statement Keywords
-    Else, For, If, Match, Return, While, ...
-
-    // 5. Modifier Keywords
-    Consuming, Mutating, Self_, Static, Where, ...
-
-    // 6. Braces
-    LParen, RParen, LBrace, RBrace, LBracket, RBracket, LAngle, RAngle,
-
-    // 7. Punctuation
-    Semicolon, Comma, Dot, Colon, DoubleColon, Arrow, FatArrow,
-
-    // 8. Operators
-    Equals, Plus, Minus, Star, Slash, ...
+func main() -> Unit {
+    Foo()        // ERROR: struct 'Foo' has 1 field(s), but 0 argument(s) were provided
 }
 ```
 
-## SyntaxKind Categories
+- `// ERROR:` is a substring match; write the full distinctive message.
+- Place the annotation on the same line as the offending token.
+- See `lib/kestrel-test-suite/AGENTS.md` for the full conventions.
 
-```rust
-pub enum SyntaxKind {
-    // === TOKENS (map 1:1 from Token) ===
-    Identifier, String, Integer, Float, Boolean,
-    Fn, Module, Struct, Protocol, ...
-    LParen, RParen, LBrace, RBrace, ...
-
-    // === SYNTAX NODES (non-terminals) ===
-    // Top-level
-    Root, SourceFile, DeclarationItem,
-
-    // Declarations
-    ModuleDeclaration, ModulePath,
-    StructDeclaration, StructBody,
-    ProtocolDeclaration, ProtocolBody,
-    FunctionDeclaration, ParameterList, Parameter,
-    FieldDeclaration,
-    ImportDeclaration,
-    TypeAliasDeclaration,
-
-    // Wrapper nodes (used for uniform extraction)
-    Name,           // Wraps identifier for declarations
-    Visibility,     // Wraps visibility token (may be empty)
-    TypeAnnotation, // Wraps type expression
-    ReturnType,     // Wraps return type
-
-    // Expressions
-    LiteralExpr, GroupingExpr, TupleExpr, ArrayExpr,
-    IdentifierExpr, CallExpr, MethodCallExpr,
-    FieldAccessExpr, BinaryExpr, UnaryExpr,
-
-    // Statements
-    ExpressionStmt, LetStmt, VarStmt, ReturnStmt,
-
-    // Types
-    TypePath, TypeArguments,
-    FunctionType, TupleType, ArrayType,
-
-    // Misc
-    Block, Arguments, WhereClause, TypeParameter,
-}
-```
-
-## Test API Cheat Sheet
-
-```rust
-// Basic compilation test
-Test::new("module Main\nstruct Point { }")
-    .expect(Compiles);
-
-// Expect error
-Test::new("module Main\nfn f() { }")  // no body
-    .expect(HasError("function 'f' must have a body"));
-
-// Check symbol exists
-Test::new("module Main\npublic struct Point { }")
-    .expect(Compiles)
-    .expect(Symbol::new("Point").is(SymbolKind::Struct));
-
-// Check symbol has behavior
-Test::new("module Main\npublic struct Point { }")
-    .expect(Compiles)
-    .expect(Symbol::new("Point").has(Behavior::Visibility(Visibility::Public)));
-
-// Multi-file test
-Test::with_files(&[
-    ("main.ks", "module Main\nimport Other"),
-    ("other.ks", "module Other\npublic struct Foo { }"),
-])
-.expect(Compiles);
-```
-
-## Commands
+## Useful commands
 
 ```bash
-# Run all tests
-cargo test
+# Run tests (never `cargo test -p kestrel-test-suite`)
+triage
+triage <pattern>
+triage --failures
 
-# Run specific crate tests
-cargo test -p kestrel-lexer
-cargo test -p kestrel-parser
-cargo test -p kestrel-syntax-tree
-cargo test -p kestrel-semantic-tree
-cargo test -p kestrel-semantic-tree-builder
-cargo test -p kestrel-semantic-tree-binder
-cargo test -p kestrel-semantic-analyzers
-cargo test -p kestrel-test-suite
+# Verbose debug traces in the compiler
+VERBOSE_DEBUG_OUTPUT=1 triage <pattern>
 
-# Run specific test file
-cargo test -p kestrel-test-suite --test body_resolution
-cargo test -p kestrel-test-suite --test functions
-
-# Run specific test by name
-cargo test -p kestrel-test-suite call_instance_method
-
-# Run main CLI
-cargo run
-
-# Check compilation
+# Format / lint / check
+cargo fmt
+cargo clippy
 cargo check
 
-# Format code
-cargo fmt
-
-# Lint
-cargo clippy
+# Unit tests for a single crate (fine)
+cargo test -p kestrel-codegen
+cargo test -p kestrel-type-infer
 ```
 
-## Symbol Kind Reference
+Package names in `lib/` have a `2` suffix in `Cargo.toml` (`kestrel-compiler`, `kestrel-codegen`, `kestrel-test-suite`, …) — the directory names don't. Use the package name with `-p`.
 
-| Kind | Description | Parent Types |
-|------|-------------|--------------|
-| `SourceFile` | File in compilation | Root |
-| `Module` | Module declaration | SourceFile |
-| `Struct` | Struct type | SourceFile, Struct |
-| `Protocol` | Protocol type | SourceFile |
-| `Function` | Function/method | SourceFile, Struct, Protocol |
-| `Field` | Field/property | Struct |
-| `TypeAlias` | Type alias | SourceFile |
-| `Import` | Import statement | SourceFile |
-| `TypeParameter` | Generic param | Struct, Function, Protocol, TypeAlias |
-| `Local` | Local variable | Function body |
+## `NodeKind` catalogue
 
-## Behavior Reference
+```rust
+pub enum NodeKind {
+    Module,
+    Struct,
+    Enum,
+    EnumCase,
+    Protocol,
+    Extension,
+    Function,
+    Initializer,
+    Deinit,
+    Field,
+    Setter,         // getter lives on the Field itself
+    Subscript,
+    TypeAlias,
+    Import,
+    TypeParameter,
+    ParamDefault,   // default-value expression for a parameter
+}
+```
 
-| Behavior | Attached To | Purpose |
-|----------|-------------|---------|
-| `VisibilityBehavior` | All declarations | Access control (public/private/etc) |
-| `CallableBehavior` | Functions | Signature, parameters, return type |
-| `TypedBehavior` | Fields, locals | Type information |
-| `ExecutableBehavior` | Functions | Body expressions |
-| `MemberAccessBehavior` | Fields | Field access info |
-| `ConformancesBehavior` | Structs | Protocol conformances |
-| `ValueBehavior` | Fields, locals | Value category (let/var) |
+(`lib/kestrel-ast-builder/src/components.rs`)
+
+## Common components on declaration entities
+
+| Component | Meaning |
+|-----------|---------|
+| `NodeKind` | Discriminant (always present). |
+| `Name(String)` | Declared identifier. |
+| `DeclSpan(Span)` | Declaration's own span. |
+| `CstNode(SyntaxNode)` | Backing CST reference. |
+| `FileId(Entity)` | Owning source file entity. |
+| `Vis` | Public / Private / Internal / Fileprivate. |
+| `Typed` (marker) | Can appear in type position. |
+| `TypeAnnotation(AstType)` | Has a declared type (fields, params, alias targets). |
+| `Callable` | Parameter list + receiver convention. |
+| `Valued(SyntaxNode)` / `Body(AstBody)` | Has a body/initializer (pre- / post-lower). |
+| `Gettable` / `Settable` (markers) | Read / write capability. |
+| `Static` (marker) | Accessed via type, not instance. |
+| `Subscript` (marker) | Call-syntax accessor. |
+| `Computed` (marker) | Field is computed (get/set accessors). |
+| `TypeParams(Vec<Entity>)` | Generic parameter entities. |
+| `WhereClause(Vec<WhereConstraint>)` | Where-clause constraints. |
+| `FieldMutability` | `Var` / `Let`. |
+
+Authoritative list: `lib/kestrel-ast-builder/src/components.rs`.
+
+## Reading inference results
+
+Given a body entity, these queries give you the data an analyzer typically needs:
+
+| Query | Output |
+|-------|--------|
+| `LowerBody { entity, root }` | `HirBody` — desugared body with scoped names resolved. |
+| `InferBody { entity, root }` | `TypedBody` — types, resolved members, promotions. |
+| `WhereClausesOf { entity, root }` | Resolved where-clause constraints in scope. |
+| `Analyze { analyzer, entity, root }` | Diagnostics from one analyzer on one entity. |
+
+See each crate's `docs/architecture.md` for the full query list.
+
+## Where the "big bags" live
+
+| Bag | Location |
+|-----|----------|
+| Analyzer registry | `AnalyzerRegistry` — built by `default_analyzers()` in `lib/kestrel-analyze/src/lib.rs`. |
+| Diagnostic descriptors | `static DESCRIPTORS: &[DiagnosticDescriptor]` at the top of each analyzer file. |
+| Constraint enum | `lib/kestrel-type-infer/src/constraint.rs`. |
+| `InferError` enum | `lib/kestrel-type-infer/src/error.rs`. |
+| `MirTy` / `Statement` / `Terminator` | `lib/kestrel-mir/src/`. |
+| `HirExpr` / `HirStmt` / `HirPat` | `lib/kestrel-hir/src/body.rs`. |

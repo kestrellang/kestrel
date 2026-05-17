@@ -7,9 +7,15 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use crate::block::CodeBlockData;
+use crate::enum_decl::{EnumCaseDeclarationData, EnumDeclarationData};
 use crate::expr::ExprVariant;
+use crate::field::FieldDeclarationData;
+use crate::function::FunctionDeclarationData;
 use crate::pattern::PatternVariant;
+use crate::r#struct::StructDeclarationData;
+use crate::subscript::SubscriptDeclarationData;
 use crate::ty::TyVariant;
+use crate::type_alias::TypeAliasDeclarationData;
 use crate::type_param::{TypeParameterData, WhereClauseData};
 
 // =============================================================================
@@ -115,15 +121,6 @@ pub struct ParameterData {
     pub default: Option<(Span, ExprVariant)>,
 }
 
-/// Receiver modifier for instance methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceiverModifier {
-    /// `mutating func` - method can mutate self
-    Mutating,
-    /// `consuming func` - method takes ownership of self
-    Consuming,
-}
-
 /// Body data for functions - either a block `{ ... }` or expression `= expr`
 #[derive(Debug, Clone)]
 pub enum FunctionBodyData {
@@ -132,66 +129,6 @@ pub enum FunctionBodyData {
     /// Expression body: `= expr`
     /// Contains the equals span and the expression
     Expression(Span, ExprVariant),
-}
-
-/// Raw parsed data for function declaration internals
-///
-/// Used by both function declarations and protocol method declarations.
-#[derive(Debug, Clone)]
-pub struct FunctionDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub is_static: Option<Span>,
-    /// Receiver modifier (mutating/consuming) with its span
-    pub receiver_modifier: Option<(ReceiverModifier, Span)>,
-    pub fn_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub lparen: Span,
-    pub parameters: Vec<ParameterData>,
-    pub rparen: Span,
-    pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
-    pub where_clause: Option<WhereClauseData>,
-    pub body: Option<FunctionBodyData>, // Optional body - None for protocol methods
-}
-
-/// Body data for computed properties
-#[derive(Debug, Clone)]
-pub enum ComputedBodyData {
-    /// Shorthand: `{ expr }`
-    Shorthand(CodeBlockData),
-    /// Explicit: `{ get { } set { } }`
-    Accessors {
-        /// Span of the opening brace (for property accessors block)
-        lbrace: Span,
-        /// Span of the "get" keyword
-        get_span: Span,
-        getter: Option<CodeBlockData>, // None for protocol `{ get }`
-        /// Span of the "set" keyword (if present)
-        set_span: Option<Span>,
-        setter: Option<CodeBlockData>, // None for protocol `{ get set }`
-        /// Span of the closing brace (for property accessors block)
-        rbrace: Span,
-    },
-}
-
-/// Raw parsed data for field declaration internals
-#[derive(Debug, Clone)]
-pub struct FieldDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub is_static: Option<Span>,
-    pub mutability_span: Span,
-    pub is_mutable: bool,
-    pub name_span: Span,
-    pub colon_span: Span,
-    pub ty: TyVariant,
-    /// For computed properties: shorthand body OR accessors
-    pub computed_body: Option<ComputedBodyData>,
-    /// For constant initialization: (equals_span, expression)
-    pub initializer: Option<(Span, ExprVariant)>,
-    /// Optional trailing semicolon (for inline field declarations)
-    pub semicolon: Option<Span>,
 }
 
 /// Raw parsed data for initializer declaration internals
@@ -238,21 +175,6 @@ pub struct ConformanceListData {
     pub conformances: Vec<ConformanceItemData>,
 }
 
-/// Raw parsed data for struct declaration internals
-#[derive(Debug, Clone)]
-pub struct StructDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub struct_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub conformances: Option<ConformanceListData>,
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<TypeDeclarationBodyItem>,
-    pub rbrace_span: Span,
-}
-
 /// Items that can appear in a type declaration body (struct or enum)
 /// Used to enable mutual nesting of structs and enums
 #[derive(Debug, Clone)]
@@ -273,184 +195,4 @@ pub enum TypeDeclarationBodyItem {
         Option<Span>,
         Option<Vec<(Span, Option<Span>)>>,
     ), // import_span, path, alias, items
-}
-
-/// Deprecated: Use TypeDeclarationBodyItem instead
-/// Kept for backwards compatibility during migration
-#[deprecated(note = "Use TypeDeclarationBodyItem instead")]
-pub type StructBodyItem = TypeDeclarationBodyItem;
-
-/// Raw parsed data for enum case parameter
-///
-/// Supports both named (`label: Type`) and unnamed (`Type`) forms:
-/// - Named: `case Some(value: T)` - label and colon present
-/// - Unnamed: `case Some(T)` - label and colon are None
-#[derive(Debug, Clone)]
-pub struct EnumCaseParameterData {
-    /// Optional label name (None for unnamed parameters)
-    pub label: Option<Span>,
-    /// Optional colon (present only when label is present)
-    pub colon: Option<Span>,
-    /// The type of the parameter
-    pub ty: TyVariant,
-}
-
-/// Raw parsed data for enum case declaration
-#[derive(Debug, Clone)]
-pub struct EnumCaseDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub case_span: Span,
-    pub name_span: Span,
-    pub parameters: Option<(Span, Vec<EnumCaseParameterData>, Span)>, // (lparen, params, rparen)
-}
-
-/// Raw parsed data for enum declaration
-#[derive(Debug, Clone)]
-pub struct EnumDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub indirect: Option<Span>,
-    pub enum_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub conformances: Option<ConformanceListData>,
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<TypeDeclarationBodyItem>,
-    pub rbrace_span: Span,
-}
-
-/// Raw parsed data for protocol declaration internals
-#[derive(Debug, Clone)]
-pub struct ProtocolDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub protocol_span: Span,
-    pub name_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub inherited: Option<ConformanceListData>, // Inherited protocols (protocol A: B { })
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<ProtocolBodyItem>, // Protocol body: functions and associated types
-    pub rbrace_span: Span,
-}
-
-/// Raw parsed data for type alias declaration internals
-#[derive(Debug, Clone)]
-pub struct TypeAliasDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub type_span: Span,
-    /// The target of the type alias - simple name or qualified path
-    pub target: AssociatedTypeTargetData,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    /// Optional bounds for associated types (: Equatable, Hashable)
-    pub bounds: Option<AssociatedTypeBoundsData>,
-    /// Optional where clause for associated types (where Iter.Item = Item)
-    pub where_clause: Option<WhereClauseData>,
-    /// Optional equals span and aliased type (= Type)
-    /// For associated types in protocols, this may be None (abstract associated type)
-    pub aliased: Option<(Span, TyVariant)>,
-    pub semicolon_span: Option<Span>,
-}
-
-/// Target for type alias - either simple name or qualified path
-#[derive(Debug, Clone)]
-pub enum AssociatedTypeTargetData {
-    /// Simple name: `type Item`
-    Simple(Span),
-    /// Qualified path: `type Iterator.Item` or `type Add[Int].Output`
-    Qualified {
-        /// The protocol path (may include type arguments)
-        protocol_path: TyVariant,
-        /// The dot before the name
-        dot_span: Span,
-        /// The associated type name
-        name_span: Span,
-    },
-}
-
-/// Bounds for associated types (: Equatable, Hashable)
-#[derive(Debug, Clone)]
-pub struct AssociatedTypeBoundsData {
-    pub colon_span: Span,
-    /// The bound types (protocols)
-    pub bounds: Vec<TyVariant>,
-}
-
-/// Items that can appear in a protocol body
-#[derive(Debug, Clone)]
-pub enum ProtocolBodyItem {
-    Function(FunctionDeclarationData),
-    Subscript(SubscriptDeclarationData),
-    AssociatedType(TypeAliasDeclarationData),
-    Initializer(InitializerDeclarationData),
-    Field(FieldDeclarationData),
-}
-
-/// Raw parsed data for extension declaration internals
-///
-/// Extension syntax: `extend Type: Protocol { ... }`
-/// Extensions add methods and conformances to existing types.
-#[derive(Debug, Clone)]
-pub struct ExtensionDeclarationData {
-    pub extend_span: Span,
-    /// The type being extended (uses type expression, not type parameter list)
-    /// This allows Box[T, Int] where T references the struct's type parameter
-    pub target_type: TyVariant,
-    /// Optional conformances this extension adds
-    pub conformances: Option<ConformanceListData>,
-    /// Optional where clause for additional constraints
-    pub where_clause: Option<WhereClauseData>,
-    pub lbrace_span: Span,
-    pub body: Vec<ExtensionBodyItem>,
-    pub rbrace_span: Span,
-}
-
-/// Items that can appear in an extension body
-#[derive(Debug, Clone)]
-pub enum ExtensionBodyItem {
-    Function(FunctionDeclarationData),
-    Subscript(SubscriptDeclarationData),
-    Initializer(InitializerDeclarationData),
-    TypeAlias(TypeAliasDeclarationData),
-}
-
-/// Raw parsed data for subscript declaration internals
-///
-/// Subscript syntax: `(visibility)? (static)? subscript[T]?(params) -> Type (where ...)? { body }`
-/// Body can be shorthand `{ expr }`, explicit `{ get { } set { } }`, or protocol `{ get }` / `{ get set }`
-#[derive(Debug, Clone)]
-pub struct SubscriptDeclarationData {
-    pub attributes: Vec<AttributeData>,
-    pub visibility: Option<(Token, Span)>,
-    pub is_static: Option<Span>,
-    pub subscript_span: Span,
-    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
-    pub lparen: Span,
-    pub parameters: Vec<ParameterData>,
-    pub rparen: Span,
-    pub return_type: (Span, TyVariant), // (arrow_span, return_ty) - required for subscripts
-    pub where_clause: Option<WhereClauseData>,
-    pub body: SubscriptBodyData,
-}
-
-/// Body data for subscript declarations
-#[derive(Debug, Clone)]
-pub enum SubscriptBodyData {
-    /// Shorthand: `{ expr }` - just a code block with an expression
-    Shorthand(CodeBlockData),
-    /// Explicit: `{ get { } set { } }` - with explicit getter and optional setter
-    Accessors {
-        /// Span of the opening brace (for subscript body block)
-        lbrace: Span,
-        /// Span of the "get" keyword
-        get_span: Span,
-        getter: Option<CodeBlockData>, // None for protocol `{ get }`
-        /// Span of the "set" keyword (if present)
-        set_span: Option<Span>,
-        setter: Option<CodeBlockData>, // None for protocol `{ get set }` without body
-        /// Span of the closing brace (for subscript body block)
-        rbrace: Span,
-    },
 }

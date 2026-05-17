@@ -1,12 +1,16 @@
 // libc bindings for I/O
 //
-// This module provides raw bindings to libc I/O functions via @extern(.C).
+// Thin `@extern(.C)` wrappers around the POSIX I/O syscalls plus the
+// platform constants the higher-level types in `std.io` need (open
+// flags, seek anchors, default mode bits). Prefer `File`, `Stdin`,
+// `Stdout`, `Stderr`, and the `read`/`write` helpers in `std.io` over
+// these raw bindings; reach for `libc.*` only for FFI interop.
 
 module std.io.libc
 
-import std.num.(Int64, Int32)
-import std.memory.(Pointer)
-import std.num.(UInt8)
+import std.numeric.(Int64, Int32)
+import std.memory.(Pointer, RawPointer)
+import std.numeric.(UInt8)
 
 // ============================================================================
 // TYPE ALIASES
@@ -41,17 +45,48 @@ public func O_WRONLY() -> Int32 { 0x0001 }
 /// Open for reading and writing.
 public func O_RDWR() -> Int32 { 0x0002 }
 
+// errno access
+@platform(.darwin)
+@extern(.C, mangleName: "__error")
+func __errno_ptr() -> Pointer[Int32]
+
+@platform(.linux)
+@extern(.C, mangleName: "__errno_location")
+func __errno_ptr() -> Pointer[Int32]
+
+// Open flags (platform-specific values)
+
 /// Create file if it doesn't exist.
+@platform(.darwin)
 public func O_CREAT() -> Int32 { 0x0200 }
 
+/// Create file if it doesn't exist.
+@platform(.linux)
+public func O_CREAT() -> Int32 { 0x0040 }
+
 /// Truncate file to zero length.
+@platform(.darwin)
 public func O_TRUNC() -> Int32 { 0x0400 }
 
+/// Truncate file to zero length.
+@platform(.linux)
+public func O_TRUNC() -> Int32 { 0x0200 }
+
 /// Append to end of file.
+@platform(.darwin)
 public func O_APPEND() -> Int32 { 0x0008 }
 
+/// Append to end of file.
+@platform(.linux)
+public func O_APPEND() -> Int32 { 0x0400 }
+
 /// Fail if file exists (with O_CREAT).
+@platform(.darwin)
 public func O_EXCL() -> Int32 { 0x0800 }
+
+/// Fail if file exists (with O_CREAT).
+@platform(.linux)
+public func O_EXCL() -> Int32 { 0x0080 }
 
 // ============================================================================
 // SEEK WHENCE CONSTANTS
@@ -78,23 +113,20 @@ public func MODE_DEFAULT() -> Int32 { 420 }
 // ============================================================================
 
 @extern(.C, mangleName: "open")
-func libc_open(path: lang.ptr[lang.i8], flags: lang.i32, mode: lang.i32) -> lang.i32
+func libc_open(path: RawPointer, flags: Int32, mode: Int32) -> Int32
 
 @extern(.C, mangleName: "close")
-func libc_close(fd: lang.i32) -> lang.i32
+func libc_close(fd: Int32) -> Int32
 
 @extern(.C, mangleName: "read")
-func libc_read(fd: lang.i32, buf: lang.ptr[lang.i8], count: lang.i64) -> lang.i64
+func libc_read(fd: Int32, buf: RawPointer, count: Int64) -> Int64
 
 @extern(.C, mangleName: "write")
-func libc_write(fd: lang.i32, buf: lang.ptr[lang.i8], count: lang.i64) -> lang.i64
+func libc_write(fd: Int32, buf: RawPointer, count: Int64) -> Int64
 
 @extern(.C, mangleName: "lseek")
-func libc_lseek(fd: lang.i32, offset: lang.i64, whence: lang.i32) -> lang.i64
+func libc_lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64
 
-// errno is accessed via __error() on macOS
-@extern(.C, mangleName: "__error")
-func __error() -> lang.ptr[lang.i32]
 
 // ============================================================================
 // PUBLIC WRAPPERS
@@ -102,31 +134,30 @@ func __error() -> lang.ptr[lang.i32]
 
 /// Opens a file. Returns file descriptor or -1 on error.
 public func open(path: Pointer[UInt8], flags: Int32, mode: Int32) -> Fd {
-    Int32(raw: libc_open(lang.cast_ptr[lang.i8](path.raw), flags.raw, mode.raw))
+    libc_open(path.asRaw(), flags, mode)
 }
 
 /// Closes a file descriptor. Returns 0 on success, -1 on error.
 public func close(fd: Int32) -> Int32 {
-    Int32(raw: libc_close(fd.raw))
+    libc_close(fd)
 }
 
 /// Reads from a file descriptor. Returns bytes read, 0 on EOF, -1 on error.
 public func read(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    Int64(raw: libc_read(fd.raw, lang.cast_ptr[lang.i8](buf.raw), count.raw))
+    libc_read(fd, buf.asRaw(), count)
 }
 
 /// Writes to a file descriptor. Returns bytes written or -1 on error.
 public func write(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    Int64(raw: libc_write(fd.raw, lang.cast_ptr[lang.i8](buf.raw), count.raw))
+    libc_write(fd, buf.asRaw(), count)
 }
 
 /// Seeks to a position in a file. Returns new position or -1 on error.
 public func lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64 {
-    Int64(raw: libc_lseek(fd.raw, offset.raw, whence.raw))
+    libc_lseek(fd, offset, whence)
 }
 
 /// Returns the current errno value.
 public func errno() -> Int32 {
-    let ptr = __error();
-    Int32(raw: lang.ptr_read(ptr))
+    __errno_ptr().read()
 }

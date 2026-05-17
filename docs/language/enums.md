@@ -92,7 +92,7 @@ indirect enum Tree[T] {
 
 indirect enum List[T] {
     case Cons(head: T, tail: List[T])
-    case Nil
+    case Empty
 }
 ```
 

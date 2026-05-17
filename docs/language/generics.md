@@ -1,486 +1,390 @@
-# Generics Implementation Plan
+# Generics
 
-## Key Context
+Generics allow types and functions to be parameterized over other types. A generic declaration introduces type parameters that behave like placeholders; the compiler resolves them at each use site so a single definition can work uniformly across many concrete types.
 
-### SymbolId
-Defined in `lib/semantic-tree/src/symbol/mod.rs`:
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SymbolId(u64);
+## Declaration Syntax
 
-impl SymbolId {
-    pub fn new() -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(1);
-        SymbolId(COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-}
-```
-Use this for keys in Substitutions map.
+Type parameters are written in **square brackets** after the declaration name. This applies to every kind of generic declaration.
 
-### KestrelSymbolKind
-In `lib/kestrel-semantic-tree/src/symbol/kind.rs` - needs `TypeParameter` variant:
-```rust
-pub enum KestrelSymbolKind {
-    Field,
-    Function,
-    Import,
-    Module,
-    Protocol,
-    SourceFile,
-    Struct,
-    TypeAlias,
-    TypeParameter,  // ADD THIS
-}
-```
+### Generic Struct
 
-### Current TyKind
-In `lib/kestrel-semantic-tree/src/ty/kind.rs`:
-```rust
-pub enum TyKind {
-    Unit,
-    Never,
-    Int(IntBits),
-    Float(FloatBits),
-    Bool,
-    String,
-    Tuple(Vec<Ty>),
-    Function { params: Vec<Ty>, return_type: Box<Ty> },
-    Path(Vec<String>),
-    Protocol(Arc<ProtocolSymbol>),
-    Struct(Arc<StructSymbol>),
-    TypeAlias(Arc<TypeAliasSymbol>),
-}
-```
-
-### Ty struct helpers
-`lib/kestrel-semantic-tree/src/ty/mod.rs` has constructor methods like `Ty::r#struct()`, `Ty::protocol()` etc. These need updating to accept Substitutions.
-
-### Module exports
-- `lib/kestrel-semantic-tree/src/ty/mod.rs` - add `pub mod substitutions; pub mod where_clause;`
-- `lib/kestrel-semantic-tree/src/symbol/mod.rs` - add `pub mod type_parameter;`
-
-### Resolver Pattern
-From `lib/kestrel-semantic-tree-builder/src/builders/struct.rs`:
-```rust
-pub struct StructResolver;
-
-impl Resolver for StructResolver {
-    fn build_declaration(
-        &self,
-        syntax: &SyntaxNode,
-        source: &str,
-        parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        // 1. Extract name from syntax tree
-        let name_str = extract_name(syntax)?;
-
-        // 2. Extract visibility
-        let visibility_behavior = ...;
-
-        // 3. Create the symbol
-        let struct_symbol = StructSymbol::new(name, full_span, visibility_behavior, parent.cloned());
-        let struct_arc = Arc::new(struct_symbol);
-
-        // 4. Add typed behavior
-        let struct_type = Ty::r#struct(struct_arc.clone(), full_span);
-        struct_arc.metadata().add_behavior(TypedBehavior::new(struct_type, full_span));
-
-        // 5. Add to parent
-        if let Some(parent) = parent {
-            parent.metadata().add_child(&struct_arc_dyn);
-        }
-
-        Some(struct_arc)
-    }
-}
-```
-
-For generics, StructResolver needs to:
-1. Look for TypeParameterList child node
-2. Create TypeParameterSymbol for each
-3. Look for WhereClause child node
-4. Parse constraints
-5. Pass type_parameters and where_clause to StructSymbol::new()
-
-### Type Resolution Pattern
-From `lib/kestrel-semantic-tree-builder/src/type_resolver.rs`:
-```rust
-pub fn resolve_type(ty: &Ty, ctx: &TypeResolutionContext, context_id: SymbolId) -> Option<Ty> {
-    match ty.kind() {
-        // Base types - return as-is
-        TyKind::Unit | TyKind::Never | ... => Some(ty.clone()),
-
-        // Path types - resolve via scope lookup
-        TyKind::Path(segments) => {
-            match queries::resolve_type_path(ctx.db, segments.clone(), context_id) {
-                TypePathResolution::Resolved(resolved_ty) => Some(resolved_ty),
-                _ => None,
-            }
-        }
-
-        // Already resolved
-        TyKind::Struct(_) | TyKind::Protocol(_) => Some(ty.clone()),
-
-        // Recursive for composites
-        TyKind::Tuple(elements) => { /* resolve each element */ }
-        TyKind::Function { params, return_type } => { /* resolve params and return */ }
-    }
-}
-```
-
-For generics, resolve_type needs to:
-1. Handle `TyKind::TypeParameter` - return as-is (already resolved)
-2. Handle `TyKind::Struct { symbol, substitutions }` - recursively resolve types in substitutions
-3. When resolving `TyKind::Path` that has type args in syntax, build Substitutions
-
-### TypeResolutionContext Enhancement
-Currently just holds `db`. May need to add:
-```rust
-pub struct TypeResolutionContext<'a> {
-    pub db: &'a dyn Db,
-    pub type_params_in_scope: HashMap<String, Arc<TypeParameterSymbol>>,  // for resolving T
-}
-```
-
----
-
-## Design Decisions
-
-### Syntax
-- Type parameters: `[T, U, V]` (square brackets, not angle brackets)
-- Defaults: `[T = Int]`
-- Where clauses: `where T: Protocol and Protocol2, U: Other`
-- Type arguments: `Foo[Int, String]`
-
-### Variance
-- Not exposed in syntax
-- Always defaults to Invariant (the safest option)
-- Stored on `TypeParameterSymbol` as a field set at creation time
-
-### Where Clause Location
-- Where clause lives on the container (Struct/Function/Protocol), not on individual type parameters
-- Bounds are `Vec<Ty>` not `Vec<ProtocolSymbol>` to support generic bounds like `T: Iterator[Int]`
-
-### Substitutions
-- `Substitutions` type maps `SymbolId` → `Ty`
-- Stored on instantiated types: `TyKind::Struct { symbol, substitutions }`
-- Empty for non-generic types
-
----
-
-## Data Structures
-
-### TypeParameterSymbol
-```rust
-// lib/kestrel-semantic-tree/src/symbol/type_parameter.rs
-pub struct TypeParameterSymbol {
-    metadata: SymbolMetadata<KestrelLanguage>,
-    default: Option<Ty>,
-    variance: Variance,
-}
-
-pub enum Variance {
-    Covariant,
-    Contravariant,
-    Invariant,
-    Bivariant,
-}
-```
-
-### Substitutions
-```rust
-// lib/kestrel-semantic-tree/src/ty/substitutions.rs
-pub struct Substitutions {
-    map: HashMap<SymbolId, Ty>,
-}
-
-impl Substitutions {
-    pub fn new() -> Self;
-    pub fn is_empty(&self) -> bool;
-    pub fn insert(&mut self, param_id: SymbolId, ty: Ty);
-    pub fn get(&self, param_id: SymbolId) -> Option<&Ty>;
-    pub fn apply(&self, ty: &Ty) -> Ty;  // substitute all type params
-}
-```
-
-### WhereClause
-```rust
-// lib/kestrel-semantic-tree/src/ty/where_clause.rs
-pub struct WhereClause {
-    pub constraints: Vec<Constraint>,
-}
-
-pub enum Constraint {
-    TypeBound {
-        param: SymbolId,      // which type parameter
-        bounds: Vec<Ty>,      // e.g., Iterator[Int], Equatable
-    },
-    // Future: TypeEquality for associated types
-    // TypeEquality { left: TypePath, right: Ty }
-}
-```
-
-### Updated TyKind
-```rust
-// lib/kestrel-semantic-tree/src/ty/kind.rs
-pub enum TyKind {
-    // Primitives (unchanged)
-    Unit, Never, Int(IntBits), Float(FloatBits), Bool, String,
-
-    // Composites (unchanged)
-    Tuple(Vec<Ty>),
-    Function { params: Vec<Ty>, return_type: Box<Ty> },
-
-    // Path (unresolved)
-    Path(Vec<String>),
-
-    // NEW: Type parameter reference
-    TypeParameter(Arc<TypeParameterSymbol>),
-
-    // UPDATED: Instantiable types now carry substitutions
-    Struct {
-        symbol: Arc<StructSymbol>,
-        substitutions: Substitutions,
-    },
-    Protocol {
-        symbol: Arc<ProtocolSymbol>,
-        substitutions: Substitutions,
-    },
-    TypeAlias {
-        symbol: Arc<TypeAliasSymbol>,
-        substitutions: Substitutions,
-    },
-}
-```
-
-### Updated Symbol Types
-```rust
-// StructSymbol
-pub struct StructSymbol {
-    metadata: SymbolMetadata<KestrelLanguage>,
-    type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    where_clause: WhereClause,
-}
-
-// FunctionSymbol
-pub struct FunctionSymbol {
-    metadata: SymbolMetadata<KestrelLanguage>,
-    type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    where_clause: WhereClause,
-    // ... existing fields
-}
-
-// ProtocolSymbol
-pub struct ProtocolSymbol {
-    metadata: SymbolMetadata<KestrelLanguage>,
-    type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    where_clause: WhereClause,
-}
-
-// TypeAliasSymbol
-pub struct TypeAliasSymbol {
-    metadata: SymbolMetadata<KestrelLanguage>,
-    type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    where_clause: WhereClause,
-}
-```
-
----
-
-## Implementation Progress
-
-### Completed
-
-#### Phase 2a: Lexer & Syntax Tree ✓
-- Added `and` and `where` keywords to lexer (`lib/kestrel-lexer/src/lib.rs`)
-- Added SyntaxKind variants (`lib/kestrel-syntax-tree/src/lib.rs`):
-  - `TypeParameterList`, `TypeParameter`, `TypeArgumentList`
-  - `DefaultType`, `WhereClause`, `TypeBound`, `TypeEquality`
-
-#### Phase 2b: Parser - Type Parameters ✓
-- Created `lib/kestrel-parser/src/type_param/mod.rs`
-- Parsers: `type_parameter_list_parser()`, `where_clause_parser()`, `type_argument_list_parser()`
-- Emit functions for syntax tree building
-- 11 tests passing
-
-#### Phase 2c: Parser - Type Updates ✓
-- Updated `TyVariant` enum to support generic args
-- Made type parser recursive for nested generics like `List[Option[Int]]`
-- Added `emit_ty_variant()` central emitter
-- 12 tests passing (including 3 generic type tests)
-
-#### Phase 2d: Semantic Tree - Type Representation ✓
-Files created/modified:
-- Created `lib/kestrel-semantic-tree/src/ty/substitutions.rs` - Substitutions type with apply()
-- Created `lib/kestrel-semantic-tree/src/ty/where_clause.rs` - WhereClause and Constraint types
-- Created `lib/kestrel-semantic-tree/src/symbol/type_parameter.rs` - TypeParameterSymbol with Variance
-- Modified `lib/kestrel-semantic-tree/src/ty/kind.rs` - TyKind now has TypeParameter and struct variants for Struct/Protocol/TypeAlias with substitutions
-- Modified `lib/kestrel-semantic-tree/src/ty/mod.rs` - exports new modules
-- Modified `lib/kestrel-semantic-tree/src/symbol/kind.rs` - added TypeParameter variant
-- Modified `lib/kestrel-semantic-tree/src/behavior/callable.rs` - updated for new TyKind patterns
-
-#### Phase 2e: Semantic Tree - Symbol Updates ✓
-Files modified:
-- `lib/kestrel-semantic-tree/src/symbol/struct.rs` - added type_parameters, where_clause, with_generics()
-- `lib/kestrel-semantic-tree/src/symbol/function.rs` - added type_parameters, where_clause, with_generics()
-- `lib/kestrel-semantic-tree/src/symbol/protocol.rs` - added type_parameters, where_clause, with_generics()
-- `lib/kestrel-semantic-tree/src/symbol/type_alias.rs` - added type_parameters, where_clause, with_generics()
-- `lib/kestrel-semantic-tree/src/symbol/mod.rs` - exports type_parameter module
-
-#### Phase 2f: Semantic Tree Builder - Resolvers ✓
-Files created/modified:
-- Created `lib/kestrel-semantic-tree-builder/src/resolvers/type_parameter.rs` - extraction functions
-- Modified `lib/kestrel-semantic-tree-builder/src/resolvers/struct.rs` - uses type parameter extraction
-- Modified `lib/kestrel-semantic-tree-builder/src/resolvers/function.rs` - uses type parameter extraction
-- Modified `lib/kestrel-semantic-tree-builder/src/resolvers/protocol.rs` - uses type parameter extraction
-- Modified `lib/kestrel-semantic-tree-builder/src/resolvers/type_alias.rs` - uses type parameter extraction
-- Modified `lib/kestrel-semantic-tree-builder/src/type_resolver.rs` - handles TypeParameter TyKind
-- Modified `lib/kestrel-semantic-tree-builder/src/validation/visibility_consistency.rs` - handles new TyKind patterns
-- Modified `lib/kestrel-semantic-tree-builder/src/lib.rs` - handles TypeParameter symbol kind
-
-Key functions implemented:
-- extract_type_parameters() - parses TypeParameterList from syntax
-- extract_where_clause() - parses WhereClause from syntax
-- build_type_param_map() - utility for name→SymbolId lookup
-
-#### Phase 2g: Validation Passes ✓
-Files created/modified:
-- Created `lib/kestrel-semantic-tree/src/error.rs` - added error types:
-  - `TypeArityError` - wrong number of type arguments
-  - `TypeNotGenericError` - type args on non-generic type
-  - `DuplicateTypeParameterError` - duplicate type param names
-  - `DefaultOrderingError` - defaults must come after non-defaults
-  - `NonProtocolBoundError` - bound is not a protocol
-  - `UndeclaredTypeParameterError` - undeclared param in where clause
-- Created `lib/kestrel-semantic-tree-builder/src/validation/generics.rs` - validation pass
-- Modified `lib/kestrel-semantic-tree-builder/src/validation/mod.rs` - registered GenericsPass
-
-Validations implemented:
-- Duplicate type parameter names detection
-- Default ordering check (defaults must come after non-defaults)
-
-#### Phase 2h: Tests ✓
-Files created/modified:
-- Created `lib/kestrel-test-suite/tests/generics.rs` - comprehensive test file with:
-  - basic_parsing module: struct/protocol/function/type_alias with generics
-  - defaults module: type parameters with defaults
-  - validation module: duplicate detection, default ordering
-  - where_clause module: bounds testing
-  - nested_generics module: generic types containing other generics
-- Modified `lib/kestrel-test-suite/src/lib.rs` - added test helpers:
-  - `Behavior::TypeParamCount(usize)` - check type parameter count
-  - `Behavior::IsGeneric(bool)` - check if symbol is generic
-  - `get_type_param_count()` helper function
-
-Tests are distributed across:
-- `lib/kestrel-test-suite/tests/types/generics.rs` - semantic/type tests
-- `lib/kestrel-test-suite/tests/codegen/generics.rs` - codegen tests
-- `lib/kestrel-test-suite/tests/execution_graph/generics.rs` - execution graph tests
-
-#### Parser Integration ✓
-Parser integration is complete:
-- Updated `lib/kestrel-parser/src/struct/mod.rs` to parse TypeParameterList
-- Updated `lib/kestrel-parser/src/function/mod.rs` to parse TypeParameterList
-- Updated `lib/kestrel-parser/src/protocol/mod.rs` to parse TypeParameterList
-- Updated `lib/kestrel-parser/src/type_alias/mod.rs` to parse TypeParameterList
-- Updated `lib/kestrel-parser/src/enum/mod.rs` to parse TypeParameterList
-- TypeParameterList and WhereClause nodes are emitted in syntax tree
-
----
-
-## Error Messages
-
-| Scenario | Error Message |
-|----------|---------------|
-| Too few args | "expected N type arguments, found M" |
-| Too many args | "expected at most N type arguments, found M" |
-| Args on non-generic | "type `X` does not take type arguments" |
-| Unknown type param | "cannot find type `T` in this scope" |
-| Duplicate param | "duplicate type parameter `T`" |
-| Default ordering | "type parameter with default must come after parameters without defaults" |
-| Non-protocol bound | "`X` is not a protocol" |
-| Unknown bound | "cannot find protocol `X`" |
-| Undeclared in where | "undeclared type parameter `T` in where clause" |
-
----
-
-## Example Scenarios
-
-### Basic Generic Struct
-```
+```kestrel
 struct Box[T] {
     var value: T
 }
-
-let b: Box[Int]
-```
-
-### Multiple Type Parameters with Defaults
-```
-struct Map[K, V = String] { }
-
-let a: Map[Int, Bool]   // K=Int, V=Bool
-let b: Map[Int]         // K=Int, V=String (default)
-```
-
-### Where Clause with Generic Bound
-```
-struct Set[T] where T: Comparable[T] and Hashable { }
 ```
 
 ### Generic Function
+
+```kestrel
+func identity[T](value: T) -> T {
+    value
+}
 ```
-func identity[T](value: T) -> T { }
+
+### Generic Protocol
+
+```kestrel
+protocol Container[T] {
+    func add(item: T)
+    func read() -> T
+}
 ```
+
+### Generic Enum
+
+```kestrel
+enum Result[T, E] {
+    case ok(T)
+    case err(E)
+}
+```
+
+### Generic Type Alias
+
+```kestrel
+type Pair[A, B] = (A, B)
+```
+
+## Multiple Type Parameters
+
+Separate type parameters with commas:
+
+```kestrel
+struct Map[K, V] {
+    var entries: [(K, V)]
+}
+
+func pair[A, B](first: A, second: B) -> (A, B) {
+    (first, second)
+}
+```
+
+## Defaults
+
+A type parameter may declare a default with `=`. Defaults let the caller omit that argument at the use site.
+
+```kestrel
+struct Map[K, V = String] { }
+
+let a: Map[Int, Bool]   // K = Int, V = Bool
+let b: Map[Int]         // K = Int, V = String (default)
+```
+
+Defaults must come **after** parameters without defaults:
+
+```kestrel
+struct Bad[T = Int, U] { }
+// Error: type parameter with default must come after parameters without defaults
+```
+
+## Type Arguments
+
+To instantiate a generic type, supply type arguments in square brackets:
+
+```kestrel
+let b: Box[Int]
+let m: Map[String, Int]
+let r: Result[Int, String]
+```
+
+Nested instantiations are written the same way:
+
+```kestrel
+let nested: Box[Option[Int]]
+let matrix: Array[Array[Float64]]
+```
+
+### Type Arguments on Paths
+
+Type arguments can appear on any segment of a path that names a generic:
+
+```kestrel
+Pointer[UInt8].nullPointer()
+Array[Int].empty()
+```
+
+## Where Clauses
+
+A `where` clause adds constraints on type parameters. It lives on the **declaration**, after the signature and before the body.
+
+### Basic Bound
+
+```kestrel
+struct Set[T] where T: Hashable {
+    var items: [T]
+}
+```
+
+### Multiple Bounds on One Parameter
+
+Use `and` to combine bounds on the same parameter:
+
+```kestrel
+struct SortedSet[T] where T: Hashable and Comparable { }
+```
+
+### Multiple Parameters
+
+Separate constraints on different parameters with commas:
+
+```kestrel
+func zip[A, B](first: [A], second: [B]) -> [(A, B)]
+    where A: Copyable, B: Copyable { }
+```
+
+### Generic Bounds
+
+Bounds may themselves be generic protocols:
+
+```kestrel
+struct Counter[T] where T: Iterator[Int] { }
+```
+
+### Where Clauses on Functions
+
+```kestrel
+func max[T](a: T, b: T) -> T where T: Comparable {
+    if a.greaterThan(other: b) { a } else { b }
+}
+```
+
+### Where Clauses on Extensions
+
+Extensions can be constrained, making their members available only when the constraints are satisfied:
+
+```kestrel
+extend Array[T] where T: Equatable {
+    func contains(item: T) -> Bool { ... }
+}
+```
+
+### Associated-Type Equality
+
+Where clauses can also constrain an associated type to be equal to some other type. This is how you express "this method is only available when the iterator's element type is `Int`," and similar refinements.
+
+```kestrel
+extend Iterator where Item: Addable, Item.Output = Item {
+    func sum() -> Item { ... }
+}
+```
+
+## The Self Type
+
+Inside a protocol or extension, `Self` refers to the conforming type. It is implicitly a type parameter bound by the enclosing protocol:
+
+```kestrel
+protocol Cloneable {
+    func clone() -> Self
+}
+
+struct Point: Cloneable {
+    var x: Int
+    var y: Int
+
+    // Self = Point here
+    func clone() -> Point { Point(x: x, y: y) }
+}
+```
+
+## Variance
+
+Kestrel type parameters are **invariant** by default. Variance is not exposed in the surface syntax — `Box[Derived]` is not a subtype of `Box[Base]` even when `Derived` conforms to `Base`. To express subtype-like relationships, use protocol conformance rather than variance.
+
+## Scope
+
+Type parameters are in scope throughout the declaration that introduces them:
+
+- Struct: visible in every field type, initializer, and method body.
+- Protocol: visible in every method requirement, associated-type default, and extension.
+- Function: visible in parameter types, return type, and body.
+- Extension: visible in every member defined in the extension.
+
+A type parameter name shadows any outer type with the same name for the duration of its scope.
+
+## Validation Rules
+
+### Duplicate Parameter Names
+
+```kestrel
+struct Bad[T, T] { }
+// Error: duplicate type parameter `T`
+```
+
+### Default Ordering
+
+```kestrel
+struct Bad[T = Int, U] { }
+// Error: type parameter with default must come after parameters without defaults
+```
+
+### Arity
+
+The number of type arguments at a use site must match the declaration (accounting for defaults):
+
+```kestrel
+struct Box[T] { }
+
+let a: Box              // Error: expected 1 type argument, found 0
+let b: Box[Int, Bool]   // Error: expected at most 1 type argument, found 2
+```
+
+### Type Arguments on Non-Generic Types
+
+```kestrel
+struct Plain { }
+
+let p: Plain[Int]
+// Error: type `Plain` does not take type arguments
+```
+
+### Bounds Must Be Protocols
+
+A where-clause bound must name a protocol (possibly with its own type arguments):
+
+```kestrel
+struct Thing[T] where T: SomeStruct { }
+// Error: `SomeStruct` is not a protocol
+```
+
+### Undeclared Parameters in Where Clauses
+
+```kestrel
+struct Thing[T] where U: Equatable { }
+// Error: undeclared type parameter `U` in where clause
+```
+
+## Errors
+
+| Scenario | Error Message |
+|----------|---------------|
+| Too few type arguments | "expected N type arguments, found M" |
+| Too many type arguments | "expected at most N type arguments, found M" |
+| Type arguments on non-generic type | "type `X` does not take type arguments" |
+| Unknown type parameter | "cannot find type `T` in this scope" |
+| Duplicate parameter name | "duplicate type parameter `T`" |
+| Default before non-default | "type parameter with default must come after parameters without defaults" |
+| Non-protocol bound | "`X` is not a protocol" |
+| Unknown bound | "cannot find protocol `X`" |
+| Undeclared in where clause | "undeclared type parameter `T` in where clause" |
+
+## Grammar
+
+```ebnf
+type_parameter_list =
+    "[" type_parameter ("," type_parameter)* "]"
+
+type_parameter =
+    identifier (":" type_bound_list)? ("=" type_expr)?
+
+type_bound_list =
+    type_expr ("and" type_expr)*
+
+type_argument_list =
+    "[" type_expr ("," type_expr)* "]"
+
+where_clause =
+    "where" where_constraint ("," where_constraint)*
+
+where_constraint =
+    | type_bound_constraint
+    | type_equality_constraint
+
+type_bound_constraint =
+    identifier ":" type_bound_list
+
+type_equality_constraint =
+    type_path "=" type_expr
+```
+
+Generic declarations in the wider grammar:
+
+```ebnf
+struct_declaration =
+    visibility? "struct" identifier type_parameter_list? conformance_list? where_clause? "{" struct_body "}"
+
+function_declaration =
+    visibility? "func" identifier type_parameter_list? parameter_list return_type? where_clause? function_body
+
+protocol_declaration =
+    visibility? "protocol" identifier type_parameter_list? protocol_inheritance? where_clause? "{" protocol_body "}"
+
+type_alias_declaration =
+    visibility? "type" identifier type_parameter_list? "=" type_expr
+
+extension_declaration =
+    "extend" type_expr conformance_list? where_clause? "{" extension_body "}"
+```
+
+## Examples
 
 ### Nested Generics
-```
+
+```kestrel
 struct Node[T] {
     var value: T
-    var children: List[Node[T]]
+    var children: [Node[T]]
 }
 ```
 
----
+### Generic Function with Constraints
 
-## Critical: Type Extraction from Syntax
+```kestrel
+func sort[T](items: [T]) -> [T] where T: Comparable {
+    // ...
+}
 
-The `extract_field_type` function in `lib/kestrel-semantic-tree-builder/src/builders/field.rs` currently only extracts simple path types:
+let sorted = sort(items: [3, 1, 2])
+```
 
-```rust
-fn extract_field_type(syntax: &SyntaxNode, source: &str) -> Ty {
-    // Finds Ty -> TyPath -> Path -> PathElement -> Identifier
-    // Returns Ty::path(segments, span)
+### Constrained Extension
+
+```kestrel
+extend Box[T] where T: Cloneable {
+    func deepCopy() -> Box[T] {
+        Box(value: self.value.clone())
+    }
 }
 ```
 
-For generics, this needs to also look for `TypeArgumentList` children:
+### Generic Protocol Conformance
 
+```kestrel
+protocol Container[T] {
+    func add(item: T)
+    func read() -> T
+}
+
+struct IntBag: Container[Int] {
+    var items: [Int]
+
+    func add(item: Int) { items.append(item) }
+    func read() -> Int { items(0) }
+}
 ```
-Ty
-└── TyPath
-    ├── Path
-    │   └── PathElement
-    │       └── Identifier ("List")
-    └── TypeArgumentList        <-- NEW
-        └── Ty
-            └── TyPath
-                └── Path...     ("Int")
+
+### Multi-Parameter Default
+
+```kestrel
+protocol Multipliable[Rhs = Self] {
+    func multiply(other: Rhs) -> Self
+}
+
+// No need to spell out Rhs = Number
+struct Number: Multipliable { ... }
 ```
 
-The updated logic should:
-1. Extract path segments as before
-2. Check for TypeArgumentList child
-3. If present, recursively extract type arguments
-4. Return `Ty::path_with_args(segments, args, span)` or similar
+## Best Practices
 
-This pattern repeats in function parameter/return type extraction too.
+1. **Prefer protocol bounds over concrete types** in function signatures — `func foo[T](x: T) where T: Equatable` is more reusable than `func foo(x: SpecificType)`.
+2. **Use defaults for common cases** — `Map[K, V = String]` lets callers omit the value type when it's usually `String`.
+3. **Keep bound lists small** — long `where` clauses are a sign that a helper protocol should be extracted.
+4. **Name parameters meaningfully** — `Element`, `Key`, `Value` read better than `T`, `U`, `V` when the role is specific.
+5. **Reach for associated types instead of type parameters** when a protocol's implementer should choose the type, not the caller.
 
----
+## See Also
 
-## Notes
-
-- Pre-existing test failures in field/function/struct/type_alias parsers due to trivia handling (unrelated to generics)
-- Type inference for generics is deferred to a later phase
-- Associated types (`T.Item`) prepared for but not implemented
+- [Protocols](protocols.md) — protocol declarations, associated types, and conformance
+- [Extensions](extensions.md) — adding members and conformances to existing types
+- [Types](types.md) — the full type system
+- [Semantics](semantics.md) — memory model and runtime behavior

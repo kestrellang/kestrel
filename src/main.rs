@@ -1,425 +1,422 @@
-use clap::{Parser, Subcommand};
-use kestrel_compiler::{Compilation, CompileError, TargetConfig};
-use std::path::Path;
+//! Kestrel CLI driver (lib).
+//!
+//! `kestrel build` compiles source files into an executable.
+//! `kestrel dump <kind>` prints compiler-internal representations for triage.
+//!
+//! Dump kinds today: tokens, cst, mir, cranelift, diagnostics.
+//! Planned: ast, hir, types, asm (see `DumpKind`).
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
+use kestrel_codegen::TargetConfig as CodegenTargetConfig;
+use kestrel_codegen_cranelift::{self as cranelift_backend, CodegenOptions};
+use kestrel_compiler::{Compiler, Severity};
+use kestrel_compiler_driver::CompilerDriver;
+use kestrel_mir_lower::lower_module;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(code) => code,
+    }
+}
+
+fn run() -> Result<(), ExitCode> {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Build(args) => build(&cli.globals, args),
+        Command::Dump(args) => dump(&cli.globals, args),
+    }
+}
+
+// ============================================================================
+// CLI surface
+// ============================================================================
+
 #[derive(Parser)]
-#[command(name = "kestrel")]
-#[command(about = "The Kestrel compiler", long_about = None)]
-#[command(version)]
+#[command(name = "kestrel", version, about = "The Kestrel compiler")]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Command,
 
-    /// Show semantic tree after analysis (use --tree=full for detailed output)
-    #[arg(long, global = true, value_name = "MODE", num_args = 0..=1, default_missing_value = "summary")]
-    tree: Option<String>,
+    #[command(flatten)]
+    globals: Globals,
+}
 
-    /// Show symbol table after analysis
-    #[arg(long, global = true)]
-    symbols: bool,
-
-    /// Show execution graph after lowering
-    #[arg(long = "execution-graph", visible_alias = "xgraph", global = true)]
-    execution_graph: bool,
-
-    /// Target triple for cross-compilation (e.g., x86_64-unknown-linux-gnu)
+#[derive(Args)]
+struct Globals {
+    /// Target triple for cross-compilation (e.g., x86_64-unknown-linux-gnu).
     #[arg(long, global = true)]
     target: Option<String>,
 
-    /// Verbose output
+    /// Verbose output.
     #[arg(short, long, global = true)]
     verbose: bool,
 
-    /// Path to standard library (overrides default lang/std/)
+    /// Path to standard library (overrides default `lang/std/`).
     #[arg(long = "std", global = true, value_name = "PATH")]
     std_path: Option<String>,
 
-    /// Disable the standard library
+    /// Disable the standard library.
     #[arg(long = "no-std", global = true)]
     no_std: bool,
 }
 
 #[derive(Subcommand)]
-enum Commands {
-    /// Type-check source files
-    Check {
-        /// Source files to check
-        files: Vec<String>,
-    },
-    /// Compile and run a program
-    Run {
-        /// Source files to run
-        #[arg(required = true)]
-        files: Vec<String>,
-        /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
-        #[arg(
-            short = 'O',
-            long = "opt-level",
-            value_name = "LEVEL",
-            default_value = "0"
-        )]
-        opt_level: u8,
-        /// Link with a library (can be repeated, use :libname.a for static libs)
-        #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
-        libraries: Vec<String>,
-        /// Add library search path (can be repeated)
-        #[arg(short = 'L', long = "library-path", value_name = "PATH")]
-        library_paths: Vec<String>,
-        /// Link with a macOS framework (can be repeated)
-        #[arg(long = "framework", value_name = "NAME")]
-        frameworks: Vec<String>,
-    },
-    /// Build an executable
-    Build {
-        /// Source files to build
-        #[arg(required = true)]
-        files: Vec<String>,
-        /// Output file path (defaults to input filename without extension)
-        #[arg(short, long)]
-        output: Option<String>,
-        /// Optimization level (0 = none, 1 = speed, 2 = speed+size)
-        #[arg(
-            short = 'O',
-            long = "opt-level",
-            value_name = "LEVEL",
-            default_value = "0"
-        )]
-        opt_level: u8,
-        /// Link with a library (can be repeated, use :libname.a for static libs)
-        #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
-        libraries: Vec<String>,
-        /// Add library search path (can be repeated)
-        #[arg(short = 'L', long = "library-path", value_name = "PATH")]
-        library_paths: Vec<String>,
-        /// Link with a macOS framework (can be repeated)
-        #[arg(long = "framework", value_name = "NAME")]
-        frameworks: Vec<String>,
-    },
+enum Command {
+    /// Build an executable from source files.
+    Build(BuildArgs),
+    /// Dump a compiler-internal representation to stdout.
+    ///
+    /// Diagnostics always go to stderr, so `kestrel dump mir f.ks > out.txt`
+    /// captures the dump while errors still show in the terminal.
+    Dump(DumpArgs),
 }
 
-fn get_target_config(target: Option<&str>) -> Result<TargetConfig, ExitCode> {
-    match target {
-        Some(triple) => TargetConfig::from_triple(triple).map_err(|e| {
-            eprintln!("error: {}", e);
-            ExitCode::from(1)
-        }),
-        None => Ok(TargetConfig::host()),
+#[derive(Args)]
+struct BuildArgs {
+    /// Source files (.ks) to compile.
+    #[arg(required = true)]
+    files: Vec<String>,
+
+    /// Output executable path (defaults to input basename).
+    #[arg(short, long)]
+    output: Option<String>,
+
+    /// Optimization level: 0 = none, 1 = speed, 2 = speed + size.
+    #[arg(
+        short = 'O',
+        long = "opt-level",
+        value_name = "LEVEL",
+        default_value = "0"
+    )]
+    opt_level: u8,
+
+    /// Link with a library (repeatable; use `:libname.a` for static).
+    #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
+    libraries: Vec<String>,
+
+    /// Add a library search path (repeatable).
+    #[arg(short = 'L', long = "library-path", value_name = "PATH")]
+    library_paths: Vec<String>,
+
+    /// Link a macOS framework (repeatable).
+    #[arg(long = "framework", value_name = "NAME")]
+    frameworks: Vec<String>,
+}
+
+#[derive(Args)]
+struct DumpArgs {
+    /// Which representation to print.
+    kind: DumpKind,
+
+    /// Source files (.ks) to process.
+    #[arg(required = true)]
+    files: Vec<String>,
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+enum DumpKind {
+    /// Token stream from the lexer.
+    Tokens,
+    /// Concrete syntax tree from the parser.
+    Cst,
+    /// MIR module after HIR lowering + all passes.
+    Mir,
+    /// Cranelift IR (CLIF) per function, pre-optimization.
+    Cranelift,
+    /// All accumulated diagnostics (lex, parse, infer, analyze).
+    Diagnostics,
+    // TODO: future dump kinds — add when display impls exist.
+    // - `ast` — ECS entity tree after `build_declarations`. Needs a walker.
+    // - `hir` — HIR bodies. `kestrel_hir::Body` has no pretty printer yet.
+    // - `types` — per-body `TypedBody`. No display impl yet.
+    // - `asm` — native assembly. Easiest path: shell out to `objdump -d` on
+    //   `compile_to_object`'s bytes, or enable Cranelift's `disas` feature.
+}
+
+// ============================================================================
+// Build
+// ============================================================================
+
+fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
+    let compiler = globals.load_compiler(&args.files)?;
+    let driver = CompilerDriver::new(&compiler);
+    driver.infer_all();
+    driver.analyze_all();
+
+    // Flush diagnostics before codegen — better to fail fast on type errors
+    // than to surface a confusing MIR-lowering cascade downstream.
+    driver.emit_diagnostics().ok();
+    if has_errors(&compiler) {
+        return Err(ExitCode::FAILURE);
     }
+
+    let output_path = args
+        .output
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_output_path(&args.files));
+
+    if globals.verbose {
+        eprintln!("  Building {}...", output_path.display());
+    }
+
+    let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+    let target = globals.codegen_target()?;
+    let options = CodegenOptions {
+        opt_level: args.opt_level,
+        libraries: args.libraries,
+        library_paths: args.library_paths,
+        frameworks: args.frameworks,
+        ..Default::default()
+    };
+
+    let result = cranelift_backend::compile_and_link(&mir, &target, &options, &output_path);
+
+    // MIR lowering accumulates its own diagnostics; flush whatever's new.
+    driver.emit_diagnostics().ok();
+
+    result.map_err(|e| {
+        eprintln!("error: {}", e);
+        ExitCode::FAILURE
+    })?;
+
+    if has_errors(&compiler) {
+        return Err(ExitCode::FAILURE);
+    }
+    if globals.verbose {
+        eprintln!("  Built successfully: {}", output_path.display());
+    }
+    Ok(())
 }
 
-fn configure_stdlib(
-    builder: kestrel_compiler::CompilationBuilder,
-    std_path: Option<&str>,
-    no_std: bool,
-) -> kestrel_compiler::CompilationBuilder {
-    if no_std {
-        builder.without_std()
-    } else if let Some(path) = std_path {
-        builder.with_std_path(path)
+// ============================================================================
+// Dump
+// ============================================================================
+
+fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
+    // Tokens and CST are per-file lex/parse — no stdlib, no inference.
+    if matches!(args.kind, DumpKind::Tokens | DumpKind::Cst) {
+        return dump_syntax(args.kind, &args.files, globals.verbose);
+    }
+
+    let compiler = globals.load_compiler(&args.files)?;
+    let driver = CompilerDriver::new(&compiler);
+    driver.infer_all();
+    driver.analyze_all();
+
+    match args.kind {
+        DumpKind::Mir => {
+            let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+            print!("{}", mir.display());
+        },
+        DumpKind::Cranelift => {
+            let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+            let target = globals.codegen_target()?;
+            let options = CodegenOptions {
+                emit_clif: true,
+                ..Default::default()
+            };
+            match cranelift_backend::compile(&mir, &target, &options) {
+                Ok(result) => {
+                    for (name, clif) in &result.clif_text {
+                        println!("; function: {}", name);
+                        print!("{}", clif);
+                        println!();
+                    }
+                },
+                Err(e) => {
+                    driver.emit_diagnostics().ok();
+                    eprintln!("error: {}", e);
+                    return Err(ExitCode::FAILURE);
+                },
+            }
+        },
+        DumpKind::Diagnostics => {
+            // Emitted below; no stdout output for this kind.
+        },
+        DumpKind::Tokens | DumpKind::Cst => unreachable!("handled above"),
+    }
+
+    driver.emit_diagnostics().ok();
+    if has_errors(&compiler) {
+        Err(ExitCode::FAILURE)
     } else {
-        builder
+        Ok(())
     }
 }
 
-fn add_source_files(
-    mut builder: kestrel_compiler::CompilationBuilder,
-    files: &[String],
-    verbose: bool,
-) -> Result<kestrel_compiler::CompilationBuilder, ExitCode> {
+fn dump_syntax(kind: DumpKind, files: &[String], verbose: bool) -> Result<(), ExitCode> {
+    let mut compiler = Compiler::new();
     for file in files {
         if verbose {
             eprintln!("  Reading {}", file);
         }
-        // Use add_file to preserve path info for @fileconstant resolution
-        builder = match builder.add_file(file) {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("error: failed to read {}: {}", file, e);
-                return Err(ExitCode::from(1));
+        let source = std::fs::read_to_string(file).map_err(|e| {
+            eprintln!("error: failed to read {}: {}", file, e);
+            ExitCode::FAILURE
+        })?;
+        let entity = compiler.set_source(file, source);
+
+        match kind {
+            DumpKind::Tokens => {
+                println!("; tokens: {}", file);
+                for tok in compiler.lex(entity) {
+                    println!("  {:?} @ {}..{}", tok.value, tok.span.start, tok.span.end);
+                }
+                println!();
             },
-        };
-    }
-    Ok(builder)
-}
-
-fn build_codegen_options(
-    opt_level: u8,
-    libraries: Vec<String>,
-    library_paths: Vec<String>,
-    frameworks: Vec<String>,
-) -> kestrel_compiler::CodegenOptions {
-    kestrel_compiler::CodegenOptions {
-        opt_level,
-        libraries,
-        library_paths,
-        frameworks,
-        ..Default::default()
-    }
-}
-
-fn run_check(
-    files: &[String],
-    show_tree: Option<&str>,
-    show_symbols: bool,
-    show_execution_graph: bool,
-    verbose: bool,
-    std_path: Option<&str>,
-    no_std: bool,
-) -> ExitCode {
-    if files.is_empty() {
-        eprintln!("error: no input files");
-        return ExitCode::from(1);
-    }
-
-    let builder = Compilation::builder();
-    let builder = configure_stdlib(builder, std_path, no_std);
-    let builder = match add_source_files(builder, files, verbose) {
-        Ok(b) => b,
-        Err(code) => return code,
-    };
-
-    if verbose {
-        eprintln!("  Compiling...");
-    }
-    let compilation = match builder.build() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(1);
-        },
-    };
-
-    if let Some(mode) = show_tree
-        && let Some(model) = compilation.semantic_model()
-    {
-        model.print_semantic_model(mode == "full");
-    }
-
-    if show_symbols && let Some(model) = compilation.semantic_model() {
-        model.print_model_symbols();
-    }
-
-    if show_execution_graph && let Some(model) = compilation.semantic_model() {
-        let root = model.root();
-        let result = kestrel_execution_graph_lowering::lower_module(model, root);
-        for diag in &result.diagnostics {
-            eprintln!("warning: {:?}", diag);
+            DumpKind::Cst => {
+                println!("; cst: {}", file);
+                // SyntaxNode's Debug format is the tree-view CST representation.
+                println!("{:#?}", compiler.parse(entity).tree);
+            },
+            _ => unreachable!("dump_syntax called with non-syntax kind"),
         }
-        print!("{}", result.mir.display());
     }
 
-    if compilation.has_errors() {
-        compilation.diagnostics().emit().ok();
-        ExitCode::from(1)
+    CompilerDriver::new(&compiler).emit_diagnostics().ok();
+    if has_errors(&compiler) {
+        Err(ExitCode::FAILURE)
     } else {
-        if verbose {
-            eprintln!("  No errors found.");
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Globals helpers
+// ============================================================================
+
+impl Globals {
+    /// Build a Compiler, loading stdlib (unless `--no-std`) and every input file.
+    fn load_compiler(&self, files: &[String]) -> Result<Compiler, ExitCode> {
+        let mut compiler = Compiler::new().with_target(self.ast_target());
+
+        if !self.no_std {
+            let std_dir = match self.std_path.as_deref() {
+                Some(p) => PathBuf::from(p),
+                None => default_std_path().map_err(|e| {
+                    eprintln!("error: could not locate the Kestrel stdlib");
+                    for (source, path) in &e.tried {
+                        eprintln!("  tried {} -> {}", source, path.display());
+                    }
+                    eprintln!("hint: set KESTREL_STD or pass --std <path>");
+                    ExitCode::FAILURE
+                })?,
+            };
+            if self.verbose {
+                eprintln!("  Loading stdlib from {}", std_dir.display());
+            }
+            compiler.load_dir(&std_dir);
         }
-        ExitCode::SUCCESS
+
+        for file in files {
+            if self.verbose {
+                eprintln!("  Reading {}", file);
+            }
+            let source = std::fs::read_to_string(file).map_err(|e| {
+                eprintln!("error: failed to read {}: {}", file, e);
+                ExitCode::FAILURE
+            })?;
+            let entity = compiler.set_source(file, source);
+            compiler.build(entity);
+        }
+        Ok(compiler)
+    }
+
+    fn codegen_target(&self) -> Result<CodegenTargetConfig, ExitCode> {
+        match self.target.as_deref() {
+            Some(triple) => CodegenTargetConfig::from_triple(triple).map_err(|e| {
+                eprintln!("error: {}", e);
+                ExitCode::FAILURE
+            }),
+            None => Ok(CodegenTargetConfig::host()),
+        }
+    }
+
+    /// Derive the ast-builder `TargetConfig` (for `@platform` conditionals) from
+    /// the requested triple, falling back to host.
+    fn ast_target(&self) -> AstTargetConfig {
+        let Some(triple) = &self.target else {
+            return AstTargetConfig::host();
+        };
+        let lower = triple.to_ascii_lowercase();
+        let os = if lower.contains("darwin") || lower.contains("apple") {
+            Some(AstOs::Darwin)
+        } else if lower.contains("linux") {
+            Some(AstOs::Linux)
+        } else {
+            None
+        };
+        AstTargetConfig { os }
     }
 }
 
-fn run_program(
-    files: &[String],
-    target: Option<&str>,
-    verbose: bool,
-    opt_level: u8,
-    libraries: Vec<String>,
-    library_paths: Vec<String>,
-    frameworks: Vec<String>,
-    std_path: Option<&str>,
-    no_std: bool,
-) -> ExitCode {
-    if files.is_empty() {
-        eprintln!("error: no input files");
-        return ExitCode::from(1);
+// ============================================================================
+// Small helpers
+// ============================================================================
+
+struct StdLookupError {
+    tried: Vec<(&'static str, PathBuf)>,
+}
+
+/// Locate the stdlib via, in priority order:
+///   1. `KESTREL_STD` env var (matches kestrel-test-suite convention)
+///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
+///   3. `<CARGO_MANIFEST_DIR>/lang/std` baked at build time (in-repo dev)
+///
+/// Each candidate must `exists()` to win; otherwise we fall through and
+/// surface every path we tried so the user can see what went wrong.
+/// Order must stay fixed: explicit override > installed toolchain > repo dev.
+fn default_std_path() -> Result<PathBuf, StdLookupError> {
+    let mut tried = Vec::new();
+
+    if let Some(p) = std::env::var_os("KESTREL_STD") {
+        let p = PathBuf::from(p);
+        if p.exists() {
+            return Ok(p);
+        }
+        tried.push(("KESTREL_STD", p));
     }
 
-    let target_config = match get_target_config(target) {
-        Ok(t) => t,
-        Err(code) => return code,
-    };
-
-    let builder = Compilation::builder();
-    let builder = configure_stdlib(builder, std_path, no_std);
-    let builder = match add_source_files(builder, files, verbose) {
-        Ok(b) => b,
-        Err(code) => return code,
-    };
-
-    let compilation = match builder.build() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(1);
-        },
-    };
-
-    if compilation.has_errors() {
-        compilation.diagnostics().emit().ok();
-        return ExitCode::from(1);
-    }
-
-    if verbose {
-        eprintln!("  Compiling and running...");
-    }
-
-    let options = build_codegen_options(opt_level, libraries, library_paths, frameworks);
-
-    match compilation.run(&target_config, &options) {
-        Ok(result) => {
-            if !result.stdout.is_empty() {
-                print!("{}", result.stdout);
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(p) = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("lib/std"))
+        {
+            if p.exists() {
+                return Ok(p);
             }
-            if !result.stderr.is_empty() {
-                eprint!("{}", result.stderr);
-            }
-            ExitCode::from(result.exit_code as u8)
-        },
-        Err(CompileError::LoweringFailed(diagnostics)) => {
-            compilation.diagnostics().emit_additional(&diagnostics).ok();
-            ExitCode::from(1)
-        },
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(1)
-        },
+            tried.push(("exe-relative", p));
+        }
+
+    let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
+    if baked.exists() {
+        return Ok(baked);
+    }
+    tried.push(("CARGO_MANIFEST_DIR", baked));
+
+    Err(StdLookupError { tried })
+}
+
+fn default_output_path(files: &[String]) -> PathBuf {
+    let stem = Path::new(&files[0])
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    if cfg!(windows) {
+        PathBuf::from(format!("{}.exe", stem))
+    } else {
+        PathBuf::from(stem.as_ref())
     }
 }
 
-fn run_build(
-    files: &[String],
-    output: Option<&str>,
-    target: Option<&str>,
-    verbose: bool,
-    opt_level: u8,
-    libraries: Vec<String>,
-    library_paths: Vec<String>,
-    frameworks: Vec<String>,
-    std_path: Option<&str>,
-    no_std: bool,
-) -> ExitCode {
-    if files.is_empty() {
-        eprintln!("error: no input files");
-        return ExitCode::from(1);
-    }
-
-    let target_config = match get_target_config(target) {
-        Ok(t) => t,
-        Err(code) => return code,
-    };
-
-    let builder = Compilation::builder();
-    let builder = configure_stdlib(builder, std_path, no_std);
-    let builder = match add_source_files(builder, files, verbose) {
-        Ok(b) => b,
-        Err(code) => return code,
-    };
-
-    let output_path = match output {
-        Some(path) => path.to_string(),
-        None => {
-            let path = Path::new(&files[0]);
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            if cfg!(windows) {
-                format!("{}.exe", stem)
-            } else {
-                stem.to_string()
-            }
-        },
-    };
-
-    let compilation = match builder.build() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(1);
-        },
-    };
-
-    if compilation.has_errors() {
-        compilation.diagnostics().emit().ok();
-        return ExitCode::from(1);
-    }
-
-    if verbose {
-        eprintln!("  Building {}...", output_path);
-    }
-
-    let options = build_codegen_options(opt_level, libraries, library_paths, frameworks);
-
-    match compilation.build(&target_config, &options, Path::new(&output_path)) {
-        Ok(()) => {
-            if verbose {
-                eprintln!("  Built successfully: {}", output_path);
-            }
-            ExitCode::SUCCESS
-        },
-        Err(CompileError::LoweringFailed(diagnostics)) => {
-            compilation.diagnostics().emit_additional(&diagnostics).ok();
-            ExitCode::from(1)
-        },
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(1)
-        },
-    }
-}
-
-fn main() -> ExitCode {
-    let cli = Cli::parse();
-
-    match cli.command {
-        Some(Commands::Check { files }) => run_check(
-            &files,
-            cli.tree.as_deref(),
-            cli.symbols,
-            cli.execution_graph,
-            cli.verbose,
-            cli.std_path.as_deref(),
-            cli.no_std,
-        ),
-        Some(Commands::Run {
-            files,
-            opt_level,
-            libraries,
-            library_paths,
-            frameworks,
-        }) => run_program(
-            &files,
-            cli.target.as_deref(),
-            cli.verbose,
-            opt_level,
-            libraries,
-            library_paths,
-            frameworks,
-            cli.std_path.as_deref(),
-            cli.no_std,
-        ),
-        Some(Commands::Build {
-            files,
-            output,
-            opt_level,
-            libraries,
-            library_paths,
-            frameworks,
-        }) => run_build(
-            &files,
-            output.as_deref(),
-            cli.target.as_deref(),
-            cli.verbose,
-            opt_level,
-            libraries,
-            library_paths,
-            frameworks,
-            cli.std_path.as_deref(),
-            cli.no_std,
-        ),
-        None => {
-            eprintln!("error: no command specified");
-            eprintln!("Run 'kestrel --help' for usage.");
-            ExitCode::from(1)
-        },
-    }
+fn has_errors(compiler: &Compiler) -> bool {
+    compiler
+        .diagnostics()
+        .iter()
+        .any(|d| d.severity >= Severity::Error)
 }

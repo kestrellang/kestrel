@@ -3,64 +3,82 @@
 
 module std.core
 
-/// Protocol for types that support bitwise AND (&).
+/// Raw protocol backing the `&` operator.
+///
+/// Implemented by every integer width; `Output` is `Self` for the standard
+/// integer types but may differ for SIMD or bitset wrappers.
+///
+/// # Examples
+///
+/// ```
+/// 0b1100 & 0b1010   // 0b1000
+/// ```
 @builtin(.BitwiseAndOperatorProtocol)
-public protocol BitwiseAnd[Rhs = Self] {
+public protocol BitwiseAnd[Other = Self] {
     type Output
 
-    /// Performs bitwise AND of this value with another.
+    /// Returns `self & other`.
     @builtin(.BitwiseAndOperatorMethod)
-    func bitwiseAnd(other: Rhs) -> Output
+    func bitwiseAnd(other: Other) -> Output
 }
 
-/// Protocol for types that support bitwise OR (|).
+/// Raw protocol backing the `|` operator.
 @builtin(.BitwiseOrOperatorProtocol)
-public protocol BitwiseOr[Rhs = Self] {
+public protocol BitwiseOr[Other = Self] {
     type Output
 
-    /// Performs bitwise OR of this value with another.
+    /// Returns `self | other`.
     @builtin(.BitwiseOrOperatorMethod)
-    func bitwiseOr(other: Rhs) -> Output
+    func bitwiseOr(other: Other) -> Output
 }
 
-/// Protocol for types that support bitwise XOR (^).
+/// Raw protocol backing the `^` operator.
 @builtin(.BitwiseXorOperatorProtocol)
-public protocol BitwiseXor[Rhs = Self] {
+public protocol BitwiseXor[Other = Self] {
     type Output
 
-    /// Performs bitwise XOR of this value with another.
+    /// Returns `self ^ other`.
     @builtin(.BitwiseXorOperatorMethod)
-    func bitwiseXor(other: Rhs) -> Output
+    func bitwiseXor(other: Other) -> Output
 }
 
-/// Protocol for types that support bitwise NOT (~).
+/// Raw protocol backing the unary `~` operator.
 @builtin(.BitwiseNotOperatorProtocol)
 public protocol BitwiseNot {
     type Output
 
-    /// Returns the bitwise complement of this value.
+    /// Returns `~self` — every bit flipped.
     @builtin(.BitwiseNotOperatorMethod)
     func bitwiseNot() -> Output
 }
 
-/// Protocol for types that support left bit shift (<<).
-/// Default Rhs is lang.i64 because type defaults must be resolvable at parse time.
+/// Raw protocol backing the `<<` operator.
+///
+/// `Other` defaults to `Int64` — the standard shift count type. Conforming
+/// types may narrow this to a different count where appropriate.
+///
+/// # Errors
+///
+/// Standard integer types panic on out-of-range shift counts (see the
+/// `shiftLeft` documentation on the integer types).
 @builtin(.ShiftLeftOperatorProtocol)
-public protocol LeftShift[Rhs = lang.i64] {
+public protocol LeftShift[Other = Int64] {
     type Output
 
-    /// Shifts this value's bits left by the given count.
+    /// Returns `self << count`.
     @builtin(.ShiftLeftOperatorMethod)
-    func shiftLeft(by count: Rhs) -> Output
+    func shiftLeft(by count: Other) -> Output
 }
 
-/// Protocol for types that support right bit shift (>>).
-/// Default Rhs is lang.i64 because type defaults must be resolvable at parse time.
+/// Raw protocol backing the `>>` operator.
+///
+/// Behaviour for signed types is arithmetic shift (sign-preserving); unsigned
+/// types use logical shift. The `Other` default mirrors `LeftShift`.
 @builtin(.ShiftRightOperatorProtocol)
-public protocol RightShift[Rhs = lang.i64] {
+public protocol RightShift[Other = Int64] {
     type Output
 
-    /// Shifts this value's bits right by the given count.
+    /// Returns `self >> count`.
     @builtin(.ShiftRightOperatorMethod)
-    func shiftRight(by count: Rhs) -> Output
+    func shiftRight(by count: Other) -> Output
 }

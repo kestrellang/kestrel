@@ -2,20 +2,44 @@
 
 module std.core
 
-import std.text.(String, FormatOptions, Formattable)
+import std.text.(String, StringBuilder, FormatOptions, Formattable)
 
-/// Represents the result of comparing two values.
-/// Used by the Comparable protocol to express total ordering.
+/// The three-valued result of a `Comparable.compare()` call.
+///
+/// `Ordering` is the lingua franca for comparison: types implementing
+/// `Comparable` define a single `compare` returning this enum, and the
+/// stdlib derives `<`, `<=`, `>`, `>=` on top. The `then` / `thenWith`
+/// helpers make it easy to chain comparisons over multiple fields without
+/// nested `if`s.
+///
+/// # Examples
+///
+/// ```
+/// let cmp = a.compare(b);
+/// match cmp {
+///     .Less => "ascending",
+///     .Equal => "tied",
+///     .Greater => "descending"
+/// }
+///
+/// // Chain field comparisons: by lastName, then firstName.
+/// a.lastName.compare(b.lastName)
+///     .then(a.firstName.compare(b.firstName))
+/// ```
+///
+/// # Representation
+///
+/// A plain three-state enum with no payload — lowers to a small integer tag.
 public enum Ordering: Equatable, Formattable {
-    /// The first value is less than the second.
+    /// The receiver compared less than the argument.
     case Less
-    /// The values are equal.
+    /// The two values compared equal.
     case Equal
-    /// The first value is greater than the second.
+    /// The receiver compared greater than the argument.
     case Greater
 
-    /// Compares this ordering with another for equality.
-    public func equals(other: Ordering) -> Bool {
+    /// Equality on the orderings themselves: same variant ⇒ equal.
+    public func isEqual(to other: Ordering) -> Bool {
         match (self, other) {
             (.Less, .Less) => true,
             (.Equal, .Equal) => true,
@@ -24,12 +48,18 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Compares this ordering with another for inequality.
-    public func notEquals(other: Ordering) -> Bool {
-        if self.equals(other) { false } else { true }
-    }
+    // isNotEqual: provided by extend Equatable: Equal[Self], NotEqual[Self]
+    // in std.core.protocols.
 
-    /// Reverses this ordering (Less becomes Greater and vice versa).
+    /// Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting
+    /// in reverse without writing a second comparator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Ordering.Less.reverse()     // .Greater
+    /// Ordering.Equal.reverse()    // .Equal
+    /// ```
     public func reverse() -> Ordering {
         match self {
             .Less => .Greater,
@@ -38,8 +68,15 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Returns this ordering if not Equal, otherwise returns the other ordering.
-    /// Useful for chaining comparisons by multiple fields.
+    /// Tie-breaker chain: returns `self` if it is non-`Equal`, otherwise
+    /// `other`. The eager form — both arguments are evaluated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Ordering.Equal.then(.Less)     // .Less
+    /// Ordering.Greater.then(.Less)   // .Greater (self wins)
+    /// ```
     public func then(other: Ordering) -> Ordering {
         match self {
             .Equal => other,
@@ -47,8 +84,8 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Returns this ordering if not Equal, otherwise evaluates and returns the comparison.
-    /// Lazy version of then() that only evaluates the closure if needed.
+    /// Lazy variant of `then` — `compare` runs only when `self` is `Equal`.
+    /// Prefer this when computing the secondary comparison is expensive.
     public func thenWith(compare: () -> Ordering) -> Ordering {
         match self {
             .Equal => compare(),
@@ -56,13 +93,19 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    /// Formats this ordering as a string.
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
+    /// Renders as `"Less"`, `"Equal"`, or `"Greater"`. With `debug` set,
+    /// prefixes with the type name (`"Ordering.Less"`).
+    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         let value = match self {
             .Less => "Less",
             .Equal => "Equal",
             .Greater => "Greater"
         };
-        if options.debug { "Ordering." + value } else { value }
+        if options.debug {
+            writer.append("Ordering.");
+            writer.append(value)
+        } else {
+            writer.append(value)
+        }
     }
 }

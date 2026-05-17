@@ -12,17 +12,30 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::attribute::attribute_list_parser;
-use crate::common::ConformanceListData;
 use crate::common::{
-    ProtocolBodyItem, ProtocolDeclarationData, emit_protocol_declaration,
-    field_declaration_parser_internal, function_declaration_parser_internal, identifier,
-    initializer_declaration_parser_internal, subscript_declaration_parser_internal, token,
-    visibility_parser_internal,
+    AttributeData, ConformanceListData, InitializerDeclarationData, emit_attribute_list,
+    emit_initializer_declaration, emit_name, emit_visibility, identifier,
+    initializer_declaration_parser_internal, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens};
-use crate::type_alias::type_alias_declaration_parser_internal;
-use crate::type_param::{conformance_list_parser, type_parameter_list_parser, where_clause_parser};
+use crate::field::{
+    FieldDeclarationData, emit_field_declaration, field_declaration_parser_internal,
+};
+use crate::function::{
+    FunctionDeclarationData, emit_function_declaration, function_declaration_parser_internal,
+};
+use crate::input::{ParserExtra, ParserInput};
+use crate::parse_and_emit;
+use crate::subscript::{
+    SubscriptDeclarationData, emit_subscript_declaration, subscript_declaration_parser_internal,
+};
+use crate::type_alias::{
+    TypeAliasDeclarationData, emit_type_alias_declaration, type_alias_declaration_parser_internal,
+};
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, conformance_list_parser, emit_conformance_list,
+    emit_type_parameter_list, emit_where_clause, type_parameter_list_parser, where_clause_parser,
+};
 
 /// Represents a protocol declaration: (visibility)? protocol Name[T]? (where ...)? { ... }
 ///
@@ -92,6 +105,31 @@ impl ProtocolDeclaration {
             })
             .unwrap_or_default()
     }
+}
+
+/// Raw parsed data for protocol declaration internals
+#[derive(Debug, Clone)]
+pub struct ProtocolDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub protocol_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub inherited: Option<ConformanceListData>, // Inherited protocols (protocol A: B { })
+    pub where_clause: Option<WhereClauseData>,
+    pub lbrace_span: Span,
+    pub body: Vec<ProtocolBodyItem>,
+    pub rbrace_span: Span,
+}
+
+/// Items that can appear in a protocol body
+#[derive(Debug, Clone)]
+pub enum ProtocolBodyItem {
+    Function(FunctionDeclarationData),
+    Subscript(SubscriptDeclarationData),
+    AssociatedType(TypeAliasDeclarationData),
+    Initializer(InitializerDeclarationData),
+    Field(FieldDeclarationData),
 }
 
 /// Parser for protocol body items (functions, subscripts, associated types, initializers, or property requirements)
@@ -180,6 +218,75 @@ pub fn protocol_declaration_parser_internal<'tokens>()
         .boxed()
 }
 
+/// Emit events for a protocol declaration.
+///
+/// Destructures `ProtocolDeclarationData` without a `..` rest pattern:
+/// adding a field forces this function to stop compiling until the new
+/// field is handled in emission.
+pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclarationData) {
+    let ProtocolDeclarationData {
+        attributes,
+        visibility,
+        protocol_span,
+        name_span,
+        type_params,
+        inherited,
+        where_clause,
+        lbrace_span,
+        body,
+        rbrace_span,
+    } = data;
+
+    sink.start_node(SyntaxKind::ProtocolDeclaration);
+
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    sink.add_token(SyntaxKind::Protocol, protocol_span);
+    emit_name(sink, name_span);
+
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(inherited) = inherited {
+        emit_conformance_list(sink, inherited.colon_span, &inherited.conformances);
+    }
+
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    sink.start_node(SyntaxKind::ProtocolBody);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
+
+    for item in body {
+        match item {
+            ProtocolBodyItem::Function(func_data) => emit_function_declaration(sink, func_data),
+            ProtocolBodyItem::Subscript(subscript_data) => {
+                emit_subscript_declaration(sink, subscript_data)
+            },
+            ProtocolBodyItem::AssociatedType(type_data) => {
+                emit_type_alias_declaration(sink, type_data)
+            },
+            ProtocolBodyItem::Initializer(init_data) => {
+                emit_initializer_declaration(sink, init_data)
+            },
+            ProtocolBodyItem::Field(field_data) => emit_field_declaration(sink, field_data),
+        }
+    }
+
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
+    sink.finish_node(); // ProtocolBody
+
+    sink.finish_node(); // ProtocolDeclaration
+}
+
+impl crate::event::EmitSyntax for ProtocolDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_protocol_declaration(sink, self);
+    }
+}
+
 /// Parse a protocol declaration and emit events
 ///
 /// This is the primary event-driven parser function for protocol declarations.
@@ -187,22 +294,13 @@ pub fn parse_protocol_declaration<I>(source: &str, tokens: I, sink: &mut EventSi
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match protocol_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_protocol_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        protocol_declaration_parser_internal(),
+        emit_protocol_declaration
+    );
 }
 
 #[cfg(test)]

@@ -240,7 +240,7 @@ fn build_error_message(expected: &[String], found: Option<&str>) -> String {
 }
 
 /// The kind of parse error
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParseErrorKind {
     /// An unexpected token was encountered
     UnexpectedToken,
@@ -264,7 +264,7 @@ impl fmt::Display for ParseErrorKind {
 }
 
 /// A parse error with detailed information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError {
     /// The kind of error
     pub kind: ParseErrorKind,
@@ -324,9 +324,25 @@ impl ParseError {
     /// This version provides better formatting for Kestrel tokens
     pub fn from_token_error<'a>(error: &chumsky::error::Rich<'a, Token>) -> Self {
         use crate::input::to_kestrel_span;
-        use chumsky::error::RichPattern;
+        use chumsky::error::{RichPattern, RichReason};
 
         let span = Some(to_kestrel_span(*error.span()));
+
+        // `Rich::custom(...)` carries its message in the reason directly.
+        // Routing it through `build_error_message` (which only consults
+        // `expected`/`found`) discards the message and produces a generic
+        // "unexpected end of file" — masking recovery diagnostics like
+        // "expected identifier after `.`". Detect that shape and pass the
+        // custom message through.
+        if let RichReason::Custom(msg) = error.reason() {
+            return Self {
+                kind: ParseErrorKind::SyntaxError,
+                message: msg.to_string(),
+                span,
+                expected: Vec::new(),
+                found: None,
+            };
+        }
 
         // Determine error kind based on what was found
         let kind = if error.found().is_none() {
@@ -381,6 +397,16 @@ pub struct ParseResult {
     pub tree: SyntaxNode,
     /// Any parse errors encountered
     pub errors: Vec<ParseError>,
+}
+
+/// Hash by tree structure text + errors. SyntaxNode doesn't impl Hash,
+/// so we hash its text representation which captures the full tree content.
+impl std::hash::Hash for ParseResult {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // SyntaxText doesn't impl Hash, convert to String
+        self.tree.text().to_string().hash(state);
+        self.errors.hash(state);
+    }
 }
 
 /// High-level parser that provides a convenient API for parsing
@@ -457,39 +483,59 @@ mod tests {
     use super::*;
     use crate::parse_source_file;
     use kestrel_lexer::lex;
+    use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-    #[test]
-    fn test_parser_with_valid_source() {
-        let source = "module Test";
-        let tokens: Vec<_> = lex(source, 0)
+    fn parse_source(source: &str, file_id: usize) -> ParseResult {
+        let tokens: Vec<_> = lex(source, file_id)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
             .collect();
 
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        Parser::parse(source, tokens.into_iter(), parse_source_file, file_id)
+    }
+
+    fn token_texts(node: &SyntaxNode, kinds: &[SyntaxKind]) -> Vec<String> {
+        let mut texts = Vec::new();
+        collect_token_texts(node, kinds, &mut texts);
+        texts
+    }
+
+    fn collect_token_texts(node: &SyntaxNode, kinds: &[SyntaxKind], texts: &mut Vec<String>) {
+        for element in node.children_with_tokens() {
+            if let Some(child) = element.clone().into_node() {
+                collect_token_texts(&child, kinds, texts);
+            } else if let Some(token) = element.into_token() {
+                if kinds.contains(&token.kind()) {
+                    texts.push(token.text().to_string());
+                }
+            }
+        }
+    }
+
+    fn count_nodes(node: &SyntaxNode, kind: SyntaxKind) -> usize {
+        let here = usize::from(node.kind() == kind);
+        here + node
+            .children()
+            .map(|child| count_nodes(&child, kind))
+            .sum::<usize>()
+    }
+
+    #[test]
+    fn test_parser_with_valid_source() {
+        let source = "module Test";
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
     fn test_parser_with_multiple_declarations() {
         let source = "module A.B.C\nimport X.Y.Z";
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
         assert_eq!(
             result.tree.children().count(),
             2,
@@ -509,12 +555,7 @@ module Test
 public struct A {}
 public struct B {}
 "#;
-        let tokens: Vec<_> = lex(valid_source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(valid_source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(valid_source, 0);
         assert_eq!(result.errors.len(), 0, "Valid code should have no errors");
         assert_eq!(
             result.tree.children().count(),
@@ -524,17 +565,9 @@ public struct B {}
 
         // Test case 2: Parser still creates a tree even with parse errors
         let source_with_errors = r#"module"#; // Incomplete module
-        let tokens: Vec<_> = lex(source_with_errors, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source_with_errors, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source_with_errors, 0);
         // Parser creates a SourceFile node even when parsing fails
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
 
         println!(
             "Error recovery test: {} declarations, {} errors",
@@ -548,12 +581,7 @@ public struct B {}
         // Test that parse errors include span information when errors occur
         // Use a syntax that will definitely cause a parse error
         let source = "struct 123"; // struct keyword followed by number instead of identifier
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         // Parser should report errors or successfully parse depending on error recovery
         // The important thing is that IF errors are reported, they should have spans
@@ -567,21 +595,13 @@ public struct B {}
         }
 
         // This test primarily documents that span tracking infrastructure is in place
-        assert_eq!(
-            result.tree.kind(),
-            kestrel_syntax_tree::SyntaxKind::SourceFile
-        );
+        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
     fn test_module_then_struct() {
         let source = "module Test\nstruct Empty {}";
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -594,12 +614,7 @@ public struct B {}
     #[test]
     fn test_module_then_struct_with_indentation() {
         let source = "module Test\n            struct Empty {}";
-        let tokens: Vec<_> = lex(source, 0)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
+        let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
@@ -630,5 +645,293 @@ public struct B {}
                 );
             }
         }
+    }
+
+    #[test]
+    fn trivia_kinds_are_distinct_between_declarations() {
+        let source = "module Test\n// keep this comment\nimport Std.IO";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(result.tree.text().to_string(), source);
+
+        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        assert_eq!(line_comments, vec!["// keep this comment"]);
+
+        let newlines = token_texts(&result.tree, &[SyntaxKind::Newline]);
+        assert_eq!(
+            newlines.len(),
+            2,
+            "two \\n separators between the three tokens"
+        );
+
+        let whitespace = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
+        assert!(
+            whitespace
+                .iter()
+                .all(|t| !t.contains('\n') && !t.contains("//")),
+            "Whitespace kind holds only spaces/tabs, not newlines or comments"
+        );
+    }
+
+    #[test]
+    fn trivia_round_trips_block_and_line_comments() {
+        let source = "module Test\n/* block */ struct Foo {}\n// trailing\n";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "tree text must round-trip the source verbatim"
+        );
+
+        let block_comments = token_texts(&result.tree, &[SyntaxKind::BlockComment]);
+        assert_eq!(block_comments, vec!["/* block */"]);
+
+        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        assert_eq!(line_comments, vec!["// trailing"]);
+    }
+
+    #[test]
+    fn trailing_trivia_is_preserved_in_tree() {
+        let source = "module Test\n// tail comment\n   \n";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "trailing trivia after the last syntax token must appear in the tree"
+        );
+    }
+
+    #[test]
+    fn characterization_nested_struct_enum_declarations() {
+        let source = "struct Outer { enum Inner { case Value struct Nested {} } }";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::StructDeclaration), 2);
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumDeclaration), 1);
+        assert_eq!(
+            count_nodes(&result.tree, SyntaxKind::EnumCaseDeclaration),
+            1
+        );
+    }
+
+    #[test]
+    fn recovery_preserves_declarations_around_garbage_region() {
+        // A malformed token run between two valid declarations should not
+        // swallow the surrounding declarations — both should still parse.
+        let source = "module A\nxyz bad stuff\nimport Std.IO";
+        let result = parse_source(source, 0);
+
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "tree must still round-trip even when recovering"
+        );
+        assert!(!result.errors.is_empty(), "recovery should report an error");
+
+        // Both the module and import declarations should be in the tree.
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::ModuleDeclaration), 1);
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::ImportDeclaration), 1);
+        // The recovered garbage is wrapped in an Error node.
+        assert!(
+            count_nodes(&result.tree, SyntaxKind::Error) >= 1,
+            "recovered region should become an Error node"
+        );
+    }
+
+    #[test]
+    fn recovery_error_span_covers_skipped_garbage() {
+        let source = "module A\nxyz bad\nimport B";
+        let result = parse_source(source, 0);
+
+        assert!(!result.errors.is_empty());
+        let err = result.errors.iter().find(|e| e.span.is_some()).unwrap();
+        let span = err.span.as_ref().unwrap();
+        let covered = &source[span.start..span.end];
+        assert!(
+            covered.contains("xyz"),
+            "recovery span should include the skipped token, got {covered:?}"
+        );
+    }
+
+    #[test]
+    fn recovery_does_not_fire_on_trailing_trivia() {
+        // Trailing whitespace/comments after the final declaration must not
+        // trigger recovery — otherwise every file with a newline at the end
+        // would report a phantom error.
+        let source = "module A\n// trailing\n";
+        let result = parse_source(source, 0);
+
+        assert!(
+            result.errors.is_empty(),
+            "trailing trivia should not trigger recovery, got {:?}",
+            result.errors
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn characterization_operator_tokens_are_preserved_for_later_pratt_parser() {
+        let source = "func calc() { let value = a + b * c ?? d; }";
+        let result = parse_source(source, 0);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(
+            token_texts(
+                &result.tree,
+                &[
+                    SyntaxKind::Plus,
+                    SyntaxKind::Star,
+                    SyntaxKind::QuestionQuestion
+                ],
+            ),
+            vec!["+", "*", "??"]
+        );
+    }
+
+    #[test]
+    fn missing_member_after_dot_recovers_with_missing_node() {
+        // Cursor mid-edit: `foo.` with nothing after. The parser should
+        // recover by emitting a Missing wrapper around a zero-width
+        // Identifier token AND record exactly one parse error.
+        let source = "func f() { foo. }";
+        let result = parse_source(source, 0);
+
+        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
+        assert_eq!(missing_count, 1, "expected one Missing wrapper");
+
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected identifier after `.`"))
+            .collect();
+        assert_eq!(
+            recovery_errors.len(),
+            1,
+            "expected exactly one recovery diagnostic, got {:?}",
+            result.errors
+        );
+
+        // The synthesized identifier inside Missing should have empty text,
+        // so the source round-trips without garbage.
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn well_formed_member_access_does_not_emit_missing() {
+        // Sanity: real `foo.bar` must still produce zero Missing nodes and
+        // zero parse errors. Catches regressions where the recovery path
+        // fires on the happy case.
+        let source = "func f() { foo.bar }";
+        let result = parse_source(source, 0);
+
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 0);
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected identifier after `.`"))
+            .collect();
+        assert!(recovery_errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn block_recovery_skips_garbage_to_next_statement_boundary() {
+        // A garbage line (`@@@`) between two well-formed statements must
+        // not poison the rest of the body. Phase 6 wraps the broken stretch
+        // in an Error node and the second `let` still parses.
+        let source = "func f() { let x = 1; @@@ let y = 2; }";
+        let result = parse_source(source, 0);
+
+        // The body should contain at least one Error wrapper from recovery
+        // plus two Let statements (one before, one after the garbage).
+        let error_nodes = count_nodes(&result.tree, SyntaxKind::Error);
+        assert!(
+            error_nodes >= 1,
+            "expected at least one recovered Error node, tree:\n{:#?}",
+            result.tree
+        );
+        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        assert_eq!(
+            lets, 2,
+            "both `let` statements must still parse around the garbage; tree:\n{:#?}",
+            result.tree
+        );
+
+        // Source text must round-trip.
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn block_recovery_preserves_following_statements_for_completion() {
+        // Mid-edit shape: a stray punctuation token between two real
+        // statements shouldn't wipe out hover/completion on the next
+        // line. The second `let` needs to land in the tree so an LSP
+        // query at its position can still find a valid declaration.
+        //
+        // Note: recovery deliberately refuses to consume tokens that
+        // could begin an expression (identifiers, literals, `(`, …) so
+        // tail expressions like `{ () }` aren't swallowed. Garbage that
+        // starts with an expression-starter is a follow-up — see the
+        // CHECKLIST under "Parser recovery".
+        let source = "func f() { let x = 1; ?? let y = 7; }";
+        let result = parse_source(source, 0);
+
+        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        assert_eq!(
+            lets, 2,
+            "both `let` statements must survive the stray `??`; tree:\n{:#?}",
+            result.tree
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn missing_close_paren_recovers_with_missing_node() {
+        // Phase-4 recovery: cursor mid-edit `foo(1, 2` (no closing paren).
+        // The call should still parse (so inference can type the args and
+        // completion works on the receiver / next dot) and the source
+        // text must round-trip.
+        let source = "func f() { foo(1, 2 }";
+        let result = parse_source(source, 0);
+
+        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
+        assert!(
+            missing_count >= 1,
+            "expected a Missing wrapper for the absent `)`, tree:\n{:#?}",
+            result.tree
+        );
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected `)`"))
+            .collect();
+        assert!(
+            !recovery_errors.is_empty(),
+            "expected an `expected \\`)\\`` diagnostic, got {:?}",
+            result.errors
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn missing_member_before_semicolon_recovers() {
+        // Cursor mid-edit shape: `foo.;`. The `;` is not a valid member token,
+        // so recovery emits Missing and the rest of the body still parses.
+        let source = "func f() { foo.; }";
+        let result = parse_source(source, 0);
+
+        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 1);
+        let recovery_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected identifier after `.`"))
+            .collect();
+        assert_eq!(recovery_errors.len(), 1);
+        assert_eq!(result.tree.text().to_string(), source);
     }
 }

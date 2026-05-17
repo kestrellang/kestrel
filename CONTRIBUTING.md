@@ -6,7 +6,7 @@ Thanks for your interest in contributing to Kestrel!
 
 ```bash
 # Clone and setup
-git clone https://github.com/jkpdino/kestrel.git
+git clone https://github.com/kestrellang/kestrel.git
 cd kestrel
 
 # Run tests

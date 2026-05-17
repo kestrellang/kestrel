@@ -3,3 +3,36 @@
 **/node_modules/
 .vscode
 /temp
+*.c.o
+# Lockfiles: ignore by default (libraries shouldn't pin), but commit example apps
+flock.lock
+!examples/*/flock.lock
+
+# Cloudflare Worker for the package registry — lives in a separate repo
+/registry/
+
+# Built binaries from Kestrel packages
+lang/flock/flock
+lang/jessup/jessup
+examples/breakout/breakout
+examples/counter/counter
+examples/life/life
+examples/pong/pong
+examples/sdl_pong/pong
+examples/sdl_pong/sdl_pong
+examples/snake/snake
+examples/weather/weather
+
+# Cloudflare Wrangler local state
+.wrangler/
+
+.triage
+
+**/flock.lock
+
+# Separate repos living inside the monorepo checkout — match both
+# directory and file/symlink forms so a stray `ln -s` can't be staged.
+/external
+/external/
+
+.wrangler

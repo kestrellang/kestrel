@@ -1,0 +1,16 @@
+// test: diagnostics
+// stdlib: false
+
+module Main
+
+enum Option {
+    case Some(value: lang.i64)
+    case None
+}
+
+func unwrapOr(opt: Option, default: lang.i64) -> lang.i64 {
+    match opt {
+        .Some(value) => value,
+        .None => default
+    }
+}

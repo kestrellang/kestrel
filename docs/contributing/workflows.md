@@ -1,539 +1,173 @@
 # Common Workflows
 
-Step-by-step guides for common development tasks.
-
-## Adding a New Language Feature
-
-This is the most common workflow. Use this when adding new syntax like a keyword, declaration type, or expression.
-
-### Files Changed (typical)
-
-Based on git history analysis of features like `self` parameter and member access:
-
-| Phase | Files | Lines Changed |
-|-------|-------|---------------|
-| Lexer | 1 file | ~5-10 |
-| Parser | 3-5 files | ~100-300 |
-| Syntax Tree | 1 file | ~20-50 |
-| Semantic Tree | 2-4 files | ~50-200 |
-| Semantic Build (lowering) | 1-3 files | ~50-250 |
-| Semantic Bind | 1-5 files | ~100-500 |
-| Semantic Analyze | 0-3 files | ~0-200 |
-| Tests | 1-2 files | ~50-200 |
-
-### Step-by-Step
-
-#### 1. Add Token (if new keyword)
-**File**: `lib/kestrel-lexer/src/lib.rs`
-
-```rust
-// Add in correct category (alphabetical within category)
-// Declaration Keywords section:
-#[token("newkeyword")]
-NewKeyword,
-```
-
-#### 2. Add SyntaxKind Variants
-**File**: `lib/kestrel-syntax-tree/src/lib.rs`
-
-```rust
-pub enum SyntaxKind {
-    // Token (if added above)
-    NewKeyword,
-
-    // Syntax nodes
-    NewFeatureDeclaration,
-    NewFeatureBody,  // if applicable
-}
-```
-
-Update `kind_from_raw`:
-```rust
-const NEW_FEATURE_DECLARATION: u16 = SyntaxKind::NewFeatureDeclaration as u16;
-
-match raw.0 {
-    NEW_FEATURE_DECLARATION => SyntaxKind::NewFeatureDeclaration,
-    // ...
-}
-```
-
-#### 3. Create Parser
-**File**: `lib/kestrel-parser/src/{feature}/mod.rs` (new file)
-
-Follow the event-driven parser pattern:
-1. Internal Chumsky parser
-2. Emit function
-3. Public parse function
-
-**File**: `lib/kestrel-parser/src/lib.rs`
-```rust
-pub mod newfeature;
-pub use newfeature::{NewFeatureDeclaration, parse_newfeature_declaration};
-```
-
-#### 4. Integrate into Declaration Items
-**File**: `lib/kestrel-parser/src/declaration_item/mod.rs`
-
-**Critical**: Add to `declaration_item_parser_internal()` - without this, the feature won't parse!
-
-```rust
-let newfeature_parser = /* ... */
-    .map(|data| DeclarationItemData::NewFeature(data));
-
-// Add to the .or() chain
-module_parser.or(import_parser).or(struct_parser).or(newfeature_parser)
-```
-
-#### 5. Add Symbol Kind
-**File**: `lib/kestrel-semantic-tree/src/symbol/kind.rs`
-```rust
-pub enum KestrelSymbolKind {
-    NewFeature,
-}
-```
-
-#### 6. Create Symbol
-**File**: `lib/kestrel-semantic-tree/src/symbol/newfeature.rs` (new file)
-
-```rust
-pub struct NewFeatureSymbol {
-    metadata: SymbolMetadata<KestrelLanguage>,
-}
-
-impl Symbol<KestrelLanguage> for NewFeatureSymbol {
-    fn metadata(&self) -> &SymbolMetadata<KestrelLanguage> {
-        &self.metadata
-    }
-}
-```
-
-Update `lib/kestrel-semantic-tree/src/symbol/mod.rs`:
-```rust
-mod newfeature;
-pub use newfeature::NewFeatureSymbol;
-```
-
-#### 7. Create Builder (BUILD)
-**File**: `lib/kestrel-semantic-tree-builder/src/builders/newfeature.rs` (new file)
-
-Implement the `Builder` trait (creates symbols + stores syntax map entries).
-
-Update `lib/kestrel-semantic-tree-builder/src/builders/mod.rs`:
-```rust
-mod newfeature;
-pub use newfeature::NewFeatureBuilder;
-```
-
-Register it in `lib/kestrel-semantic-tree-builder/src/lowerer.rs` by:
-- adding a `static NEWFEATURE: NewFeatureBuilder = NewFeatureBuilder;`
-- extending `builder_for(...)` to return `Some(&NEWFEATURE)` for your `SyntaxKind`
-
-#### 8. Create Binder (BIND)
-**File**: `lib/kestrel-semantic-tree-binder/src/binders/newfeature.rs` (new file)
-
-Implement `DeclarationBinder::bind_declaration(...)` for the new symbol kind.
-
-Update `lib/kestrel-semantic-tree-binder/src/binders/mod.rs`:
-```rust
-mod newfeature;
-pub use newfeature::NewFeatureBinder;
-```
-
-Register it in `lib/kestrel-semantic-tree-binder/src/declaration_binder.rs` in `DeclarationBinderRegistry::new()`:
-```rust
-binders.insert(SyntaxKind::NewFeatureDeclaration, Box::new(NewFeatureBinder));
-```
-
-#### 9. Add Tests
-**File**: `lib/kestrel-test-suite/tests/newfeature.rs` (new file)
-
-```rust
-use kestrel_test_suite::{Test, Compiles, HasError, Symbol, SymbolKind};
-
-#[test]
-fn basic_newfeature() {
-    Test::new("module Main\nnewfeature Foo { }")
-        .expect(Compiles)
-        .expect(Symbol::new("Foo").is(SymbolKind::NewFeature));
-}
-```
-
-#### 10. Verify
-```bash
-cargo test -p kestrel-lexer
-cargo test -p kestrel-parser
-cargo test -p kestrel-semantic-tree-builder
-cargo test -p kestrel-semantic-tree-binder
-cargo test -p kestrel-semantic-analyzers
-cargo test -p kestrel-test-suite
-cargo test
-```
+Step-by-step guides for the tasks that come up most often in lib. For architectural background see [Architecture](architecture.md); for file paths by task see [Quick Reference](quick-reference.md).
 
 ---
 
-## Adding Expression/Statement Support
+## Adding a new language feature
 
-When adding new expression or statement types (e.g., binary operators, if expressions).
+A "feature" here means new syntax or a new semantic construct that spans several pipeline stages — a keyword, declaration form, expression, or statement. The general order of operations, from front of pipeline to back:
 
-### Key Files
-- `lib/kestrel-parser/src/expr/mod.rs` - Expression parsing
-- `lib/kestrel-parser/src/stmt/mod.rs` - Statement parsing
-- `lib/kestrel-semantic-tree/src/expr.rs` - Expression semantics
-- `lib/kestrel-semantic-tree/src/stmt.rs` - Statement semantics
-- `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs` - **Main file**
+| Stage | Where the work lives |
+|-------|---------------------|
+| 1. Tokenize | `lib/kestrel-lexer/src/lib.rs` |
+| 2. Parse | `lib/kestrel-parser/src/` |
+| 3. Syntax node | `lib/kestrel-syntax-tree/src/` |
+| 4. AST type | `lib/kestrel-ast/src/` (if the feature is body-local) |
+| 5. Component / `NodeKind` | `lib/kestrel-ast-builder/src/components.rs` (if the feature is a declaration) |
+| 6. Build from CST | `lib/kestrel-ast-builder/src/` |
+| 7. Name resolution | `lib/kestrel-name-res/src/` |
+| 8. HIR shape | `lib/kestrel-hir/src/body.rs` |
+| 9. HIR lowering | `lib/kestrel-hir-lower/src/` |
+| 10. Inference | `lib/kestrel-type-infer/src/constraint.rs`, `solver.rs`, `generate.rs` |
+| 11. Analyzers | `lib/kestrel-analyze/src/body|decl|compilation/` |
+| 12. MIR lowering | `lib/kestrel-mir-lower/src/` |
+| 13. Codegen | `lib/kestrel-codegen-cranelift/src/` |
+| 14. Tests | `lib/kestrel-test-suite/testdata/<category>/` |
 
-### Step-by-Step
+You won't touch every stage for every feature — a purely syntactic change (e.g. new keyword for an existing construct) may only need 1–3. A new declaration form touches 1–12.
 
-#### 1. Add SyntaxKind
-```rust
-// In kestrel-syntax-tree/src/lib.rs
-BinaryExpr,  // or IfExpr, WhileStmt, etc.
-```
+### Recommended order
 
-#### 2. Update Parser
-Add parsing logic in `expr/mod.rs` or `stmt/mod.rs`.
+1. **Write the test first.** Create a `.ks` file under the most relevant testdata directory with the desired behavior. Run `triage <pattern>` — it should fail, and the failure tells you the nearest pipeline stage that doesn't understand the new input yet.
+2. **Move stage-by-stage**, re-running the test. Each stage typically fails with a specific error from the next stage downstream.
+3. **Add analyzers last**, once the feature compiles and runs. Analyzers encode rules; rules are easier to write when you have a working feature to reason about.
 
-#### 3. Add Semantic Representation
-```rust
-// In kestrel-semantic-tree/src/expr.rs
-pub enum Expr {
-    Binary { left: Box<Expr>, op: BinaryOp, right: Box<Expr> },
-    // ...
-}
-```
-
-#### 4. Update Body Resolver
-**File**: `lib/kestrel-semantic-tree-binder/src/body_resolver/mod.rs`
-
-This is where most of the work happens. Add a match arm to handle the new syntax:
-
-```rust
-fn resolve_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
-    match node.kind() {
-        SyntaxKind::BinaryExpr => self.resolve_binary_expr(node),
-        // ...
-    }
-}
-
-fn resolve_binary_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
-    // Extract operands and operator
-    // Resolve types
-    // Return Expr::Binary { ... }
-}
-```
-
-#### 5. Add Diagnostics (if needed)
-**File**: `lib/kestrel-semantic-tree-binder/src/diagnostics/{name}.rs`
-
-Create a new diagnostics module for feature-specific errors.
-
-#### 6. Add Tests
-**File**: `lib/kestrel-test-suite/tests/body_resolution.rs`
-
-```rust
-mod binary_ops {
-    #[test]
-    fn add_integers() {
-        Test::new("module Main\nfunc f() -> Int { 1 + 2 }")
-            .expect(Compiles);
-    }
-}
-```
+For non-trivial features prefer the `feature` agent skill — it enforces design/plan/test gates so you don't skip stages.
 
 ---
 
-## Adding a Validation Pass
+## Changing an existing feature
 
-When adding semantic checks that run after binding (e.g., checking for invalid modifiers).
+For targeted changes (tweak a diagnostic, adjust inference for one case, modify lowering for a specific pattern), use the `change` skill as a reference — the short form:
 
-### Key Files
-- `lib/kestrel-semantic-analyzers/src/analyzers/{name}/mod.rs` (new)
-- `lib/kestrel-semantic-analyzers/src/analyzers/mod.rs`
-- `lib/kestrel-semantic-analyzers/src/lib.rs` (register in `default_analyzers()`)
-- `lib/kestrel-test-suite/tests/validation.rs`
+1. Identify the two or three pipeline stages involved (use the `kestrel-pipeline` skill if routing is unclear).
+2. Update the code.
+3. Update the tests that cover it — every `.ks` file under `testdata/` with an `// ERROR:` annotation that touches this rule.
+4. Run the relevant testdata subdirectory before running the whole suite: `triage <subdir>` is faster.
 
-### Step-by-Step
-
-#### 1. Define Errors
-Document what errors the pass will detect:
-
-| Condition | Error Message |
-|-----------|---------------|
-| When X | "error: X happened" |
-
-#### 2. Create Analyzer File
-**File**: `lib/kestrel-semantic-analyzers/src/analyzers/mycheck/mod.rs`
-
-```rust
-pub struct MyCheckAnalyzer;
-
-impl Analyzer for MyCheckAnalyzer {
-    fn name(&self) -> &'static str { "my_check" }
-}
-```
-
-#### 3. Register Analyzer
-Add it to `default_analyzers()` in `lib/kestrel-semantic-analyzers/src/lib.rs` (in the right order).
-
-```rust
-// lib/kestrel-semantic-analyzers/src/analyzers/mod.rs
-pub mod mycheck;
-pub use mycheck::MyCheckAnalyzer;
-
-// lib/kestrel-semantic-analyzers/src/lib.rs
-pub fn default_analyzers() -> Vec<Box<dyn Analyzer>> {
-    vec![
-        // ... existing analyzers
-        Box::new(MyCheckAnalyzer),
-    ]
-}
-```
-
-#### 4. Add Tests
-**File**: `lib/kestrel-test-suite/tests/validation.rs`
-
-```rust
-mod my_check {
-    #[test]
-    fn valid_case() {
-        Test::new("module Main\n/* valid code */")
-            .expect(Compiles);
-    }
-
-    #[test]
-    fn invalid_case() {
-        Test::new("module Main\n/* invalid code */")
-            .expect(HasError("expected error message"));
-    }
-}
-```
+If a test has to change, make the change deliberate. `CLAUDE.md` forbids changing a test to cajole it into passing — if the test was right, the code is wrong.
 
 ---
 
-## Adding a New Diagnostic
+## Adding a diagnostic
 
-When adding error messages for semantic analysis.
+All user-visible diagnostics are emitted by analyzers or by the inference solver. The two paths differ.
 
-### Key Files
-- BIND-time diagnostics: `lib/kestrel-semantic-tree-binder/src/diagnostics/{name}.rs` (new)
-- Analyzer diagnostics: `lib/kestrel-semantic-analyzers/src/analyzers/{name}/diagnostics.rs` (new)
+### From an analyzer
 
-### Step-by-Step
+1. Pick an unused diagnostic id (search `static DESCRIPTORS` across `lib/kestrel-analyze/src/` to see what's taken).
+2. In the analyzer file, extend the `DESCRIPTORS` slice:
+   ```rust
+   DiagnosticDescriptor {
+       id: "E123",
+       name: "your_rule",
+       default_severity: Severity::Error,
+       category: Category::Correctness,
+   }
+   ```
+3. In the analyzer's `check` method, build an `AnalyzeDiagnostic` with the message, primary label, secondary labels, and optional notes.
+4. Add a `// test: diagnostics` `.ks` file under `testdata/` with an `// ERROR:` annotation that matches your full message.
+5. Document the diagnostic at the top of the analyzer file (message template, label sources, cascading behavior).
 
-#### 1. Create Diagnostic Module
-**File**: `lib/kestrel-semantic-tree-binder/src/diagnostics/myerror.rs`
+### From the type-inference solver
 
-```rust
-use kestrel_reporting::{Diagnostic, DiagnosticContext, Label};
-use kestrel_span::Span;
+Inference diagnostics go through `InferError`. Adding a variant requires changes in **five** files — `lib/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
 
-pub fn report_my_error(
-    diagnostics: &mut DiagnosticContext,
-    span: Span,
-    name: &str,
-) {
-    let diagnostic = Diagnostic::error()
-        .with_message(format!("my error: '{}'", name))
-        .with_labels(vec![
-            Label::primary(span.file_id, span.range())
-                .with_message("error occurred here")
-        ]);
+| File | Change |
+|------|--------|
+| `kestrel-type-infer/src/error.rs` | Add the variant + its span arm. |
+| `kestrel-type-infer/src/result.rs` | `describe_error()` match arm. |
+| `kestrel-compiler/src/diagnostic.rs` | `InferError` → `Diagnostic` match arm. |
+| `kestrel-analyze/src/body/type_check.rs` | `format_error()` match arm. |
+| `kestrel-compiler-driver/src/lib.rs` | `describe()` and `format_error()` arms. |
 
-    diagnostics.add_diagnostic(diagnostic);
-}
-```
+Missing any one of these produces a non-exhaustive-match error only when the dependent crate is compiled — so do the whole set in one pass.
 
-#### 2. Export
-**File**: `lib/kestrel-semantic-tree-binder/src/diagnostics/mod.rs`
-
-```rust
-mod myerror;
-pub use myerror::report_my_error;
-```
-
-#### 3. Use in Binder or Body Resolver
-```rust
-use crate::diagnostics::report_my_error;
-
-// When error condition is detected:
-report_my_error(diagnostics, span, name);
-```
+To report the error from the solver, call `ctx.report_error(InferError::YourVariant { ... })`. It returns an Error TyVar that you use as the result of the constraint-generation branch, so cascades get absorbed.
 
 ---
 
-## Adding or Modifying Standard Library Methods
+## Adding an analyzer
 
-The standard library lives in `lang/std/` as Kestrel source files.
-
-### Directory Structure
-
-```
-lang/std/
-├── collections/    # Array, Set, Dictionary
-├── core/           # Bool, Equatable, Comparable, Cloneable, Hash, Range, etc.
-├── ffi/            # Foreign function interface
-├── io/             # File, stdin/stdout/stderr, Read/Write protocols
-├── iter/           # Iterator protocol and adapters
-├── memory/         # Layout, Pointer, Slice, RawPointer, SystemAllocator, RcBox
-├── num/            # Int64, Float, RandomNumberGenerator
-├── result/         # Optional, Result
-└── text/           # String, Formattable, FormatOptions
-```
-
-### Stdlib File Structure
-
-Each `.ks` file follows this pattern:
-
-```kestrel
-module std.collections
-
-import std.core.(Bool, Equatable, Comparable)
-import std.num.(Int64)
-// ... other imports
-
-public struct MyType[T] {
-    private var data: Pointer[T]
-
-    public init() { ... }
-
-    public func myMethod() -> Bool { ... }
-
-    public mutating func myMutatingMethod() { ... }
-}
-```
-
-Key conventions:
-- Module path matches directory structure (`std.collections`, `std.core`, etc.)
-- Public API uses `public` visibility
-- Internal fields use `private`
-- Mutating methods are marked `mutating`
-- COW types (String, Array) call `makeUnique()` before `grow()` in mutating methods
-
-### Testing Stdlib Methods
-
-Stdlib tests live in `lib/kestrel-test-suite/tests/stdlib/`. Each test compiles and **runs** a Kestrel program that exercises the method.
-
-```rust
-use kestrel_test_suite::*;
-
-#[test]
-fn my_method_test() {
-    Test::new(
-        r#"module Test
-
-        func main() -> lang.i64 {
-            // Setup
-            let x = ...
-
-            // Test the method — return non-zero on failure
-            if x.myMethod() == false { return 1 }
-
-            0
-        }
-    "#,
-    )
-    .with_stdlib()
-    .expect(Compiles)
-    .expect(Runs);
-}
-```
-
-Key patterns:
-- Use `.with_stdlib()` to include the standard library
-- Use `.expect(Runs)` to compile and execute (not just compile)
-- `main()` returns `lang.i64` — return `0` for success, non-zero for failure
-- Each check returns a unique non-zero value to identify which assertion failed
-
-### Step-by-Step
-
-#### 1. Implement the method
-Edit the appropriate file in `lang/std/`. Follow existing patterns in that file.
-
-#### 2. Add tests
-Add tests in `lib/kestrel-test-suite/tests/stdlib/{type}.rs`. If the file doesn't exist, create it and add the module to `lib/kestrel-test-suite/tests/stdlib/mod.rs`.
-
-#### 3. Run the specific test
-```bash
-cargo test -p kestrel-test-suite --release -- test_name
-```
+1. Decide granularity:
+   - **`BodyCheck`** — per function / init body. You receive the HIR body and the typed body.
+   - **`DeclCheck`** — per declaration entity. You filter by `NodeKind`.
+   - **`CompilationCheck`** — once over the whole compilation. Use for cycle detection or cross-entity conflicts.
+2. Create the file under the matching subdirectory:
+   - `lib/kestrel-analyze/src/body/<name>.rs`
+   - `lib/kestrel-analyze/src/decl/<name>.rs`
+   - `lib/kestrel-analyze/src/compilation/<name>.rs`
+3. Follow the analyzer skeleton in [Patterns](patterns.md#analyzer-shape):
+   - `static DESCRIPTORS` with the diagnostic ids.
+   - ZST struct.
+   - `Describe` impl (id + descriptors).
+   - The relevant check trait impl.
+4. Export it from the parent `mod.rs`.
+5. Register it in `default_analyzers()` in `lib/kestrel-analyze/src/lib.rs`, in the correct section. Analyzers run in registration order — place yours after any analyzer it depends on.
+6. Suppress on upstream errors: if `cx.typed.errors.is_empty()` is false (for body checks), return `vec![]`.
+7. Add diagnostic tests under `testdata/validation/<your_rule>/`.
 
 ---
 
-## Debugging Semantic Resolution Issues
+## Adding a stdlib method
 
-When symbols aren't being created or resolved correctly.
+The standard library is Kestrel source in `lang/std/`, one module per directory.
 
-### Diagnostic Steps
+1. **Implement the method** in the appropriate `.ks` file. Match the patterns in the surrounding code — visibility, mutating annotations, COW conventions.
+2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks`:
+   ```kestrel
+   // test: runs
+   // stdlib: true
 
-#### 1. Check Parser Output
-Add debug output to see if syntax tree is correct:
-```rust
-// In parser test
-let tree = TreeBuilder::new(source, sink.into_events()).build();
-println!("{:#?}", tree);
-```
+   module Main
 
-#### 2. Check Registration
-Verify the builder/binder is registered:
-```rust
-// BUILD: SyntaxKind -> Builder (in builder_for(...) in lowerer.rs)
-// BIND: SyntaxKind -> DeclarationBinder (DeclarationBinderRegistry::new)
-```
-
-#### 3. Check Symbol Creation
-Add debug output in your builder:
-```rust
-fn build_declaration(&self, syntax: &SyntaxNode, ...) -> Option<...> {
-    println!("Building: {:?}", syntax.kind());
-    // ...
-    println!("Created symbol: {:?}", symbol.metadata().name());
-}
-```
-
-#### 4. Check Parent-Child Links
-```rust
-if let Some(parent) = parent {
-    parent.metadata().add_child(&symbol_arc);
-    println!("Added to parent: {:?}", parent.metadata().name());
-}
-```
-
-#### 5. Use Test Expectations
-```rust
-Test::new("module Main\nyour code")
-    .expect(Compiles)
-    .expect(Symbol::new("YourSymbol").is(SymbolKind::YourKind));
-```
-
-If the test fails, it shows what symbols actually exist.
+   func main() -> lang.i64 {
+       let arr = Array[lang.i64]()
+       arr.append(5)
+       if arr.count != 1 { return 1 }
+       0
+   }
+   ```
+   Non-zero exit codes surface as test failures; each check returns a unique non-zero value so a regression points at the exact assertion.
+3. **Run it:** `triage <test_name>`.
 
 ---
 
-## Git Workflow
+## Adding a `Constraint` variant
 
-See [Git](git.md) for the full branching strategy, PR requirements, and issue workflow.
+Type-inference constraints live in `lib/kestrel-type-infer/src/constraint.rs`.
 
-### Commit Messages
-```
-feature: description of feature
-fix: description of bug fix
-refactor: description of refactoring
-docs: description of documentation change
-test: description of test addition
-```
+1. Add the variant with the minimum data it needs, and a doc comment explaining the rule ("`a = b` — structural type equality", "`ty : Protocol` — protocol conformance", etc.).
+2. Decide whether the variant is **eager** (solves on first visit) or **deferred** (requires concrete input, re-checked each solver round). Document this in the variant's doc comment.
+3. Add a `try_solve_*` function in `lib/kestrel-type-infer/src/solver.rs` and wire it into the solver loop.
+4. Generate the constraint where the language construct is lowered — typically in `generate.rs`.
+5. Add focused tests under `testdata/inference/`.
 
-### Feature Commits
-Features are typically done in a single commit including:
-- Lexer changes
-- Parser changes
-- Syntax tree changes
-- Semantic tree changes
-- Builder changes
-- Tests
+---
 
-### Running Before Commit
+## Debugging a failing test
+
+See the `debug` skill for the full protocol. The headline rules:
+
+1. **Reproduce first.** `triage <test>` — look at the actual error.
+2. **One hypothesis at a time.** Form a specific hypothesis, test it, evaluate the result before forming the next one.
+3. **Stop after 3 failed attempts of the same class.** List what you tried, what you ruled out, ask for guidance.
+4. **Use `debug_trace!`** in compiler source and rerun with `VERBOSE_DEBUG_OUTPUT=1`. Do not use `eprintln!` / `println!`.
+5. **`kestrel dump`** can print intermediate representations (CST, AST, HIR, types, MIR) for a `.ks` file — handy for narrowing the stage where the bug lives.
+
+---
+
+## Committing and opening a PR
+
+See [Workflow](git.md) for the full branching model and release cadence. Before you commit:
+
 ```bash
 cargo fmt
 cargo clippy
-cargo test
+triage            # full suite — only before commits, not after every edit
 ```
+
+Commit message prefixes: `feature:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`.
+
+Small, focused commits beat big sweeping ones. A feature commit should include its tests.

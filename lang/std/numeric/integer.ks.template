@@ -1,0 +1,536 @@
+// {{TYPE_NAME}} - {{BITS}}-bit {{SIGNEDNESS}} integer
+// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+
+module std.numeric
+
+import std.ffi.(FFISafe)
+import std.core.(
+    Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
+    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
+    ExpressibleByIntLiteral, Convertible, Defaultable,
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+)
+import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.memory.(Slice, Pointer)
+import std.numeric.(UInt8, Int64, UInt64)
+
+/// A {{BITS}}-bit {{SIGNEDNESS}} integer.
+///
+/// {{TYPE_NAME}} is the {{BITS}}-bit member of the integer family. The same surface
+/// area is provided across all widths; switch widths to trade range for memory
+/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
+/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
+/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// `lang.{{LANG_TYPE}}` so it can cross C boundaries unchanged.
+///
+/// # Examples
+///
+/// ```
+/// let a: Int64 = 100;
+/// let b = a + 50;        // 150
+/// let c = a * 2;         // 200
+/// let d = a.addChecked(Int64.maxValue);  // None (overflow detected)
+/// ```
+///
+/// ```
+/// // Bit twiddling
+/// (0b1010).countOnes      // 2
+/// (1).shiftLeft(by: 4)    // 16
+/// (-1).leadingZeros       // 0  (all bits set)
+/// ```
+///
+/// # Representation
+///
+/// A single `lang.{{LANG_TYPE}}` field. No padding, no headers — bit-identical
+/// to the corresponding C type.
+public struct {{TYPE_NAME}}:
+    {{SIGNEDNESS_PROTOCOL}},
+    Steppable,
+    Comparable,
+    Equatable,
+    Matchable,
+    Formattable,
+    Hashable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    {{NEGATABLE}}
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
+    ModuloAssign,
+    BitwiseAndAssign,
+    BitwiseOrAssign,
+    BitwiseXorAssign,
+    LeftShiftAssign[Int64],
+    RightShiftAssign[Int64],
+    ExpressibleByIntLiteral,
+    Defaultable,
+    FFISafe,
+    RangeConstructible,
+    ClosedRangeConstructible,
+{{CONVERTIBLE_CONFORMANCES}}{
+    /// The underlying primitive `lang.{{LANG_TYPE}}` value. Exposed for FFI
+    /// and intrinsic use; prefer the typed surface for everything else.
+    public var raw: lang.{{LANG_TYPE}}
+
+    // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    /// The additive identity, `0`.
+    public static var zero: {{TYPE_NAME}} { 0 }
+
+    /// The multiplicative identity, `1`.
+    public static var one: {{TYPE_NAME}} { 1 }
+
+    /// The smallest representable value.
+    {{MIN_VALUE_DOC}}
+    /// Note that for signed types `minValue.negate()` overflows back to
+    /// itself; use `negateChecked()` if you need to detect that.
+    public static var minValue: {{TYPE_NAME}} { {{MIN_VALUE_EXPR}} }
+
+    /// The largest representable value.
+    {{MAX_VALUE_DOC}}
+    public static var maxValue: {{TYPE_NAME}} { {{MAX_VALUE}} }
+
+    /// The width in bits ({{BITS}}). Useful for shift bounds and bit-walks.
+    public static var bitWidth: Int64 { {{BITS}} }
+
+    // ========================================================================
+    // INITIALIZERS
+    // ========================================================================
+
+    /// @name Int Literal
+    /// Compiler-emitted bridge that turns an integer literal into a {{TYPE_NAME}}.
+    ///
+    /// You will rarely call this directly — write the literal and let the
+    /// `ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
+    /// 64 bits the literal is truncated with `lang.cast_i64_{{LANG_TYPE}}`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: Int64 = 42;            // implicit
+    /// ```
+    public init(intLiteral value: lang.i64) {
+        {{INT_LITERAL_INIT}}
+    }
+
+    /// @name Default
+    /// Creates the zero value, satisfying `Defaultable`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n = Int64();   // 0
+    /// ```
+    public init() {
+        self.init(intLiteral: 0)
+    }
+
+    /// @name From Raw
+    /// Wraps an existing `lang.{{LANG_TYPE}}` without conversion. Internal
+    /// constructor used by intrinsics; not part of the public API.
+    init(raw value: lang.{{LANG_TYPE}}) {
+        self.raw = value
+    }
+
+{{CONVERTIBLE_INITS}}
+    // ========================================================================
+    // SIGN INSPECTION (Properties)
+    // ========================================================================
+
+{{SIGN_PROPERTIES}}
+    // ========================================================================
+    // BIT INSPECTION (Properties)
+    // ========================================================================
+
+    /// True when the value is a positive power of two (`2^k` for `k >= 0`).
+    ///
+    /// Zero and negatives are excluded. Cheap branchless test built on
+    /// `x & (x - 1) == 0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1).isPowerOfTwo;   // true  (2^0)
+    /// (4).isPowerOfTwo;   // true  (2^2)
+    /// (3).isPowerOfTwo;   // false
+    /// (0).isPowerOfTwo;   // false
+    /// ```
+    public var isPowerOfTwo: Bool { get {
+        {{IS_POWER_OF_TWO}}
+    }}
+
+    /// Population count — the number of `1` bits in the binary representation.
+    ///
+    /// Lowered to a `popcount` intrinsic where the target supports it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (0b1010).countOnes;  // 2
+    /// (0b1111).countOnes;  // 4
+    /// (0).countOnes;       // 0
+    /// ```
+    public var countOnes: Int64 { get {
+        {{COUNT_ONES_IMPL}}
+    }}
+
+    /// Complement of `countOnes`: equal to `bitWidth - countOnes`.
+    public var countZeros: Int64 { get {
+        {{BITS}} - self.countOnes
+    }}
+
+    /// Number of leading zero bits, counting from the most-significant end.
+    ///
+    /// For zero, returns `bitWidth`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1).leadingZeros;   // bitWidth - 1
+    /// (0).leadingZeros;   // bitWidth
+    /// ```
+    public var leadingZeros: Int64 { get {
+        {{LEADING_ZEROS_IMPL}}
+    }}
+
+    /// Number of trailing zero bits. Equal to `log2(self & -self)` for non-zero
+    /// values; returns `bitWidth` for zero. Useful for finding the largest
+    /// power of two dividing the value.
+    public var trailingZeros: Int64 { get {
+        {{TRAILING_ZEROS_IMPL}}
+    }}
+
+    /// Value with its byte order reversed. Use to convert between big- and
+    /// little-endian; lowered to a `bswap` intrinsic.
+    public var byteSwapped: {{TYPE_NAME}} { get {
+        {{BYTE_SWAP_IMPL}}
+    }}
+
+    // ========================================================================
+    // COMPARISON
+    // ========================================================================
+
+    /// Bit-for-bit equality. Backs the `==` operator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (42).isEqual(to: 42);  // true
+    /// 42 == 42;               // true
+    /// ```
+    public func isEqual(to other: {{TYPE_NAME}}) -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
+    }
+
+    /// Pattern-matching hook for `Matchable`. Identical to `isEqual`.
+    public func matches(other: {{TYPE_NAME}}) -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
+    }
+
+    /// Three-way comparison returning an `Ordering`. Signed types compare
+    /// using two's-complement ordering; unsigned types use natural ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1).compare(2);   // .Less
+    /// (2).compare(2);   // .Equal
+    /// (3).compare(2);   // .Greater
+    /// ```
+    public func compare(other: {{TYPE_NAME}}) -> Ordering {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}gt(self.raw, other.raw)) { .Greater }
+        else { .Equal }
+    }
+
+    // ========================================================================
+    // STEPPING
+    // ========================================================================
+
+    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// integer ranges.
+    public func successor() -> {{TYPE_NAME}} { self.add({{TYPE_NAME}}.one) }
+
+    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    public func predecessor() -> {{TYPE_NAME}} { self.subtract({{TYPE_NAME}}.one) }
+
+    /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
+    public func exclusiveRange(to end: {{TYPE_NAME}}) -> Range[{{TYPE_NAME}}] {
+        Range[{{TYPE_NAME}}](self, end)
+    }
+
+    /// Builds a closed range `self..=end`. Sugar for the `..=` operator.
+    public func inclusiveRange(to end: {{TYPE_NAME}}) -> ClosedRange[{{TYPE_NAME}}] {
+        ClosedRange[{{TYPE_NAME}}](self, end)
+    }
+
+    // ========================================================================
+    // HASHING
+    // ========================================================================
+
+    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
+    /// only within a single process — do not persist hashes across builds.
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        let val = self;
+        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
+    }
+
+    // ========================================================================
+    // ASSOCIATED TYPE BINDINGS
+    // ========================================================================
+
+    type Addable.Output = {{TYPE_NAME}}
+    type Subtractable.Output = {{TYPE_NAME}}
+    type Multipliable.Output = {{TYPE_NAME}}
+    type Divisible.Output = {{TYPE_NAME}}
+    type Modulo.Output = {{TYPE_NAME}}
+    {{NEGATABLE_OUTPUT}}
+    type BitwiseAnd.Output = {{TYPE_NAME}}
+    type BitwiseOr.Output = {{TYPE_NAME}}
+    type BitwiseXor.Output = {{TYPE_NAME}}
+    type BitwiseNot.Output = {{TYPE_NAME}}
+    type LeftShift.Output = {{TYPE_NAME}}
+    type RightShift.Output = {{TYPE_NAME}}
+    type RangeConstructible.Output = Range[{{TYPE_NAME}}]
+    type ClosedRangeConstructible.Output = ClosedRange[{{TYPE_NAME}}]
+
+    // ========================================================================
+    // ARITHMETIC (Wrapping - Default)
+    // ========================================================================
+
+    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
+    /// `addSaturating` to clamp.
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+
+    /// `self - other`, wrapping on overflow.
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+
+    /// `self * other`, wrapping on overflow.
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+
+    /// Truncating integer division (`self / other`). For signed types,
+    /// `minValue / -1` wraps; use `divideChecked` to detect.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
+    /// process aborts before producing a result).
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.raw, other.raw)) }
+
+    /// `self % other` — truncated remainder; the result has the sign of
+    /// `self` for signed types.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `divide`.
+    public func modulo(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.raw, other.raw)) }
+
+    {{NEGATE_METHOD}}
+    {{ABS_METHOD}}
+
+    // ========================================================================
+    // ARITHMETIC (Checked - Returns Optional)
+    // ========================================================================
+
+{{CHECKED_ARITHMETIC}}
+    // ========================================================================
+    // ARITHMETIC (Saturating - Clamps to Bounds)
+    // ========================================================================
+
+{{SATURATING_ARITHMETIC}}
+    // ========================================================================
+    // ARITHMETIC (Extended)
+    // ========================================================================
+
+    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
+    /// overflow. Negative exponents return zero (integer truncation of
+    /// the would-be fraction).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (2).pow(10);  // 1024
+    /// (3).pow(4);   // 81
+    /// (5).pow(-1);  // 0
+    /// ```
+    public func pow(exponent: Int64) -> {{TYPE_NAME}} {
+        if exponent < 0 {
+            return {{TYPE_NAME}}.zero
+        };
+        if exponent == 0 {
+            return {{TYPE_NAME}}.one
+        };
+        var result = {{TYPE_NAME}}.one;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiply(base)
+            };
+            base = base.multiply(base);
+            exp = exp / 2
+        };
+        result
+    }
+
+    /// Greatest common divisor via Euclidean algorithm. For signed types
+    /// the inputs are taken absolute first; the result is always non-negative.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (12).gcd(8);   // 4
+    /// (17).gcd(5);   // 1   (coprime)
+    /// (-12).gcd(8);  // 4
+    /// ```
+    public func gcd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        var a = {{GCD_ABS_SELF}};
+        var b = {{GCD_ABS_OTHER}};
+        while b != {{TYPE_NAME}}.zero {
+            let t = b;
+            b = a.modulo(b);
+            a = t
+        };
+        a
+    }
+
+    /// Least common multiple, computed as `|self| / gcd(self, other) * |other|`
+    /// to avoid intermediate overflow. Returns zero if either input is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (4).lcm(6);   // 12
+    /// (3).lcm(5);   // 15
+    /// (0).lcm(7);   // 0
+    /// ```
+    public func lcm(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if self == {{TYPE_NAME}}.zero or other == {{TYPE_NAME}}.zero {
+            return {{TYPE_NAME}}.zero
+        };
+        let g = self.gcd(other);
+        {{LCM_ABS_SELF}}.divide(g).multiply({{LCM_ABS_OTHER}})
+    }
+
+    // ========================================================================
+    // CLAMPING
+    // ========================================================================
+
+    /// Clamps `self` into `[min, max]`. Caller is responsible for ensuring
+    /// `min <= max`; otherwise the result is undefined.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (5).clamp(0, 10);    // 5
+    /// (-5).clamp(0, 10);   // 0
+    /// (15).clamp(0, 10);   // 10
+    /// ```
+    public func clamp(min: {{TYPE_NAME}}, max: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if self < min { min }
+        else if self > max { max }
+        else { self }
+    }
+
+    // ========================================================================
+    // BITWISE OPERATIONS
+    // ========================================================================
+
+    /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
+    public func bitwiseAnd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_and(self.raw, other.raw)) }
+
+    /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
+    public func bitwiseOr(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_or(self.raw, other.raw)) }
+
+    /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
+    public func bitwiseXor(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_xor(self.raw, other.raw)) }
+
+    /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
+    public func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.raw)) }
+
+    /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
+    /// — pre-mask the count if you can't guarantee the bound.
+    public func shiftLeft(by count: Int64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.raw, {{SHIFT_CAST}})) }
+
+    /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
+    /// logical (zero-filling) for unsigned. Same `count` precondition as
+    /// `shiftLeft`.
+    public func shiftRight(by count: Int64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.raw, {{SHIFT_CAST}})) }
+
+    /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
+    /// MSB re-enter at the LSB.
+    public func rotateLeft(by count: Int64) -> {{TYPE_NAME}} {
+        let bits: Int64 = {{BITS}};
+        let c = count % bits;
+        if c == 0 { self }
+        else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
+    }
+
+    /// Rotates bits right by `count`, modulo `bitWidth`. Mirror of
+    /// `rotateLeft`.
+    public func rotateRight(by count: Int64) -> {{TYPE_NAME}} {
+        let bits: Int64 = {{BITS}};
+        let c = count % bits;
+        if c == 0 { self }
+        else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
+    }
+
+    // ========================================================================
+    // COMPOUND ASSIGNMENT
+    // ========================================================================
+
+    /// `self += other`
+    public mutating func addAssign(other: {{TYPE_NAME}}) { self = self.add(other) }
+    /// `self -= other`
+    public mutating func subtractAssign(other: {{TYPE_NAME}}) { self = self.subtract(other) }
+    /// `self *= other`
+    public mutating func multiplyAssign(other: {{TYPE_NAME}}) { self = self.multiply(other) }
+    /// `self /= other`
+    public mutating func divideAssign(other: {{TYPE_NAME}}) { self = self.divide(other) }
+    /// `self %= other`
+    public mutating func modAssign(other: {{TYPE_NAME}}) { self = self.modulo(other) }
+    /// `self &= other`
+    public mutating func bitwiseAndAssign(other: {{TYPE_NAME}}) { self = self.bitwiseAnd(other) }
+    /// `self |= other`
+    public mutating func bitwiseOrAssign(other: {{TYPE_NAME}}) { self = self.bitwiseOr(other) }
+    /// `self ^= other`
+    public mutating func bitwiseXorAssign(other: {{TYPE_NAME}}) { self = self.bitwiseXor(other) }
+    /// `self <<= count`
+    public mutating func shiftLeftAssign(by count: Int64) { self = self.shiftLeft(by: count) }
+    /// `self >>= count`
+    public mutating func shiftRightAssign(by count: Int64) { self = self.shiftRight(by: count) }
+
+    // ========================================================================
+    // BYTE CONVERSION
+    // ========================================================================
+
+{{BYTE_CONVERSION}}
+
+    // ========================================================================
+    // PARSING
+    // ========================================================================
+
+{{PARSE_METHOD}}
+
+    // ========================================================================
+    // FORMATTING
+    // ========================================================================
+
+{{FORMAT_METHOD}}}
+{{TYPE_ALIAS}}

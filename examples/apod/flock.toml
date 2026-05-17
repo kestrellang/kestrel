@@ -1,0 +1,11 @@
+[package]
+name = "apod"
+version = "0.1.0"
+description = "NASA Astronomy Picture of the Day viewer"
+
+[dependencies]
+perch = { path = "../../lang/perch" }
+swoop = { path = "../../lang/swoop" }
+quill-json = { path = "../../lang/quill-json" }
+plume = { path = "../../lang/plume" }
+http = { path = "../../lang/http" }

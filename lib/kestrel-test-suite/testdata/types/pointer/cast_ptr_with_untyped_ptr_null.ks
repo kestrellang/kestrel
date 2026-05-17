@@ -1,0 +1,8 @@
+// test: diagnostics
+// stdlib: false
+
+module Test
+
+func test() -> lang.ptr[lang.i64] {
+    lang.cast_ptr[_, lang.i64](lang.ptr_null())
+}

@@ -1,3 +1,5 @@
-# Downloaded UCD files - regenerate with fetch_unicode_data.py
-*
+# Downloaded UCD source files - regenerate with fetch_unicode_data.py
+*.txt
+
+# Keep the compiled binary tables (needed for builds)
 !.gitignore

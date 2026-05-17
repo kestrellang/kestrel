@@ -23,6 +23,29 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
+/// Emit a typed piece of parser data to an [`EventSink`].
+///
+/// Implementors are expected to destructure their data without a `..` rest
+/// pattern so that adding a new field forces the emitter to be updated (or
+/// fail to compile). The combination — one trait, one destructure per impl
+/// — gives us a local compile-time check that a new syntax field is handled
+/// by the emitter instead of being silently dropped.
+pub trait EmitSyntax {
+    fn emit(self, sink: &mut EventSink);
+}
+
+/// Distinct trivia kinds that can appear between syntax tokens. Kept local to
+/// the tree builder so callers don't need to know the enumeration.
+fn is_trivia_kind(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Whitespace
+            | SyntaxKind::Newline
+            | SyntaxKind::LineComment
+            | SyntaxKind::BlockComment
+    )
+}
+
 /// Events emitted during parsing
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -30,6 +53,12 @@ pub enum Event {
     StartNode(SyntaxKind),
     /// Add a token to the current node
     AddToken(SyntaxKind, Span),
+    /// Emit a synthesized zero-width token wrapped in a `Missing` node.
+    /// Used by error recovery when a required token (e.g. the identifier
+    /// after `foo.`) is absent. `at` carries the byte position where the
+    /// token would have appeared (start == end for a zero-width span); the
+    /// inner token's `kind` is what consumers pattern-match against.
+    MissingToken { kind: SyntaxKind, at: Span },
     /// Finish the current syntax node
     FinishNode,
     /// A parse error occurred
@@ -65,6 +94,17 @@ impl EventSink {
     /// Add a token to the current node
     pub fn add_token(&mut self, kind: SyntaxKind, span: Span) {
         self.events.push(Event::AddToken(kind, span));
+    }
+
+    /// Emit a synthesized zero-width token wrapped in a `Missing` node at
+    /// the given position. The recovery primitive for "expected token X, got
+    /// nothing" — keeps the CST well-formed so downstream lowering /
+    /// inference / completion can still operate on the parent shape. The
+    /// caller is responsible for also emitting a corresponding parse error
+    /// (typically via Chumsky's `validate` emitter) so the diagnostic isn't
+    /// silently dropped.
+    pub fn missing_token(&mut self, kind: SyntaxKind, at: Span) {
+        self.events.push(Event::MissingToken { kind, at });
     }
 
     /// Finish the current syntax node
@@ -122,6 +162,57 @@ impl EventSink {
         });
     }
 
+    /// Add a closing token whose span the parser may have synthesised when
+    /// the real token was missing. A zero-width span means the parser ran
+    /// the recovery branch (`or(empty().map_with(...))`); in that case
+    /// emit a `missing_token` CST event plus a "expected `<kind>`"
+    /// diagnostic so the editor still squiggles the gap. Real tokens go
+    /// through the normal `add_token` path. Use this for any closing
+    /// `)` / `]` / `}` / `;` that has the parser-recovery pattern in
+    /// `parser_recovery_pattern.md`.
+    ///
+    /// The diagnostic span widens the synthesised zero-width span by one
+    /// byte to the left when possible — VSCode collapses zero-width
+    /// diagnostics to invisible squiggles, so we anchor the underline on
+    /// the character preceding the cursor (where the missing token should
+    /// have appeared).
+    pub fn add_token_or_missing(&mut self, kind: SyntaxKind, span: Span, expected_label: &str) {
+        if span.start == span.end {
+            // Anchor the diagnostic on the last real (non-trivia) token
+            // already emitted into this sink — that's the end of the
+            // expression / item that should have been followed by the
+            // missing closing token. Without this, the squiggle lands on
+            // whitespace at the start of the next line because chumsky's
+            // `skip_trivia` consumed the newline before the recovery
+            // branch fired.
+            let anchor_end = self.last_real_token_end().unwrap_or(span.end);
+            let diag_start = anchor_end.saturating_sub(1);
+            self.error_at_span(
+                format!("expected `{}`", expected_label),
+                // file_id from the sink, not the input span: chumsky
+                // spans use file_id 0, which the LSP's file_id → URL
+                // map would silently drop for any non-zero file.
+                Span::new(self.file_id, diag_start..anchor_end),
+            );
+            self.missing_token(kind, Span::new(self.file_id, span.start..span.end));
+        } else {
+            self.add_token(kind, span);
+        }
+    }
+
+    /// End offset of the most recently emitted non-trivia `AddToken`.
+    /// Used by `add_token_or_missing` to anchor diagnostics for parser-
+    /// synthesised tokens at the end of the previous real content.
+    fn last_real_token_end(&self) -> Option<usize> {
+        for ev in self.events.iter().rev() {
+            if let Event::AddToken(k, span) = ev
+                && !is_trivia_kind(*k) {
+                    return Some(span.end);
+                }
+        }
+        None
+    }
+
     /// Get the collected events
     pub fn events(&self) -> &[Event] {
         &self.events
@@ -161,27 +252,69 @@ impl<'src> TreeBuilder<'src> {
         SyntaxNode::new_root(green)
     }
 
-    /// Emit trivia (whitespace and comments) from source_pos to the given position
+    /// Emit trivia (whitespace, newlines, line comments, block comments) from
+    /// `source_pos` up to `target_pos`, preserving each trivia token's distinct
+    /// `SyntaxKind`. The trivia range is re-lexed so the tree reflects the same
+    /// token kinds the lexer produced, rather than lumping everything into
+    /// `Whitespace`.
     fn emit_trivia_until(&mut self, target_pos: usize, builder: &mut GreenNodeBuilder) {
         if target_pos <= self.source_pos || target_pos > self.source.len() {
             return;
         }
 
-        let trivia = &self.source[self.source_pos..target_pos];
-        if !trivia.is_empty() {
-            // Emit as whitespace token (could be more granular)
-            builder.token(SyntaxKind::Whitespace.into(), trivia);
+        let start = self.source_pos;
+        let trivia = &self.source[start..target_pos];
+        if trivia.is_empty() {
+            self.source_pos = target_pos;
+            return;
         }
+
+        let mut cursor = 0usize;
+        for result in kestrel_lexer::lex(trivia, 0) {
+            let (kind, span) = match result {
+                Ok(spanned) => (SyntaxKind::from(spanned.value), spanned.span.range()),
+                Err(spanned) => (SyntaxKind::Error, spanned.span.range()),
+            };
+
+            // Safety net: if a non-trivia token slipped into a gap between
+            // emitted syntax tokens, emit remaining bytes as Error and stop so
+            // we never lose source bytes.
+            if !is_trivia_kind(kind) {
+                let remaining = &trivia[cursor..];
+                if !remaining.is_empty() {
+                    builder.token(SyntaxKind::Error.into(), remaining);
+                }
+                cursor = trivia.len();
+                break;
+            }
+
+            let text = &trivia[span.clone()];
+            builder.token(kind.into(), text);
+            cursor = span.end;
+        }
+
+        // If re-lexing consumed less than the gap (unexpected), emit the tail
+        // as Error rather than dropping bytes.
+        if cursor < trivia.len() {
+            builder.token(SyntaxKind::Error.into(), &trivia[cursor..]);
+        }
+
         self.source_pos = target_pos;
     }
 
     /// Process all events and build the tree
     fn process_events(&mut self, builder: &mut GreenNodeBuilder) {
+        // Track the span of the outermost node so trailing trivia lands
+        // inside it rather than as a sibling at the tree root.
+        let mut root_depth: usize = 0;
+        let mut pending_trailing_trivia = false;
+
         while self.pos < self.events.len() {
             // Use match on reference to avoid cloning events
             match &self.events[self.pos] {
                 Event::StartNode(kind) => {
                     builder.start_node((*kind).into());
+                    root_depth += 1;
                     self.pos += 1;
                 },
                 Event::AddToken(kind, span) => {
@@ -199,8 +332,28 @@ impl<'src> TreeBuilder<'src> {
                     self.source_pos = span_end;
                     self.pos += 1;
                 },
-                Event::FinishNode => {
+                Event::MissingToken { kind, at } => {
+                    let kind = *kind;
+                    let at_start = at.start;
+
+                    // Flush trivia up to the recovery point so the missing
+                    // marker lands in the right place in the tree.
+                    self.emit_trivia_until(at_start, builder);
+
+                    builder.start_node(SyntaxKind::Missing.into());
+                    builder.token(kind.into(), "");
                     builder.finish_node();
+                    self.pos += 1;
+                },
+                Event::FinishNode => {
+                    // Emit any trailing trivia before closing the outermost
+                    // node so the tree text round-trips with the source.
+                    if root_depth == 1 && !pending_trailing_trivia {
+                        self.emit_trivia_until(self.source.len(), builder);
+                        pending_trailing_trivia = true;
+                    }
+                    builder.finish_node();
+                    root_depth = root_depth.saturating_sub(1);
                     self.pos += 1;
                 },
                 Event::Error { .. } => {
@@ -272,6 +425,60 @@ mod tests {
 
         assert_eq!(tree.kind(), SyntaxKind::ModulePath);
         assert_eq!(tree.children_with_tokens().count(), 3);
+    }
+
+    #[test]
+    fn tree_builder_classifies_inter_token_trivia_by_kind() {
+        // Source has whitespace, a newline, a block comment, and a line comment
+        // wedged between two syntax tokens. The builder should preserve each
+        // trivia kind distinctly rather than folding everything into Whitespace.
+        let source = "A /* b */ \n// c\nB";
+        let mut sink = EventSink::new(0);
+
+        sink.start_node(SyntaxKind::ModulePath);
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 16..17));
+        sink.finish_node();
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        assert_eq!(tree.text().to_string(), source);
+
+        let mut kinds: Vec<SyntaxKind> = tree
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .map(|t| t.kind())
+            .collect();
+        // Expected: Identifier, Whitespace, BlockComment, Whitespace,
+        //           Newline, LineComment, Newline, Identifier
+        kinds.retain(|k| is_trivia_kind(*k) || *k == SyntaxKind::Identifier);
+        assert_eq!(
+            kinds,
+            vec![
+                SyntaxKind::Identifier,
+                SyntaxKind::Whitespace,
+                SyntaxKind::BlockComment,
+                SyntaxKind::Whitespace,
+                SyntaxKind::Newline,
+                SyntaxKind::LineComment,
+                SyntaxKind::Newline,
+                SyntaxKind::Identifier,
+            ]
+        );
+    }
+
+    #[test]
+    fn tree_builder_emits_trailing_trivia_after_last_token() {
+        let source = "A\n// tail\n";
+        let mut sink = EventSink::new(0);
+
+        sink.start_node(SyntaxKind::ModulePath);
+        sink.add_token(SyntaxKind::Identifier, Span::new(0, 0..1));
+        sink.finish_node();
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        assert_eq!(tree.text().to_string(), source);
     }
 
     #[test]

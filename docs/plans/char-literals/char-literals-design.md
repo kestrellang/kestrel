@@ -6,7 +6,8 @@ Add character literal syntax to Kestrel using single quotes (`'a'`). Character l
 
 ## Motivation
 
-Currently, working with characters in Kestrel requires verbose constructs like `CodePoint(UInt32(intLiteral: 65))` for the letter 'A'. Character literals provide:
+Currently, working with characters in Kestrel requires verbose constructs like `CodePoint(65)` for the letter 'A'. Character literals provide:
+
 - Readable character constants: `'A'` instead of magic numbers
 - Direct support for escape sequences: `'\n'`, `'\t'`, `'\u{1F600}'`
 - Type flexibility through the literal protocol system
@@ -61,30 +62,30 @@ let u: UInt32 = 'a'
 
 Supported escape sequences (consistent with string literals):
 
-| Escape | Meaning | Value |
-|--------|---------|-------|
-| `\'` | Single quote | 0x27 |
-| `\"` | Double quote | 0x22 |
-| `\\` | Backslash | 0x5C |
-| `\n` | Newline | 0x0A |
-| `\r` | Carriage return | 0x0D |
-| `\t` | Tab | 0x09 |
-| `\0` | Null | 0x00 |
-| `\xNN` | Hex byte (ASCII, 00-7F) | NN |
-| `\u{N...}` | Unicode scalar (1-6 hex digits) | N... |
+| Escape     | Meaning                         | Value |
+| ---------- | ------------------------------- | ----- |
+| `\'`       | Single quote                    | 0x27  |
+| `\"`       | Double quote                    | 0x22  |
+| `\\`       | Backslash                       | 0x5C  |
+| `\n`       | Newline                         | 0x0A  |
+| `\r`       | Carriage return                 | 0x0D  |
+| `\t`       | Tab                             | 0x09  |
+| `\0`       | Null                            | 0x00  |
+| `\xNN`     | Hex byte (ASCII, 00-7F)         | NN    |
+| `\u{N...}` | Unicode scalar (1-6 hex digits) | N...  |
 
 ## Error Cases
 
-| Condition | Error Message |
-|-----------|---------------|
-| Empty literal `''` | "empty character literal" |
-| Multiple characters `'ab'` | "character literal may only contain one codepoint" |
-| Invalid escape `'\q'` | "invalid escape sequence '\\q'" |
-| Incomplete escape `'\x4'` | "incomplete escape sequence" |
-| Hex out of range `'\xFF'` | "ascii escape out of range, must be 0x00-0x7F" |
-| Unicode out of range `'\u{FFFFFF}'` | "unicode escape out of range" |
-| Surrogate code point `'\u{D800}'` | "unicode escape is a surrogate code point" |
-| Unterminated `'a` | Lexer error: unterminated character literal |
+| Condition                           | Error Message                                      |
+| ----------------------------------- | -------------------------------------------------- |
+| Empty literal `''`                  | "empty character literal"                          |
+| Multiple characters `'ab'`          | "character literal may only contain one codepoint" |
+| Invalid escape `'\q'`               | "invalid escape sequence '\\q'"                    |
+| Incomplete escape `'\x4'`           | "incomplete escape sequence"                       |
+| Hex out of range `'\xFF'`           | "ascii escape out of range, must be 0x00-0x7F"     |
+| Unicode out of range `'\u{FFFFFF}'` | "unicode escape out of range"                      |
+| Surrogate code point `'\u{D800}'`   | "unicode escape is a surrogate code point"         |
+| Unterminated `'a`                   | Lexer error: unterminated character literal        |
 
 ## Edge Cases
 
@@ -98,10 +99,12 @@ Supported escape sequences (consistent with string literals):
 ## Type Model (Future stdlib alignment)
 
 The stdlib will be updated (separate task) to rename:
+
 - `CodePoint` → `Char` (single Unicode scalar value)
 - `Char` → `Grapheme` (extended grapheme cluster)
 
 This gives the intuitive model:
+
 - `'a'` → `Char` via `ExpressibleByCharLiteral`
 - `"é"` → `Grapheme` via `ExpressibleByStringLiteral`
 

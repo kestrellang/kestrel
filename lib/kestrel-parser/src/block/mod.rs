@@ -13,7 +13,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
-use crate::input::{ParserExtra, ParserInput, create_input, prepare_tokens, to_kestrel_span};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
 use crate::pattern::pattern_parser;
 use crate::stmt::{StmtVariant, emit_stmt_variant};
 
@@ -108,6 +109,11 @@ pub enum BlockItem {
     TrailingExpression(ExprVariant),
     /// A guard-let statement (no semicolon required)
     GuardLet(GuardLetData),
+    /// Recovered range: tokens that didn't fit any block-item shape, skipped
+    /// up to the next statement boundary (`}` or a statement-starter
+    /// keyword) so the rest of the body still parses. Phase 6 of the
+    /// parser-recovery work — see `block_item_recovery`.
+    Recovered(Span),
 }
 
 /// Raw parsed data for a code block
@@ -121,6 +127,220 @@ pub struct CodeBlockData {
     pub rbrace: Span,
 }
 
+/// Parser for items inside a guard-let `else { ... }` block, parameterized
+/// by the recursive `expr` and inline `let`/`var` parsers.
+///
+/// Yields `Vec<ElseBlockItem>`. The items are: variable declarations, regular
+/// expression statements (with semicolon), inline statement-like expressions
+/// (no semicolon needed for `if`/`while`/`loop`/`for`/`match`/`return`/
+/// `throw`/`try`), and an optional trailing expression.
+///
+/// Reused by inline guard-let inside `expr_parser` and inside closures so the
+/// grammar lives in one place.
+pub(crate) fn else_block_items_parser<'tokens, P, V>(
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ElseBlockItem>, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    let else_item = inline_var_decl.map(ElseBlockItem::Statement).or(expr
+        .clone()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .or(empty().to(None)),
+        )
+        .try_map(|(e, maybe_semi), _extra| {
+            if let Some(semi) = maybe_semi {
+                Ok(ElseBlockItem::Statement(StmtVariant::Expression(e, semi)))
+            } else if crate::expr::is_inline_statement_like(&e) {
+                Ok(ElseBlockItem::StatementExpr(e))
+            } else {
+                Err(Rich::custom(
+                    chumsky::span::Span::new((), 0..0),
+                    "expected semicolon",
+                ))
+            }
+        }));
+
+    else_item
+        .repeated()
+        .collect::<Vec<_>>()
+        .then(expr.map(ElseBlockItem::TrailingExpression).or_not())
+        .map(|(mut items, trailing)| {
+            if let Some(e) = trailing {
+                items.push(e);
+            }
+            items
+        })
+        .boxed()
+}
+
+/// Parser for an inline `guard let ... else { ... }` block item with chain
+/// support. Yields `BlockItem::GuardLet(GuardLetData)`.
+///
+/// Conditions form a chain starting with at least one `let pattern = expr`,
+/// followed by zero or more comma-separated `let` or boolean conditions.
+pub(crate) fn guard_let_block_item_parser<'tokens, P, V>(
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, BlockItem, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    let let_condition = skip_trivia()
+        .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(pattern_parser())
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(expr.clone())
+        .map(
+            |(((let_span, pattern), equals_span), value)| IfCondition::Let {
+                let_span,
+                pattern,
+                equals_span,
+                value,
+            },
+        );
+
+    let single_condition = let_condition
+        .clone()
+        .or(expr.clone().map(IfCondition::Expr));
+
+    let conditions = let_condition
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Comma))
+                .ignore_then(single_condition)
+                .repeated()
+                .collect::<Vec<_>>(),
+        )
+        .map(|(first, rest)| {
+            let mut conditions = vec![first];
+            conditions.extend(rest);
+            conditions
+        });
+
+    let else_items = else_block_items_parser(expr, inline_var_decl);
+
+    skip_trivia()
+        .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(conditions)
+        .then(
+            skip_trivia().ignore_then(just(Token::Else).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .then(else_items)
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(
+            |(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
+                BlockItem::GuardLet(GuardLetData {
+                    guard_span,
+                    conditions,
+                    else_span,
+                    else_lbrace,
+                    else_items,
+                    else_rbrace,
+                })
+            },
+        )
+        .boxed()
+}
+
+/// Parser for the items inside an inline code block. Yields `Vec<BlockItem>`
+/// with optional trailing expression already attached.
+///
+/// Item kinds: guard-let, variable declaration (via `inline_var_decl`),
+/// expression statement (with semicolon), statement-like expression (no
+/// semicolon needed), trailing expression. Does NOT include `deinit
+/// identifier;` — that is only valid in top-level blocks parsed via
+/// [`code_block_parser`].
+pub(crate) fn block_items_parser<'tokens, P, V>(
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<BlockItem>, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    let guard_let = guard_let_block_item_parser(expr.clone(), inline_var_decl.clone());
+    let stmt_decl = inline_var_decl.map(BlockItem::Statement);
+    let expr_item = expr
+        .clone()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
+                .or_not(),
+        )
+        .try_map(|(e, maybe_semi), _extra| {
+            if let Some(semi) = maybe_semi {
+                Ok(BlockItem::Statement(StmtVariant::Expression(e, semi)))
+            } else if crate::expr::is_inline_statement_like(&e) {
+                Ok(BlockItem::StatementExpr(e))
+            } else {
+                Err(Rich::custom(
+                    chumsky::span::Span::new((), 0..0),
+                    "expected semicolon",
+                ))
+            }
+        });
+
+    let block_item = guard_let.or(stmt_decl).or(expr_item);
+
+    block_item
+        .repeated()
+        .collect::<Vec<_>>()
+        .then(expr.map(BlockItem::TrailingExpression).or_not())
+        .map(|(mut items, trailing)| {
+            if let Some(e) = trailing {
+                items.push(e);
+            }
+            items
+        })
+        .boxed()
+}
+
+/// Parser for an inline `{ ... }` code block, parameterized by the `lbrace`
+/// parser, the recursive `expr` handle, and the inline `let`/`var` parser.
+///
+/// Returns `CodeBlockData`. Used as the body of `if`/`while`/`loop`/`for`
+/// expressions and `match` arms inside `expr_parser`.
+pub(crate) fn inline_code_block_parser<'tokens, L, P, V>(
+    lbrace_parser: L,
+    expr: P,
+    inline_var_decl: V,
+) -> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone
+where
+    L: Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone + 'tokens,
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+    V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    lbrace_parser
+        .then(block_items_parser(expr, inline_var_decl))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+        )
+        .map(|((lbrace, items), rbrace)| CodeBlockData {
+            lbrace,
+            items,
+            rbrace,
+        })
+        .boxed()
+}
+
 /// Parser for a code block
 ///
 /// Syntax: { statement* expression? }
@@ -129,14 +349,25 @@ pub struct CodeBlockData {
 /// - Empty blocks: { }
 /// - Statement-only blocks: { stmt; stmt; }
 /// - Trailing expression blocks: { stmt; expr }
+///
+/// Recovery: a missing closing `}` synthesises a zero-width span at the
+/// current position so a half-typed function body still parses as a
+/// `CodeBlock`. Without this, a single unclosed brace tears the whole
+/// `FunctionDeclaration` down to an `Error` node, which breaks LSP
+/// completion / hover / go-to-def for everything inside.
 pub fn code_block_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, CodeBlockData, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .then(code_block_items_parser())
+        // Closing brace is recoverable. Emitter anchors diagnostic via
+        // `add_token_or_missing`.
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(
+                just(Token::RBrace)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
         )
         .map(|((lbrace, items), rbrace)| CodeBlockData {
             lbrace,
@@ -355,9 +586,15 @@ fn code_block_items_parser<'tokens>()
                 .then(expr_parser())
                 .or_not(),
         )
+        // Semicolon is recoverable: a half-typed line synthesises a
+        // zero-width span at the parse position. The emitter widens this
+        // to anchor on the last real token via `add_token_or_missing`.
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span()))),
+            skip_trivia().ignore_then(
+                just(Token::Semicolon)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .or(empty().map_with(|_, e| to_kestrel_span(e.span()))),
+            ),
         )
         .map(
             |(
@@ -396,31 +633,53 @@ fn code_block_items_parser<'tokens>()
             }))
         });
 
-    // Expression-based item: parse expression first, then check for semicolon
+    // Expression-based item: parse expression first, then check for semicolon.
+    // Three outcomes after the expression:
+    //   1. Real `;` follows  →  Statement(Expression(expr, real_semi))
+    //   2. Block-end follows (`}` / EOF)  →  expr might be the trailing
+    //      expression; fail this alt unless the expr is statement-like
+    //      so the outer block parser can pick it up via the trailing
+    //      expression alternative.
+    //   3. Something else follows  →  the user typed a half-statement
+    //      (`arr.` then a new statement on the next line). Synthesise a
+    //      zero-width `;` so the broken expression becomes a recovered
+    //      statement instead of swallowing the rest of the block as a
+    //      trailing expression. This is the parser-recovery sibling of
+    //      the var-decl / closure-body fixes.
+    let block_end_lookahead = skip_trivia()
+        .ignore_then(just(Token::RBrace).ignored().or(end()))
+        .rewind();
     let expr_item = expr_parser()
         .then(
-            // Check if there's a semicolon (making it a regular statement)
+            // Real semicolon
             skip_trivia()
                 .ignore_then(just(Token::Semicolon).map_with(|_, e| to_kestrel_span(e.span())))
-                .map(Some)
-                .or(empty().to(None)),
+                .map(|s| Some((s, false)))
+                // Block end ahead → leave maybe_semi None for the trailing-expr path
+                .or(block_end_lookahead.to(None))
+                // Otherwise synthesise a `;`
+                .or(empty().map_with(|_, e| Some((to_kestrel_span(e.span()), true)))),
         )
-        .try_map(|(expr, maybe_semi), span| {
-            if let Some(semi) = maybe_semi {
-                // Has semicolon - it's a regular expression statement
-                Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi)))
-            } else if is_statement_like_expr(&expr) {
-                // No semicolon but it's statement-like - OK
-                Ok(BlockItem::StatementExpr(expr))
-            } else {
-                // No semicolon and not statement-like - fail, let it be parsed as trailing
-                Err(Rich::custom(span, "expected semicolon"))
-            }
+        .try_map(|(expr, maybe_semi), span| match maybe_semi {
+            Some((semi, _synth)) => Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi))),
+            None if is_statement_like_expr(&expr) => Ok(BlockItem::StatementExpr(expr)),
+            // Block end ahead and not statement-like — fail so the
+            // trailing-expression alt picks the expr up.
+            None => Err(Rich::custom(span, "expected semicolon")),
         });
 
     // A block item is a guard-let, deinit statement, variable declaration, or expression-based item
-    // Guard-let and deinit must come first since they start with keywords
-    let block_item = guard_let.or(deinit_stmt).or(var_decl).or(expr_item);
+    // Guard-let and deinit must come first since they start with keywords.
+    // Recovery kicks in after every legitimate alternative fails: skip
+    // tokens until the next statement boundary, wrap the range as
+    // `Recovered`, and let the outer `.repeated()` continue. Without this,
+    // a half-typed line like `foo bar baz` would poison the entire body's
+    // parse and break completion / hover for everything below it.
+    let block_item = guard_let
+        .or(deinit_stmt)
+        .or(var_decl)
+        .or(expr_item)
+        .recover_with(via_parser(block_item_recovery()));
 
     block_item
         .repeated()
@@ -435,6 +694,79 @@ fn code_block_items_parser<'tokens>()
             }
             items
         })
+        .boxed()
+}
+
+/// Tokens that signal "the next block item starts here" — recovery stops
+/// at these so the surrounding parser sees them. `}` ends the block; the
+/// keywords each start a new statement / declaration.
+fn is_block_item_boundary(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::RBrace
+            | Token::Let
+            | Token::Var
+            | Token::Guard
+            | Token::Deinit
+            | Token::If
+            | Token::While
+            | Token::For
+            | Token::Loop
+            | Token::Match
+            | Token::Return
+            | Token::Break
+            | Token::Continue
+            | Token::Throw
+            | Token::Try
+    )
+}
+
+/// Tokens that can start a valid expression. Recovery refuses to consume
+/// these — input starting with an expression-starter is most likely the
+/// block's trailing expression, not garbage. Without this guard the
+/// recovery would swallow tail expressions like `{ () }` or `{ x }`.
+fn is_expr_starter(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Identifier
+            | Token::Integer
+            | Token::Float
+            | Token::String
+            | Token::RawString
+            | Token::Char
+            | Token::Boolean
+            | Token::Null
+            | Token::LParen
+            | Token::LBracket
+            | Token::LBrace
+            | Token::Bang
+            | Token::Not
+            | Token::Plus
+            | Token::Minus
+            | Token::Dot
+    )
+}
+
+/// Recovery parser used when no legitimate `BlockItem` shape matched.
+/// Skips trivia, then consumes one **non-boundary, non-expression-starter**
+/// token plus any further non-boundary tokens. The first-token guards keep
+/// (a) closing braces / statement keywords available to outer parsers and
+/// (b) tail expressions intact so they reach the trailing-expression
+/// alternative.
+fn block_item_recovery<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, BlockItem, ParserExtra<'tokens>> + Clone {
+    let next_is_boundary = any().filter(is_block_item_boundary).ignored();
+    let recoverable_first = any().filter(|t: &Token| {
+        !matches!(
+            t,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        ) && !is_block_item_boundary(t)
+            && !is_expr_starter(t)
+    });
+    skip_trivia()
+        .ignore_then(recoverable_first)
+        .then(any().and_is(next_is_boundary.not()).repeated())
+        .map_with(|_, e| BlockItem::Recovered(to_kestrel_span(e.span())))
         .boxed()
 }
 
@@ -463,10 +795,21 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
             BlockItem::GuardLet(guard_data) => {
                 emit_guard_let(sink, guard_data);
             },
+            BlockItem::Recovered(span) => {
+                // Phase-6 recovery: wrap the skipped range as an Error node
+                // containing one Error token covering the whole range. The
+                // tree text round-trips with the source — TreeBuilder pulls
+                // the bytes from `span` — and downstream consumers (LSP,
+                // analyzers) can recognise `SyntaxKind::Error` to skip
+                // analysis of the broken stretch.
+                sink.start_node(SyntaxKind::Error);
+                sink.add_token(SyntaxKind::Error, span.clone());
+                sink.finish_node();
+            },
         }
     }
 
-    sink.add_token(SyntaxKind::RBrace, data.rbrace.clone());
+    sink.add_token_or_missing(SyntaxKind::RBrace, data.rbrace.clone(), "}");
     sink.finish_node();
 }
 
@@ -515,19 +858,13 @@ pub fn parse_code_block<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match code_block_parser().parse(input).into_result() {
-        Ok(data) => {
-            emit_code_block(sink, &data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        code_block_parser(),
+        |sink, data: CodeBlockData| emit_code_block(sink, &data)
+    );
 }
 
 #[cfg(test)]

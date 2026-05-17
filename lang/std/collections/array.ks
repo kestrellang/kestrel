@@ -2,165 +2,104 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable)
+import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable, fatalError)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
-import std.core.(Range, Hash)
-import std.text.(Formattable, FormatOptions)
-import std.num.(Int64)
-import std.num.(RandomNumberGenerator, Lcg64)
+import std.core.(Range, ClosedRange, Hashable)
+import std.text.(Formattable, FormatOptions, StringBuilder)
+import std.numeric.(Int64)
+import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, Slice, RawPointer, SystemAllocator, LiteralSlice, RcBox)
+import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
+import std.collections.(Slice)
 
-// ============================================================================
-// ARRAY ITERATOR
-// ============================================================================
+// ArrayIterator[T] removed — Array.iter() now returns ArraySliceIterator[T]
+// (same (ptr, remaining) layout; single iterator type for all Slice conformers).
 
-/// Iterator over array elements.
-public struct ArrayIterator[T]: Iterator {
-    type Item = T
-
-    private var ptr: Pointer[T]
-    private var remaining: Int64
-
-    /// Creates an array iterator.
-    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
-        self.ptr = ptr;
-        self.remaining = remaining;
-    }
-
-    /// Returns the next element, or None if exhausted.
-    public mutating func next() -> T? {
-        if self.remaining > Int64(intLiteral: 0) {
-            let value = self.ptr.read();
-            self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
-            self.remaining = self.remaining - Int64(intLiteral: 1);
-            .Some(value)
-        } else {
-            .None
-        }
-    }
-}
-
-// ============================================================================
-// CHUNKS ITERATOR
-// ============================================================================
-
-/// Iterator over non-overlapping chunks of an array.
-///
-/// The last chunk may be smaller than the chunk size if the array
-/// length is not evenly divisible.
-///
-/// Example:
-///     let arr = [1, 2, 3, 4, 5]
-///     for chunk in arr.chunks(of: 2) {
-///         // yields: [1, 2], then [3, 4], then [5]
-///     }
-public struct ChunksIterator[T]: Iterator {
-    type Item = Slice[T]
-
-    private var ptr: Pointer[T]
-    private var remaining: Int64
-    private var chunkSize: Int64
-
-    /// Creates a chunks iterator.
-    public init(ptr ptr: Pointer[T], remaining remaining: Int64, chunkSize chunkSize: Int64) {
-        self.ptr = ptr;
-        self.remaining = remaining;
-        self.chunkSize = chunkSize;
-    }
-
-    /// Returns the next chunk, or None if exhausted.
-    public mutating func next() -> Slice[T]? {
-        if self.remaining <= Int64(intLiteral: 0) {
-            return .None
-        }
-
-        // Determine this chunk's actual size (may be smaller for last chunk)
-        let thisChunkSize: Int64 = if self.remaining < self.chunkSize {
-            self.remaining
-        } else {
-            self.chunkSize
-        };
-
-        let slice = Slice(pointer: self.ptr, count: thisChunkSize);
-        self.ptr = self.ptr.offset(by: thisChunkSize);
-        self.remaining = self.remaining - thisChunkSize;
-        .Some(slice)
-    }
-}
-
-// ============================================================================
-// WINDOWS ITERATOR
-// ============================================================================
-
-/// Iterator over overlapping sliding windows of an array.
-///
-/// All windows have exactly the specified size. If the array is
-/// smaller than the window size, no windows are yielded.
-///
-/// Example:
-///     let arr = [1, 2, 3, 4]
-///     for window in arr.windows(of: 2) {
-///         // yields: [1, 2], then [2, 3], then [3, 4]
-///     }
-public struct WindowsIterator[T]: Iterator {
-    type Item = Slice[T]
-
-    private var ptr: Pointer[T]
-    private var remaining: Int64
-    private var windowSize: Int64
-
-    /// Creates a windows iterator.
-    public init(ptr ptr: Pointer[T], totalCount totalCount: Int64, windowSize windowSize: Int64) {
-        self.ptr = ptr;
-        self.windowSize = windowSize;
-        // Number of windows = totalCount - windowSize + 1 (if positive)
-        let windowCount = totalCount - windowSize + Int64(intLiteral: 1);
-        self.remaining = if windowCount > Int64(intLiteral: 0) {
-            windowCount
-        } else {
-            Int64(intLiteral: 0)
-        };
-    }
-
-    /// Returns the next window, or None if exhausted.
-    public mutating func next() -> Slice[T]? {
-        if self.remaining <= Int64(intLiteral: 0) {
-            return .None
-        }
-
-        let slice = Slice(pointer: self.ptr, count: self.windowSize);
-        self.ptr = self.ptr.offset(by: Int64(intLiteral: 1));
-        self.remaining = self.remaining - Int64(intLiteral: 1);
-        .Some(slice)
-    }
-}
+// ChunksIterator and WindowsIterator live in views.ks (alongside
+// ChunksView / WindowsView).
 
 // ============================================================================
 // ARRAY STORAGE (Internal)
 // ============================================================================
 
-/// Internal storage for Array (ptr, len, cap).
+/// Internal `(ptr, len, cap)` storage cell shared by `Array[T]` instances.
+///
+/// Wrapped in an `RcBox` by `Array[T]` so that copying an `Array` simply
+/// bumps a reference count; mutations call `makeUnique()` first to perform
+/// the actual copy. The `clone()` method here is the deep-copy half of that
+/// COW protocol — it allocates a fresh buffer and copies every element.
+/// Owners of the buffer are responsible for freeing it; the `deinit`
+/// handles that automatically when the last reference drops.
+///
+/// # Examples
+///
+/// ```
+/// // Not used directly. Created by Array's initializers.
+/// let s = ArrayStorage(ptr: ptr, len: 3, cap: 4);
+/// ```
+///
+/// # Representation
+///
+/// Three fields: a heap pointer to the element buffer, a length (number of
+/// initialized elements), and a capacity (allocation size in elements).
+/// `cap == 0` indicates a null `ptr` and no allocation.
+///
+/// # Memory Model
+///
+/// Owns the heap buffer. Deallocation happens in `deinit`. Used as a value
+/// inside `RcBox`, which provides the reference counting that makes COW
+/// possible.
 struct ArrayStorage[T]: Cloneable {
+    /// Heap pointer to the element buffer; null when `cap == 0`.
     var ptr: Pointer[T]
+    /// Number of initialized elements stored in the buffer.
     var len: Int64
+    /// Total slots allocated; always `>= len`.
     var cap: Int64
 
+    /// @name From Fields
+    /// Constructs an `ArrayStorage` from raw fields.
+    ///
+    /// The caller is responsible for guaranteeing the invariants
+    /// (`len <= cap`, `ptr` valid for `cap` elements when `cap > 0`).
+    ///
+    /// # Safety
+    ///
+    /// Internal: callers must pass consistent values. `Array` controls all
+    /// allocation paths.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = ArrayStorage(ptr: rawPtr.cast[T](), len: 0, cap: 16);
+    /// ```
     init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64) {
         self.ptr = ptr;
         self.len = len;
         self.cap = cap;
     }
 
-    /// Deep clone - allocate new buffer and copy elements.
+    /// Deep-copies the storage into a freshly allocated buffer.
+    ///
+    /// Allocates a new buffer sized exactly to `len` (so the clone has no
+    /// excess capacity) and copies each element via `read()` / `write()`.
+    /// An empty source returns an empty storage with a null pointer.
+    /// Panics if allocation fails. This is the slow half of COW — it runs
+    /// when `Array.makeUnique()` detects shared storage on a mutation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let copy = storage.clone();
+    /// ```
     func clone() -> ArrayStorage[T] {
-        if self.len == Int64(intLiteral: 0) {
+        if self.len == 0 {
             return ArrayStorage(
-                ptr: Pointer(raw: lang.ptr_null[T]()),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0
             )
         }
         let layout = Layout.array[T](self.len);
@@ -174,12 +113,18 @@ struct ArrayStorage[T]: Cloneable {
             }
             ArrayStorage(ptr: newPtr, len: self.len, cap: self.len)
         } else {
-            lang.panic("ArrayStorage clone allocation failed")
+            fatalError("ArrayStorage clone allocation failed")
         }
     }
 
+    /// Frees the underlying buffer.
+    ///
+    /// Runs when the last `RcBox` reference to this storage drops. Skips
+    /// the deallocation entirely when `cap == 0` (no buffer was ever
+    /// allocated). Element destructors are not invoked individually here —
+    /// `T` is treated as trivially droppable at the storage level.
     deinit {
-        if self.cap > Int64(intLiteral: 0) {
+        if self.cap > 0 {
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
@@ -191,32 +136,107 @@ struct ArrayStorage[T]: Cloneable {
 // ARRAY
 // ============================================================================
 
-/// A dynamic growable array with copy-on-write semantics.
+/// A dynamic, growable, contiguous-buffer array with copy-on-write storage.
 ///
-/// Arrays automatically grow when elements are added and use COW
-/// to efficiently share data between copies until mutation occurs.
+/// `Array[T]` is the standard ordered-collection type. It supports
+/// constant-time random access, amortized constant-time `append`, and
+/// arbitrary-position insert/remove via shifting. Storage is shared between
+/// copies until one of them mutates, at which point that copy lazily clones
+/// the buffer (see "Memory Model" below). For non-owning views over an
+/// existing buffer use `ArraySlice[T]`; for fixed-size or set-like collections
+/// see `ArraySlice[T]`, `Set`, or `Dictionary`.
+///
+/// # Examples
+///
+/// ```
+/// let evens = [2, 4, 6, 8];
+/// var names = Array[String]();
+/// names.append("Alice");
+/// names.append("Bob");
+///
+/// let copy = names;      // O(1) — shares storage with `names`
+/// names.append("Carol"); // O(1) clone happens here, `copy` is unchanged
+///
+/// for n in names.iter() { ... }
+/// let pivot = names.partition(by: { (n) in n.count > 3 });
+/// ```
+///
+/// # Indexing
+///
+/// The default subscript `arr(i)` panics on out-of-bounds. Variants exist
+/// for every common policy: `arr(checked: i)` returns `T?`,
+/// `arr(unchecked: i)` skips the bounds check (UB on OOB),
+/// `arr(wrapped: i)` wraps with modulo (and supports negative indices),
+/// and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
+/// same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
+/// `arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
+/// `SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
+/// types share each label; the result type varies (`T?` vs `ArraySlice[T]`
+/// for `clamped:`).
+///
+/// # Capacity & Reallocation
+///
+/// `count` is the number of elements; `capacity` is how many can fit
+/// without reallocating. When `append` would exceed capacity the buffer
+/// doubles (starting from 4 if previously zero). Use
+/// `reserveCapacity(minimumCapacity:)` to pre-allocate, and
+/// `shrinkToFit()` to release excess.
+///
+/// # Representation
+///
+/// Holds a single `CowBox[ArrayStorage[T]]` field. The storage is a
+/// `(ptr, len, cap)` triple over a heap-allocated buffer.
+///
+/// # Memory Model
+///
+/// Reference-counted storage with copy-on-write *value* semantics. Copying
+/// an `Array` is O(1) and shares the buffer; the next mutation on a shared
+/// `Array` triggers `makeUnique()`, which deep-clones the buffer so the
+/// mutation is invisible to other copies. The user-visible behavior is
+/// indistinguishable from deep-copying on assignment.
+///
+/// # Guarantees
+///
+/// - Elements are stored contiguously and are accessible via `asPointer()`
+///   for FFI; the pointer is invalidated by any mutation that may
+///   reallocate.
+/// - `count <= capacity` always.
+/// - Iteration order is insertion order.
+/// - Operations marked O(1) are amortized; growth is geometric.
 @builtin(.ArrayStruct)
-public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
+public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
+    /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
-    type Iter = ArrayIterator[T]
+    /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
+    type TargetIterator = ArraySliceIterator[T]
+    /// Pattern-matching element type — used by `ArrayMatchable` for
+    /// `[a, b, ..rest]` patterns.
     type Element = T
 
-    fileprivate var storage: RcBox[ArrayStorage[T]]
+    /// COW storage — `CowBox` handles the reference counting and
+    /// clone-on-write barrier. Sharing this between `Array` copies is
+    /// what enables COW.
+    fileprivate var storage: CowBox[ArrayStorage[T]]
 
-    // Helper accessors for storage fields
-    fileprivate func ptr() -> Pointer[T] { self.storage.getValue().ptr }
-    fileprivate func len() -> Int64 { self.storage.getValue().len }
-    fileprivate func cap() -> Int64 { self.storage.getValue().cap }
+    /// Returns the raw element pointer. Internal helper for storage access.
+    fileprivate func ptr() -> Pointer[T] { self.storage.read().ptr }
+    /// Returns the element count from the storage. Internal helper.
+    fileprivate func len() -> Int64 { self.storage.read().len }
+    /// Returns the buffer capacity from the storage. Internal helper.
+    fileprivate func cap() -> Int64 { self.storage.read().cap }
 
-    // Ensure unique storage for mutation (COW)
+    /// COW write barrier — ensures the storage is uniquely owned.
     fileprivate mutating func makeUnique() {
-        if self.storage.isUnique() == false {
-            self.storage = RcBox(self.storage.getValue().clone())
-        }
+        let _ = self.storage.write();
     }
 
-    /// Private init for internal use (from storage).
-    private init(storage storage: RcBox[ArrayStorage[T]]) {
+    /// @name From Storage
+    /// Wraps an existing storage box in a new `Array`.
+    ///
+    /// Module-internal — used by `clone()`, `ArrayBuilder.build()`, and
+    /// other `std.collections` code that constructs arrays from raw
+    /// storage.
+    init(storage storage: CowBox[ArrayStorage[T]]) {
         self.storage = storage;
     }
 
@@ -224,84 +244,150 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // CONSTRUCTORS
     // ========================================================================
 
-    /// Creates an empty array.
+    /// @name Empty
+    /// Creates an empty array with no allocation.
+    ///
+    /// Capacity starts at zero; the first `append` allocates a small
+    /// buffer (currently 4 elements). Use `init(capacity:)` if you can
+    /// pre-size to avoid the early growth steps.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = Array[Int64]();
+    /// arr.count;     // 0
+    /// arr.capacity;  // 0
+    /// ```
     public init() {
-        self.storage = RcBox(ArrayStorage(
-            ptr: Pointer(raw: lang.ptr_null[T]()),
-            len: Int64(intLiteral: 0),
-            cap: Int64(intLiteral: 0)
+        self.storage = CowBox(ArrayStorage(
+            ptr: Pointer[T].nullPointer(),
+            len: 0,
+            cap: 0
         ));
     }
 
-    /// Creates an empty array with the specified capacity.
+    /// @name With Capacity
+    /// Creates an empty array with at least the requested capacity reserved.
+    ///
+    /// Equivalent to `Array()` followed by `reserveCapacity(...)`, but
+    /// done in a single allocation. A non-positive `capacity` behaves
+    /// like `init()` (no allocation). Panics if allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = Array[Int64](capacity: 1000);
+    /// arr.count;     // 0
+    /// arr.capacity;  // >= 1000 — no reallocation for first 1000 appends
+    /// ```
     public init(capacity capacity: Int64) {
-        if capacity > Int64(intLiteral: 0) {
+        if capacity > 0 {
             let layout = Layout.array[T](capacity);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if let .Some(rawPtr) = result {
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: rawPtr.cast[T](),
-                    len: Int64(intLiteral: 0),
+                    len: 0,
                     cap: capacity
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         } else {
-            self.storage = RcBox(ArrayStorage(
-                ptr: Pointer(raw: lang.ptr_null[T]()),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+            self.storage = CowBox(ArrayStorage(
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0
             ))
         }
     }
 
-    /// Internal initializer called by compiler for array literals.
-    public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64) {
+    /// @name Literal Bridge
+    /// Compiler-emitted bridge initializer for `[a, b, c]` array literals.
+    ///
+    /// Not called by user code directly — the parser lowers literal
+    /// expressions into a `(ptr, count)` pair which this constructor wraps
+    /// in a `LiteralSlice` and forwards to `init(arrayLiteral:)`.
+    ///
+    /// # Safety
+    ///
+    /// The compiler guarantees `_arrayLiteralPointer` points to exactly
+    /// `_arrayLiteralCount` initialized elements of `T`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [1, 2, 3];   // emitted by the compiler as a call to this init
+    /// ```
+    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 
-    /// Creates an array from an array literal.
+    /// @name Array Literal
+    /// Creates an array containing every element of the supplied literal
+    /// slice.
+    ///
+    /// Allocates a buffer sized exactly to the literal's element count
+    /// (so `capacity == count` after construction) and copies the
+    /// elements over. An empty slice yields an empty unallocated array.
+    /// Panics if allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Triggered by the array-literal syntax:
+    /// let arr: Array[Int64] = [10, 20, 30];
+    /// ```
     public init(arrayLiteral elements: LiteralSlice[T]) {
-        let elementCount = elements.count();
-        if elementCount > Int64(intLiteral: 0) {
+        let elementCount = elements.count;
+        if elementCount > 0 {
             let layout = Layout.array[T](elementCount);
             var allocator = SystemAllocator();
             let result = allocator.allocate(layout);
             if let .Some(rawPtr) = result {
                 let newPtr = rawPtr.cast[T]();
-                var currentLen: Int64 = Int64(intLiteral: 0);
+                var currentLen: Int64 = 0;
                 // Copy elements from literal slice
                 var iter = elements.iter();
                 while let .Some(item) = iter.next() {
                     newPtr.offset(by: currentLen).write(item);
-                    currentLen = currentLen + Int64(intLiteral: 1)
+                    currentLen = currentLen + 1
                 }
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: newPtr,
                     len: currentLen,
                     cap: elementCount
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         } else {
-            self.storage = RcBox(ArrayStorage(
-                ptr: Pointer(raw: lang.ptr_null[T]()),
-                len: Int64(intLiteral: 0),
-                cap: Int64(intLiteral: 0)
+            self.storage = CowBox(ArrayStorage(
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0
             ))
         }
     }
 
-    /// Creates an array by repeating a value count times.
+    /// @name Repeating Value
+    /// Creates an array of `count` identical copies of `value`.
     ///
-    /// Example:
-    ///     let zeros = Array(repeating: 0, count: 5)  // [0, 0, 0, 0, 0]
-    ///     let empty = Array(repeating: "x", count: 0)  // []
-    public init(repeating value: T, count: Int64) {
-        if count <= Int64(intLiteral: 0) {
+    /// Allocates exactly `count` slots and writes the same value into each.
+    /// `count <= 0` produces an empty array. Useful for initializing
+    /// fixed-size buffers; if you instead want each slot computed, use
+    /// `init(count:generator:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let zeros = Array(repeating: 0, count: 5);    // [0, 0, 0, 0, 0]
+    /// let empty = Array(repeating: "x", count: 0);  // []
+    /// let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
+    /// ```
+    public init(repeating value: T, count count: Int64) {
+        if count <= 0 {
             self.init()
         } else {
             let layout = Layout.array[T](count);
@@ -315,22 +401,33 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
                 for i in 1..<count {
                     newPtr.offset(by: i).write(value);
                 }
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: newPtr,
                     len: count,
                     cap: count
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         }
     }
 
-    /// Creates an array from any iterable source.
+    /// @name From Iterable
+    /// Creates an array by collecting every element produced by an iterable.
     ///
-    /// Example:
-    ///     let fromRange = Array(from: 1..<5)  // [1, 2, 3, 4]
-    ///     let fromSet = Array(from: mySet)
+    /// Drains `iterable` to completion via `append`, so the resulting
+    /// capacity is whatever the growth policy lands on (not necessarily
+    /// equal to `count`). For a sized source you can shave reallocations
+    /// by following with `shrinkToFit()`. See also `appendFrom(iterable:)`
+    /// to add elements to an existing array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let fromRange = Array(from: 1..<5);         // [1, 2, 3, 4]
+    /// let fromSet   = Array(from: mySet);         // arbitrary order
+    /// let collected = Array(from: lines.iter());  // exhausts the iterator
+    /// ```
     public init[I](from iterable: I) where I: Iterable, I.Item = T {
         self.init();
         var iter = iterable.iter();
@@ -339,15 +436,23 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    /// Creates an array of count elements using a generator function.
+    /// @name From Generator
+    /// Creates an array of `count` elements computed by a per-index closure.
     ///
-    /// The generator receives the index (0 to count-1) for each element.
+    /// Allocates exactly `count` slots and invokes `gen(i)` once for each
+    /// `i` in `0..<count`. `count <= 0` produces an empty array. Use this
+    /// when each slot is a function of its index; for a constant value,
+    /// prefer `init(repeating:count:)`.
     ///
-    /// Example:
-    ///     let squares = Array(count: 5, generator: { (i) in i * i })  // [0, 1, 4, 9, 16]
-    ///     let indices = Array(count: 3, generator: { (i) in i })  // [0, 1, 2]
-    public init(count: Int64, generator: (Int64) -> T) {
-        if count <= Int64(intLiteral: 0) {
+    /// # Examples
+    ///
+    /// ```
+    /// let squares = Array(of: 5, generatedBy: { (i) in i * i });  // [0, 1, 4, 9, 16]
+    /// let indices = Array(of: 3, generatedBy: { (i) in i });      // [0, 1, 2]
+    /// let empty   = Array(of: 0, generatedBy: { (i) in i });      // []
+    /// ```
+    public init(of count: Int64, generatedBy gen: (Int64) -> T) {
+        if count <= 0 {
             self.init()
         } else {
             let layout = Layout.array[T](count);
@@ -356,15 +461,15 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             if let .Some(rawPtr) = result {
                 let newPtr = rawPtr.cast[T]();
                 for i in 0..<count {
-                    newPtr.offset(by: i).write(generator(i));
+                    newPtr.offset(by: i).write(gen(i));
                 }
-                self.storage = RcBox(ArrayStorage(
+                self.storage = CowBox(ArrayStorage(
                     ptr: newPtr,
                     len: count,
                     cap: count
                 ))
             } else {
-                lang.panic("Array allocation failed")
+                fatalError("Array allocation failed")
             }
         }
     }
@@ -373,316 +478,34 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // PROPERTIES
     // ========================================================================
 
-    /// Returns the number of elements in the array.
-    ///
-    /// Example:
-    ///     [1, 2, 3].count  // 3
-    ///     [].count         // 0
-    public var count: Int64 { get { self.len() } }
+    // count, isEmpty, indices, asPointer, isValidIndex: provided by extend Slice[T]
 
-    /// Returns the current capacity (elements storable without reallocating).
-    ///
-    /// Capacity is always >= count. When count exceeds capacity, the array
-    /// reallocates with increased capacity (typically doubling).
-    ///
-    /// Example:
-    ///     var arr = Array[Int64](capacity: 10)
-    ///     arr.capacity  // >= 10
+    /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
 
-    /// Returns true if the array contains no elements.
-    ///
-    /// Equivalent to `count == 0` but may be more readable.
-    ///
-    /// Example:
-    ///     [].isEmpty      // true
-    ///     [1].isEmpty     // false
-    public var isEmpty: Bool { self.len() == Int64(intLiteral: 0) }
-
-    /// Returns the valid index range for this array.
-    ///
-    /// Equivalent to `0..<count`. Useful for iteration or bounds checking.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr.indices  // 0..<3
-    ///
-    ///     for i in arr.indices {
-    ///         print(arr(i))
-    ///     }
-    public var indices: Range[Int64] {
-        Range(Int64(intLiteral: 0), self.len())
+    /// Slice protocol kernel — borrows the array's buffer as an ArraySlice.
+    public func asSlice() -> ArraySlice[T] {
+        ArraySlice(pointer: self.ptr(), count: self.len())
     }
 
-    // ========================================================================
-    // ACCESSORS
-    // ========================================================================
+    // All subscripts provided by extend Slice[T] in slice.ks
 
-    /// Returns a raw pointer to the array's element storage.
-    ///
-    /// WARNING: The pointer is invalidated by any mutation or reallocation.
-    /// Use with caution for FFI or low-level operations.
-    public func asPointer() -> Pointer[T] { self.ptr() }
-
-    /// Returns a slice view of the entire array.
-    ///
-    /// Example:
-    ///     let slice = arr.asSlice()
-    public func asSlice() -> Slice[T] {
-        Slice(pointer: self.ptr(), count: self.len())
-    }
-
-    /// Returns true if index is within valid bounds [0, count).
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3]
-    ///     arr.isValidIndex(index: 0)   // true
-    ///     arr.isValidIndex(index: 2)   // true
-    ///     arr.isValidIndex(index: 3)   // false
-    ///     arr.isValidIndex(index: -1)  // false
-    public func isValidIndex(index: Int64) -> Bool {
-        index >= Int64(intLiteral: 0) and index < self.len()
-    }
-
-    // ========================================================================
-    // ELEMENT SUBSCRIPTS
-    // ========================================================================
-
-    /// Accesses the element at the given index.
-    ///
-    /// Panics if index is out of bounds [0, count).
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr(0)      // 10
-    ///     arr(1) = 25 // arr is now [10, 25, 30]
-    ///     arr(5)      // PANIC: index out of bounds
-    public subscript(index: Int64) -> T {
-        get {
-            if index < Int64(intLiteral: 0) or index >= self.len() {
-                lang.panic("Array index out of bounds")
-            }
-            self.ptr().offset(by: index).read()
-        }
-        set {
-            if index < Int64(intLiteral: 0) or index >= self.len() {
-                lang.panic("Array index out of bounds")
-            }
-            self.makeUnique();
-            self.ptr().offset(by: index).write(newValue)
-        }
-    }
-
-    /// Accesses the element at the given index with bounds checking.
-    ///
-    /// Returns None if index is out of bounds, making it safe for
-    /// untrusted indices.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr(checked: 0)   // Some(10)
-    ///     arr(checked: 5)   // None
-    ///     arr(checked: -1)  // None
-    public subscript(checked index: Int64) -> T? {
-        get {
-            if index >= Int64(intLiteral: 0) and index < self.len() {
-                .Some(self.ptr().offset(by: index).read())
-            } else {
-                .None
-            }
-        }
-    }
-
-    /// Accesses the element at the given index without bounds checking.
-    ///
-    /// WARNING: Undefined behavior if index is out of bounds.
-    /// Only use when you have already verified the index is valid.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     if arr.isValidIndex(index: i) {
-    ///         let val = arr(unchecked: i)  // safe
-    ///     }
-    public subscript(unchecked index: Int64) -> T {
-        get { self.ptr().offset(by: index).read() }
-        set {
-            self.makeUnique();
-            self.ptr().offset(by: index).write(newValue)
-        }
-    }
-
-    /// Accesses the element with wrapping for negative and overflow indices.
-    ///
-    /// Index -1 refers to the last element, -2 to second-to-last, etc.
-    /// Positive indices beyond count also wrap using modulo arithmetic.
-    /// Returns None only if the array is empty.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr(wrapping: -1)  // Some(30) - last element
-    ///     arr(wrapping: -2)  // Some(20) - second to last
-    ///     arr(wrapping: 3)   // Some(10) - wraps to index 0
-    ///     arr(wrapping: 4)   // Some(20) - wraps to index 1
-    ///     [](wrapping: 0)    // None - empty array
-    public subscript(wrapping index: Int64) -> T? {
-        get {
-            let myLen = self.len();
-            if myLen == Int64(intLiteral: 0) {
-                return .None
-            }
-            var idx = index % myLen;
-            if idx < Int64(intLiteral: 0) {
-                idx = idx + myLen
-            }
-            .Some(self.ptr().offset(by: idx).read())
-        }
-        set {
-            if let .Some(value) = newValue {
-                let myLen = self.len();
-                if myLen == Int64(intLiteral: 0) {
-                    return
-                }
-                var idx = index % myLen;
-                if idx < Int64(intLiteral: 0) {
-                    idx = idx + myLen
-                }
-                self.makeUnique();
-                self.ptr().offset(by: idx).write(value)
-            }
-        }
-    }
-
-    /// Accesses element at index, clamping to valid bounds.
-    ///
-    /// Negative indices clamp to 0, indices >= count clamp to count-1.
-    /// Returns None only if the array is empty.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr(clamping: -5)   // Some(10) - clamped to first
-    ///     arr(clamping: 100)  // Some(30) - clamped to last
-    ///     arr(clamping: 1)    // Some(20) - normal access
-    ///     [](clamping: 0)     // None - empty array
-    public subscript(clamping index: Int64) -> T? {
-        get {
-            let myLen = self.len();
-            if myLen == Int64(intLiteral: 0) {
-                return .None
-            }
-            var idx = index;
-            if idx < Int64(intLiteral: 0) {
-                idx = Int64(intLiteral: 0)
-            }
-            if idx >= myLen {
-                idx = myLen - Int64(intLiteral: 1)
-            }
-            .Some(self.ptr().offset(by: idx).read())
-        }
-        set {
-            if let .Some(value) = newValue {
-                let myLen = self.len();
-                if myLen == Int64(intLiteral: 0) {
-                    return
-                }
-                var idx = index;
-                if idx < Int64(intLiteral: 0) {
-                    idx = Int64(intLiteral: 0)
-                }
-                if idx >= myLen {
-                    idx = myLen - Int64(intLiteral: 1)
-                }
-                self.makeUnique();
-                self.ptr().offset(by: idx).write(value)
-            }
-        }
-    }
-
-    // ========================================================================
-    // RANGE SUBSCRIPTS
-    // ========================================================================
-
-    /// Returns a slice view of the array for the given range.
-    ///
-    /// Panics if range is out of bounds.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30, 40, 50]
-    ///     arr(1..<4)  // Slice containing [20, 30, 40]
-    ///     arr(0..<2)  // Slice containing [10, 20]
-    public subscript(range range: Range[Int64]) -> Slice[T] {
-        get {
-            let start = range.start;
-            let end = range.end;
-            if start < Int64(intLiteral: 0) or end > self.len() or start > end {
-                lang.panic("Array range out of bounds")
-            }
-            Slice(pointer: self.ptr().offset(by: start), count: end - start)
-        }
-    }
-
-    /// Returns a slice view with bounds checking.
-    ///
-    /// Returns None if any part of range is out of bounds.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr(checked: 0..<2)   // Some(Slice[10, 20])
-    ///     arr(checked: 0..<10)  // None - end out of bounds
-    ///     arr(checked: -1..<2)  // None - start out of bounds
-    public subscript(checkedRange range: Range[Int64]) -> Slice[T]? {
-        get {
-            let start = range.start;
-            let end = range.end;
-            if start >= Int64(intLiteral: 0) and end <= self.len() and start <= end {
-                .Some(Slice(pointer: self.ptr().offset(by: start), count: end - start))
-            } else {
-                .None
-            }
-        }
-    }
-
-    /// Returns a slice view without bounds checking.
-    ///
-    /// WARNING: Undefined behavior if range is out of bounds.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30, 40, 50]
-    ///     if start >= 0 and end <= arr.count {
-    ///         let slice = arr(unchecked: start..<end)  // safe
-    ///     }
-    public subscript(uncheckedRange range: Range[Int64]) -> Slice[T] {
-        get {
-            Slice(pointer: self.ptr().offset(by: range.start), count: range.end - range.start)
-        }
-    }
-
-    /// Returns a slice view with indices clamped to valid bounds.
-    ///
-    /// Never panics - out-of-bounds indices are clamped to [0, count].
-    /// An empty slice is returned if the clamped range is empty.
-    ///
-    /// Example:
-    ///     let arr = [10, 20, 30]
-    ///     arr(clamping: -5..<100)  // Slice containing entire array
-    ///     arr(clamping: -5..<1)    // Slice containing [10]
-    ///     arr(clamping: 10..<20)   // Empty slice (both clamped to 3)
-    public subscript(clampingRange range: Range[Int64]) -> Slice[T] {
-        get {
-            let myLen = self.len();
-            var start = range.start;
-            var end = range.end;
-            if start < Int64(intLiteral: 0) { start = Int64(intLiteral: 0) }
-            if end > myLen { end = myLen }
-            if start > end { start = end }
-            Slice(pointer: self.ptr().offset(by: start), count: end - start)
-        }
+    /// COW write barrier — deep-copies storage if shared.
+    public mutating func ensureUnique() {
+        self.makeUnique()
     }
 
     // ========================================================================
     // CAPACITY MANAGEMENT (Internal)
     // ========================================================================
 
-    /// Grows capacity to at least minCapacity.
+    /// Grows the buffer so it can hold at least `minCapacity` elements.
+    ///
+    /// No-op when current capacity is already sufficient. Otherwise picks
+    /// the next capacity by doubling (starting from 4 when capacity is
+    /// zero), allocates the new buffer, copies elements over, and frees
+    /// the old buffer. Triggers COW first so the reallocation is
+    /// invisible to other `Array` copies. Panics if allocation fails.
     private mutating func grow(minCapacity: Int64) {
         let myCap = self.cap();
         if myCap >= minCapacity {
@@ -693,11 +516,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
         // Calculate new capacity
         var newCap: Int64 = myCap;
-        if newCap == Int64(intLiteral: 0) {
-            newCap = Int64(intLiteral: 4)
+        if newCap == 0 {
+            newCap = 4
         }
         while newCap < minCapacity {
-            newCap = newCap * Int64(intLiteral: 2)
+            newCap = newCap * 2
         }
 
         // Allocate new buffer
@@ -706,19 +529,19 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            let oldStorage = self.storage.getValue();
+            let oldStorage = self.storage.read();
             // Copy existing elements
             for i in 0..<oldStorage.len {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
             }
             // Free old buffer
-            if oldStorage.cap > Int64(intLiteral: 0) {
+            if oldStorage.cap > 0 {
                 let oldLayout = Layout.array[T](oldStorage.cap);
                 allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
             self.storage.setValue(ArrayStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
         } else {
-            lang.panic("Array grow failed")
+            fatalError("Array grow failed")
         }
     }
 
@@ -726,60 +549,79 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // ELEMENT ACCESS
     // ========================================================================
 
-    /// Sets the element at the given index without bounds checking.
-    public mutating func setUnchecked(index: Int64, value: T) {
-        self.makeUnique();
-        self.ptr().offset(by: index).write(value)
-    }
-
     // ========================================================================
     // ADDING ELEMENTS
     // ========================================================================
 
-    /// Adds an element to the end of the array.
+    /// Appends `element` to the end of the array.
     ///
-    /// Amortized O(1). May trigger reallocation if capacity is exceeded.
+    /// Amortized O(1). Triggers a reallocation (and COW if storage is
+    /// shared) when `count == capacity`. For appending many elements,
+    /// `reserveCapacity(...)` first to avoid intermediate growths; for
+    /// adding multiple elements at once see `append(contentsOf:)` or
+    /// `appendFrom(iterable:)`.
     ///
-    /// Example:
-    ///     var arr = [1, 2]
-    ///     arr.append( 3)  // [1, 2, 3]
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2];
+    /// arr.append(3);  // [1, 2, 3]
+    /// ```
     public mutating func append(element: T) {
         let myLen = self.len();
         self.makeUnique();
-        self.grow(myLen + Int64(intLiteral: 1));
-        var s = self.storage.getValue();
+        self.grow(myLen + 1);
+        var s = self.storage.read();
         s.ptr.offset(by: s.len).write(element);
-        s.len = s.len + Int64(intLiteral: 1);
+        s.len = s.len + 1;
         self.storage.setValue(s)
     }
 
-    /// Appends all elements from another array.
+    /// Appends every element of `other` to the end of this array.
     ///
-    /// Example:
-    ///     var arr = [1, 2]
-    ///     arr.append(contentsOf: [3, 4])  // [1, 2, 3, 4]
+    /// Reserves the exact required capacity in one growth step then
+    /// copies the elements over, so it's faster than calling `append`
+    /// in a loop. Sharing semantics: `other` is read-only here, but if
+    /// `self` shares storage with anything else, COW fires once at the
+    /// start. See also `appendFrom(iterable:)` for arbitrary iterable
+    /// sources.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2];
+    /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
+    /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
+    /// ```
     public mutating func append(contentsOf other: Array[T]) {
         let otherLen = other.count;
-        if otherLen == Int64(intLiteral: 0) {
+        if otherLen == 0 {
             return
         }
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + otherLen);
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         let otherPtr = other.asPointer();
         for i in 0..<otherLen {
             s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
-            s.len = s.len + Int64(intLiteral: 1)
+            s.len = s.len + 1
         }
         self.storage.setValue(s)
     }
 
-    /// Appends all elements from an iterable source.
+    /// Appends every element produced by an arbitrary iterable.
     ///
-    /// Example:
-    ///     var arr = [1, 2]
-    ///     arr.appendFrom(3..<6)  // [1, 2, 3, 4, 5]
+    /// Drains the iterable via `append`, so capacity grows geometrically
+    /// rather than to an exact target — for sized sources like another
+    /// `Array`, prefer `append(contentsOf:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2];
+    /// arr.appendFrom(3..<6);  // [1, 2, 3, 4, 5]
+    /// ```
     public mutating func appendFrom[I](iterable: I) where I: Iterable, I.Item = T {
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
@@ -787,32 +629,43 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    /// Inserts an element at the specified index.
+    /// Inserts `element` at `index`, shifting later elements right by one.
     ///
-    /// Shifts all elements from index onward to the right.
-    /// Panics if index > count (index == count appends to end).
+    /// O(n) in the number of elements after `index`. `index == count`
+    /// behaves like `append`. Triggers COW and may reallocate. For bulk
+    /// insertion at one location, prefer
+    /// `replaceSubrange(i..<i, with: ...)`.
     ///
-    /// Example:
-    ///     var arr = [1, 3]
-    ///     arr.insert(element: 2, at: 1)  // [1, 2, 3]
-    ///     arr.insert(element: 0, at: 0)  // [0, 1, 2, 3]
-    ///     arr.insert(element: 4, at: 4)  // [0, 1, 2, 3, 4] - append
+    /// # Errors
+    ///
+    /// Panics with `"Array.insert: index out of bounds"` if `index < 0`
+    /// or `index > count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 3];
+    /// arr.insert(2, at: 1);  // [1, 2, 3]
+    /// arr.insert(0, at: 0);  // [0, 1, 2, 3]
+    /// arr.insert(4, at: 4);  // [0, 1, 2, 3, 4]  — append-equivalent
+    /// arr.insert(9, at: 99); // PANIC
+    /// ```
     public mutating func insert(element: T, at index: Int64) {
         let myLen = self.len();
-        if index < Int64(intLiteral: 0) or index > myLen {
-            lang.panic("Array.insert: index out of bounds")
+        if index < 0 or index > myLen {
+            fatalError("Array.insert: index out of bounds")
         }
         self.makeUnique();
-        self.grow(myLen + Int64(intLiteral: 1));
-        var s = self.storage.getValue();
+        self.grow(myLen + 1);
+        var s = self.storage.read();
         // Shift elements right
         var i: Int64 = s.len;
         while i > index {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i - Int64(intLiteral: 1)).read());
-            i = i - Int64(intLiteral: 1)
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).read());
+            i = i - 1
         }
         s.ptr.offset(by: index).write(element);
-        s.len = s.len + Int64(intLiteral: 1);
+        s.len = s.len + 1;
         self.storage.setValue(s)
     }
 
@@ -820,20 +673,28 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // REMOVING ELEMENTS
     // ========================================================================
 
-    /// Removes and returns the last element, or None if empty.
+    /// Removes and returns the last element, or `None` if the array is empty.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3]
-    ///     arr.pop()  // Some(3), arr is [1, 2]
-    ///     arr.pop()  // Some(2), arr is [1]
-    ///     arr.pop()  // Some(1), arr is []
-    ///     arr.pop()  // None, arr is still []
+    /// O(1). Capacity is retained for reuse — only `len` is decremented.
+    /// The mirror operation `popFirst()` is O(n) because it must shift
+    /// the remainder. To inspect the last element without removing, use
+    /// `last()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3];
+    /// arr.pop();  // Some(3), arr is [1, 2]
+    /// arr.pop();  // Some(2), arr is [1]
+    /// arr.pop();  // Some(1), arr is []
+    /// arr.pop();  // None,    arr is still []
+    /// ```
     public mutating func pop() -> T? {
         let myLen = self.len();
-        if myLen > Int64(intLiteral: 0) {
+        if myLen > 0 {
             self.makeUnique();
-            var s = self.storage.getValue();
-            s.len = s.len - Int64(intLiteral: 1);
+            var s = self.storage.read();
+            s.len = s.len - 1;
             let value = s.ptr.offset(by: s.len).read();
             self.storage.setValue(s);
             .Some(value)
@@ -842,124 +703,171 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    /// Removes and returns the first element, or None if empty.
+    /// Removes and returns the first element, or `None` if the array is
+    /// empty.
     ///
-    /// Note: O(n) as all elements must shift left.
+    /// O(n) — every following element shifts left by one. If you can
+    /// tolerate it, `pop()` from the back is O(1). For inspection
+    /// without removal, use `first()`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3]
-    ///     arr.popFirst()  // Some(1), arr is [2, 3]
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3];
+    /// arr.popFirst();  // Some(1), arr is [2, 3]
+    /// arr.popFirst();  // Some(2), arr is [3]
+    /// ```
     public mutating func popFirst() -> T? {
-        if self.len() == Int64(intLiteral: 0) {
+        if self.len() == 0 {
             return .None
         }
-        .Some(self.remove(at: Int64(intLiteral: 0)))
+        .Some(self.remove(at: 0))
     }
 
-    /// Removes and returns the element at the specified index.
+    /// Removes and returns the element at `index`, shifting later
+    /// elements left.
     ///
-    /// Shifts subsequent elements left. Panics if index is out of bounds.
+    /// O(n - index). Capacity is retained. For removing many elements at
+    /// once, prefer `removeSubrange(range:)`. To remove the *first*
+    /// element by *value* see the `Equatable` extension's
+    /// `remove(element:)`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4]
-    ///     arr.remove(at: 1)  // returns 2, arr is [1, 3, 4]
+    /// # Errors
+    ///
+    /// Panics with `"Array.remove: index out of bounds"` if `index < 0`
+    /// or `index >= count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4];
+    /// arr.remove(at: 1);  // returns 2; arr is [1, 3, 4]
+    /// arr.remove(at: 9);  // PANIC
+    /// ```
     public mutating func remove(at index: Int64) -> T {
         let myLen = self.len();
-        if index < Int64(intLiteral: 0) or index >= myLen {
-            lang.panic("Array.remove: index out of bounds")
+        if index < 0 or index >= myLen {
+            fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         let removed = s.ptr.offset(by: index).read();
         // Shift elements left
         var i: Int64 = index;
-        while i < s.len - Int64(intLiteral: 1) {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i + Int64(intLiteral: 1)).read());
-            i = i + Int64(intLiteral: 1)
+        while i < s.len - 1 {
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).read());
+            i = i + 1
         }
-        s.len = s.len - Int64(intLiteral: 1);
+        s.len = s.len - 1;
         self.storage.setValue(s);
         removed
     }
 
-    /// Removes elements in the specified range.
+    /// Removes every element in `range`, shifting later elements left.
     ///
-    /// Panics if range is out of bounds.
+    /// O(count - range.end + range.length). Empty ranges are no-ops.
+    /// Capacity is retained — call `shrinkToFit()` to release it. For
+    /// "remove these and put others back" use `replaceSubrange(...)`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.removeSubrange(range: 1..<4)  // arr is [1, 5]
+    /// # Errors
+    ///
+    /// Panics with `"Array.removeSubrange: range out of bounds"` if
+    /// `range.start < 0`, `range.end > count`, or
+    /// `range.start > range.end`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// arr.removeSubrange(1..<4);  // arr is [1, 5]
+    /// arr.removeSubrange(0..<0);  // no-op
+    /// ```
     public mutating func removeSubrange(range: Range[Int64]) {
         let start = range.start;
         let end = range.end;
         let myLen = self.len();
-        if start < Int64(intLiteral: 0) or end > myLen or start > end {
-            lang.panic("Array.removeSubrange: range out of bounds")
+        if start < 0 or end > myLen or start > end {
+            fatalError("Array.removeSubrange: range out of bounds")
         }
         let removeCount = end - start;
-        if removeCount == Int64(intLiteral: 0) {
+        if removeCount == 0 {
             return
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         // Shift elements left
         var i = start;
         while i < myLen - removeCount {
             s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).read());
-            i = i + Int64(intLiteral: 1)
+            i = i + 1
         }
         s.len = s.len - removeCount;
         self.storage.setValue(s)
     }
 
-    /// Removes all elements from the array.
+    /// Removes every element from the array, leaving capacity untouched.
     ///
-    /// Capacity may be retained for reuse.
+    /// O(1). The buffer is kept so subsequent appends don't reallocate
+    /// — if you want the memory back, follow with `shrinkToFit()`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3]
-    ///     arr.clear()  // arr is []
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3];
+    /// arr.clear();    // arr is []
+    /// arr.capacity;   // unchanged
+    /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.getValue();
-        s.len = Int64(intLiteral: 0);
+        var s = self.storage.read();
+        s.len = 0;
         self.storage.setValue(s)
     }
 
-    /// Retains only elements that satisfy the predicate.
+    /// Keeps only elements for which `predicate` returns true; removes
+    /// the rest in place.
     ///
-    /// Elements are visited in order. This is an in-place filter.
+    /// O(n), single pass, stable (relative order preserved). The mirror
+    /// operation is `removeAll(matching:)`. For a copy instead of an
+    /// in-place edit, use `iter().filter(...).collect()`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.retain(matching: { (x) in x % 2 == 0 })  // arr is [2, 4]
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// arr.retain(matching: { (x) in x % 2 == 0 });  // [2, 4]
+    /// ```
     public mutating func retain(matching predicate: (T) -> Bool) {
         self.makeUnique();
-        var s = self.storage.getValue();
-        var writeIdx: Int64 = Int64(intLiteral: 0);
+        var s = self.storage.read();
+        var writeIdx: Int64 = 0;
         for readIdx in 0..<s.len {
             let element = s.ptr.offset(by: readIdx).read();
             if predicate(element) {
                 if writeIdx != readIdx {
                     s.ptr.offset(by: writeIdx).write(element)
                 }
-                writeIdx = writeIdx + Int64(intLiteral: 1)
+                writeIdx = writeIdx + 1
             }
         }
         s.len = writeIdx;
         self.storage.setValue(s)
     }
 
-    /// Removes all elements that satisfy the predicate.
+    /// Removes every element for which `predicate` returns true.
     ///
-    /// The inverse of `retain`. Elements are visited in order.
+    /// The inverse of `retain(matching:)` — implemented as
+    /// `retain` over the negated predicate. O(n), stable.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.removeAll(matching: { (x) in x % 2 == 0 })  // arr is [1, 3, 5]
+    /// # Examples
     ///
-    ///     var names = ["Alice", "", "Bob", ""]
-    ///     names.removeAll(matching: |s| s.isEmpty)  // ["Alice", "Bob"]
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// arr.removeAll(matching: { (x) in x % 2 == 0 });  // [1, 3, 5]
+    ///
+    /// var names = ["Alice", "", "Bob", ""];
+    /// names.removeAll(matching: { (s) in s.isEmpty });  // ["Alice", "Bob"]
+    /// ```
     public mutating func removeAll(matching predicate: (T) -> Bool) {
         self.retain(matching: { (x) in predicate(x) == false })
     }
@@ -968,17 +876,27 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // REORDERING
     // ========================================================================
 
-    /// Swaps the elements at the two given indices.
+    /// Swaps the elements at indices `i` and `j` in place.
     ///
-    /// Panics if either index is out of bounds.
+    /// O(1). A no-op when `i == j`. Triggers COW.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3]
-    ///     arr.swap(at: 0, with: 2)  // [3, 2, 1]
+    /// # Errors
+    ///
+    /// Panics with `"Array.swap: index out of bounds"` if either index
+    /// is `< 0` or `>= count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3];
+    /// arr.swap(at: 0, with: 2);  // [3, 2, 1]
+    /// arr.swap(at: 1, with: 1);  // [3, 2, 1] — no-op
+    /// arr.swap(at: 0, with: 9);  // PANIC
+    /// ```
     public mutating func swap(at i: Int64, with j: Int64) {
         let myLen = self.len();
-        if i < Int64(intLiteral: 0) or i >= myLen or j < Int64(intLiteral: 0) or j >= myLen {
-            lang.panic("Array.swap: index out of bounds")
+        if i < 0 or i >= myLen or j < 0 or j >= myLen {
+            fatalError("Array.swap: index out of bounds")
         }
         if i == j {
             return
@@ -992,97 +910,115 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
     /// Reverses the order of elements in place.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3]
-    ///     arr.reverse()  // [3, 2, 1]
+    /// O(n). Triggers COW. For a non-mutating variant returning a new
+    /// array, use `reversed()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3];
+    /// arr.reverse();  // [3, 2, 1]
+    /// ```
     public mutating func reverse() {
         self.makeUnique();
-        var s = self.storage.getValue();
-        var left: Int64 = Int64(intLiteral: 0);
-        var right: Int64 = s.len - Int64(intLiteral: 1);
+        var s = self.storage.read();
+        var left: Int64 = 0;
+        var right: Int64 = s.len - 1;
         while left < right {
             let temp = s.ptr.offset(by: left).read();
             s.ptr.offset(by: left).write(s.ptr.offset(by: right).read());
             s.ptr.offset(by: right).write(temp);
-            left = left + Int64(intLiteral: 1);
-            right = right - Int64(intLiteral: 1)
+            left = left + 1;
+            right = right - 1
         }
         self.storage.setValue(s)
     }
 
-    /// Returns a new array with elements in reversed order.
-    ///
-    /// The original array is unchanged.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3]
-    ///     let rev = arr.reversed()  // [3, 2, 1]
-    ///     // arr is still [1, 2, 3]
-    public func reversed() -> Array[T] {
-        var result = self.clone();
-        result.reverse();
-        result
-    }
+    // reversed(): provided by extend Slice[T] — returns a lazy ReversedView[T]
+    // (use `arr.reversed().toArray()` if an owned Array is needed).
 
-    /// Rotates elements left by the given amount.
+    /// Rotates the elements in place by `amount` positions to the left.
     ///
-    /// Positive amounts rotate left (first elements move to end).
-    /// Negative amounts rotate right (last elements move to start).
+    /// Implemented with the three-reversal algorithm — O(n) time,
+    /// O(1) extra space. Negative `amount` rotates right; the actual
+    /// rotation is `amount mod count`, so very large amounts wrap. A
+    /// no-op when `count <= 1` or the normalized amount is zero.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.rotate(by: 2)   // [3, 4, 5, 1, 2]
-    ///     arr.rotate(by: -1)  // [2, 3, 4, 5, 1]
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// arr.rotate(by:  2);  // [3, 4, 5, 1, 2]
+    /// arr.rotate(by: -1);  // [2, 3, 4, 5, 1]
+    /// arr.rotate(by:  7);  // same as rotate(by: 2) for count == 5
+    /// ```
     public mutating func rotate(by amount: Int64) {
         let myLen = self.len();
-        if myLen <= Int64(intLiteral: 1) {
+        if myLen <= 1 {
             return
         }
         var normalized = amount % myLen;
-        if normalized < Int64(intLiteral: 0) {
+        if normalized < 0 {
             normalized = normalized + myLen
         }
-        if normalized == Int64(intLiteral: 0) {
+        if normalized == 0 {
             return
         }
         // Three-reversal algorithm
         self.makeUnique();
         // Reverse first part [0, normalized)
-        self.reverseRange(from: Int64(intLiteral: 0), to: normalized);
+        self.reverseRange(from: 0, to: normalized);
         // Reverse second part [normalized, len)
         self.reverseRange(from: normalized, to: myLen);
         // Reverse entire array
         self.reverse()
     }
 
-    /// Private helper to reverse a range within the array.
+    /// Reverses the half-open sub-range `[start, end)` in place.
+    ///
+    /// Internal helper used by `rotate(by:)`'s three-reversal algorithm.
+    /// Does not bounds-check; callers must pass valid indices.
     private mutating func reverseRange(from start: Int64, to end: Int64) {
         var left = start;
-        var right = end - Int64(intLiteral: 1);
+        var right = end - 1;
         let ptr = self.ptr();
         while left < right {
             let temp = ptr.offset(by: left).read();
             ptr.offset(by: left).write(ptr.offset(by: right).read());
             ptr.offset(by: right).write(temp);
-            left = left + Int64(intLiteral: 1);
-            right = right - Int64(intLiteral: 1)
+            left = left + 1;
+            right = right - 1
         }
     }
 
-    /// Replaces elements in the specified range with elements from replacement.
+    /// Replaces the elements in `range` with the elements of `replacement`.
     ///
-    /// The replacement can have a different length than the range.
-    /// Panics if range is out of bounds.
+    /// `replacement.count` need not equal the range length — the array
+    /// shrinks or grows accordingly, shifting the trailing elements once.
+    /// Use `range == i..<i` to insert without removing, or
+    /// `replacement == []` to remove without inserting (equivalent to
+    /// `removeSubrange(...)`). May reallocate; triggers COW.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.replaceSubrange(range: 1..<4, with: [20, 30])  // [1, 20, 30, 5]
+    /// # Errors
+    ///
+    /// Panics with `"Array.replaceSubrange: range out of bounds"` if
+    /// `range.start < 0`, `range.end > count`, or
+    /// `range.start > range.end`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// arr.replaceSubrange(1..<4, with: [20, 30]);    // [1, 20, 30, 5]
+    /// arr.replaceSubrange(1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
+    /// arr.replaceSubrange(0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
+    /// ```
     public mutating func replaceSubrange(range: Range[Int64], with replacement: Array[T]) {
         let start = range.start;
         let end = range.end;
         let myLen = self.len();
-        if start < Int64(intLiteral: 0) or end > myLen or start > end {
-            lang.panic("Array.replaceSubrange: range out of bounds")
+        if start < 0 or end > myLen or start > end {
+            fatalError("Array.replaceSubrange: range out of bounds")
         }
 
         let removeCount = end - start;
@@ -1091,21 +1027,21 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 
         self.grow(newLen);
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
 
         if insertCount > removeCount {
             // Shift elements right
-            var i = myLen - Int64(intLiteral: 1);
+            var i = myLen - 1;
             while i >= end {
                 s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).read());
-                i = i - Int64(intLiteral: 1)
+                i = i - 1
             }
         } else if insertCount < removeCount {
             // Shift elements left
             var i = end;
             while i < myLen {
                 s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).read());
-                i = i + Int64(intLiteral: 1)
+                i = i + 1
             }
         }
 
@@ -1118,73 +1054,94 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         self.storage.setValue(s)
     }
 
-    /// Randomly shuffles the array in place using the provided generator.
+    /// Shuffles the array in place using `rng`.
     ///
-    /// Uses the Fisher-Yates shuffle algorithm.
+    /// Uses the Fisher-Yates algorithm — every permutation is equally
+    /// likely, given a uniform RNG. Passing the same seeded `rng`
+    /// produces a deterministic shuffle, which is the usual reason to
+    /// reach for this overload over the no-arg `shuffle()`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     var rng = Lcg64(seed: 42)
-    ///     arr.shuffle(using: rng)  // deterministic shuffle
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// var rng = Lcg64(seed: 42);
+    /// arr.shuffle(using: rng);  // deterministic for the seed
+    /// ```
     public mutating func shuffle[R](using rng: R) where R: RandomNumberGenerator {
         let n = self.len();
-        if n <= Int64(intLiteral: 1) {
+        if n <= 1 {
             return
         }
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         var generator = rng;
 
         // Fisher-Yates shuffle
-        var i: Int64 = n - Int64(intLiteral: 1);
-        while i > Int64(intLiteral: 0) {
+        var i: Int64 = n - 1;
+        while i > 0 {
             // Inline nextInt(below:) since extension methods may not be visible on generic R
-            let bound = UInt64(from: i) + UInt64(intLiteral: 1);
+            let bound = UInt64(from: i) + 1;
             let rngValue = generator.nextUInt64();
             let j = Int64(from: rngValue.modulo(bound));
             // Swap elements at i and j
             let temp = s.ptr.offset(by: i).read();
             s.ptr.offset(by: i).write(s.ptr.offset(by: j).read());
             s.ptr.offset(by: j).write(temp);
-            i = i - Int64(intLiteral: 1)
+            i = i - 1
         }
 
         self.storage.setValue(s)
     }
 
-    /// Randomly shuffles the array in place.
+    /// Shuffles the array in place using a fresh default RNG.
     ///
-    /// Uses the default random number generator.
+    /// Convenience over `shuffle(using:)`. The result is non-deterministic
+    /// across calls — pass an explicit `Lcg64(seed: ...)` (or other
+    /// `RandomNumberGenerator`) when you need reproducibility.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     arr.shuffle()  // e.g., [3, 1, 5, 2, 4]
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// arr.shuffle();  // e.g. [3, 1, 5, 2, 4]
+    /// ```
     public mutating func shuffle() {
         var rng = Lcg64();
         self.shuffle(using: rng)
     }
 
-    /// Returns a new array with elements in random order using the provided generator.
+    /// Returns a new array shuffled with `rng`. The original is unchanged.
     ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4, 5]
-    ///     var rng = Lcg64(seed: 42)
-    ///     let result = arr.shuffled(using: rng)
+    /// The non-mutating mirror of `shuffle(using:)`. Internally clones via
+    /// COW (cheap until the next mutation) and shuffles the copy.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [1, 2, 3, 4, 5];
+    /// var rng = Lcg64(seed: 42);
+    /// let result = arr.shuffled(using: rng);
+    /// // arr is still [1, 2, 3, 4, 5]
+    /// ```
     public func shuffled[R](using rng: R) -> Array[T] where R: RandomNumberGenerator {
         var result = self.clone();
         result.shuffle(using: rng);
         result
     }
 
-    /// Returns a new array with elements in random order.
+    /// Returns a new array shuffled with a default RNG. Original unchanged.
     ///
-    /// Uses the default random number generator.
-    /// The original array is unchanged.
+    /// Convenience over `shuffled(using:)`. Non-deterministic between
+    /// calls.
     ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4, 5]
-    ///     let shuffled = arr.shuffled()  // e.g., [4, 2, 5, 1, 3]
-    ///     // arr is still [1, 2, 3, 4, 5]
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [1, 2, 3, 4, 5];
+    /// let shuffled = arr.shuffled();  // e.g. [4, 2, 5, 1, 3]
+    /// // arr is still [1, 2, 3, 4, 5]
+    /// ```
     public func shuffled() -> Array[T] {
         var result = self.clone();
         result.shuffle();
@@ -1195,42 +1152,55 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // CAPACITY MANAGEMENT
     // ========================================================================
 
-    /// Reserves capacity for at least minimumCapacity elements.
+    /// Reserves enough capacity to hold at least `minimumCapacity` elements.
     ///
-    /// Does nothing if current capacity is already sufficient.
-    /// Use when you know many elements will be added.
+    /// A no-op when capacity already suffices. The actual capacity after
+    /// the call may exceed the request because growth rounds up via the
+    /// doubling policy. Pair with bulk inserts to skip intermediate
+    /// reallocations. The opposite operation is `shrinkToFit()`.
     ///
-    /// Example:
-    ///     var arr = Array[Int64]()
-    ///     arr.reserveCapacity(minimumCapacity: 1000)
-    ///     for i in 0..<1000 {
-    ///         arr.append( i)  // No reallocations
-    ///     }
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = Array[Int64]();
+    /// arr.reserveCapacity(1000);
+    /// for i in 0..<1000 {
+    ///         arr.append(i);  // no reallocations
+    /// }
+    /// ```
     public mutating func reserveCapacity(minimumCapacity: Int64) {
         self.grow(minimumCapacity)
     }
 
-    /// Reduces capacity to match the current count.
+    /// Releases unused capacity by reallocating to fit `count` exactly.
     ///
-    /// Frees excess memory. Useful after removing many elements.
+    /// Useful after a bulk removal or when you've finished building a
+    /// large array. A no-op when `capacity == count`. For an empty
+    /// array, fully deallocates the buffer (capacity drops to 0).
+    /// Triggers COW.
     ///
-    /// Example:
-    ///     var arr = Array[Int64](capacity: 1000)
-    ///     arr.append( 1)
-    ///     arr.shrinkToFit()  // capacity reduced to ~1
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = Array[Int64](capacity: 1000);
+    /// arr.append(1);
+    /// arr.shrinkToFit();   // capacity reduced to 1
+    /// arr.clear();
+    /// arr.shrinkToFit();   // capacity reduced to 0, buffer freed
+    /// ```
     public mutating func shrinkToFit() {
         let myLen = self.len();
         let myCap = self.cap();
-        if myLen == myCap or myLen == Int64(intLiteral: 0) {
-            if myLen == Int64(intLiteral: 0) and myCap > Int64(intLiteral: 0) {
+        if myLen == myCap or myLen == 0 {
+            if myLen == 0 and myCap > 0 {
                 // Deallocate entirely for empty array
                 self.makeUnique();
-                var s = self.storage.getValue();
+                var s = self.storage.read();
                 let layout = Layout.array[T](myCap);
                 var allocator = SystemAllocator();
                 allocator.deallocate(s.ptr.asRaw(), layout);
-                s.ptr = Pointer(raw: lang.ptr_null[T]());
-                s.cap = Int64(intLiteral: 0);
+                s.ptr = Pointer[T].nullPointer();
+                s.cap = 0;
                 self.storage.setValue(s)
             }
             return
@@ -1244,11 +1214,11 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            let oldStorage = self.storage.getValue();
+            let oldStorage = self.storage.read();
             for i in 0..<myLen {
                 newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read())
             }
-            if myCap > Int64(intLiteral: 0) {
+            if myCap > 0 {
                 let oldLayout = Layout.array[T](myCap);
                 allocator.deallocate(oldStorage.ptr.asRaw(), oldLayout)
             }
@@ -1256,308 +1226,58 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
         }
     }
 
-    // ========================================================================
-    // ACCESSORS (continued)
-    // ========================================================================
-
-    /// Returns the first element, or None if empty.
-    ///
-    /// Example:
-    ///     [1, 2, 3].first()  // Some(1)
-    ///     [].first()         // None
-    public func first() -> T? {
-        if self.len() > Int64(intLiteral: 0) {
-            .Some(self.ptr().read())
-        } else {
-            .None
-        }
-    }
-
-    /// Returns the last element, or None if empty.
-    ///
-    /// Example:
-    ///     [1, 2, 3].last()  // Some(3)
-    ///     [].last()         // None
-    public func last() -> T? {
-        let myLen = self.len();
-        if myLen > Int64(intLiteral: 0) {
-            .Some(self.ptr().offset(by: myLen - Int64(intLiteral: 1)).read())
-        } else {
-            .None
-        }
-    }
+    // first(), last(), firstIndex(matching:), lastIndex(matching:),
+    // first(matching:), last(matching:), all(matching:), any(matching:),
+    // countItems(matching:), prefix(count:), suffix(count:),
+    // drop(first:), drop(last:): provided by extend Slice[T]
 
     // ========================================================================
     // ITERATION
     // ========================================================================
 
-    /// Returns an iterator over the array's elements.
-    ///
-    /// Example:
-    ///     for item in arr.iter() { ... }
-    ///     let doubled = arr.iter().map { it * 2 }.collect()
-    public func iter() -> ArrayIterator[T] {
-        ArrayIterator(ptr: self.ptr(), remaining: self.len())
+    /// Returns a forward iterator over the array's elements.
+    public func iter() -> ArraySliceIterator[T] {
+        ArraySliceIterator(ptr: self.ptr(), remaining: self.len())
     }
 
-    // ========================================================================
-    // SEARCHING
-    // ========================================================================
-
-    /// Returns the index of the first element matching the predicate, or None.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4, 5]
-    ///     arr.firstIndex(matching: { (x) in x > 3 })   // Some(3) - index of 4
-    ///     arr.firstIndex(matching: { (x) in x > 10 })  // None
-    public func firstIndex(matching predicate: (T) -> Bool) -> Int64? {
-        let myLen = self.len();
-        let myPtr = self.ptr();
-        for i in 0..<myLen {
-            if predicate(myPtr.offset(by: i).read()) {
-                return .Some(i)
-            }
-        }
-        .None
-    }
-
-    /// Returns the index of the last element matching the predicate, or None.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 2, 1]
-    ///     arr.lastIndex(matching: { (x) in x == 2 })  // Some(3)
-    public func lastIndex(matching predicate: (T) -> Bool) -> Int64? {
-        let myLen = self.len();
-        if myLen == Int64(intLiteral: 0) {
-            return .None
-        }
-        let myPtr = self.ptr();
-        var i = myLen - Int64(intLiteral: 1);
-        while i >= Int64(intLiteral: 0) {
-            if predicate(myPtr.offset(by: i).read()) {
-                return .Some(i)
-            }
-            i = i - Int64(intLiteral: 1)
-        }
-        .None
-    }
-
-    /// Returns the first element matching the predicate, or None.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4, 5]
-    ///     arr.first(matching: { (x) in x > 3 })  // Some(4)
-    public func first(matching predicate: (T) -> Bool) -> T? {
-        if let .Some(idx) = self.firstIndex(matching: predicate) {
-            .Some(self(unchecked: idx))
-        } else {
-            .None
-        }
-    }
-
-    /// Returns the last element matching the predicate, or None.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 2, 1]
-    ///     arr.last(matching: { (x) in x > 1 })  // Some(2) - the second 2
-    public func last(matching predicate: (T) -> Bool) -> T? {
-        if let .Some(idx) = self.lastIndex(matching: predicate) {
-            .Some(self(unchecked: idx))
-        } else {
-            .None
-        }
-    }
-
-    // ========================================================================
-    // PREDICATES
-    // ========================================================================
-
-    /// Returns true if all elements satisfy the predicate.
-    ///
-    /// Returns true for an empty array (vacuous truth).
-    /// Short-circuits on first non-matching element.
-    ///
-    /// Example:
-    ///     [2, 4, 6].all(satisfy: { (x) in x % 2 == 0 })  // true
-    ///     [2, 3, 6].all(satisfy: { (x) in x % 2 == 0 })  // false
-    ///     [].all(satisfy: { (x) in false })              // true (empty)
-    public func all(satisfy predicate: (T) -> Bool) -> Bool {
-        let myLen = self.len();
-        let myPtr = self.ptr();
-        for i in 0..<myLen {
-            if predicate(myPtr.offset(by: i).read()) == false {
-                return false
-            }
-        }
-        true
-    }
-
-    /// Returns true if any element satisfies the predicate.
-    ///
-    /// Returns false for an empty array.
-    /// Short-circuits on first matching element.
-    ///
-    /// Example:
-    ///     [1, 2, 3].any(satisfy: { (x) in x > 2 })  // true
-    ///     [1, 2, 3].any(satisfy: { (x) in x > 5 })  // false
-    ///     [].any(satisfy: { (x) in true })          // false (empty)
-    public func any(satisfy predicate: (T) -> Bool) -> Bool {
-        let myLen = self.len();
-        let myPtr = self.ptr();
-        for i in 0..<myLen {
-            if predicate(myPtr.offset(by: i).read()) {
-                return true
-            }
-        }
-        false
-    }
-
-    /// Returns the number of elements satisfying the predicate.
-    ///
-    /// Example:
-    ///     [1, 2, 3, 4, 5].countWhere({ (x) in x % 2 == 0 })  // 2
-    public func countWhere(predicate: (T) -> Bool) -> Int64 {
-        let myLen = self.len();
-        let myPtr = self.ptr();
-        var result: Int64 = Int64(intLiteral: 0);
-        for i in 0..<myLen {
-            if predicate(myPtr.offset(by: i).read()) {
-                result = result + Int64(intLiteral: 1)
-            }
-        }
-        result
-    }
-
-    // ========================================================================
-    // SLICING
-    // ========================================================================
-
-    /// Returns a slice of the first count elements.
-    ///
-    /// Panics if count > self.count.
-    ///
-    /// Example:
-    ///     [1, 2, 3, 4, 5].prefix(count: 3)  // Slice[1, 2, 3]
-    ///     [1, 2].prefix(count: 0)           // Empty slice
-    public func prefix(count: Int64) -> Slice[T] {
-        let myLen = self.len();
-        if count > myLen {
-            lang.panic("Array.prefix: count exceeds array length")
-        }
-        Slice(pointer: self.ptr(), count: count)
-    }
-
-    /// Returns a slice of the last count elements.
-    ///
-    /// Panics if count > self.count.
-    ///
-    /// Example:
-    ///     [1, 2, 3, 4, 5].suffix(count: 2)  // Slice[4, 5]
-    public func suffix(count: Int64) -> Slice[T] {
-        let myLen = self.len();
-        if count > myLen {
-            lang.panic("Array.suffix: count exceeds array length")
-        }
-        Slice(pointer: self.ptr().offset(by: myLen - count), count: count)
-    }
-
-    /// Returns a slice with the first count elements removed.
-    ///
-    /// Panics if count > self.count.
-    ///
-    /// Example:
-    ///     [1, 2, 3, 4, 5].drop(first: 2)  // Slice[3, 4, 5]
-    public func drop(first count: Int64) -> Slice[T] {
-        let myLen = self.len();
-        if count > myLen {
-            lang.panic("Array.drop(first:): count exceeds array length")
-        }
-        Slice(pointer: self.ptr().offset(by: count), count: myLen - count)
-    }
-
-    /// Returns a slice with the last count elements removed.
-    ///
-    /// Panics if count > self.count.
-    ///
-    /// Example:
-    ///     [1, 2, 3, 4, 5].drop(last: 2)  // Slice[1, 2, 3]
-    public func drop(last count: Int64) -> Slice[T] {
-        let myLen = self.len();
-        if count > myLen {
-            lang.panic("Array.drop(last:): count exceeds array length")
-        }
-        Slice(pointer: self.ptr(), count: myLen - count)
-    }
-
-    // ========================================================================
-    // CHUNKING
-    // ========================================================================
-
-    /// Returns an iterator over non-overlapping chunks of the given size.
-    ///
-    /// The last chunk may be smaller if count isn't evenly divisible.
-    /// Panics if size is 0.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4, 5]
-    ///     for chunk in arr.chunks(of: 2) {
-    ///         // yields [1, 2], then [3, 4], then [5]
-    ///     }
-    public func chunks(of size: Int64) -> ChunksIterator[T] {
-        if size <= Int64(intLiteral: 0) {
-            lang.panic("Array.chunks: size must be positive")
-        }
-        ChunksIterator(ptr: self.ptr(), remaining: self.len(), chunkSize: size)
-    }
-
-    /// Returns an iterator over overlapping sliding windows of the given size.
-    ///
-    /// Panics if size is 0 or size > count.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4]
-    ///     for window in arr.windows(of: 2) {
-    ///         // yields [1, 2], then [2, 3], then [3, 4]
-    ///     }
-    public func windows(of size: Int64) -> WindowsIterator[T] {
-        if size <= Int64(intLiteral: 0) {
-            lang.panic("Array.windows: size must be positive")
-        }
-        if size > self.len() {
-            lang.panic("Array.windows: size exceeds array length")
-        }
-        WindowsIterator(ptr: self.ptr(), totalCount: self.len(), windowSize: size)
-    }
+    // chunks(of:), windows(of:): provided by extend Slice[T] — return
+    // ChunksView[T] / WindowsView[T] (multi-pass; subscript via .get(i)).
 
     // ========================================================================
     // PARTITIONING
     // ========================================================================
 
-    /// Reorders elements so those satisfying predicate come first.
+    /// Reorders elements in place so that all matching elements come
+    /// before all non-matching elements; returns the partition point.
     ///
-    /// Returns the index of the first element not satisfying predicate
-    /// (i.e., the partition point).
-    /// The relative order within each partition is NOT preserved.
+    /// The returned index is the count of matching elements (and the
+    /// index of the first non-matching one). This is an *unstable*
+    /// partition — relative order within each side is not preserved.
+    /// For a stable, allocating variant that returns two arrays, use
+    /// `partitioned(by:)`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 4, 5]
-    ///     let pivot = arr.partition(by: { (x) in x % 2 == 0 })
-    ///     // arr might be [2, 4, 3, 1, 5] or similar
-    ///     // pivot == 2 (first two elements satisfy predicate)
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 4, 5];
+    /// let pivot = arr.partition(by: { (x) in x % 2 == 0 });
+    /// // arr might be [2, 4, 3, 1, 5] (or another valid permutation)
+    /// // pivot == 2 — first two elements satisfy the predicate
+    /// ```
     public mutating func partition(by predicate: (T) -> Bool) -> Int64 {
         self.makeUnique();
-        var s = self.storage.getValue();
-        var lo: Int64 = Int64(intLiteral: 0);
-        var hi: Int64 = s.len - Int64(intLiteral: 1);
+        var s = self.storage.read();
+        var lo: Int64 = 0;
+        var hi: Int64 = s.len - 1;
 
         while true {
             // Find first element that doesn't satisfy predicate
             while lo < s.len and predicate(s.ptr.offset(by: lo).read()) {
-                lo = lo + Int64(intLiteral: 1)
+                lo = lo + 1
             }
             // Find last element that satisfies predicate
-            while hi >= Int64(intLiteral: 0) and predicate(s.ptr.offset(by: hi).read()) == false {
-                hi = hi - Int64(intLiteral: 1)
+            while hi >= 0 and predicate(s.ptr.offset(by: hi).read()) == false {
+                hi = hi - 1
             }
 
             if lo >= hi {
@@ -1568,22 +1288,28 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
             let temp = s.ptr.offset(by: lo).read();
             s.ptr.offset(by: lo).write(s.ptr.offset(by: hi).read());
             s.ptr.offset(by: hi).write(temp);
-            lo = lo + Int64(intLiteral: 1);
-            hi = hi - Int64(intLiteral: 1)
+            lo = lo + 1;
+            hi = hi - 1
         }
 
         self.storage.setValue(s);
         lo
     }
 
-    /// Splits into two arrays: elements satisfying predicate and those that don't.
+    /// Returns two new arrays: elements matching `predicate` first, then
+    /// elements that don't.
     ///
-    /// Preserves relative order within each resulting array.
+    /// Stable: relative order within each side is preserved. Allocates
+    /// two new arrays — use `partition(by:)` for an in-place, unstable
+    /// reordering that avoids the allocation.
     ///
-    /// Example:
-    ///     let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: { (x) in x % 2 == 0 })
-    ///     // evens = [2, 4]
-    ///     // odds = [1, 3, 5]
+    /// # Examples
+    ///
+    /// ```
+    /// let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: { (x) in x % 2 == 0 });
+    /// // evens = [2, 4]
+    /// // odds  = [1, 3, 5]
+    /// ```
     public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]) {
         var matching = Array[T]();
         var notMatching = Array[T]();
@@ -1604,7 +1330,21 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
     // PROTOCOL CONFORMANCES
     // ========================================================================
 
-    /// Creates a shallow clone (COW - copy deferred until mutation).
+    /// Returns an `Array[T]` sharing the same storage; the deep copy is
+    /// deferred until either side mutates.
+    ///
+    /// O(1) — just bumps the storage `CowBox`'s refcount. The first
+    /// mutation on either the original or the clone triggers
+    /// `makeUnique()`, which deep-copies the buffer so the two arrays
+    /// diverge.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = [1, 2, 3];
+    /// var b = a.clone();  // O(1), shares storage
+    /// b.append(4);        // b deep-copies here; a is unchanged
+    /// ```
     public func clone() -> Array[T] {
         Array(storage: self.storage.clone())
     }
@@ -1614,143 +1354,28 @@ public struct Array[T]: Iterable, ExpressibleByArrayLiteral, _ExpressibleByArray
 // CONDITIONAL EXTENSIONS
 // ============================================================================
 
-/// Equatable extension when T is Equatable.
-extend Array[T]: Equatable where T: Equatable {
-    /// Compares two arrays for equality.
-    ///
-    /// Two arrays are equal if they have the same length and all
-    /// corresponding elements are equal.
-    ///
-    /// Example:
-    ///     [1, 2, 3].equals(other: [1, 2, 3])  // true
-    ///     [1, 2, 3].equals(other: [1, 2])     // false
-    ///     [1, 2, 3].equals(other: [3, 2, 1])  // false
-    public func equals(other: Array[T]) -> Bool {
-        let selfCount = self.count;
-        let otherCount = other.count;
-        if selfCount != otherCount {
-            return false
-        }
-        var i: Int64 = Int64(intLiteral: 0);
-        var equal: Bool = true;
-        while i < selfCount and equal {
-            if self(unchecked: i).equals(other(unchecked: i)) == false {
-                equal = false
-            }
-            i = i + Int64(intLiteral: 1)
-        }
-        equal
-    }
+/// `Equatable` and value-based search/dedup operations available when the
+/// element type itself is `Equatable`.
+// contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:),
+// isEqual: provided by extend Slice[T] where T: Equatable
+extend Array[T]: Equatable where T: Equatable { }
 
-    /// Returns true if the array contains the given element.
+extend Array[T] where T: Equatable {
+    /// Removes the first element equal to `element`. Returns whether a
+    /// removal occurred.
     ///
-    /// Example:
-    ///     [1, 2, 3].contains(element: 2)  // true
-    ///     [1, 2, 3].contains(element: 5)  // false
-    public func contains(element: T) -> Bool {
-        self.firstIndex(matching: { (x) in x.equals(element) }).isSome()
-    }
-
-    /// Returns the index of the first occurrence of element, or None.
+    /// Performs `firstIndex(of:)` then `remove(at:)`. To strip every
+    /// occurrence in one pass, use `removeAll(element:)`.
     ///
-    /// Example:
-    ///     [1, 2, 3, 2].firstIndex(of: 2)  // Some(1)
-    ///     [1, 2, 3].firstIndex(of: 5)     // None
-    public func firstIndex(of element: T) -> Int64? {
-        self.firstIndex(matching: { (x) in x.equals(element) })
-    }
-
-    /// Returns the index of the last occurrence of element, or None.
+    /// # Examples
     ///
-    /// Example:
-    ///     [1, 2, 3, 2].lastIndex(of: 2)  // Some(3)
-    public func lastIndex(of element: T) -> Int64? {
-        self.lastIndex(matching: { (x) in x.equals(element) })
-    }
-
-    /// Returns true if the array starts with the given prefix.
-    ///
-    /// Example:
-    ///     [1, 2, 3].starts(with: [1, 2])     // true
-    ///     [1, 2, 3].starts(with: [1, 2, 3])  // true
-    ///     [1, 2, 3].starts(with: [2, 3])     // false
-    ///     [1, 2].starts(with: [1, 2, 3])     // false (prefix longer)
-    ///     [1, 2, 3].starts(with: [])         // true (empty prefix)
-    public func starts(with prefix: Array[T]) -> Bool {
-        let prefixLen = prefix.count;
-        if prefixLen > self.count {
-            return false
-        }
-        for i in 0..<prefixLen {
-            if self(unchecked: i).equals(prefix(unchecked: i)) == false {
-                return false
-            }
-        }
-        true
-    }
-
-    /// Returns true if the array ends with the given suffix.
-    ///
-    /// Example:
-    ///     [1, 2, 3].ends(with: [2, 3])  // true
-    ///     [1, 2, 3].ends(with: [1, 2])  // false
-    ///     [1, 2, 3].ends(with: [])      // true (empty suffix)
-    public func ends(with suffix: Array[T]) -> Bool {
-        let suffixLen = suffix.count;
-        let myLen = self.count;
-        if suffixLen > myLen {
-            return false
-        }
-        let offset = myLen - suffixLen;
-        for i in 0..<suffixLen {
-            if self(unchecked: offset + i).equals(suffix(unchecked: i)) == false {
-                return false
-            }
-        }
-        true
-    }
-
-    /// Splits the array at each occurrence of separator.
-    ///
-    /// The separator elements are not included in the resulting slices.
-    /// Empty slices are included when separators are adjacent or at edges.
-    ///
-    /// Example:
-    ///     [1, 0, 2, 0, 3].split(separator: 0)
-    ///     // [Slice[1], Slice[2], Slice[3]]
-    ///
-    ///     [0, 1, 0, 0, 2, 0].split(separator: 0)
-    ///     // [Slice[], Slice[1], Slice[], Slice[2], Slice[]]
-    ///
-    ///     [1, 2, 3].split(separator: 0)
-    ///     // [Slice[1, 2, 3]] - no separator found
-    ///
-    ///     [].split(separator: 0)
-    ///     // [Slice[]] - empty array yields one empty slice
-    public func split(separator: T) -> Array[Slice[T]] {
-        var result = Array[Slice[T]]();
-        let myLen = self.count;
-        var start: Int64 = Int64(intLiteral: 0);
-        for i in 0..<myLen {
-            if self(unchecked: i).equals(separator) {
-                result.append( Slice(pointer: self.asPointer().offset(by: start), count: i - start));
-                start = i + Int64(intLiteral: 1)
-            }
-        }
-        result.append( Slice(pointer: self.asPointer().offset(by: start), count: myLen - start));
-        result
-    }
-
-    /// Removes the first occurrence of element.
-    ///
-    /// Returns true if the element was found and removed, false otherwise.
-    ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 2]
-    ///     arr.remove(element: 2)  // true, arr is [1, 3, 2]
-    ///     arr.remove(element: 5)  // false, arr unchanged
+    /// ```
+    /// var arr = [1, 2, 3, 2];
+    /// arr.remove(2);  // true; arr is [1, 3, 2]
+    /// arr.remove(5);  // false; arr unchanged
+    /// ```
     public mutating func remove(element: T) -> Bool {
-        if let .Some(idx) = self.firstIndex(matching: { (x) in x.equals(element) }) {
+        if let .Some(idx) = self.firstIndex(of: element) {
             let _ = self.remove(at: idx);
             true
         } else {
@@ -1758,47 +1383,68 @@ extend Array[T]: Equatable where T: Equatable {
         }
     }
 
-    /// Removes all occurrences of element.
+    /// Removes every element equal to `element`.
     ///
-    /// Example:
-    ///     var arr = [1, 2, 3, 2, 4, 2]
-    ///     arr.removeAll(element: 2)  // arr is [1, 3, 4]
+    /// Implemented as `retain` with a negated equality predicate —
+    /// O(n), single pass, stable. To remove only the first occurrence
+    /// use `remove(element:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 2, 3, 2, 4, 2];
+    /// arr.removeAll(2);  // [1, 3, 4]
+    /// ```
     public mutating func removeAll(element: T) {
-        self.retain(matching: { (x) in x.equals(element) == false })
+        self.retain(matching: { (x) in x.isEqual(to: element) == false })
     }
 
-    /// Removes consecutive duplicate elements in place.
+    /// Removes runs of consecutive equal elements, in place.
     ///
-    /// Only removes duplicates that are adjacent. Sort first for full dedup.
+    /// Only adjacent duplicates collapse — non-adjacent equal values are
+    /// kept. To deduplicate globally, `sort()` first or, for `Hashable`
+    /// elements, use the `unique()` / `removeDuplicates()` extension
+    /// methods. The non-mutating variant is `deduped()`.
     ///
-    /// Example:
-    ///     var arr = [1, 1, 2, 2, 2, 3, 1, 1]
-    ///     arr.dedup()  // [1, 2, 3, 1] - note trailing 1s kept
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 1, 2, 2, 2, 3, 1, 1];
+    /// arr.dedup();  // [1, 2, 3, 1] — trailing 1s survive (not adjacent to first run)
+    /// ```
     public mutating func dedup() {
-        if self.count <= Int64(intLiteral: 1) {
+        if self.count <= 1 {
             return
         }
         self.makeUnique();
-        var s = self.storage.getValue();
-        var writeIdx: Int64 = Int64(intLiteral: 1);
+        var s = self.storage.read();
+        var writeIdx: Int64 = 1;
         for readIdx in 1..<s.len {
             let current = s.ptr.offset(by: readIdx).read();
-            let previous = s.ptr.offset(by: writeIdx - Int64(intLiteral: 1)).read();
-            if current.equals(previous) == false {
+            let previous = s.ptr.offset(by: writeIdx - 1).read();
+            if current.isEqual(to: previous) == false {
                 if writeIdx != readIdx {
                     s.ptr.offset(by: writeIdx).write(current)
                 }
-                writeIdx = writeIdx + Int64(intLiteral: 1)
+                writeIdx = writeIdx + 1
             }
         }
         s.len = writeIdx;
         self.storage.setValue(s)
     }
 
-    /// Returns a new array with consecutive duplicates removed.
+    /// Returns a new array with consecutive duplicates removed; original
+    /// is unchanged.
     ///
-    /// Example:
-    ///     [1, 1, 2, 2, 3].deduped()  // [1, 2, 3]
+    /// Non-mutating mirror of `dedup()`. Same caveat: only adjacent
+    /// duplicates collapse.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 1, 2, 2, 3].deduped();        // [1, 2, 3]
+    /// [1, 2, 1, 2].deduped();           // [1, 2, 1, 2] — none are adjacent
+    /// ```
     public func deduped() -> Array[T] {
         var result = self.clone();
         result.dedup();
@@ -1806,24 +1452,42 @@ extend Array[T]: Equatable where T: Equatable {
     }
 }
 
-/// ArrayMatchable extension for array pattern matching.
-/// Enables patterns like `[a, b]`, `[a, ..rest]`, `[a, .., z]`, `[a, ..rest, z]`.
+/// `ArrayMatchable` conformance — wires `Array[T]` into the compiler's
+/// array-pattern matcher.
+///
+/// Enables patterns such as `[a, b]`, `[a, ..rest]`, `[a, .., z]`, and
+/// `[a, ..rest, z]` against an `Array[T]` scrutinee. End users do not call
+/// the methods below directly — they're invoked by lowered match code.
 extend Array[T]: ArrayMatchable {
+    /// `ArrayMatchable` element type — what the pattern bindings extract.
     type Element = T
 
-    /// Returns the number of elements in the array.
+    /// Pattern-matcher hook returning the array's `count`.
+    ///
+    /// Used by the matcher to decide whether the scrutinee has enough
+    /// elements for a fixed-arity pattern.
     public func matchLength() -> Int64 {
         self.count
     }
 
-    /// Returns the element at the given index (unchecked).
+    /// Pattern-matcher hook reading the element at `index` (no bounds
+    /// check).
+    ///
+    /// # Safety
+    ///
+    /// The matcher only calls this with indices it has already validated
+    /// against `matchLength()`, so the unchecked read is safe in that
+    /// context.
     public func matchGet(index: Int64) -> T {
         self(unchecked: index)
     }
 
-    /// Returns a slice from `from` (inclusive) to `to` (exclusive).
-    public func matchSlice(from: Int64, to: Int64) -> Slice[T] {
-        Slice(pointer: self.asPointer().offset(by: from), count: to - from)
+    /// Pattern-matcher hook returning the half-open `[from, to)` slice.
+    ///
+    /// Used to bind `..rest` segments. The matcher guarantees the
+    /// indices are in range.
+    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
+        ArraySlice(pointer: self.asPointer().offset(by: from), count: to - from)
     }
 }
 
@@ -1831,153 +1495,44 @@ extend Array[T]: ArrayMatchable {
 // COMPARABLE EXTENSION
 // ============================================================================
 
-/// Comparable extension for arrays with comparable elements.
+/// Ordering-aware operations available when `T: Comparable`.
 extend Array[T] where T: Comparable {
-    /// Sorts the array in place in ascending order.
+    /// Sorts the array in ascending order using the natural `<` ordering.
     ///
-    /// Example:
-    ///     var arr = [3, 1, 4, 1, 5]
-    ///     arr.sort()  // [1, 1, 3, 4, 5]
+    /// Uses introsort — O(n log n) worst-case. For descending or custom
+    /// orderings pass a comparator to `sort(by:)`. Non-mutating variant:
+    /// `sorted()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [3, 1, 4, 1, 5];
+    /// arr.sort();  // [1, 1, 3, 4, 5]
+    /// ```
     public mutating func sort() {
         self.sort(by: { (a, b) in a < b })
     }
 
-    /// Returns a new sorted array in ascending order.
-    ///
-    /// The original array is unchanged.
-    ///
-    /// Example:
-    ///     let arr = [3, 1, 4, 1, 5]
-    ///     let sorted = arr.sorted()  // [1, 1, 3, 4, 5]
-    ///     // arr is still [3, 1, 4, 1, 5]
-    public func sorted() -> Array[T] {
-        self.sorted(by: { (a, b) in a < b })
-    }
-
-    /// Returns the minimum element, or None if empty.
-    ///
-    /// Example:
-    ///     [3, 1, 4].min()  // Some(1)
-    ///     [].min()         // None
-    public func min() -> T? {
-        if self.count == Int64(intLiteral: 0) {
-            return .None
-        }
-        var result = self(unchecked: Int64(intLiteral: 0));
-        for i in 1..<self.count {
-            let element = self(unchecked: i);
-            if element < result {
-                result = element
-            }
-        }
-        .Some(result)
-    }
-
-    /// Returns the maximum element, or None if empty.
-    ///
-    /// Example:
-    ///     [3, 1, 4].max()  // Some(4)
-    ///     [].max()         // None
-    public func max() -> T? {
-        if self.count == Int64(intLiteral: 0) {
-            return .None
-        }
-        var result = self(unchecked: Int64(intLiteral: 0));
-        for i in 1..<self.count {
-            let element = self(unchecked: i);
-            if element > result {
-                result = element
-            }
-        }
-        .Some(result)
-    }
-
-    /// Returns true if the array is sorted in ascending order.
-    ///
-    /// An empty array and single-element array are considered sorted.
-    ///
-    /// Example:
-    ///     [1, 2, 3].isSorted()  // true
-    ///     [1, 3, 2].isSorted()  // false
-    ///     [1, 1, 1].isSorted()  // true (equal elements OK)
-    ///     [].isSorted()         // true
-    public func isSorted() -> Bool {
-        if self.count <= Int64(intLiteral: 1) {
-            return true
-        }
-        for i in 1..<self.count {
-            if self(unchecked: i) < self(unchecked: i - Int64(intLiteral: 1)) {
-                return false
-            }
-        }
-        true
-    }
-
-    /// Performs binary search for element.
-    ///
-    /// Returns the index if found, or None if not found.
-    /// WARNING: The array MUST be sorted; behavior is undefined otherwise.
-    ///
-    /// Example:
-    ///     let arr = [1, 2, 3, 4, 5]
-    ///     arr.binarySearch(element: 3)  // Some(2)
-    ///     arr.binarySearch(element: 6)  // None
-    public func binarySearch(element: T) -> Int64? {
-        var lo: Int64 = Int64(intLiteral: 0);
-        var hi: Int64 = self.count;
-        while lo < hi {
-            let mid = lo + (hi - lo) / Int64(intLiteral: 2);
-            let midVal = self(unchecked: mid);
-            if midVal < element {
-                lo = mid + Int64(intLiteral: 1)
-            } else if midVal > element {
-                hi = mid
-            } else {
-                return .Some(mid)
-            }
-        }
-        .None
-    }
+    // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Slice[T] where T: Comparable
 }
 
 // ============================================================================
 // HASH EXTENSION
 // ============================================================================
 
-/// Hash extension for arrays with hashable elements.
-extend Array[T] where T: Hash {
-    /// Returns a new array with all duplicates removed.
+extend Array[T] where T: Hashable {
+    /// Removes every duplicate in place, keeping the first occurrence.
     ///
-    /// Preserves the order of first occurrences.
-    /// Note: Uses O(n^2) algorithm. For O(n) performance, use a Set.
+    /// Implemented by replacing storage with the result of `unique()`,
+    /// so the same O(n²) caveat applies. The non-mutating mirror is
+    /// `unique()`.
     ///
-    /// Example:
-    ///     [1, 2, 1, 3, 2, 4].unique()  // [1, 2, 3, 4]
-    public func unique() -> Array[T] {
-        var result = Array[T]();
-        let myLen = self.count;
-        for i in 0..<myLen {
-            let element = self(unchecked: i);
-            var found = false;
-            for j in 0..<result.count {
-                if result(unchecked: j).equals(element) {
-                    found = true
-                }
-            }
-            if found == false {
-                result.append( element)
-            }
-        }
-        result
-    }
-
-    /// Removes all duplicate elements in place.
+    /// # Examples
     ///
-    /// Preserves the order of first occurrences.
-    ///
-    /// Example:
-    ///     var arr = [1, 2, 1, 3, 2]
-    ///     arr.removeDuplicates()  // [1, 2, 3]
+    /// ```
+    /// var arr = [1, 2, 1, 3, 2];
+    /// arr.removeDuplicates();  // [1, 2, 3]
+    /// ```
     public mutating func removeDuplicates() {
         self = self.unique()
     }
@@ -1987,59 +1542,180 @@ extend Array[T] where T: Hash {
 // CUSTOM SORTING EXTENSION
 // ============================================================================
 
-/// Custom sorting methods for all arrays.
+/// Custom-comparator and key-extracting sort overloads, available for
+/// every element type (no `Comparable` requirement).
 extend Array[T] {
-    /// Sorts the array in place using a custom comparator.
+    /// Sorts the array in place using a `<`-style comparator.
     ///
-    /// The comparator should return true if the first argument should
-    /// come before the second.
+    /// The comparator returns `true` when its first argument should come
+    /// before the second. Uses introsort — quicksort with heapsort
+    /// fallback when recursion exceeds 2·log₂(n), and insertion sort for
+    /// partitions ≤ 16 elements. O(n log n) worst-case. Pass a reversed
+    /// comparator for descending order.
     ///
-    /// Example:
-    ///     var arr = [1, 5, 3, 2, 4]
-    ///     arr.sort(by: { (a, b) in a > b })  // [5, 4, 3, 2, 1] descending
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [1, 5, 3, 2, 4];
+    /// arr.sort(by: { (a, b) in a > b });  // [5, 4, 3, 2, 1] descending
+    /// ```
     public mutating func sort(by comparator: (T, T) -> Bool) {
         let n = self.count;
-        if n <= Int64(intLiteral: 1) {
+        if n <= 1 { return }
+        self.makeUnique();
+        var depthLimit: Int64 = 0;
+        var v = n;
+        while v > 1 { v = v / 2; depthLimit = depthLimit + 1 }
+        depthLimit = depthLimit * 2;
+        self.introsortLoop(low: 0, high: n, depthLimit: depthLimit, by: comparator)
+    }
+
+    // -- Introsort internals ------------------------------------------------
+
+    private mutating func introsortLoop(low lo: Int64, high hi: Int64, depthLimit depth: Int64, by cmp: (T, T) -> Bool) {
+        if hi - lo <= 16 {
+            self.insertionSortRange(low: lo, high: hi, by: cmp);
             return
         }
-        self.makeUnique();
-        // Insertion sort (simple and stable)
-        for i in 1..<n {
-            let key = self(unchecked: i);
-            var j = i - Int64(intLiteral: 1);
-            while j >= Int64(intLiteral: 0) and comparator(key, self(unchecked: j)) {
-                self.setUnchecked(j + Int64(intLiteral: 1), self(unchecked: j));
-                j = j - Int64(intLiteral: 1)
+        if depth == 0 {
+            self.heapsortRange(low: lo, high: hi, by: cmp);
+            return
+        }
+        let p = self.partitionRange(low: lo, high: hi, by: cmp);
+        self.introsortLoop(low: lo, high: p, depthLimit: depth - 1, by: cmp);
+        self.introsortLoop(low: p + 1, high: hi, depthLimit: depth - 1, by: cmp)
+    }
+
+    // Lomuto partition with median-of-three pivot selection.
+    private mutating func partitionRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) -> Int64 {
+        let mid = lo + (hi - lo) / 2;
+        let last = hi - 1;
+        // Sort lo, mid, last so median lands at mid
+        if cmp(self(unchecked: mid), self(unchecked: lo)) {
+            let t = self(unchecked: lo);
+            self(unchecked: lo) = self(unchecked: mid);
+            self(unchecked: mid) = t
+        }
+        if cmp(self(unchecked: last), self(unchecked: lo)) {
+            let t = self(unchecked: lo);
+            self(unchecked: lo) = self(unchecked: last);
+            self(unchecked: last) = t
+        }
+        if cmp(self(unchecked: last), self(unchecked: mid)) {
+            let t = self(unchecked: mid);
+            self(unchecked: mid) = self(unchecked: last);
+            self(unchecked: last) = t
+        }
+        // Move median to pivot position (last)
+        let t = self(unchecked: mid);
+        self(unchecked: mid) = self(unchecked: last);
+        self(unchecked: last) = t;
+        let pivot = self(unchecked: last);
+        var i = lo;
+        for j in lo..<last {
+            if cmp(self(unchecked: j), pivot) {
+                let tmp = self(unchecked: i);
+                self(unchecked: i) = self(unchecked: j);
+                self(unchecked: j) = tmp;
+                i = i + 1
             }
-            self.setUnchecked(j + Int64(intLiteral: 1), key)
+        }
+        // Place pivot at its final position
+        let tmp = self(unchecked: i);
+        self(unchecked: i) = self(unchecked: last);
+        self(unchecked: last) = tmp;
+        i
+    }
+
+    private mutating func insertionSortRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) {
+        for i in (lo + 1)..<hi {
+            let key = self(unchecked: i);
+            var j = i - 1;
+            while j >= lo and cmp(key, self(unchecked: j)) {
+                self(unchecked: j + 1) = self(unchecked: j);
+                j = j - 1
+            }
+            self(unchecked: j + 1) = key
         }
     }
 
-    /// Returns a new array sorted using a custom comparator.
+    // Max-heap sort on the subrange [lo, hi).
+    private mutating func heapsortRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) {
+        let n = hi - lo;
+        // Build max-heap
+        var i = n / 2 - 1;
+        while i >= 0 {
+            self.siftDown(lo: lo, index: i, count: n, by: cmp);
+            i = i - 1
+        }
+        // Extract max repeatedly
+        var end = n - 1;
+        while end > 0 {
+            let t = self(unchecked: lo);
+            self(unchecked: lo) = self(unchecked: lo + end);
+            self(unchecked: lo + end) = t;
+            self.siftDown(lo: lo, index: 0, count: end, by: cmp);
+            end = end - 1
+        }
+    }
+
+    private mutating func siftDown(lo lo: Int64, index start: Int64, count n: Int64, by cmp: (T, T) -> Bool) {
+        var idx = start;
+        while true {
+            var largest = idx;
+            let left = 2 * idx + 1;
+            let right = 2 * idx + 2;
+            if left < n and cmp(self(unchecked: lo + largest), self(unchecked: lo + left)) {
+                largest = left
+            }
+            if right < n and cmp(self(unchecked: lo + largest), self(unchecked: lo + right)) {
+                largest = right
+            }
+            if largest == idx { return }
+            let t = self(unchecked: lo + idx);
+            self(unchecked: lo + idx) = self(unchecked: lo + largest);
+            self(unchecked: lo + largest) = t;
+            idx = largest
+        }
+    }
+
+    // -- Public sort variants -----------------------------------------------
+
+    /// Returns a new array sorted by a custom comparator. Original unchanged.
     ///
-    /// Example:
-    ///     let arr = ["apple", "Banana", "cherry"]
-    ///     let sorted = arr.sorted(by: { (a, b) in a.lowercase() < b.lowercase() })
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [3, 1, 2];
+    /// let desc = arr.sorted(by: { (a, b) in a > b });  // [3, 2, 1]
+    /// ```
     public func sorted(by comparator: (T, T) -> Bool) -> Array[T] {
         var result = self.clone();
         result.sort(by: comparator);
         result
     }
 
-    /// Sorts the array in place by a key extracted from each element.
+    /// Sorts the array in place by an extracted `Comparable` key.
     ///
-    /// Example:
-    ///     var people = [Person("Alice", 30), Person("Bob", 25)]
-    ///     people.sort(byKey: { (p) in p.age })  // sorted by age ascending
+    /// # Examples
+    ///
+    /// ```
+    /// var people = [Person("Alice", 30), Person("Bob", 25)];
+    /// people.sort(byKey: { (p) in p.age });
+    /// ```
     public mutating func sort[K](byKey key: (T) -> K) where K: Comparable {
         self.sort(by: { (a, b) in key(a) < key(b) })
     }
 
-    /// Returns a new array sorted by a key extracted from each element.
+    /// Returns a new array sorted by an extracted `Comparable` key;
+    /// original unchanged.
     ///
-    /// Example:
-    ///     let words = ["hi", "hello", "hey"]
-    ///     let byLength = words.sorted(byKey: { (w) in w.count })  // ["hi", "hey", "hello"]
+    /// # Examples
+    ///
+    /// ```
+    /// let words = ["hi", "hello", "hey"];
+    /// let byLen = words.sorted(byKey: { (w) in w.count });
+    /// ```
     public func sorted[K](byKey key: (T) -> K) -> Array[T] where K: Comparable {
         self.sorted(by: { (a, b) in key(a) < key(b) })
     }
@@ -2049,16 +1725,24 @@ extend Array[T] {
 // NESTED STRUCTURE EXTENSIONS
 // ============================================================================
 
-/// Extension for arrays of iterable elements.
+/// Flattening for arrays whose elements are themselves `Iterable`.
 extend Array[T] where T: Iterable {
-    /// Flattens nested iterables into a single array.
+    /// Concatenates each element's iterator into a single
+    /// `Array[T.Item]`.
     ///
-    /// Example:
-    ///     let nested = [[1, 2], [3, 4], [5]]
-    ///     nested.flatten()  // [1, 2, 3, 4, 5]
+    /// Drains every inner iterator in order. Empty inner sequences
+    /// disappear without affecting the surrounding ones. Element type
+    /// of the result is `T.Item`, the inner iterable's item type.
     ///
-    ///     let mixed = [[1], [], [2, 3]]
-    ///     mixed.flatten()  // [1, 2, 3]
+    /// # Examples
+    ///
+    /// ```
+    /// let nested = [[1, 2], [3, 4], [5]];
+    /// nested.flatten();  // [1, 2, 3, 4, 5]
+    ///
+    /// let mixed = [[1], [], [2, 3]];
+    /// mixed.flatten();   // [1, 2, 3]
+    /// ```
     public func flatten() -> Array[T.Item] {
         var result = Array[T.Item]();
         for i in 0..<self.count {
@@ -2071,54 +1755,39 @@ extend Array[T] where T: Iterable {
     }
 }
 
-/// Extension for arrays of formattable elements.
+/// String-joining for arrays whose elements are `Formattable`.
 extend Array[T] where T: Formattable {
-    /// Joins elements into a string with the given separator.
+    /// Concatenates each element's string representation, separated by
+    /// `separator`.
     ///
-    /// Each element is converted to string via Formattable.
+    /// Each element is rendered with its `format()` method using default
+    /// `FormatOptions`. The default `separator` is empty (raw
+    /// concatenation). Empty arrays produce `""`. For the bracketed
+    /// debug form (`"[1, 2, 3]"`), use `format()` directly.
     ///
-    /// Example:
-    ///     [1, 2, 3].joined(separator: ", ")  // "1, 2, 3"
-    ///     [1, 2, 3].joined()                 // "123"
-    ///     ["a", "b"].joined(separator: "-")  // "a-b"
-    ///     [].joined(separator: ", ")         // ""
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].joined(", ");  // "1, 2, 3"
+    /// [1, 2, 3].joined();       // "123"
+    /// ["a", "b"].joined("-");   // "a-b"
+    /// [].joined(", ");          // ""
+    /// ```
     public func joined(separator: String = "") -> String {
-        if self.count == Int64(intLiteral: 0) {
+        if self.count == 0 {
             return ""
         }
-        var result = self(unchecked: Int64(intLiteral: 0)).format();
+        var b = StringBuilder();
+        self(unchecked: 0).format(into: b);
         for i in 1..<self.count {
-            result = result + separator;
-            result = result + self(unchecked: i).format()
+            b.append(separator);
+            self(unchecked: i).format(into: b)
         }
-        result
+        b.build()
     }
 }
 
-// ============================================================================
-// FORMATTABLE CONFORMANCE
-// ============================================================================
-
-/// Formattable conformance for arrays with formattable elements.
-///
-/// Arrays format as "[elem1, elem2, ...]".
-///
-/// Example:
-///     "\{[1, 2, 3]}"  // "[1, 2, 3]"
-extend Array[T]: Formattable where T: Formattable {
-    public func format(options: FormatOptions = FormatOptions.default()) -> String {
-        var result = "[";
-        let myLen = self.count;
-        for i in 0..<myLen {
-            if i > Int64(intLiteral: 0) {
-                result = result + ", "
-            }
-            result = result + self(unchecked: i).format(options)
-        }
-        result = result + "]";
-        result
-    }
-}
+// Formattable: provided by extend Slice[T] where T: Formattable
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE
@@ -2141,6 +1810,19 @@ extend Array[T]: Formattable where T: Formattable {
 // TYPE OPERATOR
 // ============================================================================
 
-/// Type operator alias: [T] desugars to Array[T].
+/// Compiler-recognized type alias that lets `[T]` desugar to `Array[T]`.
+///
+/// Allows annotations like `let xs: [Int64] = [1, 2, 3]` instead of
+/// requiring the user to spell out `Array[Int64]`. Not intended for
+/// direct use — the parser inserts it automatically when it sees the
+/// `[T]` shorthand in a type position.
+///
+/// # Examples
+///
+/// ```
+/// let xs: [Int64] = [1, 2, 3];   // same as: Array[Int64]
+/// func sum(of values: [Float]) -> Float { ... }
+/// ```
 @builtin(.ArrayTypeOperator)
 public type ArrayTypeOperator[T] = Array[T];
+

@@ -1,0 +1,15 @@
+[package]
+name = "flock"
+version = "0.2.1"
+description = "Package manager for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]
+kestrel/clutch = { version = "0.2.1" }
+kestrel/quill = { version = "0.2.1" }
+kestrel/quill-toml = { version = "0.2.1" }
+kestrel/quill-json = { version = "0.2.1" }
+kestrel/http = { version = "0.2.1" }
+kestrel/swoop = { version = "0.2.1" }

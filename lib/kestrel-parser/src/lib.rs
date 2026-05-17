@@ -61,7 +61,7 @@
 
 pub mod attribute;
 pub mod block;
-pub mod common;
+pub(crate) mod common;
 pub mod declaration_item;
 pub mod enum_decl;
 pub mod event;
@@ -80,7 +80,7 @@ pub mod r#struct;
 pub mod subscript;
 pub mod ty;
 pub mod type_alias;
-pub mod type_decl;
+pub(crate) mod type_decl;
 pub mod type_param;
 
 use event::{EventSink, TreeBuilder};

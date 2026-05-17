@@ -1,425 +1,226 @@
-# Type Inference & Type Substitutions
+# Type Inference (lib)
 
-This document covers Kestrel's type inference system and the four type substitution mechanisms:
-Self type, type aliases, associated types, and generic parameter substitutions.
+Kestrel uses a **bidirectional, constraint-based** type system with a fixpoint solver. The implementation lives in `lib/kestrel-type-infer/`. This document is the contributor-level overview — enough to find your way around and safely add a constraint or diagnostic. For deeper invariants see `lib/kestrel-type-infer/AGENTS.md` and `lib/kestrel-type-infer/docs/`.
 
-## Overview
-
-Kestrel uses **Hindley-Milner style constraint-based type inference**. The system is decoupled from the
-semantic model via the `TypeOracle` trait, keeping the solver reusable and testable in isolation.
-
-### Where it runs in the pipeline
+## Where it runs
 
 ```
-Phase 1 analyzers (pre-inference):
-  Cycle detection, conformance resolution, field validation, etc.
-      ↓
-Phase 2 analyzers (type resolution):
-  TypeInferenceAnalyzer   ← RUNS HERE (per function/init/getter/setter)
-  Pattern checking, type checking, exhaustiveness
-      ↓
-Phase 3 analyzers (post-checking):
-  Protocol methods, duplicate symbols, visibility, generics
+Source ─▶ … ─▶ HIR Lower (HirBody) ─▶ Type Infer (TypedBody) ─▶ Analyze / MIR Lower / Codegen
+                                       ^^^ this crate
 ```
 
-The `TypeInferenceAnalyzer` in `kestrel-semantic-analyzers` runs inference for each symbol that
-has an `ExecutableBehavior` (code body). It queries `InferenceResultFor { symbol_id }` which
-triggers constraint generation, solving, and solution application.
+Inference is a memoized query: `InferBody { entity, root }`. You get a `TypedBody` with:
 
-## Key Files
+- Resolved types for every `HirExprId` / `HirPatId`.
+- Resolved member resolutions (which entity a method / field / subscript call landed on).
+- Promotion records (where a value needs implicit `FromValue` wrapping, e.g. `Int` into `Optional[Int]`).
+- Collected `InferError`s.
+
+Downstream code (analyzers, MIR lowering) reads these fields; it does not re-run inference.
+
+## Files at a glance
 
 | File | Purpose |
 |------|---------|
-| `lib/kestrel-semantic-type-inference/src/context.rs` | `InferenceContext` — solver state |
-| `lib/kestrel-semantic-type-inference/src/constraint.rs` | `Constraint` enum — type relationships |
-| `lib/kestrel-semantic-type-inference/src/constraint_generator.rs` | Generates constraints from code |
-| `lib/kestrel-semantic-type-inference/src/solver.rs` | Unification + fixpoint iteration |
-| `lib/kestrel-semantic-type-inference/src/solution.rs` | `Solution` — inference result |
-| `lib/kestrel-semantic-type-inference/src/oracle.rs` | `TypeOracle` trait — type queries |
-| `lib/kestrel-semantic-type-inference/src/apply.rs` | Applies solution back to code |
-| `lib/kestrel-semantic-type-inference/src/error.rs` | Inference errors |
-| `lib/kestrel-semantic-tree/src/ty/mod.rs` | `Ty`, `TyId` — type representation |
-| `lib/kestrel-semantic-tree/src/ty/kind.rs` | `TyKind` enum — all type variants |
-| `lib/kestrel-semantic-tree/src/ty/substitutions.rs` | `Substitutions` — type param mapping |
-| `lib/kestrel-semantic-tree/src/ty/where_clause.rs` | `WhereClause`, `Constraint` |
-| `lib/kestrel-semantic-analyzers/src/analyzers/type_inference/mod.rs` | `TypeInferenceAnalyzer` |
+| `src/ty.rs` | `TyVar`, `TyKind`, `TySlot` — the inference-side type representation. |
+| `src/ctx.rs` | `InferCtx` — solver state. |
+| `src/constraint.rs` | `Constraint` enum. |
+| `src/error.rs` | `InferError` enum. |
+| `src/generate.rs` | HIR walker that emits constraints. |
+| `src/solver.rs` | The fixpoint loop and per-constraint solve routines. |
+| `src/unify.rs` | Unification. |
+| `src/resolve.rs` | `TypeResolver` / `WorldResolver` — name resolution for types during inference. |
+| `src/where_clauses.rs` | `WhereClausesOf` query — resolves entity-scoped where clauses. |
+| `src/result.rs` | `TypedBody`, `ResolvedTy`, error descriptions. |
+| `src/compare.rs` | Structural comparison, assignability checks. |
+| `AGENTS.md` | Adding `InferError` variants; solver reporting rules; memberwise-init invariants. |
 
-## Type Representation
+## Types on the inference side
 
-Every type is a `Ty` with a unique `TyId` (atomic counter), a `TyKind`, and a `Span`.
+During inference we work with `TyVar` — an integer handle into `InferCtx` — and `TyKind`, a normal enum of type constructors:
 
-### TyKind variants
+```
+TyKind::Infer                      placeholder, to be resolved
+TyKind::Error                      poison absorber; unifies with anything
+TyKind::Never                      !
+TyKind::Unit / Int / Float / Bool / String / …   primitives
+TyKind::Tuple(Vec<TyVar>)
+TyKind::Pointer(TyVar)
+TyKind::Function { params, ret }
+TyKind::Named { entity, type_args }          struct / enum / protocol / alias
+TyKind::TypeParameter(Entity)
+TyKind::AssociatedType { container, name }
+TyKind::SelfType
+```
+
+`TySlot` tracks substitution state for a `TyVar`: fresh (`Infer`), bound to a `TyKind`, or unified with another `TyVar`.
+
+Every type defaults to `Infer` until a constraint pins it down.
+
+## Constraints
+
+The solver operates on these variants (`constraint.rs`):
+
+| Variant | Meaning | Deferred? |
+|---------|---------|-----------|
+| `Equal { a, b }` | Structural equality. Branches of `if`/`match`, array elements. | No — unifies eagerly. |
+| `Coerce { from, to, expr }` | Value flows from `from` to `to`. Tries `Equal`, then `FromValue` promotion. Used at let bindings, arguments, returns, assignments. | No. |
+| `Conforms { ty, protocol }` | `ty : Protocol`. | Yes — needs concrete `ty`. |
+| `Associated { container, name, result }` | `Container.Name` projection. | Yes — needs concrete container. |
+| `Member { receiver, name, args, result, … }` | Method / field / computed property / subscript / init resolution. | Yes — needs concrete receiver. |
+| `Call { callee, args, result }` | Function or subscript call. | Yes — needs concrete callee. |
+| `OverloadedCall { candidates, type_args, args, result }` | Overload resolution by labels + arity + type compatibility. | Yes. |
+| `Implicit { expected, name, args, result }` | `.Case(args)` resolved against an expected type (enum shorthand). | Yes — needs concrete expected. |
+| `ImplicitPat { … }` | Same, but in pattern position. | Yes. |
+| `Reduce { … }` | Numeric / literal narrowing on known-concrete sides. | Yes. |
+| `TupleRestPat { … }` | `(a, .., c)` pattern binding. | Yes. |
+| `TupleIndex { tuple, index, result }` | `t.0`, `t.1`, … | Yes. |
+
+"Deferred" means the solver leaves the constraint in the pool and retries it each round until its inputs are concrete.
+
+Constraints are generated in `generate.rs` while walking the HIR body. For each HIR expression, the generator emits the constraints that the expression implies and associates them with the source span.
+
+## The solver
 
 ```rust
-TyKind::Unit                    // ()
-TyKind::Never                   // ! (bottom type)
-TyKind::Int(IntBits)            // i8, i16, i32, i64
-TyKind::Float(FloatBits)        // f16, f32, f64
-TyKind::Bool                    // lang.i1
-TyKind::String                  // lang.str
-TyKind::Tuple(Vec<Ty>)          // (T1, T2, ...)
-TyKind::Pointer(Box<Ty>)        // lang.ptr[T]
-TyKind::Function { params, return_type }  // (P1, P2, ...) -> R
-
-// Nominal types — carry Substitutions for their type arguments
-TyKind::Struct { symbol, substitutions }       // Array[Int], Point, etc.
-TyKind::Enum { symbol, substitutions }         // Optional[T], Result[T,E], etc.
-TyKind::Protocol { symbol, substitutions }     // Iterator, Equatable, etc.
-TyKind::TypeAlias { symbol, substitutions }    // Expanded during resolution
-
-// Generic system
-TyKind::TypeParameter(Arc<TypeParameterSymbol>)  // T, U, etc.
-TyKind::AssociatedType { symbol, container }      // Item, Element, etc.
-TyKind::SelfType                                  // Self keyword
-
-// Inference
-TyKind::Infer                                 // Placeholder — to be determined
-TyKind::UnresolvedFunction { param_info, return_type }  // Closure with unknown params
-TyKind::UnresolvedPath { segments }            // Path not yet resolved
-
-TyKind::Error                   // Poison value — suppresses cascading errors
-```
-
-### TyId
-
-Every `Ty` gets a globally unique `TyId` at construction. The inference system uses TyIds
-to track types without cloning. The solver maintains a `HashMap<TyId, Ty>` for substitutions.
-
----
-
-## Constraint-Based Inference
-
-### Constraints
-
-The solver works with these constraint types:
-
-| Constraint | Meaning | Example |
-|-----------|---------|---------|
-| `Equals { a, b }` | Types must be identical | `let x: Int = expr` → equate(expr.ty, Int) |
-| `Conforms { ty, protocol }` | Type must implement protocol | `5` → conforms(ty, ExpressibleByIntLiteral) |
-| `Normalizes { base, assoc_name, result }` | Associated type projection | `T.Item` → normalizes(T, "Item", result) |
-| `MemberAccess { receiver, member, ... }` | Type-directed member lookup | `x.foo()` → member_access(x.ty, "foo", ...) |
-| `ImplicitMember { expr_ty, member_name, ... }` | Enum shorthand `.Case` | `.Some(v)` → implicit_member(ty, "Some", ...) |
-| `EnumPatternBinding { enum_ty, case_name, ... }` | Pattern match on enum case | `case .Some(v):` |
-| `StructPatternBinding { struct_ty, ... }` | Pattern match on struct fields | `case Point { x, y }:` |
-| `Promotable { from_ty, to_ty }` | Implicit wrapping (Optional, Result) | `let x: Int? = 5` |
-| `TupleIndexAccess { tuple, index, result }` | Tuple element access | `t.0` |
-
-### Constraint Generation
-
-`generate_constraints()` walks the code block and creates constraints:
-
-- **Literals**: `conforms(expr.ty, ExpressibleBy*Literal)`
-- **Function calls**: `equate(arg.ty, param.ty)` for each argument
-- **Deferred method calls**: `member_access(receiver.ty, name, args, result.ty)`
-- **Closures**: Create expected function type, unify with closure type
-- **Patterns**: `enum_pattern_binding(...)` or `struct_pattern_binding(...)`
-- **Return/assignment**: `promotable(value.ty, target.ty)`
-- **If branches**: `promotable(branch.ty, if_expr.ty)`
-- **Match arms**: `equate(pattern.ty, scrutinee.ty)`
-
-### Solving Algorithm
-
-The solver in `solver.rs` uses fixpoint iteration:
-
-```
-1. PRE-SCAN: Identify literal TyIds that have default types (Int, Float, String, etc.)
-
-2. MAIN LOOP (repeat until no progress):
-   For each constraint:
-     Equals       → unify(a, b)
-     Conforms     → oracle.conforms_to(ty, protocol)
-     Normalizes   → oracle.resolve_associated_type(base, name), unify with result
-     MemberAccess → oracle.resolve_member(receiver, name), create arg constraints
-     Promotable   → try unify, else check FromValue conformance
-     ...
-
-   Each attempt returns: Solved | Deferred | Error
-   - Solved: constraint processed, possibly produced new substitutions
-   - Deferred: type not resolved enough yet, retry next round
-   - Error: accumulated (non-fatal), solving continues
-
-3. DEFAULT APPLICATION LOOP (until no more defaults):
-   For unresolved literals: equate(literal.ty, default_type)
-   - Int literal → Int64, Float → Float64, String → String, etc.
-   Re-solve new constraints
-
-4. FINAL CHECK: Report any types still Infer as errors
-```
-
-### Unification
-
-`unify(a, b)` is the core algorithm:
-
-1. Both `Infer` → map one to the other
-2. One `Infer` → occurs check, then substitute
-3. `Error` or `Never` → accept (special handling)
-4. `Struct`/`Enum`/`Protocol` → check symbol identity, unify substitutions
-5. `Function`/`UnresolvedFunction` → unify params and return
-6. `Tuple` → check arity, unify elements
-7. `TypeAlias` → expand, retry
-8. Primitives → exact equality
-9. Anything else → type mismatch error
-
-**Occurs check**: Prevents infinite types (`T = List[T]`).
-
-### Solution
-
-```rust
-Solution {
-    types: HashMap<TyId, Ty>,              // Resolved inference variables
-    values: HashMap<ExprId, ValueResolution>,  // Resolved member access symbols
-    promotions: HashMap<ExprId, PromotionInfo>, // Expressions needing FromValue wrapping
-    errors: Vec<InferenceError>,
+// src/solver.rs
+pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    fixpoint(ctx);                       // Phase 1: main solving
+    apply_literal_defaults(ctx);         // Phase 2: literals default to Int64 / Float64 / String / …
+    fixpoint(ctx);                       // Phase 3: solve again with defaults applied
+    report_unresolved_type_params(ctx);  // Phase 4: diagnose unbound generics at call sites
+    // Phase 4.25: never-fallback for branches where Never leaked through
+    report_unsolved(ctx);                // Phase 5: emit "could not infer" for remaining TyVars
 }
 ```
 
-`apply_solution()` walks the code block, replacing `Infer` types with resolved types,
-recording promotions, and updating local variable types.
+### Fixpoint iteration
 
-### TypeOracle
+`fixpoint` repeatedly walks the constraint pool. For each constraint, the solver attempts one of three outcomes:
 
-The `TypeOracle` trait decouples the solver from the semantic model:
+- **Solved** — constraint discharged, possibly recording substitutions or new sub-constraints.
+- **Deferred** — not enough information yet; keep it for the next round.
+- **Errored** — unresolvable. The solver calls `ctx.report_error(InferError::…)` and substitutes `TyKind::Error` for the affected `TyVar` so downstream constraints see the poison absorber and stop firing cascades.
+
+The loop terminates when no constraint made progress in a full pass.
+
+### Literal defaults
+
+Integer literals without an explicit type default to `Int64`, floats to `Float64`, strings to `String`, etc. Defaulting runs **after** the first fixpoint so that contextual types get a chance to propagate first (`let x: Int32 = 5` resolves `5` to `Int32`, not `Int64`). `apply_literal_defaults` emits `Equal` constraints that pin each unresolved literal `TyVar` to its default; the second fixpoint then re-propagates.
+
+### Unification (`unify.rs`)
+
+`unify(a, b)` resolves two `TyVar`s:
+
+1. Two `Infer`s — alias one to the other.
+2. One `Infer` — occurs check, then substitute.
+3. `Error` on either side — absorb silently.
+4. `Never` — assignable to anything on the right-hand side.
+5. Named-with-named — check entity identity, then unify `type_args` pairwise.
+6. `Function` — unify params and return type.
+7. `Tuple` — check arity, unify elements.
+8. `TypeAlias` — expand, retry.
+9. Primitives — exact equality.
+10. Everything else — report `TypeMismatch`.
+
+The occurs check prevents infinite types like `T = List[T]`.
+
+## Name resolution during inference
+
+Type paths inside bodies are resolved via the `TypeResolver` trait. The concrete implementation, `WorldResolver`, holds the `QueryContext`, the compilation root, and the body-owner entity — that last one is what anchors where-clauses and type parameters.
 
 ```rust
-trait TypeOracle {
-    fn resolve_member(&self, receiver_ty: &Ty, member: &str, is_static: bool) -> ...;
-    fn conforms_to(&self, ty: &Ty, protocol_id: SymbolId) -> bool;
-    fn resolve_associated_type(&self, container: &Ty, assoc_name: &str) -> Option<Ty>;
-    fn expand_type_alias(&self, ty: &Ty) -> Ty;
-    fn default_integer_type(&self, span: Span) -> Ty;  // Int64
-    fn default_float_type(&self, span: Span) -> Ty;    // Float64
-    fn check_from_value_conformance(&self, target: &Ty, source: &Ty) -> Option<...>;
-    // ... more queries
+pub struct WorldResolver<'a> {
+    ctx: &'a QueryContext<'a>,
+    root: Entity,
+    body_owner: Entity,
 }
 ```
 
-The concrete implementation (`ContextualOracle` in `kestrel-semantic-model`) delegates
-to the `SemanticModel` query system.
+**Non-obvious invariant:** where-clauses belong to an entity's own scope. Use `ctx.query(WhereClausesOf { entity, root })` to get resolved clauses — never re-resolve names from a call site's scope. The query resolves associated-type equalities, protocol bounds, and subject paths within the declaring entity's scope, which is the only scope where they make sense.
 
----
+## Type substitutions
 
-## Type Substitution Mechanisms
+Four distinct substitution mechanisms show up in inference:
 
-Kestrel has four distinct type substitution systems. They operate at different phases
-and serve different purposes.
+### 1. Generic parameter substitutions
 
-### 1. Generic Parameter Substitutions
+Nominal types (`Struct`, `Enum`, `Protocol`, `TypeAlias`) carry `type_args: Vec<TyVar>`. Applying substitutions walks composite types and replaces `TypeParameter(entity)` leaves with the mapped type. Cycle detection uses a visited set to break recursive substitutions.
 
-**What**: Replaces type parameters (`T`, `U`, etc.) with concrete types at instantiation sites.
+### 2. `Self` substitution
 
-**Representation**: `Substitutions` — a `HashMap<SymbolId, Ty>` mapping type parameter IDs to types.
+Inside a method body, `TyKind::SelfType` means the method's containing type (with its own type parameters still abstract). `substitute_self(replacement)` recursively replaces `SelfType` throughout a type and rewrites naked associated types (`Item`) into qualified form (`Self.Item`).
 
-**Where it lives**: Carried by every nominal type variant (`Struct`, `Enum`, `Protocol`, `TypeAlias`).
+### 3. Type alias expansion
 
-```rust
-// Array[Int] is represented as:
-TyKind::Struct {
-    symbol: <Array symbol>,
-    substitutions: { T.id() → Ty::int(I64) }
-}
+`TyKind::Named { entity, type_args }` for a type-alias entity expands by looking up the alias's resolved target and applying `type_args` to it. Expansion is iterated — alias chains collapse.
 
-// Dictionary[String, Int] is:
-TyKind::Struct {
-    symbol: <Dictionary symbol>,
-    substitutions: { K.id() → Ty::string(), V.id() → Ty::int(I64) }
-}
-```
+### 4. Associated type projection
 
-**How substitution works** (`Substitutions::apply`):
+`Container.Name` resolves in one of three ways:
 
-```rust
-// Given substitutions: { T → Int }
-// Apply to: Array[T]
-// Result:   Array[Int]
+- **Via `Associated` constraint** during solving: the solver asks the semantics layer for the concrete associated type once `container` is concrete.
+- **Via `WhereClausesOf`**: a `where T.Item = Int64` clause on the enclosing entity directly equates the projection, so subsequent uses of `T.Item` unify with `Int64` without querying protocols.
+- **Via `substitute_self`** when entering a method body: naked `Item` inside a protocol becomes `Self.Item`, which then resolves as above.
 
-// The apply method:
-// 1. TypeParameter(T) → look up T.id() in map → Int
-// 2. Struct { Array, {T → param} } → recursively apply to inner substitutions
-// 3. Function { params, return } → recursively apply to each
-// 4. Tuple, Pointer, etc. → recursively apply to components
-// 5. Primitives, Error, SelfType, Infer → return as-is
-```
+## Literal flow (`let x: Int? = 5`)
 
-**Cycle detection**: Uses a `visited: HashSet<SymbolId>` to break cycles where
-`T → List[T]` would cause infinite recursion.
+1. HIR: `HirExpr::Literal(Int(5))`, assigned to a local with annotation `Int?`.
+2. Generate: `Conforms(ty5, ExpressibleByIntLiteral)` and `Coerce(ty5, tyLocal)` where `tyLocal` is `Int?`.
+3. Fixpoint round 1:
+   - `Conforms` — deferred; `ty5` is still `Infer`.
+   - `Coerce` — deferred; `from` is an unresolved literal.
+4. Apply literal defaults: `Equal(ty5, Int64)`.
+5. Fixpoint round 2:
+   - `Equal` — substitutes `Int64` for `ty5`.
+   - `Coerce(Int64, Int?)` — tries `Equal` (fails), falls back to `FromValue` check. Optional has a `FromValue` conformance that accepts `Int64`; promotion recorded.
+6. `TypedBody` records the promotion so MIR lowering can emit the wrapper.
 
-**When it happens**:
-- During type resolution (binding phase) when generic types are instantiated
-- During inference when method calls resolve type arguments
-- During codegen when monomorphization substitutes all type parameters
+## Error recovery
 
-### 2. Self Type Substitution
-
-**What**: Replaces the `Self` keyword with the concrete type of the containing struct/enum/protocol.
-
-**Representation**: `TyKind::SelfType` in the type system.
-
-**Key method**: `Ty::substitute_self(replacement: &Ty) -> Ty`
+The solver's philosophy is **absorb, don't cascade**. Reporting an error returns an `Error` `TyVar` whose `TyKind` is `Error`:
 
 ```rust
-// Inside struct Array[T]:
-//   func clone() -> Self
-// Self gets substituted with Array[T] (where T is still a TypeParameter)
-
-// The concrete Self type for a generic struct S[T] is built as:
-// Ty::generic_struct(S, { T → TypeParameter(T) })
+let result = ctx.report_error(InferError::TypeMismatch { … });
+// result is the Error var — use it wherever the constraint's output
+// would have gone.
 ```
 
-**What it does recursively**:
-- `SelfType` → replaced with the concrete type
-- `AssociatedType { symbol, container: None }` → `AssociatedType { symbol, container: Some(replacement) }`
-  (naked associated types like `Item` implicitly mean `Self.Item`)
-- Composite types (Tuple, Function, Struct, Enum, etc.) → recurse into components
-- Primitives → unchanged
+`Error` unifies with anything silently. Constraints whose inputs became `Error` don't fire cascade errors. Analyzers further downstream check `cx.typed.errors.is_empty()` and suppress themselves on a tainted body.
 
-**When it happens**:
-- When entering a method body during binding: the `self` parameter and method signatures
-  have `Self` replaced with the concrete struct/enum type
-- Protocol default implementations: `Self` remains abstract until conformance resolution
+## Adding a `Constraint` variant
 
-### 3. Type Alias Expansion
+1. Add it to `Constraint` in `constraint.rs` with a doc comment: what rule, eager or deferred, why.
+2. Generate it where the HIR construct it represents is walked, in `generate.rs`.
+3. Add a `try_solve_*` function in `solver.rs`. Return `Solved` / `Deferred` / `Errored`.
+4. Wire it into the fixpoint dispatch (the big match in `fixpoint`).
+5. If the constraint can fail, add the corresponding `InferError` variant (see below — **five** files).
+6. Write focused tests under `lib/kestrel-test-suite/testdata/inference/`.
 
-**What**: Follows type alias chains to their underlying types.
+## Adding an `InferError` variant
 
-**Representation**: `TyKind::TypeAlias { symbol, substitutions }`
+From `lib/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **five** files:
 
-**Key method**: `Ty::expand_aliases() -> Ty`
+1. `kestrel-type-infer/src/error.rs` — the variant plus its span arm in `InferError::span`.
+2. `kestrel-type-infer/src/result.rs` — `describe_error()` match arm (short detail string).
+3. `kestrel-compiler/src/diagnostic.rs` — match arm building the user-facing `Diagnostic` (message, labels, notes).
+4. `kestrel-analyze/src/body/type_check.rs` — `format_error()` match arm returning `(message, label_text)`.
+5. `kestrel-compiler-driver/src/lib.rs` — both `describe()` and `format_error()` arms.
 
-```kestrel
-// In Kestrel:
-type StringArray = Array[String]
+Missing any one produces a non-exhaustive-match error only in a downstream crate — so do the whole set in one commit.
 
-// StringArray is:
-TyKind::TypeAlias { symbol: <StringArray>, substitutions: {} }
+Emit from the solver via `ctx.report_error(InferError::YourVariant { … })`, not via the accumulator.
 
-// expand_aliases() follows the chain:
-// 1. Get resolved type from TypeAliasTypedBehavior → Array[String]
-// 2. Apply substitutions (if any)
-// 3. Recursively expand (in case the target is also an alias)
-```
+## Debugging
 
-**Generic type aliases**:
-```kestrel
-type Pair[T] = (T, T)
-// Pair[Int] expands to (Int, Int)
-```
+- `VERBOSE_DEBUG_OUTPUT=1 triage <test>` enables `debug_trace!` in the solver — member resolution, unification steps, where-clause lookups.
+- Add `debug_trace!` calls rather than `eprintln!` so output stays filterable.
+- `kestrel dump` can print the HIR and the inferred types for a `.ks` file. Useful when a constraint never fires or fires with unexpected inputs.
+- **"Cannot infer type"** usually means a `TyVar` stayed `Infer` — the constraint that should have pinned it either wasn't generated, or deferred forever because its own inputs never resolved. Trace back from the unsolved var to the constraint that carries it.
+- **"Type mismatch"** on what looks like compatible types — check that aliases expanded (`TypeAlias` branch in `unify`) and that `Self` substitution happened at the method entry.
 
-The expansion applies the alias's substitutions to the resolved type before returning.
+## Further reading
 
-**When it happens**:
-- During `is_assignable_to()` — both sides expanded before comparison
-- During inference when the solver encounters a TypeAlias in unification
-- The oracle's `expand_type_alias()` is called by the solver when needed
-
-### 4. Associated Type Projection
-
-**What**: Resolves protocol-defined associated types to their concrete implementations.
-
-**Representation**: `TyKind::AssociatedType { symbol, container }`
-
-- `container: None` — unqualified, within the protocol itself (e.g., `func next() -> Item`)
-- `container: Some(ty)` — qualified (e.g., `T.Item` where `T: Iterator`)
-
-**Resolution paths**:
-
-**Via Normalizes constraint** (during inference):
-```
-// Array[Int].iter() returns ArrayIterator[Int]
-// ArrayIterator[Int] conforms to Iterator where type Item = Int
-// So: normalizes(ArrayIterator[Int], "Item", result) → result = Int
-
-// The solver:
-// 1. Resolves base type (ArrayIterator[Int])
-// 2. Queries oracle: resolve_associated_type(ArrayIterator[Int], "Item")
-// 3. Gets Int
-// 4. Unifies result with Int
-```
-
-**Via direct oracle query** (during solution application):
-```rust
-// In apply_solution, unresolved AssociatedType nodes are resolved:
-oracle.resolve_associated_type(&container, "Item")
-```
-
-**Via Self substitution** (during binding):
-```rust
-// Inside Iterator protocol:
-//   func next() -> Item        // Item has container: None
-// When substitute_self(ArrayIterator[Int]):
-//   Item becomes ArrayIterator[Int].Item  // container: Some(ArrayIterator[Int])
-// Then resolved to Int via oracle
-```
-
-**Where clause integration**:
-```kestrel
-func compactMap[T]() -> ... where Item = Optional[T]
-```
-Where clauses generate `Normalizes` constraints that drive associated type inference.
-The solver extracts where clauses when resolving method calls and converts them to constraints.
-
----
-
-## Literal Type Inference
-
-Literals get special handling because they have both contextual types and defaults.
-
-**Flow for `let x: Int? = 5`**:
-
-```
-1. Constraint generation:
-   - conforms(5.ty, ExpressibleByIntLiteral)  // 5 is an int literal
-   - promotable(5.ty, Int?)                   // must be assignable to Int?
-
-2. Pre-scan: mark 5.ty as a literal TyId (has default)
-
-3. Main loop round 1:
-   - Conforms: Deferred (5.ty is Infer, can't check conformance)
-   - Promotable: Deferred (5.ty is literal, defer until default)
-
-4. Default application:
-   - 5.ty still Infer → equate(5.ty, Int64)
-
-5. Main loop round 2:
-   - Equals: 5.ty = Int64 (substitution recorded)
-   - Promotable(Int64, Int?): check FromValue conformance → yes
-   - Record promotion: wrap with Optional.from()
-
-6. Solution:
-   types: { 5.ty → Int64 }
-   promotions: { 5.expr → PromotionInfo { Optional.from, ... } }
-```
-
-**Deferral strategy**: Literals with defaults (Int, Float, String, Bool, Char) defer
-Promotable constraints to give context a chance to propagate first. Null and array
-literals do NOT defer — they need context to resolve at all.
-
----
-
-## Debugging Type Inference
-
-### Common issues
-
-**"Cannot infer type"**: A TyId remained `Infer` after solving. Usually means:
-- Missing constraint (expression not generating the right constraints)
-- Constraint deferred forever (receiver type never resolves)
-
-**"Type mismatch"**: Unification failed. Check:
-- Are type aliases being expanded? (`expand_aliases()`)
-- Are substitutions being applied correctly?
-- Is Self being substituted before comparison?
-
-### Adding constraints
-
-If you need to add a new constraint kind:
-
-1. Add variant to `Constraint` enum in `constraint.rs`
-2. Add generation logic in `constraint_generator.rs`
-3. Add solving logic in `solver.rs` (implement the `try_solve_*` function)
-4. Handle the new constraint in the fixpoint loop
-
-### Tracing
-
-The substitutions code has debug logging for `Rhs` parameter substitutions
-(in `substitutions.rs`). For general debugging, add `eprintln!` in `solver.rs`
-to trace constraint solving progress.
+- `lib/kestrel-type-infer/AGENTS.md` — invariants, five-file rule, memberwise-init validation.
+- `lib/kestrel-type-infer/docs/architecture.md`, `design.md` — deeper design rationale.
+- `.claude/skills/type-inference/` — solver crate deep-dive skill.

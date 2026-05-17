@@ -1,112 +1,68 @@
-//! Error types for monomorphization.
+//! Monomorphization error types.
 
-use kestrel_execution_graph::{Id, QualifiedName, Ty};
 use std::fmt;
 
-/// Errors that can occur during monomorphization.
+/// Errors that occur during monomorphization (instantiation discovery).
 #[derive(Debug, Clone)]
 pub enum MonomorphizeError {
-    /// No witness found for a protocol implementation.
+    /// A protocol witness was not found for a type.
     WitnessNotFound {
-        protocol: Id<QualifiedName>,
-        for_type: Id<Ty>,
-        /// Human-readable protocol name (set when MirContext is available)
-        protocol_name: Option<String>,
-        /// Human-readable type description (set when MirContext is available)
-        type_name: Option<String>,
+        protocol_name: String,
+        type_description: String,
     },
-
     /// A method was not found in a witness.
-    MethodNotFoundInWitness {
-        protocol: Id<QualifiedName>,
+    MethodNotFound {
+        protocol_name: String,
         method: String,
-        for_type: Id<Ty>,
-        /// Human-readable protocol name (set when MirContext is available)
-        protocol_name: Option<String>,
-        /// Human-readable type description (set when MirContext is available)
-        type_name: Option<String>,
+        type_description: String,
     },
-
-    /// A function was not found by name.
-    FunctionNotFound { name: Id<QualifiedName> },
-
-    /// A function reference could not be instantiated.
-    UnsupportedFunctionReference {
-        name: Id<QualifiedName>,
-        reason: String,
+    /// A function was not found.
+    FunctionNotFound { name: String },
+    /// A type mismatch during witness pattern matching.
+    TypeMismatch { expected: String, found: String },
+    /// An instantiation arrived at the monomorphizer with a type-arg count
+    /// that does not match the function's declared `type_params` arity.
+    /// Always a dispatch bug in MIR lowering: some call site constructed a
+    /// callee whose `type_args` length is wrong for the target function.
+    TypeArgArityMismatch {
+        function: String,
+        expected: usize,
+        got: usize,
     },
-
-    /// Type mismatch during pattern matching.
-    TypeMismatch { expected: Id<Ty>, found: Id<Ty> },
-
-    /// A type was not interned during the collection phase.
-    ///
-    /// This indicates a bug in the collection algorithm - all types
-    /// needed during codegen should have been interned during collection.
-    TypeNotInterned { description: String },
 }
 
 impl fmt::Display for MonomorphizeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MonomorphizeError::WitnessNotFound {
-                protocol,
-                for_type,
+            Self::WitnessNotFound {
                 protocol_name,
-                type_name,
-            } => {
-                let protocol_display = protocol_name
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or_else(|| "unknown");
-                let type_display = type_name
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or_else(|| "unknown");
-                write!(
-                    f,
-                    "no witness found: protocol {} ({:?}) for type {} ({:?})",
-                    protocol_display, protocol, type_display, for_type
-                )
-            },
-            MonomorphizeError::MethodNotFoundInWitness {
-                protocol,
+                type_description,
+            } => write!(
+                f,
+                "no witness found: {type_description} does not implement {protocol_name}"
+            ),
+            Self::MethodNotFound {
+                protocol_name,
                 method,
-                for_type,
-                protocol_name,
-                type_name,
-            } => {
-                let protocol_display = protocol_name
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("unknown");
-                let type_display = type_name.as_ref().map(|s| s.as_str()).unwrap_or("unknown");
-                write!(
-                    f,
-                    "method '{}' not found in witness: protocol {} ({:?}) for type {} ({:?})",
-                    method, protocol_display, protocol, type_display, for_type
-                )
+                type_description,
+            } => write!(
+                f,
+                "method '{method}' not found in witness for {type_description}: {protocol_name}"
+            ),
+            Self::FunctionNotFound { name } => {
+                write!(f, "function not found: {name}")
             },
-            MonomorphizeError::FunctionNotFound { name } => {
-                write!(f, "function not found: {:?}", name)
+            Self::TypeMismatch { expected, found } => {
+                write!(f, "type mismatch: expected {expected}, found {found}")
             },
-            MonomorphizeError::UnsupportedFunctionReference { name, reason } => {
-                write!(f, "unsupported function reference: {:?} ({})", name, reason)
-            },
-            MonomorphizeError::TypeMismatch { expected, found } => {
-                write!(
-                    f,
-                    "type mismatch: expected {:?}, found {:?}",
-                    expected, found
-                )
-            },
-            MonomorphizeError::TypeNotInterned { description } => {
-                write!(
-                    f,
-                    "type not interned (bug in collection phase): {}",
-                    description
-                )
-            },
+            Self::TypeArgArityMismatch {
+                function,
+                expected,
+                got,
+            } => write!(
+                f,
+                "dispatch bug: call to '{function}' has {got} type arg(s), function expects {expected}"
+            ),
         }
     }
 }

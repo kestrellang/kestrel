@@ -1,0 +1,791 @@
+// {{TYPE_NAME}} - {{BITS}}-bit floating point ({{PRECISION_KIND_HEADER}})
+// Generated from float.ks.template - DO NOT EDIT
+
+// ============================================================================
+// {{TYPE_NAME_UPPER}}
+// ============================================================================
+
+module std.numeric
+
+import std.ffi.(FFISafe)
+import std.core.(
+    Equatable, Comparable, Ordering, Bool,
+    Addable, Subtractable, Multipliable, Divisible, Negatable,
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
+)
+import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.numeric.(Int64, {{OTHER_FLOAT}})
+
+/// A {{BITS}}-bit IEEE 754 {{PRECISION_KIND}} float.
+///
+/// Range is approximately ±{{RANGE_APPROX}} with {{SIG_DIGITS}} significant decimal
+/// digits. Float literals without a type annotation default to `Float64`;
+/// annotate the binding to pick `Float32`. The type is `FFISafe` and lays out
+/// as a single `lang.{{LANG_TYPE}}`.
+///
+/// # Examples
+///
+/// ```
+/// let pi = Float64.pi;
+/// let area = pi * radius * radius;
+/// let s = area.format(.{precision: 2});  // "314.16"
+/// ```
+///
+/// ```
+/// let x = 3.14;          // Float64
+/// let y: Float32 = 3.14; // Float32
+/// ```
+///
+/// # Special Values
+///
+/// - `nan` — Not-a-Number, result of `0.0 / 0.0`, `sqrt(-1)`, etc.
+/// - `infinity` / `-infinity` — overflow or `1.0 / 0.0`.
+/// - Negative zero compares equal to positive zero but produces `-infinity`
+///   when used as a divisor.
+///
+/// NaN comparisons are surprising: `nan == nan` is false and every ordered
+/// comparison against NaN is false. Use `isNaN` to test, never `== nan`. Any
+/// arithmetic with NaN propagates NaN.
+///
+/// # Representation
+///
+/// A single `lang.{{LANG_TYPE}}` field holding the raw IEEE 754 bit pattern.
+public struct {{TYPE_NAME}}:
+    Comparable,
+    Equatable,
+    Formattable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Negatable,
+    ExpressibleByFloatLiteral,
+    ExpressibleByIntLiteral,
+    Defaultable,
+    Convertible[Int64],
+    Convertible[{{OTHER_FLOAT}}],
+    FFISafe
+{
+    /// The underlying primitive `lang.{{LANG_TYPE}}` value (IEEE 754 bit
+    /// pattern). Exposed for FFI and intrinsic use; reach for the typed
+    /// surface for everything else.
+    public var raw: lang.{{LANG_TYPE}}
+
+    // ========================================================================
+    // CONSTANTS - Basic Values
+    // ========================================================================
+
+    /// The additive identity, `0.0`.
+    public static var zero: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.0) }
+
+    /// The multiplicative identity, `1.0`.
+    public static var one: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.0) }
+
+    /// The most negative finite value, ≈ {{MIN_VALUE}}.
+    public static var minValue: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{MAX_VALUE}}).negate() }
+
+    /// The most positive finite value, ≈ {{MAX_VALUE}}.
+    public static var maxValue: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{MAX_VALUE}}) }
+
+    /// The smallest positive *normal* value, ≈ {{MIN_POSITIVE}}.
+    /// Values smaller than this are subnormal and lose precision.
+    public static var minPositive: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{MIN_POSITIVE}}) }
+
+    /// Machine epsilon — the smallest `e` such that `1.0 + e != 1.0`,
+    /// ≈ {{EPSILON}}.
+    ///
+    /// Useful as a tolerance in approximate comparisons; scale by the
+    /// operand magnitude for relative-error checks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// func almostEqual(a: Float64, b: Float64) -> Bool {
+    ///     (a - b).abs() < Float64.epsilon * a.abs().max(b.abs());
+    /// }
+    /// ```
+    public static var epsilon: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: {{EPSILON}}) }
+
+    // ========================================================================
+    // CONSTANTS - Special Values
+    // ========================================================================
+
+    /// Positive infinity. Produced by overflow or `+x / 0.0` for `x > 0`.
+    /// Arithmetic with infinity follows IEEE 754: finite + infinity is
+    /// infinity, infinity − infinity is NaN.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Float64.infinity;       // inf
+    /// Float64.infinity + 1;   // inf
+    /// 1.0 / 0.0;              // inf
+    /// Float64.infinity.negate();  // -inf
+    /// ```
+    public static var infinity: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_infinity()) }
+
+    /// Not-a-Number. Produced by undefined operations like `0.0 / 0.0` or
+    /// `sqrt(-1.0)`. NaN propagates through arithmetic and is unequal to
+    /// every value including itself — always test with `isNaN`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Float64.nan.isNaN;             // true
+    /// Float64.nan == Float64.nan;    // false (!)
+    /// 0.0 / 0.0;                     // nan
+    /// ```
+    public static var nan: {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_nan()) }
+
+    // ========================================================================
+    // CONSTANTS - Mathematical
+    // ========================================================================
+
+    /// The constant π ≈ 3.14159265358979… — circle circumference over diameter.
+    public static var pi: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 3.141592653589793) }
+
+    /// Euler's number `e` ≈ 2.71828182845904… — base of the natural logarithm.
+    public static var e: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 2.718281828459045) }
+
+    /// Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
+    /// "one full turn" rotational math.
+    public static var tau: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 6.283185307179586) }
+
+    /// Natural logarithm of 2, ≈ 0.69314718055994…
+    public static var ln2: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 0.6931471805599453) }
+
+    /// Natural logarithm of 10, ≈ 2.30258509299404…
+    public static var ln10: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 2.302585092994046) }
+
+    /// Square root of 2, ≈ 1.41421356237309…
+    public static var sqrt2: {{TYPE_NAME}} { {{TYPE_NAME}}(floatLiteral: 1.4142135623730951) }
+
+    // ========================================================================
+    // INITIALIZERS
+    // ========================================================================
+
+    /// @name Float Literal
+    /// Compiler-emitted bridge for floating-point literals via
+    /// `ExpressibleByFloatLiteral`. Rarely called directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x: Float64 = 3.14;                  // implicit
+    /// let y = Float64(floatLiteral: 3.14);    // explicit
+    /// ```
+    public init(floatLiteral value: lang.f64) {
+        {{FLOAT_LITERAL_INIT}}
+    }
+
+    /// @name Default
+    /// Creates the zero value, satisfying `Defaultable`.
+    public init() {
+        self.init(floatLiteral: 0.0)
+    }
+
+    /// @name Int Literal
+    /// Bridge that lets bare integer literals appear where a float is
+    /// expected. Conversion is exact up to ±2^53; larger magnitudes round.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x: Float64 = 42;     // 42.0
+    /// let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
+    /// ```
+    public init(intLiteral value: lang.i64) {
+        self.raw = lang.cast_i64_{{LANG_TYPE}}(value)
+    }
+
+    /// @name From Raw
+    /// Wraps an existing `lang.{{LANG_TYPE}}` bit pattern. Internal; used
+    /// by intrinsics.
+    init(raw value: lang.{{LANG_TYPE}}) {
+        self.raw = value
+    }
+
+    /// @name From Int
+    /// Converts an `Int64` to a float. Values with magnitude greater than
+    /// 2^53 lose low-order bits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: Int64 = 42;
+    /// let f = Float64(from: n);  // 42.0
+    /// ```
+    public init(from value: Int64) {
+        self.raw = lang.cast_i64_{{LANG_TYPE}}(value.raw)
+    }
+
+    /// @name From Float
+    /// Converts between `Float32` and `Float64`. The 32→64 direction is
+    /// exact; the 64→32 direction rounds and may overflow to ±infinity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let f32: Float32 = 3.14;
+    /// let f64 = Float64(from: f32);
+    /// ```
+    public init(from value: {{OTHER_FLOAT}}) {
+        self.raw = lang.cast_{{OTHER_LANG_TYPE}}_{{LANG_TYPE}}(value.raw)
+    }
+
+    // ========================================================================
+    // CLASSIFICATION (Properties)
+    // ========================================================================
+
+    /// True if `self` is NaN. The only correct way to test for NaN — `==`
+    /// returns false against NaN even when both operands are NaN.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (0.0 / 0.0).isNaN;        // true
+    /// Float64.nan.isNaN;        // true
+    /// (1.0).isNaN;              // false
+    /// Float64.infinity.isNaN;   // false
+    /// ```
+    public var isNaN: Bool { get {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_nan(self.raw))
+    }}
+
+    /// True if `self` is `+infinity` or `-infinity`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Float64.infinity.isInfinite;             // true
+    /// Float64.infinity.negate().isInfinite;    // true
+    /// (1.0 / 0.0).isInfinite;                  // true
+    /// Float64.nan.isInfinite;                  // false
+    /// ```
+    public var isInfinite: Bool { get {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_is_infinite(self.raw))
+    }}
+
+    /// True if `self` is finite — equivalently, not NaN and not infinite.
+    /// Includes zero and subnormals.
+    public var isFinite: Bool { get {
+        not self.isNaN and not self.isInfinite
+    }}
+
+    /// True if `self` is a *normal* number — finite, non-zero, and at least
+    /// `minPositive` in magnitude. Subnormals, zero, infinity, and NaN are
+    /// not normal.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).isNormal;                              // true
+    /// (0.0).isNormal;                              // false
+    /// Float64.minPositive.isNormal;                // true
+    /// (Float64.minPositive / 2.0).isNormal;        // false (subnormal)
+    /// ```
+    public var isNormal: Bool { get {
+        self.isFinite and not self.isZero and self.abs() >= {{TYPE_NAME}}.minPositive
+    }}
+
+    /// True if `self` is subnormal (denormalized) — finite, non-zero, and
+    /// smaller than `minPositive` in magnitude. Subnormals trade precision
+    /// for range near zero.
+    public var isSubnormal: Bool { get {
+        self.isFinite and not self.isZero and self.abs() < {{TYPE_NAME}}.minPositive
+    }}
+
+    // ========================================================================
+    // SIGN INSPECTION (Properties)
+    // ========================================================================
+
+    /// Sign as a float: `-1.0`, `0.0`, or `1.0`. NaN propagates as NaN.
+    /// Negative zero returns `-0.0` (which still compares equal to `0.0`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (-3.14).sign;        // -1.0
+    /// (0.0).sign;          //  0.0
+    /// (3.14).sign;         //  1.0
+    /// Float64.nan.sign;    //  nan
+    /// ```
+    public var sign: {{TYPE_NAME}} { get {
+        if self.isNaN { {{TYPE_NAME}}.nan }
+        else if self.isZero {
+            let one = {{TYPE_NAME}}.one;
+            let inverse = one.divide(self);
+            if inverse < 0.0 {
+                let zero = {{TYPE_NAME}}.zero;
+                zero.negate()
+            } else {
+                {{TYPE_NAME}}(floatLiteral: 0.0)
+            }
+        }
+        else if self < 0.0 { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(1.0)) }
+        else { {{TYPE_NAME}}(floatLiteral: 1.0) }
+    }}
+
+    /// True if `self > 0.0`. False for `+0.0`, `-0.0`, `nan`, and negatives.
+    public var isPositive: Bool { get {
+        self > 0.0
+    }}
+
+    /// True if `self < 0.0`. False for `-0.0`, `nan`, zero, and positives.
+    /// To detect signed zero specifically, use `sign`.
+    public var isNegative: Bool { get {
+        self < 0.0
+    }}
+
+    /// True if `self` is `+0.0` or `-0.0`. Both signed zeros compare equal.
+    public var isZero: Bool { get {
+        self == 0.0
+    }}
+
+    // ========================================================================
+    // COMPARISON
+    // ========================================================================
+
+    /// IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.14).isEqual(to: 3.14);                  // true
+    /// (0.0).isEqual(to: -0.0);                   // true
+    /// Float64.nan.isEqual(to: Float64.nan);      // false (!)
+    /// ```
+    public func isEqual(to other: {{TYPE_NAME}}) -> Bool {
+        Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
+    }
+
+    /// Three-way comparison returning an `Ordering`. NaN is *not* an ordered
+    /// value — comparisons against NaN currently fall through to `.Equal`,
+    /// which is wrong; gate inputs with `isNaN` if you need a well-defined
+    /// answer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).compare(2.0);              // .Less
+    /// (2.0).compare(2.0);              // .Equal
+    /// (3.0).compare(2.0);              // .Greater
+    /// (1.0).compare(Float64.infinity); // .Less
+    /// ```
+    public func compare(other: {{TYPE_NAME}}) -> Ordering {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, other.raw)) { .Less }
+        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.raw, other.raw)) { .Greater }
+        else { .Equal }
+    }
+
+    // ========================================================================
+    // ASSOCIATED TYPE BINDINGS
+    // ========================================================================
+
+    type Addable.Output = {{TYPE_NAME}}
+    type Subtractable.Output = {{TYPE_NAME}}
+    type Multipliable.Output = {{TYPE_NAME}}
+    type Divisible.Output = {{TYPE_NAME}}
+    type Negatable.Output = {{TYPE_NAME}}
+
+    // ========================================================================
+    // ARITHMETIC
+    // ========================================================================
+
+    /// IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
+    /// is inf.
+    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+
+    /// IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
+    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+
+    /// IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
+    /// the result follows the usual algebra.
+    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+
+    /// IEEE 754 division. Unlike integer divide, dividing by zero does not
+    /// trap — it produces ±infinity (or NaN for `0.0 / 0.0`).
+    ///
+    /// Special cases:
+    /// - `x / 0.0` → `+inf` if `x > 0`, `-inf` if `x < 0`, `nan` if `x == 0`
+    /// - `x / inf` → 0 for finite `x`
+    /// - `inf / inf` → NaN
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (10.0).divide(4.0);  // 2.5
+    /// 1.0 / 0.0;                  // inf
+    /// 0.0 / 0.0;                  // nan
+    /// ```
+    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.raw, other.raw)) }
+
+    /// IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
+    /// is `+0.0`.
+    public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw)) }
+
+    // ========================================================================
+    // BASIC MATHEMATICAL FUNCTIONS
+    // ========================================================================
+
+    /// Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
+    /// `+0.0`.
+    public func abs() -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, {{ZERO_LITERAL}})) { self.negate() } else { self }
+    }
+
+    /// Largest integer ≤ `self`. Rounds toward `-infinity`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.7).floor();   //  3.0
+    /// (-3.2).floor();  // -4.0
+    /// ```
+    public func floor() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_floor(self.raw)) }
+
+    /// Smallest integer ≥ `self`. Rounds toward `+infinity`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.2).ceil();   //  4.0
+    /// (-3.7).ceil();  // -3.0
+    /// ```
+    public func ceil() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_ceil(self.raw)) }
+
+    /// Round to nearest integer, breaking ties *away from zero* (banker's
+    /// rounding is not used).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.4).round();   //  3.0
+    /// (3.5).round();   //  4.0   (tie → away from zero)
+    /// (-3.5).round();  // -4.0
+    /// ```
+    public func round() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_round(self.raw)) }
+
+    /// Integer part, truncating toward zero. `floor` for positives, `ceil`
+    /// for negatives.
+    public func trunc() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_trunc(self.raw)) }
+
+    /// Fractional part — `self - self.trunc()`. Sign matches `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.7).fract();   //  0.7
+    /// (-3.7).fract();  // -0.7
+    /// ```
+    public func fract() -> {{TYPE_NAME}} {
+        self.subtract(self.trunc())
+    }
+
+    /// Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
+    /// `+inf` returns `+inf`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (4.0).sqrt();    // 2.0
+    /// (-1.0).sqrt();   // nan
+    /// ```
+    public func sqrt() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sqrt(self.raw)) }
+
+    /// Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
+    public func cbrt() -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_cbrt{{LIBM_SUFFIX}}(self.raw))
+    }
+
+    /// Hypotenuse — `sqrt(self² + other²)`, computed via libm in a way that
+    /// avoids intermediate overflow when one operand is very large.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.0).hypot(4.0);  // 5.0
+    /// ```
+    public func hypot(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_hypot{{LIBM_SUFFIX}}(self.raw, other.raw))
+    }
+
+    // ========================================================================
+    // EXPONENTIAL AND LOGARITHMIC FUNCTIONS
+    // ========================================================================
+
+    /// `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
+    public func exp() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_exp{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// `2^self`. Useful for binary scaling.
+    public func exp2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_exp2{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// `e^self - 1`, computed without the cancellation that hurts
+    /// `self.exp() - 1.0` for small `self`.
+    public func expm1() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_expm1{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Natural logarithm. Negatives return NaN; zero returns `-inf`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).ln();           //  0.0
+    /// Float64.e.ln();       //  1.0
+    /// (0.0).ln();           // -inf
+    /// (-1.0).ln();          //  nan
+    /// ```
+    public func ln() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
+    /// would lose digits.
+    public func ln1p() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log1p{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Base-2 logarithm.
+    public func log2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log2{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Base-10 logarithm.
+    public func log10() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log10{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
+    /// Pick `log2` or `log10` directly when you can — they avoid the second
+    /// libm call.
+    public func log(base: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        self.ln().divide(base.ln())
+    }
+
+    /// `self ^ exponent` via libm. Negative bases with non-integer exponents
+    /// return NaN.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (2.0).pow(10.0);   // 1024.0
+    /// (2.0).pow(0.5);    // sqrt(2)
+    /// (-2.0).pow(0.5);   // nan
+    /// ```
+    public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_pow{{LIBM_SUFFIX}}(self.raw, exponent.raw))
+    }
+
+    /// Integer-exponent power via repeated squaring. Faster and more accurate
+    /// than `pow` when the exponent is known to be integral. Negative
+    /// exponents invert.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (2.0).powi(10);   // 1024.0
+    /// (2.0).powi(-1);   // 0.5
+    /// ```
+    public func powi(exponent: Int64) -> {{TYPE_NAME}} {
+        if exponent == 0 { return {{TYPE_NAME}}(floatLiteral: 1.0) };
+        if exponent < 0 { return {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(1.0, self.powi(exponent.negate()).raw)) };
+        var result = {{TYPE_NAME}}(floatLiteral: 1.0);
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(result.raw, base.raw))
+            };
+            base = {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(base.raw, base.raw));
+            exp = exp / 2
+        };
+        result
+    }
+
+    // ========================================================================
+    // TRIGONOMETRIC FUNCTIONS
+    // ========================================================================
+
+    /// Sine of `self` in radians.
+    public func sin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_sin{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Cosine of `self` in radians.
+    public func cos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_cos{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
+    public func tan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_tan{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
+    /// `[-1.0, 1.0]`.
+    public func asin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_asin{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Arc cosine, result in radians on `[0, π]`. Returns NaN outside
+    /// `[-1.0, 1.0]`.
+    public func acos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_acos{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
+    /// recovery use `atan2`.
+    public func atan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Two-argument arctangent — angle of the point `(x, self)` measured
+    /// from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
+    /// `atan` cannot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).atan2(1.0);    //  π/4   (Q1)
+    /// (1.0).atan2(-1.0);   //  3π/4  (Q2)
+    /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
+    /// (-1.0).atan2(1.0);   // -π/4   (Q4)
+    /// ```
+    public func atan2(x: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan2{{LIBM_SUFFIX}}(self.raw, x.raw)) }
+
+    /// Sine and cosine in one call. Implemented via two libm calls today;
+    /// kept for ergonomics and as a future optimisation point.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (s, c) = angle.sinCos();
+    /// ```
+    public func sinCos() -> ({{TYPE_NAME}}, {{TYPE_NAME}}) {
+        (self.sin(), self.cos())
+    }
+
+    // ========================================================================
+    // HYPERBOLIC FUNCTIONS
+    // ========================================================================
+
+    /// Hyperbolic sine.
+    public func sinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_sinh{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Hyperbolic cosine.
+    public func cosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_cosh{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Hyperbolic tangent. Saturates at ±1 for large magnitudes.
+    public func tanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_tanh{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Inverse hyperbolic sine. Defined on all real inputs.
+    public func asinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_asinh{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
+    public func acosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_acosh{{LIBM_SUFFIX}}(self.raw)) }
+
+    /// Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
+    public func atanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atanh{{LIBM_SUFFIX}}(self.raw)) }
+
+    // ========================================================================
+    // IEEE 754 OPERATIONS
+    // ========================================================================
+
+    /// Fused multiply-add — `(self * a) + b` with a single rounding step.
+    /// More accurate (and often faster) than separate `multiply`/`add`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (2.0).fma(3.0, 4.0);   // 10.0
+    /// ```
+    public func fma(a: {{TYPE_NAME}}, b: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_fma(self.raw, a.raw, b.raw))
+    }
+
+    /// Returns a value with `self`'s magnitude and `other`'s sign — i.e. an
+    /// IEEE 754 `copysign`. Useful for unbiased rounding tricks.
+    public func copysign(from other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_copysign(self.raw, other.raw))
+    }
+
+    /// Next representable value greater than `self`. `+inf` and `nan` are
+    /// fixed points; the largest finite value steps up to `+inf`.
+    public func nextUp() -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_infinity()))
+    }
+
+    /// Next representable value less than `self`. Mirror of `nextUp`.
+    public func nextDown() -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_neg(lang.{{LANG_TYPE}}_infinity())))
+    }
+
+    /// IEEE 754 remainder — uses round-to-nearest division, not truncation.
+    /// Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
+    /// `2.0`.
+    public func remainder(dividingBy other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        {{TYPE_NAME}}(raw: libm_remainder{{LIBM_SUFFIX}}(self.raw, other.raw))
+    }
+
+    // ========================================================================
+    // CLAMPING AND INTERPOLATION
+    // ========================================================================
+
+    /// Clamps `self` into `[min, max]`. NaN passes through unchanged. Caller
+    /// must ensure `min <= max`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (0.5).clamp(0.0, 1.0);   // 0.5
+    /// (-0.5).clamp(0.0, 1.0);  // 0.0
+    /// (1.5).clamp(0.0, 1.0);   // 1.0
+    /// ```
+    public func clamp(min: {{TYPE_NAME}}, max: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if self.isNaN { self }
+        else if self < min { min }
+        else if self > max { max }
+        else { self }
+    }
+
+    /// Linear interpolation — `self + (other - self) * t`. `t == 0` returns
+    /// `self`, `t == 1` returns `other`; `t` outside `[0, 1]` extrapolates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (0.0).lerp(to: 10.0, 0.0);   //  0.0
+    /// (0.0).lerp(to: 10.0, 0.5);   //  5.0
+    /// (0.0).lerp(to: 10.0, 1.0);   // 10.0
+    /// (0.0).lerp(to: 10.0, 0.25);  //  2.5
+    /// ```
+    public func lerp(to other: {{TYPE_NAME}}, t: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        self.add(other.subtract(self).multiply(t))
+    }
+
+    // ========================================================================
+    // CONVERSION
+    // ========================================================================
+
+    /// Truncates toward zero into an `Int64`. Returns `None` for NaN,
+    /// infinity, or values that fall outside the `Int64` range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (3.7).toInt64();              // Some(3)
+    /// (-3.7).toInt64();             // Some(-3)
+    /// Float64.nan.toInt64();        // None
+    /// Float64.infinity.toInt64();   // None
+    /// ```
+    public func toInt64() -> Int64? {
+        if self.isNaN or self.isInfinite {
+            return .None
+        };
+        let truncated = self.trunc();
+        if truncated >= 9223372036854775808.0 {
+            return .None
+        };
+        if truncated < -9223372036854775808.0 {
+            return .None
+        };
+        .Some(Int64(raw: lang.cast_{{LANG_TYPE}}_i64(truncated.raw)))
+    }
+
+    /// Converts to the sibling float type. Widening (32→64) is exact;
+    /// narrowing (64→32) rounds and may overflow to ±infinity.
+    public func to{{OTHER_FLOAT}}() -> {{OTHER_FLOAT}} {
+        {{TO_OTHER_FLOAT}}
+    }
+
+    // ========================================================================
+    // PARSING
+    // ========================================================================
+
+{{PARSE_METHOD}}
+
+    // ========================================================================
+    // FORMATTING
+    // ========================================================================
+
+{{FORMAT_METHOD}}}
+{{TYPE_ALIAS}}

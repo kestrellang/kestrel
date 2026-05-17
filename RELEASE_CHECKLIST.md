@@ -1,8 +1,17 @@
-# Release Checklist
-
-- [x] All tests pass
-- [x] All examples build
-- [x] All docs are up to date
-- [x] Remove docs/std
-- [x] Test stdlib more thoroughly
-- [x] Put debugging behind the flags 
+- [x] Clean up repository
+- [x] Cargo fmt
+- [x] Cargo clippy
+- [x] Rewrite README.md
+- [x] Write naming guide
+- [ ] Add custom written docs
+- [x] Move to github org
+- [x] Write blog post
+- [ ] Play with extension
+- [x] Create claude code plugin
+- [x] Create skill
+- [x] Move site to separate repo
+- [x] Move registry to separate repo
+- [x] Move plugin to separate repo
+- [x] Move triage to separate repo
+- [ ] Verify installation end-to-end
+- [ ] Go over libraries

@@ -222,6 +222,37 @@ extend Pair[T, lang.i64] {
 
 This extension applies to `Pair[lang.str, lang.i64]` and `Pair[lang.i1, lang.i64]`, but not to `Pair[lang.str, lang.str]`.
 
+### Free Type Parameters from the Conformance RHS
+
+When extending a non-generic type with a generic protocol, the protocol's type arguments can introduce free type parameters that the extension is generic over. The extension does not list them on the keyword — they're introduced wherever they appear on the conformance:
+
+```kestrel
+protocol ArrayIndex[T] {
+    type Output
+    func loadFrom(array: Array[T]) -> Output
+}
+
+// `T` is not on the LHS — `Int64` has no type parameters. The conformance
+// `ArrayIndex[T]` introduces `T` as a free parameter on this extension.
+// The conformance reads as "for all T, Int64 conforms to ArrayIndex[T]".
+extend Int64: ArrayIndex[T] {
+    type ArrayIndex[T].Output = T
+
+    public func loadFrom(array: Array[T]) -> T {
+        array(unchecked: self)
+    }
+}
+```
+
+A few notes:
+
+- **Single-uppercase identifiers** (`T`, `U`, `E`, `K`, `V`, …) are recognized as free parameters when they appear in the conformance RHS and aren't already in scope. Multi-letter names like `Self` or `Int64` are *not* introduced — they're treated as references to existing types.
+- **Top-level position only.** `extend Int64: Foo[Box[T]]` does not auto-introduce `T`; put `T` at a top-level conformance argument instead.
+- **No keyword-side declaration.** Kestrel deliberately does not use a form like `extend[T] Int64: ArrayIndex[T]`. The free parameter is introduced where it's used; the conformance is what's generic, not the extension itself.
+- **Constraints on free parameters** ride in the where clause: `extend Int64: ArrayIndex[T] where T: Hashable`.
+
+The qualified-binding form `type ArrayIndex[T].Output = T` (rather than bare `type Output = T`) ties the binding to a specific protocol — important when one type conforms to multiple protocols that each define an `Output`. The `T` on the right-hand side refers to the same free parameter introduced on the conformance line.
+
 ## Conditional Conformance
 
 Extensions can add protocol conformances with additional constraints using where clauses:

@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-hir"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-ast = { path = "../kestrel-ast" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-hecs = { path = "../kestrel-hecs" }

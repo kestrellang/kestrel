@@ -1,0 +1,9 @@
+// test: diagnostics
+// stdlib: false
+
+module Test
+
+@builtin(.Copyable)
+protocol Copyable {}
+
+struct Handle: not Copyable {}

@@ -4,44 +4,59 @@
 
 module std.core
 
-/// Protocol for types that support logical AND (and keyword).
-/// Uses short-circuit evaluation: the right operand is only evaluated if needed.
+/// Raw protocol backing the `and` keyword operator.
+///
+/// The `other` operand is a thunk so that conformers can short-circuit:
+/// the right-hand side must not be evaluated when `self` is falsy. The
+/// stdlib implementations on `Bool` and the optional types all honour
+/// this; user implementations should too.
+///
+/// # Examples
+///
+/// ```
+/// true and false        // false
+/// true and { true }     // true (closure form, mostly internal)
+/// ```
 @builtin(.LogicalAndOperatorProtocol)
-public protocol And[Rhs = Self] {
+public protocol And[Other = Self] {
     type Output
 
-    /// Performs logical AND with short-circuit evaluation.
-    /// The closure is only called if self is truthy.
+    /// Returns `self and other()`. The closure runs only if needed.
     @builtin(.LogicalAndOperatorMethod)
-    func logicalAnd(other: () -> Rhs) -> Output
+    func logicalAnd(other: () -> Other) -> Output
 }
 
-/// Protocol for types that support logical OR (or keyword).
-/// Uses short-circuit evaluation: the right operand is only evaluated if needed.
+/// Raw protocol backing the `or` keyword operator.
+///
+/// As with `And`, `other` is a thunk so the right-hand side can be skipped
+/// when `self` already determines the result.
 @builtin(.LogicalOrOperatorProtocol)
-public protocol Or[Rhs = Self] {
+public protocol Or[Other = Self] {
     type Output
 
-    /// Performs logical OR with short-circuit evaluation.
-    /// The closure is only called if self is falsy.
+    /// Returns `self or other()`. The closure runs only if needed.
     @builtin(.LogicalOrOperatorMethod)
-    func logicalOr(other: () -> Rhs) -> Output
+    func logicalOr(other: () -> Other) -> Output
 }
 
-/// Protocol for types that support logical NOT (not keyword).
+/// Raw protocol backing the `not` keyword operator.
 @builtin(.LogicalNotOperatorProtocol)
 public protocol Not {
     type Output
 
-    /// Returns the logical negation of this value.
+    /// Returns `not self`.
     @builtin(.LogicalNotOperatorMethod)
     func logicalNot() -> Output
 }
 
-/// Protocol for types that can be used as boolean conditions in if/while statements.
-/// Types conforming to this protocol can be used directly in conditionals.
+/// Protocol for types that may appear directly in `if`, `while`, and other
+/// boolean contexts.
+///
+/// `Bool` is the canonical conformer. The method returns the primitive
+/// `lang.i1` rather than `Bool` to avoid a circular dependency between the
+/// conditional lowering and `Bool` itself.
 @builtin(.BooleanConditional)
 public protocol BooleanConditional {
-    /// Returns the boolean value for use in conditionals.
+    /// Returns the underlying truth value as a primitive `i1`.
     func boolValue() -> lang.i1
 }

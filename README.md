@@ -1,271 +1,195 @@
-# Kestrel
-
-A statically-typed programming language with Swift-inspired syntax, protocol-based polymorphism, and value semantics.
-
-## What It Does
-
-Games built with Kestrel:
-
-<p>
-<img src="site/public/pong.gif" alt="Pong game written in Kestrel" width="400">
-<img src="site/public/snake.gif" alt="Snake game written in Kestrel" width="400">
-<img src="site/public/breakout.gif" alt="Breakout game written in Kestrel" width="400">
+<p align="center">
+<img src="external/kestrel-website/public/kestrel-hovering.png" alt="Kestrel" width="180">
 </p>
 
-## Features
+<h1 align="center">Kestrel</h1>
 
-- **Value semantics by default** - Copy-on-assignment with explicit `not Copyable` for move-only types
-- **Protocol-based polymorphism** - Interfaces through protocols with extensions and retroactive conformance
-- **Monomorphized generics** - Zero-cost abstractions through compile-time specialization
-- **RAII resource management** - Deterministic cleanup via `deinit` blocks
-- **First-class functions** - Closures with trailing closure syntax and implicit `it` parameter
-- **Pattern matching** - `match`, `if let`, `while let`, range patterns, and array patterns with exhaustiveness checking
-- **Type inference** - Bidirectional type inference within function bodies
-- **Parameter labels** - Named parameters with default values for readable call sites
-- **String interpolation** - `"Hello, \(name)"` with format specifiers
-- **Error handling** - `try`/`throw` expressions with `Result` and `Optional` types
-- **Type sugar** - `T?` for Optional, `T!` for Result, `[T]` for Array, `[K: V]` for Dictionary
-- **For-in loops** - `for item in collection { ... }` with iterator protocol
-- **Expression-bodied functions** - `func double(x: Int) -> Int = x * 2`
+<p align="center">
+Clean syntax. Powerful types. Deterministic memory.
+</p>
+
+<p align="center">
+<a href="https://kestrel-lang.com"><img src="https://img.shields.io/badge/docs-kestrel--lang.com-blue" alt="Docs"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"></a>
+</p>
+
+<p align="center">
+<img src="docs/images/lsp-completions.png" alt="LSP Completions" width="600">
+</p>
+
+<p align="center">
+<img src="docs/images/weather.jpeg" alt="Weather Dashboard" width="260">
+<img src="docs/images/pokedex.jpeg" alt="Pokédex" width="260">
+<img src="docs/images/apod.jpeg" alt="APOD Viewer" width="260">
+</p>
+<table align="center"><tr>
+<td align="center" valign="middle"><img src="docs/images/wordle.jpeg" alt="Wordle" width="260"></td>
+<td align="center" valign="middle"><img src="docs/images/life.png" alt="Game of Life" width="260"></td>
+</tr></table>
+
+## What is Kestrel?
+
+Kestrel is a compiled programming language with deterministic memory management — no garbage collector, no borrow checker. It compiles to native code via Cranelift and ships with a full ecosystem: package manager, web framework, HTTP client, VS Code extension, and more — many written in Kestrel itself.
+
+Currently in its first preview release, Kestrel can be used to write 2D games, CLI tools, and web apps.
 
 ## Quick Start
 
 ```bash
-# Build the compiler
-cargo build --release
+# Install Kestrel
+curl --proto '=https' --tlsv1.2 -sSf https://kestrel-lang.com/install.sh | sh
 
 # Run a program
-kestrel run examples/pong/pong.ks
+kestrel run hello.ks
 
-# Check for errors without running
-kestrel check file.ks
-
-# Build an executable
-kestrel build file.ks -o output
+# Or use Flock (package manager)
+flock new myproject && cd myproject && flock run
 ```
 
-## Hello World
+Or [build from source](#building-from-source) if you prefer.
+
+## Contents
+
+- [A Taste of Kestrel](#a-taste-of-kestrel)
+- [Features](#features)
+- [Ecosystem](#ecosystem)
+- [Examples](#examples)
+- [Editor Support](#editor-support)
+- [Standard Library](#standard-library)
+- [Building from Source](#building-from-source)
+
+## A Taste of Kestrel
 
 ```kestrel
-module Hello
+module Cafe
 
-import std.io.stdio.(println)
-import std.io.error.(Error)
-
-func main() -> () throws Error {
-    let name = "World";
-    println("Hello, \(name)!");
-}
-```
-
-## Language Overview
-
-### Structs and Protocols
-
-```kestrel
-protocol Bakeable {
-    func bakeTime() -> Int
-    func isGoldenBrown(minutes: Int) -> Bool
+enum Roast {
+    case Light
+    case Dark
+    case Custom(String)
 }
 
-struct Cookie : Bakeable {
-    let flavor: String
-    let chips: Int
+struct Order {
+    let drink: String
+    let roast: Roast
+    let shots: Int64
 
-    func bakeTime() -> Int { 12 }
+    var price: Int64 { self.shots * 250 }
 
-    func isGoldenBrown(minutes: Int) -> Bool {
-        minutes >= self.bakeTime()
-    }
-}
-```
-
-### Generics
-
-```kestrel
-struct Box[T] {
-    var value: T
-}
-
-func identity[T](value: T) -> T { value }
-
-func process[T](item: T) where T: Bakeable {
-    let time = item.bakeTime();
-}
-```
-
-### Enums and Pattern Matching
-
-```kestrel
-enum Option[T] {
-    case Some(T)
-    case None
-}
-
-func unwrap[T](opt: Option[T], default: T) -> T {
-    match opt {
-        .Some(value) => value,
-        .None => default
-    }
-}
-```
-
-### Closures
-
-```kestrel
-let double = { it * 2 }
-let add = { x, y in x + y }
-
-// Trailing closure syntax
-numbers.map { it * 2 }
-```
-
-### For Loops and Iterators
-
-```kestrel
-for item in items {
-    println("\(item)");
-}
-
-// Iterator adapters
-let evens = numbers.iter()
-    .filter { it % 2 == 0 }
-    .map { it * 10 }
-    .collect();
-```
-
-### Error Handling
-
-```kestrel
-func readConfig(path: String) -> String throws Error {
-    let file = try File.open(path);
-    let contents = try file.readToString();
-    contents
-}
-
-// Null coalescing
-let name = optionalName ?? "default";
-```
-
-### Type Sugar
-
-```kestrel
-var name: String? = nil;      // Optional[String]
-var ids: [Int64] = [];         // Array[Int64]
-var scores: [String: Int64];   // Dictionary[String, Int64]
-```
-
-### Expression-Bodied Functions
-
-```kestrel
-func double(x: Int64) -> Int64 = x * 2
-func isEven(n: Int64) -> Bool = n % 2 == 0
-```
-
-### Parameter Access Modes
-
-```kestrel
-// borrowing (default) - read-only reference
-func read(point: Point) -> Int { point.x }
-
-// mutating - mutable reference
-mutating func reset(point: Point) { point.x = 0; }
-
-// consuming - takes ownership
-consuming func destroy(point: Point) { /* point is moved */ }
-```
-
-### Extensions
-
-```kestrel
-extend Int {
-    func squared() -> Int {
-        self * self
+    func receipt() -> String {
+        let roast = match self.roast {
+            .Light => "light",
+            .Dark => "dark",
+            .Custom(name) => name
+        }
+        "\(self.drink) (\(roast)) — $\(self.price / 100)"
     }
 }
 
-// Retroactive conformance
-extend ExternalType : MyProtocol {
-    func requiredMethod() { }
+func main() {
+    let orders = [
+        Order(drink: "Cortado", roast: .Dark, shots: 2),
+        Order(drink: "Oat Latte", roast: .Light, shots: 3),
+    ];
+
+    orders.filter { it.shots > 2 }.forEach { println(it.receipt()) };
 }
 ```
 
-## CLI Reference
+## Features
+
+### Type System
+
+- **Protocols and extensions** — polymorphism with retroactive conformance
+- **Monomorphized generics** — zero-cost abstractions with `where` clause constraints
+- **Algebraic data types** — enums with associated values and exhaustive pattern matching
+- **Type inference** — bidirectional constraint-based inference
+
+### Memory Model
+
+- **Value semantics** — copy-on-assignment, `not Copyable` for move-only types
+- **Copy-on-write collections** — Array, Dictionary, Set
+- **RAII** — deterministic cleanup via `deinit`
+- **No GC, no borrow checker** — ownership is simple and predictable
+
+### Ergonomics
+
+- **Error handling** — `throws` / `try` sugar over `Result[T, E]`
+- **Closures** — trailing closure syntax, implicit `it` parameter
+- **String interpolation** — `"\(expr)"` via the Formattable protocol
+- **Iterators** — `for`-`in` loops with 20+ adapters (map, filter, zip, scan, take, ...)
+- **C interop** — `@extern(.C)` for calling C functions and linking native libraries
+- **Parameter labels** — named parameters for readable call sites
+
+## Ecosystem
+
+Kestrel ships with **Flock**, a package manager written in Kestrel:
 
 ```bash
-kestrel <command> [options] <files>
-
-Commands:
-  check   Type-check without compiling
-  run     Compile and run a program
-  build   Compile to an executable
-
-Options:
-  --tree           Show semantic tree (use --tree=full for details)
-  --symbols        Show symbol table
-  --xgraph         Show execution graph (MIR)
-  --no-std         Disable standard library
-  --std <PATH>     Custom standard library path
-  -O, --opt-level  Optimization level (0-2)
-  --target         Target triple for cross-compilation
-  -v, --verbose    Verbose output
-  -o, --output     Output file path (build only)
-  -l, --link       Link with library (build/run)
-  -L               Library search path (build/run)
+flock init myproject && cd myproject
+flock run
 ```
 
-## Project Structure
+Available packages:
 
-```
-lib/
-  kestrel-lexer/                  # Tokenization (Logos)
-  kestrel-parser/                 # Parsing (Chumsky)
-  kestrel-syntax-tree/            # Concrete Syntax Tree (Rowan)
-  kestrel-semantic-tree/          # Symbol definitions
-  kestrel-semantic-model/         # Query system
-  kestrel-semantic-tree-builder/  # BUILD phase
-  kestrel-semantic-tree-binder/   # BIND phase
-  kestrel-semantic-analyzers/     # VALIDATE phase
-  kestrel-execution-graph/        # MIR representation
-  kestrel-codegen-cranelift/      # Code generation (Cranelift)
-lang/
-  std/                            # Standard library
-examples/                         # Example programs
-docs/                             # Documentation
-```
+| Package | Description |
+| --- | --- |
+| [kestrel/perch](https://kestrel-lang.com/flock/kestrel/perch) | Web framework — routing, middleware, generic context |
+| [kestrel/swoop](https://kestrel-lang.com/flock/kestrel/swoop) | HTTP/HTTPS client |
+| [kestrel/clutch](https://kestrel-lang.com/flock/kestrel/clutch) | CLI argument parser |
+| [kestrel/quill](https://kestrel-lang.com/flock/kestrel/quill) | Serialization framework |
+| [kestrel/quill-json](https://kestrel-lang.com/flock/kestrel/quill-json) | JSON support for Quill |
+| [kestrel/quill-toml](https://kestrel-lang.com/flock/kestrel/quill-toml) | TOML support for Quill |
+| [kestrel/http](https://kestrel-lang.com/flock/kestrel/http) | Shared HTTP types |
+| [kestrel/plume](https://kestrel-lang.com/flock/kestrel/plume) | Template engine |
+
+Also included: **Jessup** (toolchain version manager, like rustup).
+
+## Examples
+
+| Example | Description | Complexity |
+| --- | --- | --- |
+| [Weather Dashboard](examples/weather) | Full-stack web app with Perch, htmx, and Open-Meteo API | Advanced |
+| [Pokédex](examples/pokedex) | Kanto Pokédex using PokéAPI, Perch, and Plume | Advanced |
+| [Wordle](examples/wordle) | Wordle clone with shareable URL state | Intermediate |
+| [APOD](examples/apod) | NASA Astronomy Picture of the Day viewer | Intermediate |
+| [Counter](examples/counter) | HTMX counter app with Perch | Beginner |
+| [Game of Life](examples/life) | Conway's Game of Life with SDL2 | Intermediate |
+| [Breakout](examples/breakout) | Terminal brick breaker with Iterator-based game loop | Intermediate |
+| [Snake](examples/snake) | Terminal snake with RAII terminal management | Intermediate |
+| [Pong](examples/pong) | Terminal pong with AI opponent | Intermediate |
+| [SDL Pong](examples/sdl_pong) | Graphical pong via SDL2 FFI bindings | Intermediate |
+
+## Editor Support
+
+Kestrel ships with a language server (`kestrel-lsp`) with diagnostics, completions, go-to-definition, rename, and more. Install the [VS Code extension](https://github.com/kestrellang/vscode-kestrel) to get started.
+
+<p align="center">
+<img src="docs/images/lsp-editor.png" alt="Kestrel in VS Code" width="600">
+</p>
 
 ## Standard Library
 
-The standard library (`lang/std/`) includes:
+All public stdlib types are auto-imported — no `import` statements needed. See the full [Standard Library Reference](https://kestrel-lang.com/reference/stdlib).
 
-- **core/** - Protocols for operators, comparison, copying, error handling
-- **collections/** - Array, Dictionary (hash map), Set
-- **result/** - Optional and Result types with promotion
-- **text/** - String (UTF-8), Char (grapheme), Unicode tables, string formatting
-- **io/** - File I/O, stdin/stdout, buffered readers/writers
-- **memory/** - Allocator, Buffer, Pointer, reference counting (RcBox)
-- **iter/** - Iterator protocol and adapters (map, filter, flatMap, zip, chain, enumerate, etc.)
-- **num/** - Numeric types (Int8-64, UInt8-64, Float32/64), math functions, random
-- **ffi/** - CString, libc bindings for C interop
+## Status
+
+Kestrel is in early preview — expect breaking changes between releases.
+
+- **macOS** is the primary platform; **Linux** is supported but less tested
+- **No optimized release profile** yet — binaries are unoptimized
+- **Windows** is not currently supported
 
 ## Building from Source
 
-Requirements:
-- Rust 2024 edition (1.85+)
-- Cargo
+Requires Rust 2024 edition (1.85+).
 
 ```bash
-git clone https://github.com/jkpdino/kestrel
+git clone https://github.com/kestrellang/kestrel
 cd kestrel
-cargo build --release
-```
-
-Run tests:
-
-```bash
-cargo test
+cargo install --path .
 ```
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+Apache-2.0 — see [LICENSE](LICENSE).

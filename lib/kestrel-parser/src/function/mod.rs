@@ -3,13 +3,26 @@
 //! This module is the single source of truth for function declaration parsing.
 //! Functions support generics with type parameters and where clauses.
 
+use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::common::{emit_function_declaration, function_declaration_parser_internal};
+use crate::attribute::attribute_list_parser;
+use crate::common::{
+    AttributeData, FunctionBodyData, ParameterData, emit_attribute_list, emit_function_body,
+    emit_name, emit_parameter_list, emit_return_type, emit_static_modifier, emit_visibility,
+    function_body_parser, identifier, parameter_list_parser, return_type_parser, skip_trivia,
+    static_parser, token, visibility_parser_internal,
+};
 use crate::event::{EventSink, TreeBuilder};
-use crate::input::{create_input, prepare_tokens};
+use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+use crate::parse_and_emit;
+use crate::ty::TyVariant;
+use crate::type_param::{
+    TypeParameterData, WhereClauseData, emit_type_parameter_list, emit_where_clause,
+    type_parameter_list_parser, where_clause_parser,
+};
 
 /// Represents a function declaration: (visibility)? (static)? fn name[T]?(params) (-> return_type)? (where ...)? { }
 ///
@@ -105,6 +118,193 @@ impl FunctionDeclaration {
     }
 }
 
+/// Receiver modifier for instance methods
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiverModifier {
+    /// `mutating func` - method can mutate self
+    Mutating,
+    /// `consuming func` - method takes ownership of self
+    Consuming,
+}
+
+/// Raw parsed data for function declaration internals
+///
+/// Used by both function declarations and protocol method declarations.
+#[derive(Debug, Clone)]
+pub struct FunctionDeclarationData {
+    pub attributes: Vec<AttributeData>,
+    pub visibility: Option<(Token, Span)>,
+    pub is_static: Option<Span>,
+    /// Receiver modifier (mutating/consuming) with its span
+    pub receiver_modifier: Option<(ReceiverModifier, Span)>,
+    pub fn_span: Span,
+    pub name_span: Span,
+    pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub lparen: Span,
+    pub parameters: Vec<ParameterData>,
+    pub rparen: Span,
+    pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
+    pub where_clause: Option<WhereClauseData>,
+    pub body: Option<FunctionBodyData>, // Optional body - None for protocol methods
+}
+
+/// Parser for optional receiver modifier (mutating/consuming)
+///
+/// Parses an optional `mutating` or `consuming` keyword and returns the modifier with its span.
+fn receiver_modifier_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<(ReceiverModifier, Span)>, ParserExtra<'tokens>>
++ Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Mutating)
+                .map_with(|_, e| Some((ReceiverModifier::Mutating, to_kestrel_span(e.span()))))
+                .or(just(Token::Consuming).map_with(|_, e| {
+                    Some((ReceiverModifier::Consuming, to_kestrel_span(e.span())))
+                })),
+        )
+        .or(empty().to(None))
+}
+
+/// Parser for a function declaration
+///
+/// Syntax: `(@attr)* (visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ } | = expr)?`
+///
+/// This is the single source of truth for function declaration parsing.
+pub fn function_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, FunctionDeclarationData, ParserExtra<'tokens>> + Clone
+{
+    attribute_list_parser()
+        .then(visibility_parser_internal())
+        .then(static_parser())
+        .then(receiver_modifier_parser())
+        .then(token(Token::Func))
+        .then(identifier())
+        .then(type_parameter_list_parser().or_not())
+        .then(token(Token::LParen))
+        .then(parameter_list_parser())
+        .then(token(Token::RParen))
+        .then(return_type_parser())
+        .then(where_clause_parser().or_not())
+        .then(function_body_parser())
+        .map(
+            |(
+                (
+                    (
+                        (
+                            (
+                                (
+                                    (
+                                        (
+                                            (
+                                                (
+                                                    ((attributes, visibility), is_static),
+                                                    receiver_modifier,
+                                                ),
+                                                fn_span,
+                                            ),
+                                            name_span,
+                                        ),
+                                        type_params,
+                                    ),
+                                    lparen,
+                                ),
+                                parameters,
+                            ),
+                            rparen,
+                        ),
+                        return_type,
+                    ),
+                    where_clause,
+                ),
+                body,
+            )| {
+                FunctionDeclarationData {
+                    attributes,
+                    visibility,
+                    is_static,
+                    receiver_modifier,
+                    fn_span,
+                    name_span,
+                    type_params,
+                    lparen,
+                    parameters,
+                    rparen,
+                    return_type,
+                    where_clause,
+                    body,
+                }
+            },
+        )
+        .boxed()
+}
+
+/// Emit events for a function declaration.
+///
+/// Destructures `FunctionDeclarationData` without a `..` rest pattern: adding
+/// a field forces this function to stop compiling until the new field is
+/// handled in emission.
+pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclarationData) {
+    let FunctionDeclarationData {
+        attributes,
+        visibility,
+        is_static,
+        receiver_modifier,
+        fn_span,
+        name_span,
+        type_params,
+        lparen,
+        parameters,
+        rparen,
+        return_type,
+        where_clause,
+        body,
+    } = data;
+
+    sink.start_node(SyntaxKind::FunctionDeclaration);
+
+    emit_attribute_list(sink, &attributes);
+    emit_visibility(sink, visibility);
+    emit_static_modifier(sink, is_static);
+
+    // Emit receiver modifier (mutating/consuming) if present
+    if let Some((modifier, span)) = receiver_modifier {
+        let kind = match modifier {
+            ReceiverModifier::Mutating => SyntaxKind::Mutating,
+            ReceiverModifier::Consuming => SyntaxKind::Consuming,
+        };
+        sink.add_token(kind, span);
+    }
+
+    sink.add_token(SyntaxKind::Func, fn_span);
+    emit_name(sink, name_span);
+
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    emit_parameter_list(sink, lparen, parameters, rparen);
+
+    if let Some((arrow_span, return_ty)) = return_type {
+        emit_return_type(sink, arrow_span, return_ty);
+    }
+
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
+    if let Some(body) = body {
+        emit_function_body(sink, &body);
+    }
+
+    sink.finish_node();
+}
+
+impl crate::event::EmitSyntax for FunctionDeclarationData {
+    fn emit(self, sink: &mut EventSink) {
+        emit_function_declaration(sink, self);
+    }
+}
+
 /// Parse a function declaration and emit events
 ///
 /// This is the primary event-driven parser function for function declarations.
@@ -112,24 +312,13 @@ pub fn parse_function_declaration<I>(source: &str, tokens: I, sink: &mut EventSi
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    use chumsky::Parser;
-
-    let prepared = prepare_tokens(tokens);
-    let input = create_input(&prepared, source.len());
-
-    match function_declaration_parser_internal()
-        .parse(input)
-        .into_result()
-    {
-        Ok(data) => {
-            emit_function_declaration(sink, data);
-        },
-        Err(errors) => {
-            for error in errors {
-                sink.error_from_rich(&error);
-            }
-        },
-    }
+    parse_and_emit!(
+        source,
+        tokens,
+        sink,
+        function_declaration_parser_internal(),
+        emit_function_declaration
+    );
 }
 
 #[cfg(test)]

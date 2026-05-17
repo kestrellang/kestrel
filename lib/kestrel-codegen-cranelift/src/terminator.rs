@@ -1,524 +1,317 @@
-//! Terminator compilation.
+//! Terminator compilation — block exit instructions.
+//!
+//! Fixes the lib1 Switch last-case bug: uses `jump` instead of `brif(same, same)`.
 
+use crate::common::{self, is_aggregate};
 use crate::context::CodegenContext;
 use crate::error::CodegenError;
-use crate::monomorphize::{Substitution, build_substitution};
-use crate::place::compile_place_read;
-use crate::rvalue::compile_value;
-
-use kestrel_execution_graph::{
-    Block, FunctionDef, Id, Local, MirTy, PlaceKind, Terminator, TerminatorKind, Value,
-};
-
+use crate::function::FunctionState;
+use crate::place;
+use crate::rvalue;
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::types as cl_types;
-use cranelift_codegen::ir::{InstBuilder, MemFlags, Value as CraneliftValue};
-use cranelift_frontend::{FunctionBuilder, Variable};
-
-use std::collections::HashMap;
+use cranelift_codegen::ir::immediates::Offset32;
+use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
+use cranelift_frontend::FunctionBuilder;
+use kestrel_codegen::{NamedKind, substitute_type_with_self};
+use kestrel_mir::{MirTy, SwitchCase, Terminator, TerminatorKind, Value};
 
 /// Compile a block terminator.
 pub fn compile_terminator(
-    ctx: &mut CodegenContext<'_>,
-    func_def: &FunctionDef,
-    subst: &Substitution,
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
     terminator: &Terminator,
-    builder: &mut FunctionBuilder<'_>,
-    block_map: &HashMap<Id<Block>, cranelift_codegen::ir::Block>,
-    local_map: &HashMap<Id<Local>, Variable>,
-    stack_locals: &std::collections::HashSet<Id<Local>>,
-    is_main: bool,
-    sret_ptr: Option<CraneliftValue>,
 ) -> Result<(), CodegenError> {
     match &terminator.kind {
-        TerminatorKind::Return(value) => {
-            let concrete_ret = subst
-                .apply_ty_readonly(ctx.mir, func_def.ret)
-                .unwrap_or(func_def.ret);
-            let ret_ty = ctx.mir.ty(concrete_ret);
-            if matches!(ret_ty, kestrel_execution_graph::MirTy::Unit) {
-                if is_main {
-                    // main() must return 0 for success exit code
-                    let zero = builder.ins().iconst(cl_types::I64, 0);
-                    builder.ins().return_(&[zero]);
-                } else {
-                    builder.ins().return_(&[]);
-                }
-            } else if let Some(dest_ptr) = sret_ptr {
-                // Check if we're trying to return unit in a non-unit function
-                let is_unit_value = matches!(
-                    value,
-                    Value::Immediate(kestrel_execution_graph::Immediate {
-                        kind: kestrel_execution_graph::ImmediateKind::Unit,
-                        ..
-                    })
-                );
-                if is_unit_value {
-                    builder
-                        .ins()
-                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
-                } else {
-                    let val = compile_value(
-                        ctx,
-                        func_def,
-                        subst,
-                        value,
-                        builder,
-                        local_map,
-                        stack_locals,
-                    )?;
-                    copy_aggregate_value(ctx, concrete_ret, dest_ptr, val, builder);
-                    builder.ins().return_(&[]);
-                }
-            } else {
-                // Check if we're trying to return unit in a non-unit function
-                // This happens in unreachable code paths (e.g., after a loop with only returns)
-                let is_unit_value = matches!(
-                    value,
-                    Value::Immediate(kestrel_execution_graph::Immediate {
-                        kind: kestrel_execution_graph::ImmediateKind::Unit,
-                        ..
-                    })
-                );
-                if is_unit_value {
-                    // This is dead code - emit trap
-                    builder
-                        .ins()
-                        .trap(cranelift_codegen::ir::TrapCode::unwrap_user(3));
-                } else {
-                    let val = compile_value(
-                        ctx,
-                        func_def,
-                        subst,
-                        value,
-                        builder,
-                        local_map,
-                        stack_locals,
-                    )?;
-
-                    // For main(), if the return type is an aggregate (Named type), the value
-                    // we get is a pointer to the struct. We need to load the actual i64 value
-                    // since main's C ABI signature returns i64.
-                    if is_main && matches!(ret_ty, MirTy::Named { .. }) {
-                        // Load the first i64 from the struct pointer.
-                        // This handles wrapper types like std.num.Int64 which wrap a primitive.
-                        let loaded = builder.ins().load(cl_types::I64, MemFlags::new(), val, 0);
-                        builder.ins().return_(&[loaded]);
-                    } else {
-                        builder.ins().return_(&[val]);
-                    }
-                }
-            }
-        },
-
+        TerminatorKind::Return(value) => compile_return(ctx, state, builder, value),
         TerminatorKind::Jump(target) => {
-            let cl_block = block_map
-                .get(target)
-                .ok_or_else(|| CodegenError::Unsupported("unknown jump target".to_string()))?;
-            builder.ins().jump(*cl_block, &[]);
+            let cl_block = state.block_map[target];
+            builder.ins().jump(cl_block, &[]);
+            Ok(())
         },
-
         TerminatorKind::Branch {
             condition,
             then_block,
             else_block,
-        } => {
-            let cond = compile_value(
-                ctx,
-                func_def,
-                subst,
-                condition,
-                builder,
-                local_map,
-                stack_locals,
-            )?;
-            let ptr_type = if ctx.target.is_64bit() {
-                cl_types::I64
-            } else {
-                cl_types::I32
-            };
-            let cond = if builder.func.dfg.value_type(cond) == ptr_type {
-                // Bool is a wrapper struct in std2; branch on its underlying byte.
-                builder.ins().load(cl_types::I8, MemFlags::new(), cond, 0)
-            } else {
-                cond
-            };
-            // Bool is i8 in Cranelift, but brif expects a boolean condition.
-            // Explicitly compare with 0.
-            let cond_bool = builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
-            let then_cl = block_map
-                .get(then_block)
-                .ok_or_else(|| CodegenError::Unsupported("unknown then block".to_string()))?;
-            let else_cl = block_map
-                .get(else_block)
-                .ok_or_else(|| CodegenError::Unsupported("unknown else block".to_string()))?;
-            builder.ins().brif(cond_bool, *then_cl, &[], *else_cl, &[]);
-        },
-
+        } => compile_branch(ctx, state, builder, condition, *then_block, *else_block),
         TerminatorKind::Switch {
             discriminant,
             cases,
-        } => {
-            // Load the discriminant value from the enum
-            // The discriminant is stored at offset 0 as an i32
-            let enum_ptr =
-                compile_place_read(ctx, discriminant, builder, local_map, subst, stack_locals)?;
-            let discr_val = builder
-                .ins()
-                .load(cl_types::I32, MemFlags::new(), enum_ptr, 0);
-
-            // Get the enum type to look up case discriminants
-            let enum_id = get_enum_id_from_place(ctx, discriminant)?;
-            let enum_def = ctx.mir.enum_def(enum_id);
-
-            // Build a chain of brif instructions for each case
-            // This is simpler than br_table and works for any number of cases
-            if cases.is_empty() {
-                // No cases - emit unreachable
-                builder
-                    .ins()
-                    .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
-            } else {
-                // For each case except the last, compare and branch
-                for (i, (case_name, target_block)) in cases.iter().enumerate() {
-                    let target_cl = block_map.get(target_block).ok_or_else(|| {
-                        CodegenError::Unsupported(format!("unknown switch target: {}", case_name))
-                    })?;
-
-                    // Handle wildcard case "_" - this is the default/fallback
-                    if case_name == "_" {
-                        // Wildcard matches everything - just jump
-                        builder.ins().jump(*target_cl, &[]);
-                        break;
-                    }
-
-                    // Look up the discriminant value for this case
-                    let case_id = enum_def.case_by_name(case_name).ok_or_else(|| {
-                        CodegenError::Unsupported(format!("enum case not found: {}", case_name))
-                    })?;
-                    let case_def = &ctx.mir.enum_cases[case_id];
-                    let expected_discr = case_def.discriminant as i64;
-
-                    if i == cases.len() - 1 {
-                        // Last case - check if it's the only case or if we need to compare
-                        if cases.len() == 1 {
-                            builder.ins().jump(*target_cl, &[]);
-                        } else {
-                            let cmp =
-                                builder
-                                    .ins()
-                                    .icmp_imm(IntCC::Equal, discr_val, expected_discr);
-                            // If it's exhaustive, we can just jump, but let's be safe
-                            builder.ins().brif(cmp, *target_cl, &[], *target_cl, &[]);
-                        }
-                    } else {
-                        // Compare discriminant and branch
-                        let cmp = builder
-                            .ins()
-                            .icmp_imm(IntCC::Equal, discr_val, expected_discr);
-
-                        // Create a fallthrough block for the next comparison
-                        let next_block = builder.create_block();
-                        builder.ins().brif(cmp, *target_cl, &[], next_block, &[]);
-                        builder.switch_to_block(next_block);
-                        builder.seal_block(next_block);
-                    }
-                }
-            }
-        },
-
+        } => compile_switch(ctx, state, builder, discriminant, cases),
         TerminatorKind::Panic(_msg) => {
-            // TODO: Call panic handler
-            // User trap code 1 = panic
-            builder
-                .ins()
-                .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+            builder.ins().trap(TrapCode::unwrap_user(1));
+            Ok(())
         },
-
         TerminatorKind::Unreachable => {
-            // User trap code 2 = unreachable
+            builder.ins().trap(TrapCode::unwrap_user(2));
+            Ok(())
+        },
+    }
+}
+
+fn compile_return(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    value: &Value,
+) -> Result<(), CodegenError> {
+    let ret_ty = substitute_type_with_self(
+        &state.func_def.ret,
+        &state.subst,
+        state.self_type.as_ref(),
+        ctx.module,
+    );
+
+    // Unit/Never return — both compile to void in the Cranelift signature.
+    if ret_ty.is_unit() || matches!(ret_ty, MirTy::Never) {
+        if state.is_main {
+            let zero = builder.ins().iconst(ir::types::I64, 0);
+            builder.ins().return_(&[zero]);
+        } else {
+            builder.ins().return_(&[]);
+        }
+        return Ok(());
+    }
+
+    let val = rvalue::compile_value(ctx, state, builder, value)?;
+
+    if let Some(sret_ptr) = state.sret_ptr {
+        // Aggregate return via sret pointer
+        common::copy_aggregate(builder, &mut ctx.layouts, &ret_ty, sret_ptr, val);
+        builder.ins().return_(&[]);
+    } else if state.is_main {
+        // Main returns i64 — may need to extract from wrapper struct
+        if is_aggregate(&ret_ty, &mut ctx.layouts) {
+            let loaded = builder
+                .ins()
+                .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0));
+            builder.ins().return_(&[loaded]);
+        } else {
+            builder.ins().return_(&[val]);
+        }
+    } else if is_aggregate(&ret_ty, &mut ctx.layouts) {
+        // Non-sret aggregate return: if the value is a scalar (e.g., Bool literal
+        // compiled as i8 but return type is Named{Bool} which is a pointer),
+        // we need to check the value's Cranelift type vs the signature's return type.
+        let val_type = builder.func.dfg.value_type(val);
+        let sig_ret_type = builder.func.signature.returns.first().map(|r| r.value_type);
+        if Some(val_type) != sig_ret_type && sig_ret_type.is_some() {
+            // Value type mismatch — store scalar to stack, return pointer
+            let ptr_ty = common::ptr_type(ctx.target);
+            let layout = ctx.layouts.layout_of(&ret_ty);
+            let size = if layout.size == 0 { 1 } else { layout.size };
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                size as u32,
+                common::align_to_shift(layout.align),
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
             builder
                 .ins()
-                .trap(cranelift_codegen::ir::TrapCode::unwrap_user(2));
-        },
+                .store(MemFlags::new(), val, addr, Offset32::new(0));
+            builder.ins().return_(&[addr]);
+        } else {
+            builder.ins().return_(&[val]);
+        }
+    } else {
+        builder.ins().return_(&[val]);
     }
 
     Ok(())
 }
 
-fn copy_aggregate_value(
-    ctx: &mut CodegenContext<'_>,
-    ty: Id<kestrel_execution_graph::Ty>,
-    dest_ptr: CraneliftValue,
-    src_ptr: CraneliftValue,
-    builder: &mut FunctionBuilder<'_>,
-) {
-    // Unit types have zero size - nothing to copy
-    if matches!(ctx.mir.ty(ty), kestrel_execution_graph::MirTy::Unit) {
-        return;
-    }
+fn compile_branch(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    condition: &Value,
+    then_block: kestrel_mir::BlockId,
+    else_block: kestrel_mir::BlockId,
+) -> Result<(), CodegenError> {
+    let cond_raw = rvalue::compile_value(ctx, state, builder, condition)?;
 
-    let layout = ctx.layouts.layout_of(ty);
-    if layout.size == 0 {
-        return;
-    }
-
-    // Skip copy if src_ptr is a constant 0 (null pointer from Unit value).
-    // This can happen when if-else expressions have aggregate types but
-    // the branch values are from discarded statement results.
-    if let cranelift_codegen::ir::ValueDef::Result(inst, _) = builder.func.dfg.value_def(src_ptr)
-        && let cranelift_codegen::ir::InstructionData::UnaryImm { imm, .. } =
-            builder.func.dfg.insts[inst]
-        && imm.bits() == 0
-    {
-        return;
-    }
-
-    for offset in 0..layout.size {
-        let byte = builder
-            .ins()
-            .load(cl_types::I8, MemFlags::new(), src_ptr, offset as i32);
+    // Bool is Named (aggregate) — a Place read returns a pointer; a bool
+    // immediate arrives as a scalar I8. Discriminate by the cranelift value
+    // type: I8 means scalar, anything else is the aggregate pointer and we
+    // load the byte at offset 0.
+    //
+    // This width-equality check is safe *only* because I8 can never equal
+    // any supported target's pointer size. Do NOT copy this pattern for
+    // wider primitive wrappers (Int64, UInt64, Float64) — their widths
+    // collide with 64-bit `ptr_type` and the wrong branch would be taken.
+    // For switch discriminants and anywhere else that needs a scalar out
+    // of a possibly-wrapped primitive Place, use
+    // `place::compile_place_read_scalar` instead.
+    let cond_val = if builder.func.dfg.value_type(cond_raw) == ir::types::I8 {
+        cond_raw
+    } else {
         builder
             .ins()
-            .store(MemFlags::new(), byte, dest_ptr, offset as i32);
+            .load(ir::types::I8, MemFlags::new(), cond_raw, Offset32::new(0))
+    };
+
+    // Convert i8 bool to branch condition
+    let cmp = builder.ins().icmp_imm(IntCC::NotEqual, cond_val, 0);
+
+    let then_cl = state.block_map[&then_block];
+    let else_cl = state.block_map[&else_block];
+    builder.ins().brif(cmp, then_cl, &[], else_cl, &[]);
+
+    Ok(())
+}
+
+fn compile_switch(
+    ctx: &mut CodegenContext,
+    state: &FunctionState,
+    builder: &mut FunctionBuilder,
+    discriminant: &kestrel_mir::Place,
+    cases: &[(SwitchCase, kestrel_mir::BlockId)],
+) -> Result<(), CodegenError> {
+    // Fast path: single case → unconditional jump.
+    if cases.len() == 1 {
+        let (_, target_block) = &cases[0];
+        let target_cl = state.block_map[target_block];
+        builder.ins().jump(target_cl, &[]);
+        return Ok(());
+    }
+
+    // Probe the discriminant's type to decide the scalar width we need.
+    //   - Enum: always I32 (the discriminant tag at offset 0).
+    //   - Everything else: the primitive width of the type (I8 for Bool, I64
+    //     for Int64, …). `compile_place_read_scalar` centralizes the
+    //     aggregate-vs-scalar load — do NOT reinvent that decision here.
+    let probe_ty = common::get_place_type(
+        ctx.module,
+        state.body,
+        discriminant,
+        &state.subst,
+        state.self_type.as_ref(),
+        &ctx.layouts,
+    )?;
+    let enum_id = match &probe_ty {
+        MirTy::Named { entity, .. } => match ctx.layouts.resolve_named(*entity) {
+            NamedKind::Enum(id) => Some(id),
+            _ => None,
+        },
+        _ => None,
+    };
+    let width_ty = if enum_id.is_some() {
+        ir::types::I32
+    } else {
+        primitive_width_ty(ctx, &probe_ty)
+    };
+
+    let (discr_val, _) =
+        place::compile_place_read_scalar(ctx, state, builder, discriminant, width_ty)?;
+
+    for (i, (case, target_block)) in cases.iter().enumerate() {
+        let target_cl = state.block_map[target_block];
+
+        // Wildcard case or exhaustive last arm: unconditional jump.
+        if case.is_wildcard() || i == cases.len() - 1 {
+            builder.ins().jump(target_cl, &[]);
+            return Ok(());
+        }
+
+        let cmp = match case {
+            SwitchCase::Wildcard => unreachable!("handled above"),
+            SwitchCase::Variant(name) => {
+                // case_by_name keys on short names; fully-qualified names
+                // (e.g. "std.core.Ordering.Less") get trimmed here.
+                let expected = if let Some(eid) = enum_id {
+                    let enum_def = &ctx.module.enums[eid.index()];
+                    enum_def
+                        .case_by_name(common::short_name(name))
+                        .map(|c| c.discriminant as i64)
+                        .unwrap_or(i as i64)
+                } else {
+                    i as i64
+                };
+                builder.ins().icmp_imm(IntCC::Equal, discr_val, expected)
+            },
+            SwitchCase::Bool(b) => builder.ins().icmp_imm(IntCC::Equal, discr_val, *b as i64),
+            SwitchCase::IntLiteral(v) => builder.ins().icmp_imm(IntCC::Equal, discr_val, *v),
+            SwitchCase::IntRange { start, end } => {
+                range_test(builder, discr_val, *start, *end, /*signed*/ true)
+            },
+            SwitchCase::CharLiteral(c) => {
+                builder.ins().icmp_imm(IntCC::Equal, discr_val, *c as i64)
+            },
+            SwitchCase::CharRange { start, end } => {
+                range_test(
+                    builder,
+                    discr_val,
+                    start.map(|s| s as i64),
+                    end.map(|e| e as i64),
+                    /*signed*/ false,
+                )
+            },
+            SwitchCase::StringLiteral(_) => {
+                // String-literal cases are diverted to a `Matchable.matches`
+                // call chain in `kestrel-mir-lower::body_lower::emit_decision_tree`,
+                // so they should never reach codegen. If one does, the diversion
+                // was bypassed — fail loudly rather than silently falling through.
+                unreachable!(
+                    "SwitchCase::StringLiteral lowered to method dispatch in \
+                     kestrel-mir-lower; codegen should never see it"
+                )
+            },
+        };
+        let next_block = builder.create_block();
+        builder.ins().brif(cmp, target_cl, &[], next_block, &[]);
+        builder.switch_to_block(next_block);
+        builder.seal_block(next_block);
+    }
+
+    // Fallthrough (shouldn't reach here for exhaustive matches)
+    builder.ins().trap(TrapCode::unwrap_user(4));
+    Ok(())
+}
+
+/// Pick the cranelift integer type that matches the scrutinee's layout size.
+/// Works for `lang.iN` primitives and their stdlib wrappers (Bool, Char, Int64, …),
+/// which are all single-field structs whose byte layout matches the primitive.
+fn primitive_width_ty(ctx: &mut CodegenContext, ty: &MirTy) -> ir::Type {
+    match ty {
+        MirTy::Bool | MirTy::I8 => ir::types::I8,
+        MirTy::I16 => ir::types::I16,
+        MirTy::I32 | MirTy::F32 => ir::types::I32,
+        MirTy::I64 | MirTy::F64 => ir::types::I64,
+        _ => match ctx.layouts.layout_of(ty).size {
+            1 => ir::types::I8,
+            2 => ir::types::I16,
+            4 => ir::types::I32,
+            _ => ir::types::I64,
+        },
     }
 }
 
-/// Get the enum ID from a place expression.
-fn get_enum_id_from_place(
-    ctx: &CodegenContext<'_>,
-    place: &kestrel_execution_graph::Place,
-) -> Result<kestrel_execution_graph::Id<kestrel_execution_graph::Enum>, CodegenError> {
-    // Get the type of the place
-    let ty = get_place_type(ctx, place)?;
-    let mir_ty = ctx.mir.ty(ty);
-
-    match mir_ty {
-        MirTy::Named { name, .. } => {
-            let name_data = ctx.mir.name(*name);
-            for (id, def) in ctx.mir.enums.iter() {
-                let def_name = ctx.mir.name(def.name);
-                if def_name == name_data {
-                    return Ok(id);
-                }
-            }
-            Err(CodegenError::Unsupported(format!(
-                "enum not found for type: {}",
-                name_data
-            )))
-        },
-        _ => Err(CodegenError::Unsupported(format!(
-            "switch on non-enum type: {:?}",
-            mir_ty
-        ))),
-    }
-}
-
-/// Get the type of a place expression.
-fn get_place_type(
-    ctx: &CodegenContext<'_>,
-    place: &kestrel_execution_graph::Place,
-) -> Result<kestrel_execution_graph::Id<kestrel_execution_graph::Ty>, CodegenError> {
-    match &place.kind {
-        PlaceKind::Local(local_id) => {
-            let local_def = ctx.mir.local(*local_id);
-            Ok(local_def.ty)
-        },
-        PlaceKind::Global(name_id) => {
-            // Find the static definition to get its type
-            let static_def = ctx
-                .mir
-                .statics
-                .iter()
-                .find(|(_, def)| def.name == *name_id)
-                .map(|(_, def)| def)
-                .ok_or_else(|| {
-                    let global_name = ctx.mir.name(*name_id);
-                    CodegenError::Unsupported(format!("static variable not found: {}", global_name))
-                })?;
-            Ok(static_def.ty)
-        },
-        PlaceKind::Field { parent, name } => {
-            // Get the parent's type, then look up the field type
-            let parent_ty_id = get_place_type(ctx, parent)?;
-            let parent_ty = ctx.mir.ty(parent_ty_id);
-
-            // Find the struct and get the field type
-            if let MirTy::Named {
-                name: type_name,
-                type_args,
-            } = parent_ty
-            {
-                let type_name_data = ctx.mir.name(*type_name);
-                for (_, struct_def) in ctx.mir.structs.iter() {
-                    if ctx.mir.name(struct_def.name) == type_name_data {
-                        // Found the struct, now find the field
-                        for field_id in &struct_def.fields {
-                            let field_def = &ctx.mir.fields[*field_id];
-                            if field_def.name == *name {
-                                let mut field_ty = field_def.ty;
-
-                                // Apply substitution from struct's type params to concrete type args
-                                let type_params = &struct_def.type_params;
-                                if !type_params.is_empty() && type_params.len() == type_args.len() {
-                                    let subst = build_substitution(ctx.mir, type_params, type_args);
-                                    if let Ok(substituted_ty) =
-                                        subst.apply_ty_readonly(ctx.mir, field_ty)
-                                    {
-                                        field_ty = substituted_ty;
-                                    }
-                                }
-
-                                return Ok(field_ty);
-                            }
-                        }
-                        return Err(CodegenError::Unsupported(format!(
-                            "field '{}' not found in struct '{}'",
-                            name, type_name_data
-                        )));
-                    }
-                }
-                Err(CodegenError::Unsupported(format!(
-                    "struct not found for type: {}",
-                    type_name_data
-                )))
-            } else {
-                Err(CodegenError::Unsupported(format!(
-                    "field access on non-struct type: {:?}",
-                    parent_ty
-                )))
-            }
-        },
-        PlaceKind::Downcast { parent, .. } => {
-            // Downcast preserves the enum type
-            get_place_type(ctx, parent)
-        },
-        PlaceKind::Deref(parent) => {
-            // Get the pointer/ref type and extract the pointee type
-            let parent_ty_id = get_place_type(ctx, parent)?;
-            let parent_ty = ctx.mir.ty(parent_ty_id);
-            match parent_ty {
-                MirTy::Ref(inner) | MirTy::RefMut(inner) | MirTy::Pointer(inner) => Ok(*inner),
-                _ => Err(CodegenError::Unsupported(
-                    "deref of non-pointer type".to_string(),
-                )),
-            }
-        },
-        PlaceKind::Index { parent, index } => {
-            // Get the parent's type, then look up the field type by index
-            let parent_ty_id = get_place_type(ctx, parent)?;
-            let parent_ty = ctx.mir.ty(parent_ty_id);
-
-            // Check if the parent is a downcast - in that case, find the variant struct
-            if let PlaceKind::Downcast {
-                parent: grandparent,
-                variant,
-            } = &parent.kind
-            {
-                let enum_ty_id = get_place_type(ctx, grandparent)?;
-                let enum_ty = ctx.mir.ty(enum_ty_id);
-
-                if let MirTy::Named { name, type_args } = enum_ty {
-                    let name_data = ctx.mir.name(*name);
-                    for (_, enum_def) in ctx.mir.enums.iter() {
-                        if ctx.mir.name(enum_def.name) == name_data {
-                            let case_id = enum_def.case_by_name(variant).ok_or_else(|| {
-                                CodegenError::Unsupported(format!(
-                                    "enum case not found: {}",
-                                    variant
-                                ))
-                            })?;
-                            let case_def = &ctx.mir.enum_cases[case_id];
-                            let struct_id = case_def.struct_def.ok_or_else(|| {
-                                CodegenError::Unsupported(format!(
-                                    "enum case {} has no struct_def",
-                                    variant
-                                ))
-                            })?;
-                            let struct_def = ctx.mir.struct_def(struct_id);
-                            let fields: Vec<_> = struct_def.fields.clone();
-                            if *index >= fields.len() {
-                                return Err(CodegenError::Unsupported(format!(
-                                    "field index {} out of bounds",
-                                    index
-                                )));
-                            }
-                            let field_id = fields[*index];
-                            let field_def = &ctx.mir.fields[field_id];
-                            let mut field_ty = field_def.ty;
-
-                            // Apply substitution from enum's type params to concrete type args
-                            let type_params = &enum_def.type_params;
-                            if !type_params.is_empty() && type_params.len() == type_args.len() {
-                                let subst = build_substitution(ctx.mir, type_params, type_args);
-                                if let Ok(substituted_ty) =
-                                    subst.apply_ty_readonly(ctx.mir, field_ty)
-                                {
-                                    field_ty = substituted_ty;
-                                }
-                            }
-
-                            return Ok(field_ty);
-                        }
-                    }
-                }
-            }
-
-            // Regular struct or tuple
-            match parent_ty {
-                MirTy::Named {
-                    name: type_name,
-                    type_args,
-                } => {
-                    let type_name_data = ctx.mir.name(*type_name);
-                    for (_, struct_def) in ctx.mir.structs.iter() {
-                        if ctx.mir.name(struct_def.name) == type_name_data {
-                            let fields: Vec<_> = struct_def.fields.clone();
-                            if *index >= fields.len() {
-                                return Err(CodegenError::Unsupported(format!(
-                                    "field index {} out of bounds (struct has {} fields)",
-                                    index,
-                                    fields.len()
-                                )));
-                            }
-                            let field_id = fields[*index];
-                            let field_def = &ctx.mir.fields[field_id];
-                            let mut field_ty = field_def.ty;
-
-                            // Apply substitution from struct's type params to concrete type args
-                            let type_params = &struct_def.type_params;
-                            if !type_params.is_empty() && type_params.len() == type_args.len() {
-                                let subst = build_substitution(ctx.mir, type_params, type_args);
-                                if let Ok(substituted_ty) =
-                                    subst.apply_ty_readonly(ctx.mir, field_ty)
-                                {
-                                    field_ty = substituted_ty;
-                                }
-                            }
-
-                            return Ok(field_ty);
-                        }
-                    }
-                    Err(CodegenError::Unsupported(format!(
-                        "struct not found for index access: {}",
-                        type_name_data
-                    )))
-                },
-                MirTy::Tuple(elements) => {
-                    if *index >= elements.len() {
-                        return Err(CodegenError::Unsupported(format!(
-                            "tuple index {} out of bounds (len {})",
-                            index,
-                            elements.len()
-                        )));
-                    }
-                    Ok(elements[*index])
-                },
-                _ => Err(CodegenError::Unsupported(format!(
-                    "index access on unsupported type: {:?}",
-                    parent_ty
-                ))),
-            }
-        },
-    }
+/// Build a boolean condition for `start <= val <= end`. Open bounds act as `true`.
+fn range_test(
+    builder: &mut FunctionBuilder,
+    val: CrValue,
+    start: Option<i64>,
+    end: Option<i64>,
+    signed: bool,
+) -> CrValue {
+    let (gte, lte) = if signed {
+        (
+            IntCC::SignedGreaterThanOrEqual,
+            IntCC::SignedLessThanOrEqual,
+        )
+    } else {
+        (
+            IntCC::UnsignedGreaterThanOrEqual,
+            IntCC::UnsignedLessThanOrEqual,
+        )
+    };
+    let low_ok = match start {
+        Some(s) => builder.ins().icmp_imm(gte, val, s),
+        None => builder.ins().iconst(ir::types::I8, 1),
+    };
+    let high_ok = match end {
+        Some(e) => builder.ins().icmp_imm(lte, val, e),
+        None => builder.ins().iconst(ir::types::I8, 1),
+    };
+    builder.ins().band(low_ok, high_ok)
 }

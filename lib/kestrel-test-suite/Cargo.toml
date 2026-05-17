@@ -7,19 +7,28 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-kestrel-span = { path = "../kestrel-span" }
-kestrel-lexer = { path = "../kestrel-lexer" }
-kestrel-parser = { path = "../kestrel-parser" }
-kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
-kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
-kestrel-semantic-tree-builder = { path = "../kestrel-semantic-tree-builder" }
-kestrel-semantic-tree-binder = { path = "../kestrel-semantic-tree-binder" }
-kestrel-semantic-analyzers = { path = "../kestrel-semantic-analyzers" }
-kestrel-reporting = { path = "../kestrel-reporting" }
-kestrel-execution-graph = { path = "../kestrel-execution-graph" }
-kestrel-execution-graph-lowering = { path = "../kestrel-execution-graph-lowering" }
+kestrel-compiler = { path = "../kestrel-compiler" }
+kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-mir = { path = "../kestrel-mir" }
+kestrel-mir-lower = { path = "../kestrel-mir-lower" }
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
-kestrel-compiler = { path = "../kestrel-compiler" }
-semantic-tree = { path = "../semantic-tree" }
-downcast-rs = { workspace = true }
+kestrel-analyze = { path = "../kestrel-analyze" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+codespan-reporting = { workspace = true }
+
+[dev-dependencies]
+libtest-mimic = "0.8"
+walkdir = "2"
+
+[[test]]
+name = "file_tests"
+harness = false
+
+[[example]]
+name = "build_test"
+path = "examples/build_test.rs"

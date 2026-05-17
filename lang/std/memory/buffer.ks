@@ -3,21 +3,54 @@
 module std.memory
 
 import std.result.(Optional)
-import std.core.(Bool, Copyable)
-import std.num.(Int64)
-import std.memory.(Layout, Pointer, Slice, RawPointer, Allocator, GlobalAllocator)
+import std.core.(Bool, Copyable, fatalError)
+import std.numeric.(Int64)
+import std.memory.(Layout, Pointer, ArraySlice, RawPointer, Allocator, GlobalAllocator)
 import std.ffi.(memcpy, memmove, memset)
 
-/// A contiguous memory region that owns its allocation.
-/// Not copyable to ensure unique ownership of the underlying memory.
-/// Used as a building block for higher-level collections.
+/// Owning, allocator-parameterised contiguous storage.
+///
+/// `Buffer` is the building block underneath `Array`, `String`, and any
+/// other COW/growable collection. It owns its allocation, deallocates on
+/// drop, and is `not Copyable` to keep ownership unique. For a non-owning
+/// view see `Slice`; for a refcounted owning wrapper see `RcBox`.
+///
+/// # Examples
+///
+/// ```
+/// var buf = Buffer[Int64, SystemAllocator](capacity: 4, allocator: SystemAllocator());
+/// buf.write(at: 0, value: 10);
+/// buf.write(at: 1, value: 20);
+/// buf.read(at: 0)              // .Some(10)
+/// buf.resize(to: 8);           // grow in place if possible
+/// ```
+///
+/// # Representation
+///
+/// A `Pointer[T]` to the storage, an `Int64` capacity, and the allocator
+/// instance. The buffer's contents are not initialised on construction —
+/// reading an uninitialised slot is undefined behavior.
+///
+/// # Memory Model
+///
+/// Owning, unique. The deinit reclaims storage via the same allocator.
+/// Marked `not Copyable` so an accidental `let b2 = b1` is rejected at
+/// compile time; use a higher-level COW wrapper (e.g. via `RcBox`) for
+/// shared semantics.
 public struct Buffer[T, A]: not Copyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int64
     private var allocator: A
 
-    /// Allocates a buffer with the specified capacity using the provided allocator.
-    /// Panics if allocation fails.
+    /// @name With Capacity
+    /// Allocates a buffer holding `capacity` elements. Storage is
+    /// uninitialised; the caller is responsible for writing valid `T`s
+    /// before reading them.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Buffer allocation failed"` if `allocator.allocate`
+    /// returns `.None`.
     public init(capacity: Int64, allocator: A) {
         self.allocator = allocator;
         self.cap = capacity;
@@ -26,43 +59,57 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[T]()
         } else {
-            lang.panic("Buffer allocation failed")
+            fatalError("Buffer allocation failed")
         }
     }
 
-    // Create from existing pointer (takes ownership)
+    // Internal init that adopts an existing allocation. Used by
+    // higher-level collections that already hold the storage and want
+    // to wrap it as a Buffer (e.g. when reconstructing from raw fields).
     private init(pointer: Pointer[T], capacity: Int64, allocator: A) {
         self.ptr = pointer;
         self.cap = capacity;
         self.allocator = allocator;
     }
 
-    /// Destructor: deallocates the buffer memory.
+    /// Releases the storage through the same allocator instance the
+    /// buffer was constructed with.
     deinit {
         let layout = Layout.array[T](self.cap);
         self.allocator.deallocate(self.ptr.asRaw(), layout)
     }
 
-    /// The number of elements this buffer can hold.
+    /// Number of element slots — not the count of *initialised* elements.
     public var capacity: Int64 { self.cap }
 
-    /// A pointer to the buffer's element storage.
+    /// Pointer to the first slot.
     public var pointer: Pointer[T] { self.ptr }
 
-    /// Reads the element at the given index without bounds checking.
-    /// Undefined behavior if index is out of bounds.
+    /// @name Unchecked Index
+    /// Reads slot `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// `index` must satisfy `0 <= index < capacity`, and the slot must
+    /// already hold an initialised `T`. Out-of-range or uninitialised
+    /// reads are undefined behavior.
     public func read(unchecked index: Int64) -> T {
         self.ptr.offset(by: index).read()
     }
 
-    /// Writes a value at the given index without bounds checking.
-    /// Undefined behavior if index is out of bounds.
+    /// @name Unchecked Index
+    /// Writes `value` into slot `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Same precondition as `read(unchecked:)` — `0 <= index < capacity`.
     public func write(unchecked index: Int64, value: T) {
         self.ptr.offset(by: index).write(value)
     }
 
-    /// Reads the element at the given index with bounds checking.
-    /// Returns None if index is out of bounds.
+    /// @name Checked Index
+    /// Reads slot `index`, returning `.None` when out of range. As with
+    /// the unchecked form, the slot must already hold an initialised `T`.
     public func read(at index: Int64) -> T? {
         if index >= 0 and index < self.cap {
             .Some(self.ptr.offset(by: index).read())
@@ -71,8 +118,8 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
         }
     }
 
-    /// Writes a value at the given index with bounds checking.
-    /// Returns true on success, false if index is out of bounds.
+    /// Writes `value` to slot `index`. Returns `false` (and does
+    /// nothing) when out of range.
     public func write(at index: Int64, value: T) -> Bool {
         if index >= 0 and index < self.cap {
             self.ptr.offset(by: index).write(value);
@@ -104,8 +151,16 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     //     memset(self.ptr.asRaw().raw, 0, byteCount.raw);
     // }
 
-    /// Resizes the buffer to the new capacity.
-    /// Panics if reallocation fails.
+    /// Grows or shrinks the storage to hold `newCapacity` elements via
+    /// the allocator's `reallocate`. On success, existing initialised
+    /// elements are preserved up to the smaller of the two capacities;
+    /// the new pointer becomes the buffer's storage.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Buffer resize failed"` if `reallocate` returns
+    /// `.None` (the original allocation is left intact, but the panic
+    /// aborts).
     public mutating func resize(to newCapacity: Int64) {
         let oldLayout = Layout.array[T](self.cap);
         let newLayout = Layout.array[T](newCapacity);
@@ -115,20 +170,23 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
             self.ptr = rawPtr.cast[T]();
             self.cap = newCapacity
         } else {
-            lang.panic("Buffer resize failed")
+            fatalError("Buffer resize failed")
         }
     }
 
-    /// Returns a slice view of the entire buffer.
-    public func asSlice() -> Slice[T] {
-        Slice(pointer: self.ptr, count: self.cap)
+    /// Returns a `ArraySlice[T]` over the entire buffer. The slice does not
+    /// extend the buffer's lifetime; callers must keep the buffer alive
+    /// for as long as they use the slice.
+    public func asSlice() -> ArraySlice[T] {
+        ArraySlice(pointer: self.ptr, count: self.cap)
     }
 
-    /// Returns a slice view of a portion of the buffer.
-    /// Returns None if the range is out of bounds.
-    public func slice(from start: Int64, to end: Int64) -> Slice[T]? {
+    /// Returns a slice over `[start, end)`, or `.None` when the range
+    /// falls outside `[0, capacity]`. As with `asSlice`, the slice
+    /// borrows from the buffer.
+    public func slice(from start: Int64, to end: Int64) -> ArraySlice[T]? {
         if start >= 0 and end <= self.cap and start <= end {
-            .Some(Slice(pointer: self.ptr.offset(by: start), count: end - start))
+            .Some(ArraySlice(pointer: self.ptr.offset(by: start), count: end - start))
         } else {
             .None
         }
