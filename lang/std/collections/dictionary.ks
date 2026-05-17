@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Adda
 import std.text.(Formattable, FormatOptions, String, StringBuilder)
 import std.numeric.(Int64, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox)
 import std.iter.(Iterator, Iterable)
 import std.collections.(DefaultHasher, Array)
 
@@ -334,34 +334,28 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Concrete iterator type returned by `iter()`.
     type TargetIterator = DictionaryIterator[K, V]
 
-    /// Refcounted storage cell. Sharing this between `Dictionary`
-    /// copies enables COW.
-    private var storage: RcBox[DictionaryStorage[K, V, H]]
+    /// COW storage — `CowBox` handles the reference counting and
+    /// clone-on-write barrier.
+    private var storage: CowBox[DictionaryStorage[K, V, H]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.getValue().buckets }
+    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.read().buckets }
     /// Returns the live-entry count from storage. Internal helper.
-    private func len() -> Int64 { self.storage.getValue().len }
+    private func len() -> Int64 { self.storage.read().len }
     /// Returns the total bucket capacity from storage. Internal helper.
-    private func cap() -> Int64 { self.storage.getValue().cap }
+    private func cap() -> Int64 { self.storage.read().cap }
 
-    /// Ensures the storage is uniquely owned, deep-copying it if shared.
-    ///
-    /// COW write barrier: every mutating method calls this before
-    /// touching the bucket array, so writes never leak into other
-    /// `Dictionary` copies that share the same `RcBox`. No-op when
-    /// this is the only reference.
+    /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
-        if not self.storage.isUnique() {
-            self.storage = RcBox(self.storage.getValue().clone())
+        if self.storage.isUnique() == false {
+            var s = self.storage.write();
+            self.storage.setValue(s)
         }
     }
 
     /// @name From Storage
-    /// Wraps an existing storage box in a new `Dictionary`. Used by
-    /// `clone()` and other helpers that already have an `RcBox` in
-    /// hand.
-    private init(storage storage: RcBox[DictionaryStorage[K, V, H]]) {
+    /// Wraps an existing storage box in a new `Dictionary`.
+    private init(storage storage: CowBox[DictionaryStorage[K, V, H]]) {
         self.storage = storage;
     }
 
@@ -384,7 +378,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// d.capacity;  // 0
     /// ```
     public init() {
-        self.storage = RcBox(DictionaryStorage(
+        self.storage = CowBox(DictionaryStorage(
             buckets: Pointer[Bucket[K, V]].nullPointer(),
             len: 0,
             cap: 0
@@ -418,7 +412,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 for i in 0..<actualCap {
                     newBuckets.offset(by: i).write(.Empty);
                 }
-                self.storage = RcBox(DictionaryStorage(
+                self.storage = CowBox(DictionaryStorage(
                     buckets: newBuckets,
                     len: 0,
                     cap: actualCap
@@ -427,7 +421,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 fatalError("Dictionary allocation failed")
             }
         } else {
-            self.storage = RcBox(DictionaryStorage(
+            self.storage = CowBox(DictionaryStorage(
                 buckets: Pointer[Bucket[K, V]].nullPointer(),
                 len: 0,
                 cap: 0
@@ -834,7 +828,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Panics on allocation failure.
     private mutating func resize() {
         self.makeUnique();
-        let s = self.storage.getValue();
+        let s = self.storage.read();
         let newCap: Int64 = if s.cap == 0 {
             8
         } else {
@@ -901,7 +895,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// not check. Triggers COW. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
         self.makeUnique();
-        let s = self.storage.getValue();
+        let s = self.storage.read();
         let oldBuckets = s.buckets;
         let oldCap = s.cap;
 
@@ -1014,7 +1008,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         // Find empty slot
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
-            var s = self.storage.getValue();
+            var s = self.storage.read();
             s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
             s.len = s.len + 1;
             self.storage.setValue(s)
@@ -1043,7 +1037,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            var s = self.storage.getValue();
+            var s = self.storage.read();
             let bucket = s.buckets.offset(by: index).read();
             let removedValue: V? = match bucket {
                 .Occupied(_, v, _) => .Some(v),
@@ -1076,7 +1070,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         for i in 0..<s.cap {
             s.buckets.offset(by: i).write(.Empty);
         }

@@ -64,11 +64,7 @@ public struct ClientUrl: Cloneable {
         if self.port == httpDefault or self.port == httpsDefault {
             self.host
         } else {
-            var hostHeader = String();
-            hostHeader.append(self.host);
-            hostHeader.append(":");
-            hostHeader.append(Int64(from: self.port).format());
-            hostHeader
+            "\(self.host):\(self.port)"
         }
     }
 }

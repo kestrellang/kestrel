@@ -172,10 +172,10 @@ _Defined in `lang/std/text/unicode/grapheme_tables.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(GraphemeBreakProperty) -> Bool
+public func isEqual(to: GraphemeBreakProperty) -> Bool
 ```
 
 Equality by ordinal — same variant, same value.
@@ -190,7 +190,7 @@ _Defined in `lang/std/text/unicode/grapheme_tables.ks`._
 public func matches(GraphemeBreakProperty) -> Bool
 ```
 
-Match form of `equals` for use in pattern matching.
+Match form of `isEqual` for use in pattern matching.
 
 _Defined in `lang/std/text/unicode/grapheme_tables.ks`._
 

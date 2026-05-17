@@ -1,28 +1,6 @@
-// Utilities: URL encoding, comma-separated guess lists, parsing.
+// Utilities: comma-separated guess lists, parsing.
 
 module wordle.util
-
-public func urlEncode(s: String) -> String {
-    var out = String();
-    var i: Int64 = 0;
-    let len = s.byteCount;
-    while i < len {
-        let b = s.bytes(unchecked: i);
-        if b == 32 {
-            out.appendByte(43)
-        } else if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 45 or b == 95 or b == 46 or b == 44 {
-            out.appendByte(b)
-        } else {
-            out.appendByte(37);
-            let hi = Int64(from: b) / 16;
-            let lo = Int64(from: b) % 16;
-            if hi < 10 { out.appendByte(UInt8(from: 48 + hi)) } else { out.appendByte(UInt8(from: 55 + hi)) };
-            if lo < 10 { out.appendByte(UInt8(from: 48 + lo)) } else { out.appendByte(UInt8(from: 55 + lo)) }
-        };
-        i = i + 1
-    }
-    out
-}
 
 public func splitGuesses(s: String) -> Array[String] {
     var out = Array[String]();
@@ -58,7 +36,7 @@ public func joinGuesses(guesses: Array[String]) -> String {
 
 /// Parse a non-negative seed, falling back to 1 on bad input.
 public func parseSeed(s: String) -> Int64 {
-    match Int64.parse(s) {
+    match Int64(parsing: s) {
         .Some(n) => if n > 0 { n } else { 1 },
         .None => 1
     }

@@ -178,7 +178,7 @@ public func getStringFromArray(arr: Array[Value], idx: Int64) -> String {
 public func parseHourFromIso(isoStr: String) -> Int64 {
     if isoStr.byteCount < 13 { return 0 };
     let hourStr = isoStr.asSlice().subslice(from: 11, to: 13).toOwned();
-    match Int64.parse(hourStr) {
+    match Int64(parsing: hourStr) {
         .Some(n) => n,
         .None => 0
     }
@@ -197,7 +197,7 @@ public func formatSunTime(isoStr: String) -> String {
     if isoStr.byteCount < 16 { return "" };
     let hourStr = isoStr.asSlice().subslice(from: 11, to: 13).toOwned();
     let minStr = isoStr.asSlice().subslice(from: 14, to: 16).toOwned();
-    let hour = match Int64.parse(hourStr) {
+    let hour = match Int64(parsing: hourStr) {
         .Some(n) => n,
         .None => return ""
     };

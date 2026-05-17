@@ -10,10 +10,10 @@ func main() -> lang.i64 {
     // ChunksView is multi-pass: count + indexed access without iterating.
     let chunks = arr.chunks(of: 2);
     if chunks.count != 3 { return 1 }
-    if chunks.at(0).count != 2 { return 2 }
-    if chunks.at(0)(unchecked: 0) != 1 { return 3 }
-    if chunks.at(2).count != 1 { return 4 }
-    if chunks.at(2)(unchecked: 0) != 5 { return 5 }
+    if chunks(0).count != 2 { return 2 }
+    if chunks(0)(unchecked: 0) != 1 { return 3 }
+    if chunks(2).count != 1 { return 4 }
+    if chunks(2)(unchecked: 0) != 5 { return 5 }
 
     // Multi-pass: iterate, then iterate again.
     var firstPassSum: std.numeric.Int64 = 0;
@@ -30,14 +30,14 @@ func main() -> lang.i64 {
     // WindowsView is multi-pass with O(1) count.
     let windows = arr.windows(of: 3);
     if windows.count != 3 { return 8 }
-    if windows.at(0)(unchecked: 0) != 1 { return 9 }
-    if windows.at(2)(unchecked: 2) != 5 { return 10 }
+    if windows(0)(unchecked: 0) != 1 { return 9 }
+    if windows(2)(unchecked: 2) != 5 { return 10 }
 
     // ReversedView keeps the source intact.
     let rev = arr.reversed();
     if rev.count != 5 { return 11 }
-    if rev.at(0) != 5 { return 12 }
-    if rev.at(4) != 1 { return 13 }
+    if rev(0) != 5 { return 12 }
+    if rev(4) != 1 { return 13 }
     if arr(unchecked: 0) != 1 { return 14 }
 
     // ArraySplitView via toArray().

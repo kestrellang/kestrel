@@ -55,7 +55,7 @@ func counterHtml(count: Int64) -> String {
 func getN(request: Request) -> Int64 {
     match request.query("n") {
         .Some(val) => {
-            match Int64.parse(val) {
+            match Int64(parsing: val) {
                 .Some(n) => n,
                 .None => 0
             }

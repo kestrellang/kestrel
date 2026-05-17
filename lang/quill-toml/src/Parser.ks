@@ -36,7 +36,7 @@ import quill.toml.error.(TomlParseError)
 ///
 /// Four fields: `source` (the full input), `pos` (current byte offset),
 /// `len` (cached `source.byteCount`), and `line` (1-based line counter).
-struct TomlCursor {
+struct TomlCursor: Cloneable {
     var source: String
     var pos: Int64
     var len: Int64
@@ -91,6 +91,15 @@ struct TomlCursor {
         }
 
         .Some((slice.subslice(from: start, to: self.len).toOwned(), lineNum))
+    }
+
+    /// Returns a copy of this cursor with the same position and state.
+    func clone() -> TomlCursor {
+        var c = TomlCursor(self.source.clone());
+        c.pos = self.pos;
+        c.len = self.len;
+        c.line = self.line;
+        c
     }
 }
 

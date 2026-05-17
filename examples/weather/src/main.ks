@@ -10,7 +10,7 @@ import perch.response.(Response)
 import swoop.swoop.(Swoop)
 import quill.json.parser.(parseJson)
 import weather.ui.(pageHtml, searchResultsHtml, weatherPageHtml, errorHtml)
-import weather.util.(urlEncode, urlDecode)
+import http.url.(percentEncode, percentDecode)
 import perch.middleware.(logger)
 
 // ============================================================================
@@ -33,14 +33,14 @@ struct Ctx: Cloneable {
 
 func handleSearch(req: Request, ctx: Ctx) -> Response {
     let city = match req.query("q") {
-        .Some(v) => urlDecode(v),
+        .Some(v) => percentDecode(v),
         .None => ""
     };
     if city.byteCount == 0 {
         return Response.ok(html: "")
     };
 
-    let url = ctx.geoBase + "/v1/search?name=" + urlEncode(city) + "&count=5&language=en";
+    let url = ctx.geoBase + "/v1/search?name=" + percentEncode(city) + "&count=5&language=en";
 
     match Swoop().fetch(url) {
         .Ok(res) => {
@@ -65,7 +65,7 @@ func handleWeather(req: Request, ctx: Ctx) -> Response {
         .None => return Response.ok(html: errorHtml("Missing longitude."))
     };
     let name = match req.query("name") {
-        .Some(v) => urlDecode(v),
+        .Some(v) => percentDecode(v),
         .None => "Unknown"
     };
 

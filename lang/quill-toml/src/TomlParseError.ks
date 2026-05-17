@@ -45,6 +45,6 @@ public struct TomlParseError: Cloneable {
 
     /// Formats the error as `"TOML parse error at line <N>: <message>"`.
     public func description() -> String {
-        "TOML parse error at line " + self.line.format() + ": " + self.message
+        "TOML parse error at line \(self.line): \(self.message)"
     }
 }

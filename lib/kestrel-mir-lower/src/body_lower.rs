@@ -496,12 +496,22 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let receiver_ty = self.resolve_expr_type(callee_expr);
                     let receiver_arg = (self.lower_expr(callee_expr)).into_ref_mut();
                     let type_args = self.resolve_type_args(target_id);
-                    let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
-                    let callee = Callee::method(setter, type_args, receiver_ty);
                     let mut call_args = vec![receiver_arg];
                     call_args.append(&mut subscript_args);
                     call_args.push(newval_arg);
-                    self.emit_call(callee, call_args, MirTy::unit());
+                    // Protocol-extension subscript setter → witness dispatch
+                    if let Some(protocol) = self.find_protocol_for_method(setter) {
+                        self.ctx.register_name(protocol);
+                        let method_key = self.witness_method_key_of(setter);
+                        let callee =
+                            Callee::witness(protocol, method_key, receiver_ty, type_args);
+                        self.emit_call(callee, call_args, MirTy::unit());
+                    } else {
+                        let type_args =
+                            self.prepend_receiver_type_args(&receiver_ty, type_args);
+                        let callee = Callee::method(setter, type_args, receiver_ty);
+                        self.emit_call(callee, call_args, MirTy::unit());
+                    }
                 }
                 Some(Value::Const(Immediate::unit()))
             },
@@ -590,12 +600,21 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let mut subscript_args = self.lower_call_args(&args);
                 let newval_arg = self.lower_expr(value_id).into_copy();
                 let type_args = self.resolve_type_args(target_id);
-                let type_args = self.prepend_receiver_type_args(&field_ty, type_args);
-                let callee = Callee::method(setter, type_args, field_ty);
                 let mut call_args = vec![receiver_arg];
                 call_args.append(&mut subscript_args);
                 call_args.push(newval_arg);
-                self.emit_call(callee, call_args, MirTy::unit());
+                if let Some(protocol) = self.find_protocol_for_method(setter) {
+                    self.ctx.register_name(protocol);
+                    let method_key = self.witness_method_key_of(setter);
+                    let callee =
+                        Callee::witness(protocol, method_key, field_ty, type_args);
+                    self.emit_call(callee, call_args, MirTy::unit());
+                } else {
+                    let type_args =
+                        self.prepend_receiver_type_args(&field_ty, type_args);
+                    let callee = Callee::method(setter, type_args, field_ty);
+                    self.emit_call(callee, call_args, MirTy::unit());
+                }
                 Some(Value::Const(Immediate::unit()))
             },
             _ => None,
@@ -2143,6 +2162,24 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     fn witness_method_key_of(&self, entity: Entity) -> WitnessMethodKey {
+        // Setters (identified by EnclosingContainer) use `<accessor>.set`
+        // with the *subscript's* param labels (not the setter's, which
+        // includes newValue) to match the witness table.
+        if self.ctx.world.get::<kestrel_ast_builder::EnclosingContainer>(entity).is_some() {
+            if let Some(parent) = self.ctx.world.parent_of(entity) {
+                let parent_name = self.method_name_of(parent);
+                let parent_labels = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Callable>(parent)
+                    .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+                    .unwrap_or_default();
+                return WitnessMethodKey::new(
+                    format!("{parent_name}.set"),
+                    parent_labels,
+                );
+            }
+        }
         let name = self.method_name_of(entity);
         let labels = self
             .ctx
@@ -2207,7 +2244,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// need Witness dispatch so the witness table can route to the correct implementation.
     fn find_protocol_for_method(&self, method: Entity) -> Option<Entity> {
         use kestrel_ast_builder::NodeKind;
-        let parent = self.ctx.world.parent_of(method)?;
+        // EnclosingContainer (set at build time on Setters) jumps
+        // straight to the container; everything else uses direct parent.
+        let parent = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::EnclosingContainer>(method)
+            .map(|ec| ec.0)
+            .or_else(|| self.ctx.world.parent_of(method))?;
         let parent_kind = self.ctx.world.get::<NodeKind>(parent)?;
         match parent_kind {
             // Abstract protocol method (no body) — always needs Witness

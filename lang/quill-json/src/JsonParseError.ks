@@ -40,7 +40,7 @@ public struct JsonParseError: Cloneable {
 
     /// Formats the error as `"JSON parse error at offset <N>: <message>"`.
     public func description() -> String {
-        "JSON parse error at offset " + self.offset.format() + ": " + self.message
+        "JSON parse error at offset \(self.offset): \(self.message)"
     }
 
     /// Returns a deep copy of this error.

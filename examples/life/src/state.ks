@@ -52,4 +52,25 @@ struct GameState: Cloneable {
             self.lastFpsMs = elapsed;
         }
     }
+
+    func clone() -> GameState {
+        var copy = GameState(fromConfig: Config(
+            width: self.grid.width,
+            height: self.grid.height,
+            cellSize: 1,
+            stepDelayMs: self.stepDelayMs,
+            headlessIters: 0
+        ));
+        copy.grid = self.grid.clone();
+        copy.paused = self.paused;
+        copy.running = self.running;
+        copy.selectedPattern = self.selectedPattern;
+        copy.seedCounter = self.seedCounter;
+        copy.fps = self.fps;
+        copy.stepDelayMs = self.stepDelayMs;
+        copy.generation = self.generation;
+        copy.frameCount = self.frameCount;
+        copy.lastFpsMs = self.lastFpsMs;
+        copy
+    }
 }

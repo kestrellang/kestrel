@@ -26,17 +26,11 @@ import std.io.error.(IoError)
 public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result[(), IoError] {
     var resp = String(capacity: 256 + response.bodyContent.byteCount);
 
-    resp.append("HTTP/1.1 ");
-    resp.append(response.status.code.format());
-    resp.append(" ");
-    resp.append(response.status.text());
-    resp.append("\r\n");
+    resp.append("HTTP/1.1 \(response.status.code) \(response.status.text())\r\n");
 
     resp.append(response.headers.toWireFormat());
 
-    resp.append("Content-Length: ");
-    resp.append(response.bodyContent.byteCount.format());
-    resp.append("\r\n");
+    resp.append("Content-Length: \(response.bodyContent.byteCount)\r\n");
 
     resp.append("Connection: close");
     resp.append("\r\n");

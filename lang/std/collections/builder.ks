@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Bool, fatalError)
 import std.numeric.(Int64)
-import std.memory.(Layout, Pointer, ArraySlice, SystemAllocator, RcBox)
+import std.memory.(Layout, Pointer, ArraySlice, SystemAllocator, CowBox)
 import std.iter.(Iterable)
 
 /// Write-only buffer for efficient array construction. No COW, no
@@ -135,7 +135,7 @@ public struct ArrayBuilder[T] {
             return Array[T]()
         }
         let storage = ArrayStorage(ptr: self.ptr, len: self.len, cap: self.cap);
-        let result = Array[T](storage: RcBox(storage));
+        let result = Array[T](storage: CowBox(storage));
         self.ptr = Pointer[T].nullPointer();
         self.len = 0;
         self.cap = 0;

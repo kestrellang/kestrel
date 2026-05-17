@@ -68,7 +68,7 @@ _Defined in `lang/std/io/read.ks`._
 #### function `read`
 
 ```kestrel
-public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Reads from the current position; returns `.Ok(0)` at EOF and
@@ -120,7 +120,7 @@ _Defined in `lang/std/io/read.ks`._
 #### function `read`
 
 ```kestrel
-public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Always returns `.Ok(0)`.
@@ -146,7 +146,7 @@ error — the caller is expected to loop, or to use `readExact` /
 ```
 public struct DigitsReader: Readable {
     var next: UInt8
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         if buf.count == 0 { return .Ok(0) }
         buf.pointer.write(self.next);
         self.next = self.next + 1;
@@ -162,7 +162,7 @@ _Defined in `lang/std/io/read.ks`._
 #### function `read`
 
 ```kestrel
-mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]
+mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Reads up to `buf.count` bytes; returns the number of bytes
@@ -210,7 +210,7 @@ _Defined in `lang/std/io/read.ks`._
 #### function `read`
 
 ```kestrel
-public mutating func read(into: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Fills `buf` with the repeated byte; returns `.Ok(buf.count)`.
@@ -259,7 +259,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readExact`
 
 ```kestrel
-public func readExact[R](mutating R, into: Slice[UInt8]) -> Result[(), IoError] where R: Readable
+public func readExact[R](mutating R, into: ArraySlice[UInt8]) -> Result[(), IoError] where R: Readable
 ```
 
 Reads exactly `buf.count` bytes; treats a short read (EOF reached

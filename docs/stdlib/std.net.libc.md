@@ -292,7 +292,7 @@ responsible for closing it via `close`.
 ### Examples
 
 ```
-let fd = socket(domain: AF_INET(), type_: SOCK_STREAM(), proto: IPPROTO_TCP());
+let fd = socket(AF_INET(), SOCK_STREAM(), IPPROTO_TCP());
 if fd < 0 { /* errno() */ }
 ```
 

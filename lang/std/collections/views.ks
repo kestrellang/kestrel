@@ -33,7 +33,7 @@ public struct ChunksView[T]: Iterable {
 
     public var isEmpty: Bool { self.slice.count == 0 }
 
-    public func at(index: Int64) -> ArraySlice[T] {
+    public subscript(index: Int64) -> ArraySlice[T] {
         if index < 0 or index >= self.count {
             fatalError("ChunksView index out of bounds")
         }
@@ -46,17 +46,17 @@ public struct ChunksView[T]: Iterable {
         ArraySlice(pointer: self.slice.pointer.offset(by: start), count: thisSize)
     }
 
-    public func first() -> Optional[ArraySlice[T]] {
+    public var first: Optional[ArraySlice[T]] {
         if self.slice.count > 0 {
-            .Some(self.at(0))
+            .Some(self(0))
         } else {
             .None
         }
     }
 
-    public func last() -> Optional[ArraySlice[T]] {
+    public var last: Optional[ArraySlice[T]] {
         if self.slice.count > 0 {
-            .Some(self.at(self.count - 1))
+            .Some(self(self.count - 1))
         } else {
             .None
         }
@@ -71,7 +71,7 @@ public struct ChunksView[T]: Iterable {
         let n = self.count;
         result.reserveCapacity(n);
         for i in 0..<n {
-            result.append(self.at(i))
+            result.append(self(i))
         }
         result
     }
@@ -131,25 +131,25 @@ public struct WindowsView[T]: Iterable {
 
     public var isEmpty: Bool { self.slice.count < self.windowSize }
 
-    public func at(index: Int64) -> ArraySlice[T] {
+    public subscript(index: Int64) -> ArraySlice[T] {
         if index < 0 or index >= self.count {
             fatalError("WindowsView index out of bounds")
         }
         ArraySlice(pointer: self.slice.pointer.offset(by: index), count: self.windowSize)
     }
 
-    public func first() -> Optional[ArraySlice[T]] {
+    public var first: Optional[ArraySlice[T]] {
         if self.isEmpty {
             return .None
         }
-        .Some(self.at(0))
+        .Some(self(0))
     }
 
-    public func last() -> Optional[ArraySlice[T]] {
+    public var last: Optional[ArraySlice[T]] {
         if self.isEmpty {
             return .None
         }
-        .Some(self.at(self.count - 1))
+        .Some(self(self.count - 1))
     }
 
     public func iter() -> WindowsIterator[T] {
@@ -161,7 +161,7 @@ public struct WindowsView[T]: Iterable {
         let n = self.count;
         result.reserveCapacity(n);
         for i in 0..<n {
-            result.append(self.at(i))
+            result.append(self(i))
         }
         result
     }
@@ -216,14 +216,14 @@ public struct ReversedView[T]: Iterable {
 
     public var isEmpty: Bool { self.slice.count == 0 }
 
-    public func at(index: Int64) -> T {
+    public subscript(index: Int64) -> T {
         if index < 0 or index >= self.slice.count {
             fatalError("ReversedView index out of bounds")
         }
         self.slice.pointer.offset(by: self.slice.count - 1 - index).read()
     }
 
-    public func first() -> Optional[T] {
+    public var first: Optional[T] {
         if self.slice.count > 0 {
             .Some(self.slice.pointer.offset(by: self.slice.count - 1).read())
         } else {
@@ -231,7 +231,7 @@ public struct ReversedView[T]: Iterable {
         }
     }
 
-    public func last() -> Optional[T] {
+    public var last: Optional[T] {
         if self.slice.count > 0 {
             .Some(self.slice.pointer.read())
         } else {
