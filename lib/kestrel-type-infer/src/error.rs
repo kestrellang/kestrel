@@ -190,6 +190,13 @@ pub enum InferError {
         method: String,
         span: Span,
     },
+
+    /// Circular opaque type inference: the concrete type behind `some P`
+    /// is itself another `some P` from a mutually recursive call, so no
+    /// concrete type can be determined.
+    CircularOpaqueReturn {
+        span: Span,
+    },
 }
 
 impl InferError {
@@ -220,7 +227,8 @@ impl InferError {
             | Self::TupleIndexOnNonTuple { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. }
             | Self::MemberAccessOnPrimitive { span, .. }
-            | Self::PrimitiveMethodNotCalled { span, .. } => span,
+            | Self::PrimitiveMethodNotCalled { span, .. }
+            | Self::CircularOpaqueReturn { span } => span,
         }
     }
 }

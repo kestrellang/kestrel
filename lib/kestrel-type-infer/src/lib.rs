@@ -94,6 +94,19 @@ impl QueryFn for InferBody {
         // Solve
         solver::solve(&mut infer_ctx, &hir);
 
+        // Detect circular opaque returns: if the concrete type behind `some P`
+        // is itself another opaque, the body never grounded to a real type.
+        if let Some(ref info) = infer_ctx.opaque_return {
+            let resolved = infer_ctx.resolve(info.concrete_tv);
+            if let ty::TySlot::Resolved(ty::TyKind::Opaque { .. }) =
+                &infer_ctx.types[resolved.0 as usize]
+            {
+                infer_ctx.errors.push(error::InferError::CircularOpaqueReturn {
+                    span: info.span.clone(),
+                });
+            }
+        }
+
         // Build output
         Some(result::build_result(&infer_ctx))
     }

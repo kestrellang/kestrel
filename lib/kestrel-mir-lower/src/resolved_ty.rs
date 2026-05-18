@@ -3,13 +3,23 @@
 //! ResolvedTy comes from type inference results. It has the same shape as HirTy
 //! but without spans and without Infer.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use kestrel_ast_builder::{Name, TypeParams};
+use kestrel_hecs::Entity;
 use kestrel_mir::MirTy;
 use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::InferBody;
 
 use crate::context::LowerCtx;
 use crate::ty::lower_named_type_from_entity;
+
+thread_local! {
+    /// Guard against infinite recursion when resolving mutually-recursive
+    /// opaque return types (e.g. `f -> some P` calls `g -> some P` calls `f`).
+    static OPAQUE_RESOLVE_STACK: RefCell<HashSet<Entity>> = RefCell::new(HashSet::new());
+}
 
 /// Convert a ResolvedTy (from type inference) to a MirTy.
 pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> MirTy {
@@ -62,6 +72,14 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> MirTy {
             origin_args,
             ..
         } => {
+            // Cycle guard: if we're already resolving this origin's opaque type,
+            // we have mutual recursion (f -> some P calls g -> some P calls f).
+            // Break the cycle with MirTy::Error — inference should have diagnosed this.
+            let is_cycle = OPAQUE_RESOLVE_STACK.with(|stack| !stack.borrow_mut().insert(*origin));
+            if is_cycle {
+                return MirTy::Error;
+            }
+
             let body = ctx.query.query(InferBody {
                 entity: *origin,
                 root: ctx.root,
@@ -79,7 +97,10 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> MirTy {
                 .unwrap_or_default();
 
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
-            lower_resolved_ty(ctx, &substituted)
+            let result = lower_resolved_ty(ctx, &substituted);
+
+            OPAQUE_RESOLVE_STACK.with(|stack| stack.borrow_mut().remove(origin));
+            result
         },
         ResolvedTy::Never => MirTy::Never,
         ResolvedTy::Error => MirTy::Error,

@@ -2,9 +2,7 @@
 // stdlib: false
 
 // Mutual recursion where both functions have opaque returns
-// and neither has a concrete base case. Currently produces
-// conformance errors because the opaque return resolves to ?.
-// TODO: implement E470 "circular opaque type inference"
+// and neither has a concrete base case.
 
 module Test
 
@@ -19,10 +17,10 @@ extend Circle: Shape {
     public func area() -> lang.i64 { 1 }
 }
 
-func f() -> some Shape { // ERROR: does not conform
+func f() -> some Shape { // ERROR: circular opaque return type
     g()
 }
 
-func g() -> some Shape { // ERROR: does not conform
+func g() -> some Shape { // ERROR: circular opaque return type
     f()
 }
