@@ -70,10 +70,10 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// let opt = Optional.some(42);   // Some(42)
+    /// let opt = Optional.wrap(42);   // Some(42)
     /// let opt: Int64? = 42;                 // identical, preferred
     /// ```
-    public static func some(value: T) -> Optional[T] {
+    public static func wrap(value: T) -> Optional[T] {
         .Some(value)
     }
 
@@ -139,7 +139,7 @@ public enum Optional[T] {
     // ========================================================================
 
     /// Returns the wrapped value, panicking if `None`. Reach for
-    /// `unwrapOr`, `unwrap(orElse:)`, the `??` operator, or pattern
+    /// `unwrapOr`, `unwrap(or:)`, the `??` operator, or pattern
     /// matching unless you can prove the value is `Some`.
     ///
     /// # Errors
@@ -180,7 +180,7 @@ public enum Optional[T] {
     }
 
     /// Returns the wrapped value or `default` when `None`. `default` is
-    /// always evaluated — use `unwrap(orElse:)` if computing it is
+    /// always evaluated — use `unwrap(or:)` if computing it is
     /// expensive.
     ///
     /// # Examples
@@ -202,10 +202,10 @@ public enum Optional[T] {
     /// # Examples
     ///
     /// ```
-    /// Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
-    /// None.unwrap(orElse: { expensiveDefault() });       // calls fn
+    /// Some(42).unwrap(or: { expensiveDefault() });   // 42, no call
+    /// None.unwrap(or: { expensiveDefault() });       // calls fn
     /// ```
-    public func unwrap(orElse defaultFn: () -> T) -> T {
+    public func unwrap(or defaultFn: () -> T) -> T {
         match self {
             .Some(value) => value,
             .None => defaultFn()
@@ -472,12 +472,12 @@ public enum Optional[T] {
     ///
     /// ```
     /// var opt = Some(42);
-    /// opt.take(matching: { it > 0 });    // Some(42); opt is now None
+    /// opt.take(where: { it > 0 });    // Some(42); opt is now None
     ///
     /// var opt2 = Some(42);
-    /// opt2.take(matching: { it < 0 });   // None;     opt2 is still Some(42)
+    /// opt2.take(where: { it < 0 });   // None;     opt2 is still Some(42)
     /// ```
-    public mutating func take(matching predicate: (T) -> Bool) -> Optional[T] {
+    public mutating func take(where predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
                 if predicate(value) {
@@ -711,7 +711,7 @@ extend Optional[T]: Formattable where T: Formattable {
             .Some(value) => {
                 writer.append("Some(");
                 value.format(into: writer, options);
-                writer.appendChar(')')
+                writer.append(char: ')')
             },
             .None => writer.append("None")
         }

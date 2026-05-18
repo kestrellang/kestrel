@@ -159,7 +159,7 @@ impl LowerCtx {
         match node.kind() {
             SyntaxKind::VariableDeclaration => self.lower_variable_decl(node),
             SyntaxKind::ExpressionStatement => self.lower_expr_stmt(node),
-            SyntaxKind::GuardLetStatement => self.lower_guard_let(node),
+            SyntaxKind::GuardStatement => self.lower_guard(node),
             SyntaxKind::DeinitStatement => self.lower_deinit_stmt(node),
             _ => {
                 // Fallback: wrap as expression statement if it looks like an expr
@@ -257,11 +257,11 @@ impl LowerCtx {
         self.alloc_stmt(AstStmt::Expr { expr, span })
     }
 
-    /// `guard let pattern = expr [, let pattern = expr] else { block }`
-    fn lower_guard_let(&mut self, node: &SyntaxNode) -> StmtId {
+    /// `guard <condition> [, <condition>] else { block }`
+    fn lower_guard(&mut self, node: &SyntaxNode) -> StmtId {
         let span = self.span(node);
 
-        let conditions = self.lower_let_conditions(node, SyntaxKind::GuardLetCondition);
+        let conditions = self.lower_let_conditions(node, SyntaxKind::GuardCondition);
 
         // Else block — find CodeBlock child
         let else_body = node
@@ -273,7 +273,7 @@ impl LowerCtx {
                 tail_expr: None,
             });
 
-        self.alloc_stmt(AstStmt::GuardLet {
+        self.alloc_stmt(AstStmt::Guard {
             conditions,
             else_body,
             span,
@@ -866,10 +866,19 @@ impl LowerCtx {
             .map(|c| self.lower_expr(&c))
             .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span: span.clone() }));
 
-        // For now, only Unwrap (!) postfix operator
+        let op = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| matches!(t.kind(), SyntaxKind::Bang | SyntaxKind::DotDot))
+            .map(|t| match t.kind() {
+                SyntaxKind::DotDot => PostfixOp::RangeFrom,
+                _ => PostfixOp::Unwrap,
+            })
+            .unwrap_or(PostfixOp::Unwrap);
+
         self.alloc_expr(AstExpr::Postfix {
             operand,
-            op: PostfixOp::Unwrap,
+            op,
             span,
         })
     }
@@ -1472,6 +1481,8 @@ impl LowerCtx {
             SyntaxKind::LiteralPattern => self.lower_literal_pattern(&node),
             SyntaxKind::RangePattern => self.lower_range_pattern(&node),
             SyntaxKind::EnumPattern => self.lower_enum_pattern(&node),
+            SyntaxKind::NullPattern => self.lower_null_pattern(&node),
+            SyntaxKind::SomePattern => self.lower_some_pattern(&node),
             SyntaxKind::StructPattern => self.lower_struct_pattern(&node),
             SyntaxKind::ArrayPattern => self.lower_array_pattern(&node),
             SyntaxKind::AtPattern => self.lower_at_pattern(&node),
@@ -1708,6 +1719,38 @@ impl LowerCtx {
         })
     }
 
+    /// Lower the `null` keyword pattern to `AstPat::Enum { case_name: "None" }`.
+    /// Bare sugar for matching `Optional.None`; type-checking enforces the
+    /// scrutinee is `Optional[T]` via existing enum-case resolution.
+    fn lower_null_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+        self.alloc_pat(AstPat::Enum {
+            case_name: "None".to_string(),
+            args: vec![],
+            span,
+        })
+    }
+
+    /// Lower `some PAT` to `AstPat::Enum { case_name: "Some", args: [PAT] }`.
+    /// The inner pattern is lowered recursively; nested sugar like `some some x`
+    /// or `some null` flows through naturally.
+    fn lower_some_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+        let inner = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Pattern || is_pattern_kind(c.kind()))
+            .map(|p| self.lower_pat(&p))
+            .unwrap_or_else(|| self.alloc_pat(AstPat::Error { span: span.clone() }));
+        self.alloc_pat(AstPat::Enum {
+            case_name: "Some".to_string(),
+            args: vec![EnumPatArg {
+                label: None,
+                pattern: inner,
+            }],
+            span,
+        })
+    }
+
     /// Extract label from an EnumPatternArg: Identifier followed by Colon.
     fn extract_pattern_arg_label(&self, node: &SyntaxNode) -> Option<String> {
         let mut iter = node.children_with_tokens().filter(|e| {
@@ -1868,7 +1911,7 @@ impl LowerCtx {
 
     // ===== Shared helpers =====
 
-    /// Lower IfLetCondition/WhileLetCondition/GuardLetCondition nodes.
+    /// Lower IfLetCondition/WhileLetCondition/GuardCondition nodes.
     fn lower_let_conditions(
         &mut self,
         parent: &SyntaxNode,
@@ -2005,6 +2048,8 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::LiteralPattern
             | SyntaxKind::RangePattern
             | SyntaxKind::EnumPattern
+            | SyntaxKind::NullPattern
+            | SyntaxKind::SomePattern
             | SyntaxKind::StructPattern
             | SyntaxKind::ArrayPattern
             | SyntaxKind::AtPattern
@@ -2102,6 +2147,8 @@ fn token_to_unary_op(kind: SyntaxKind) -> Option<UnaryOp> {
         SyntaxKind::Not => Some(UnaryOp::LogicalNot),
         SyntaxKind::Bang => Some(UnaryOp::BitNot),
         SyntaxKind::Plus => Some(UnaryOp::Pos),
+        SyntaxKind::DotDotLess => Some(UnaryOp::RangeUpTo),
+        SyntaxKind::DotDotEquals => Some(UnaryOp::RangeThrough),
         _ => None,
     }
 }

@@ -1,0 +1,6 @@
+func Test.touch(h: &var Test.Handle) -> ()
+{
+    bb0:
+        %self.fd = i64.literal 42
+        return ()
+}

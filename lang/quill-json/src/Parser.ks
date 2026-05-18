@@ -105,9 +105,9 @@ struct JsonCursor: Cloneable {
             .Ok(())
         } else {
             var expected = String();
-            expected.appendChar(c);
+            expected.append(char: c);
             var got = String();
-            got.appendChar(actual);
+            got.append(char: actual);
             .Err(JsonParseError("expected '" + expected + "', got '" + got + "'", self.pos - 1))
         }
     }
@@ -193,7 +193,7 @@ func parseValue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                 parseNumber(cursor)
             } else {
                 var got = String();
-                got.appendChar(c);
+                got.append(char: c);
                 .Err(JsonParseError("unexpected character '" + got + "'", cursor.pos))
             }
         },
@@ -343,12 +343,8 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
             cursor.pos = cursor.pos + 1
         }
 
-        // Copy the run verbatim — no UTF-8 decode/encode overhead.
-        var i = runStart;
-        while i < cursor.pos {
-            result.appendByte(srcBytes(unchecked: i));
-            i = i + 1
-        }
+        // Copy the run verbatim.
+        result.append(srcBytes.substring(runStart..<cursor.pos));
 
         if cursor.pos >= cursor.len {
             return .Err(JsonParseError("unterminated string", cursor.pos))
@@ -365,24 +361,24 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
         let esc = try cursor.advanceChar();
         // \" \\ \/ \b \f \n \r \t \uXXXX
         if esc == '"' {
-            result.appendByte(34)
+            result.append(char: '"')
         } else if esc == '\\' {
-            result.appendByte(92)
+            result.append(char: '\\')
         } else if esc == '/' {
-            result.appendByte(47)
+            result.append(char: '/')
         } else if esc == 'b' {
-            result.appendByte(8)
+            result.append(char: Char(8).unwrap())
         } else if esc == 'f' {
-            result.appendByte(12)
+            result.append(char: Char(12).unwrap())
         } else if esc == 'n' {
-            result.appendByte(10)
+            result.append(char: '\n')
         } else if esc == 'r' {
-            result.appendByte(13)
+            result.append(char: '\r')
         } else if esc == 't' {
-            result.appendByte(9)
+            result.append(char: '\t')
         } else if esc == 'u' {
             let codepoint = try parseUnicodeEscape(cursor);
-            result.appendChar(Char(UInt32(from: codepoint)))
+            result.append(char: Char(UInt32(from: codepoint)).unwrap())
         } else {
             return .Err(JsonParseError("invalid escape sequence", cursor.pos - 1))
         }

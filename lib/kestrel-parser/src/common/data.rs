@@ -131,9 +131,18 @@ pub enum FunctionBodyData {
     Expression(Span, ExprVariant),
 }
 
+/// Init effect: failable (`?`) or throwing (`throws E`).
+#[derive(Debug, Clone)]
+pub enum InitEffect {
+    /// `init()?` — failable, body returns `()?`
+    Failable(Span),
+    /// `init() throws E` — throwing, body returns `() throws E`
+    Throwing(Span, TyVariant),
+}
+
 /// Raw parsed data for initializer declaration internals
 ///
-/// Initializer syntax: `(visibility)? init[T]?(params) where ...? { body }?`
+/// Initializer syntax: `(visibility)? init[T]?(params)(? | throws E)? where ...? { body }?`
 /// Body is optional for protocol initializer declarations.
 #[derive(Debug, Clone)]
 pub struct InitializerDeclarationData {
@@ -144,6 +153,7 @@ pub struct InitializerDeclarationData {
     pub lparen: Span,
     pub parameters: Vec<ParameterData>,
     pub rparen: Span,
+    pub effect: Option<InitEffect>,
     pub where_clause: Option<WhereClauseData>,
     pub body: Option<CodeBlockData>,
 }

@@ -71,6 +71,7 @@ pub enum SyntaxKind {
     PropertyAccessors, // { get { } set { } } or { get } { get set }
     FunctionDeclaration,
     InitializerDeclaration,
+    InitEffect, // ? or throws E after init params
     DeinitDeclaration,
     SubscriptDeclaration,
     SubscriptBody,
@@ -115,6 +116,7 @@ pub enum SyntaxKind {
     TyResult,     // T throws E - result type
     TyList,
     TyInferred, // _ - inferred type placeholder
+    TySome,     // some P - opaque type
 
     // Path nodes (shared between types and other constructs)
     Path,
@@ -125,9 +127,9 @@ pub enum SyntaxKind {
     Statement,           // Wrapper for statement variants
     ExpressionStatement, // expression;
     VariableDeclaration, // let/var name: Type = expr;
-    GuardLetStatement,   // guard let pattern = expr else { block }
+    GuardStatement,      // guard <condition> else { block }
     DeinitStatement,     // deinit identifier; - explicit destructor call
-    GuardLetCondition,   // let pattern = expr (in guard-let condition chain)
+    GuardCondition,      // let pattern = expr (in guard condition chain)
 
     // Expression nodes
     Expression,               // Wrapper for expression variants
@@ -191,6 +193,8 @@ pub enum SyntaxKind {
     RangePattern,        // 0..=9 or 0..<10 (range pattern)
     EnumPattern,         // .Case or .Case(args)
     EnumPatternArg,      // Single arg in enum pattern: label or label: pattern
+    NullPattern,         // null (sugar for .None on Optional)
+    SomePattern,         // some PAT (sugar for .Some(PAT) on Optional)
     StructPattern,       // Point { x, y } or Point { x: a, y: b }
     StructPatternField,  // Single field: name or name: pattern
     StructPatternRest,   // .. (ignore remaining fields)
@@ -212,6 +216,7 @@ pub enum SyntaxKind {
     Float,
     Boolean,
     Null,
+    Some,
 
     // Keywords
     As,
@@ -355,6 +360,7 @@ impl From<Token> for SyntaxKind {
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,
             Token::Null => SyntaxKind::Null,
+            Token::Some => SyntaxKind::Some,
             // Keywords
             Token::As => SyntaxKind::As,
             Token::Break => SyntaxKind::Break,
@@ -495,6 +501,7 @@ impl Language for KestrelLanguage {
         const PROPERTY_ACCESSORS: u16 = SyntaxKind::PropertyAccessors as u16;
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
         const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
+        const INIT_EFFECT: u16 = SyntaxKind::InitEffect as u16;
         const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
         const SUBSCRIPT_DECLARATION: u16 = SyntaxKind::SubscriptDeclaration as u16;
         const SUBSCRIPT_BODY: u16 = SyntaxKind::SubscriptBody as u16;
@@ -528,14 +535,15 @@ impl Language for KestrelLanguage {
         const TY_RESULT: u16 = SyntaxKind::TyResult as u16;
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
         const TY_INFERRED: u16 = SyntaxKind::TyInferred as u16;
+        const TY_SOME: u16 = SyntaxKind::TySome as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
         const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
         const CODE_BLOCK: u16 = SyntaxKind::CodeBlock as u16;
         const STATEMENT: u16 = SyntaxKind::Statement as u16;
         const EXPRESSION_STATEMENT: u16 = SyntaxKind::ExpressionStatement as u16;
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
-        const GUARD_LET_STATEMENT: u16 = SyntaxKind::GuardLetStatement as u16;
-        const GUARD_LET_CONDITION: u16 = SyntaxKind::GuardLetCondition as u16;
+        const GUARD_STATEMENT: u16 = SyntaxKind::GuardStatement as u16;
+        const GUARD_CONDITION: u16 = SyntaxKind::GuardCondition as u16;
         const DEINIT_STATEMENT: u16 = SyntaxKind::DeinitStatement as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
@@ -597,6 +605,8 @@ impl Language for KestrelLanguage {
         const RANGE_PATTERN: u16 = SyntaxKind::RangePattern as u16;
         const ENUM_PATTERN: u16 = SyntaxKind::EnumPattern as u16;
         const ENUM_PATTERN_ARG: u16 = SyntaxKind::EnumPatternArg as u16;
+        const NULL_PATTERN: u16 = SyntaxKind::NullPattern as u16;
+        const SOME_PATTERN: u16 = SyntaxKind::SomePattern as u16;
         const STRUCT_PATTERN: u16 = SyntaxKind::StructPattern as u16;
         const STRUCT_PATTERN_FIELD: u16 = SyntaxKind::StructPatternField as u16;
         const STRUCT_PATTERN_REST: u16 = SyntaxKind::StructPatternRest as u16;
@@ -615,6 +625,7 @@ impl Language for KestrelLanguage {
         const FLOAT: u16 = SyntaxKind::Float as u16;
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
+        const SOME: u16 = SyntaxKind::Some as u16;
         const AS: u16 = SyntaxKind::As as u16;
         const BREAK: u16 = SyntaxKind::Break as u16;
         const CASE: u16 = SyntaxKind::Case as u16;
@@ -749,6 +760,7 @@ impl Language for KestrelLanguage {
             PROPERTY_ACCESSORS => SyntaxKind::PropertyAccessors,
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
             INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
+            INIT_EFFECT => SyntaxKind::InitEffect,
             DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
             SUBSCRIPT_DECLARATION => SyntaxKind::SubscriptDeclaration,
             SUBSCRIPT_BODY => SyntaxKind::SubscriptBody,
@@ -782,6 +794,7 @@ impl Language for KestrelLanguage {
             TY_RESULT => SyntaxKind::TyResult,
             TY_LIST => SyntaxKind::TyList,
             TY_INFERRED => SyntaxKind::TyInferred,
+            TY_SOME => SyntaxKind::TySome,
             TY_OPTIONAL => SyntaxKind::TyOptional,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,
@@ -789,8 +802,8 @@ impl Language for KestrelLanguage {
             STATEMENT => SyntaxKind::Statement,
             EXPRESSION_STATEMENT => SyntaxKind::ExpressionStatement,
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
-            GUARD_LET_STATEMENT => SyntaxKind::GuardLetStatement,
-            GUARD_LET_CONDITION => SyntaxKind::GuardLetCondition,
+            GUARD_STATEMENT => SyntaxKind::GuardStatement,
+            GUARD_CONDITION => SyntaxKind::GuardCondition,
             DEINIT_STATEMENT => SyntaxKind::DeinitStatement,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,
@@ -852,6 +865,8 @@ impl Language for KestrelLanguage {
             RANGE_PATTERN => SyntaxKind::RangePattern,
             ENUM_PATTERN => SyntaxKind::EnumPattern,
             ENUM_PATTERN_ARG => SyntaxKind::EnumPatternArg,
+            NULL_PATTERN => SyntaxKind::NullPattern,
+            SOME_PATTERN => SyntaxKind::SomePattern,
             STRUCT_PATTERN => SyntaxKind::StructPattern,
             STRUCT_PATTERN_FIELD => SyntaxKind::StructPatternField,
             STRUCT_PATTERN_REST => SyntaxKind::StructPatternRest,
@@ -870,6 +885,7 @@ impl Language for KestrelLanguage {
             FLOAT => SyntaxKind::Float,
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
+            SOME => SyntaxKind::Some,
             AS => SyntaxKind::As,
             BREAK => SyntaxKind::Break,
             CASE => SyntaxKind::Case,

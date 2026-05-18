@@ -90,6 +90,7 @@ impl LowerCtx<'_> {
             },
             AstExpr::Postfix { operand, op, span } => match op {
                 PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
+                PostfixOp::RangeFrom => self.desugar_postfix_op(body, &op, operand, &span),
             },
             AstExpr::Binary { .. } => self.lower_binary_with_precedence(body, id),
             AstExpr::Assignment { lhs, rhs, span } => {
@@ -158,8 +159,14 @@ impl LowerCtx<'_> {
             },
             AstExpr::Return { value, span } => {
                 let lowered = value.map(|v| self.lower_expr(body, v));
+                // Bare return in effectful init: wrap () in .Some(())/.Ok(())
+                let wrapped = if lowered.is_none() {
+                    self.wrap_init_success_value(span.clone())
+                } else {
+                    lowered
+                };
                 self.alloc_expr(HirExpr::Return {
-                    value: lowered,
+                    value: wrapped,
                     span,
                 })
             },
@@ -334,12 +341,13 @@ impl LowerCtx<'_> {
             .collect();
 
         match result {
-            ValueResolution::Def(entity) | ValueResolution::TypeParameter(entity) => self
-                .alloc_expr(HirExpr::Def(
-                    entity,
-                    explicit_type_args.clone(),
-                    span.clone(),
-                )),
+            ValueResolution::Def(entity)
+            | ValueResolution::TypeParameter(entity)
+            | ValueResolution::SelfValue(entity) => self.alloc_expr(HirExpr::Def(
+                entity,
+                explicit_type_args.clone(),
+                span.clone(),
+            )),
             ValueResolution::Overloaded(entities) => {
                 // Preserve full overload set — type inference disambiguates at call site
                 self.alloc_expr(HirExpr::OverloadSet {
@@ -407,6 +415,19 @@ impl LowerCtx<'_> {
                         "use a fully qualified path to disambiguate".to_string(),
                     ]);
                 self.ctx.accumulate(diag);
+                self.alloc_expr(HirExpr::Error { span: span.clone() })
+            },
+            ValueResolution::SelfNotInScope => {
+                self.ctx.accumulate(
+                    Diagnostic::error()
+                        .with_message(
+                            "'Self' is only valid inside a type, extension, or protocol body",
+                        )
+                        .with_labels(vec![
+                            Label::primary(span.file_id, span.range())
+                                .with_message("'Self' used outside of a type body"),
+                        ]),
+                );
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
             ValueResolution::NotFound(ref seg) => {
@@ -745,6 +766,74 @@ impl LowerCtx<'_> {
                             args: lowered_args,
                             span: span.clone(),
                         });
+                    }
+                }
+
+                // Type-prefix protocol-extension static method call:
+                // `A.helper()` where `helper` lives in `extend SomeProto` and
+                // `A: SomeProto`. The full-path collapse to `Call(Def(helper))`
+                // loses the receiver `A`, so MIR can't compute the witness
+                // self_type. Emit `MethodCall(Def(A), "helper")` instead, so
+                // `lower_method_call` uses A's type as self_type.
+                {
+                    use kestrel_ast_builder::NodeKind;
+                    if segments.len() >= 2 {
+                        let prefix_names: Vec<String> = segments[..segments.len() - 1]
+                            .iter()
+                            .map(|s| s.name.clone())
+                            .collect();
+                        let prefix_result = self.ctx.query(ResolveValuePath {
+                            segments: prefix_names,
+                            context: self.owner,
+                            root: self.root,
+                        });
+                        let full_names: Vec<String> =
+                            segments.iter().map(|s| s.name.clone()).collect();
+                        let full_result = self.ctx.query(ResolveValuePath {
+                            segments: full_names,
+                            context: self.owner,
+                            root: self.root,
+                        });
+                        let prefix_is_type = matches!(
+                            &prefix_result,
+                            ValueResolution::Def(e) if matches!(
+                                self.ctx.get::<NodeKind>(*e),
+                                Some(&NodeKind::Struct | &NodeKind::Enum)
+                            )
+                        );
+                        let method_via_proto_ext = matches!(
+                            &full_result,
+                            ValueResolution::Def(method)
+                                if self.ctx.get::<NodeKind>(*method) == Some(&NodeKind::Function)
+                                && self.ctx.parent_of(*method).is_some_and(|p|
+                                    self.ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension)
+                                    && self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                                        extension: p,
+                                        root: self.root,
+                                    }).is_some_and(|target|
+                                        self.ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
+                                    )
+                                )
+                        );
+                        if prefix_is_type && method_via_proto_ext {
+                            let prefix_slice = &segments[..segments.len() - 1];
+                            let prefix_span = Span::new(
+                                segments[0].span.file_id,
+                                segments[0].span.start..prefix_slice.last().unwrap().span.end,
+                            );
+                            let receiver = self.lower_path(body, prefix_slice, &prefix_span);
+                            let last = &segments[segments.len() - 1];
+                            let lowered_type_args = last.type_args.as_ref().map(|args| {
+                                args.iter().map(|t| self.lower_type(t)).collect()
+                            });
+                            return self.alloc_expr(HirExpr::MethodCall {
+                                receiver,
+                                method: name_from_ast(last.name.clone()),
+                                type_args: lowered_type_args,
+                                args: lowered_args,
+                                span: span.clone(),
+                            });
+                        }
                     }
                 }
 
@@ -1101,7 +1190,7 @@ impl LowerCtx<'_> {
     /// Multiple conditions are ANDed together.
     /// Let-conditions create bindings in the current scope.
     /// `source` tags any desugared let-condition matches so the right
-    /// diagnostic fires (IfLet → E302, WhileLet → E308, GuardLet → E309).
+    /// diagnostic fires (IfLet → E302, WhileLet → E308, Guard → E309).
     pub(crate) fn lower_if_conditions(
         &mut self,
         body: &AstBody,

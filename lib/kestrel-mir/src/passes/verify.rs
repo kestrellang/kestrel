@@ -2,16 +2,22 @@
 //!
 //! Reports ALL issues rather than failing on the first, so you can
 //! see the full picture and fix batches at once.
+//!
+//! Includes an optional ownership verifier that checks every droppable local
+//! is cleaned up exactly once on every path to a Return.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use kestrel_hecs::Entity;
 
 use crate::{
-    BasicBlock, Callee, FunctionDef, FunctionId, ImmediateKind, MirBody,
+    BasicBlock, Callee, CopyBehavior, FunctionDef, FunctionId, ImmediateKind, LocalId, MirBody,
     MirTy, Place, Rvalue, StatementKind, TerminatorKind, Value,
 };
+use crate::body::ScopeId;
+use crate::item::FunctionKind;
+use super::drop_elaboration;
 
 /// A single verification diagnostic.
 #[derive(Debug)]
@@ -42,6 +48,15 @@ pub struct VerifyResult {
 impl VerifyResult {
     pub fn is_ok(&self) -> bool {
         self.errors.is_empty()
+    }
+
+    /// Like [`Self::dump`] but silent on success — used by pipeline hooks
+    /// that want to surface verifier diagnostics without spamming stderr
+    /// for every successful compile.
+    pub fn dump_if_errors(&self) {
+        if !self.errors.is_empty() {
+            self.dump();
+        }
     }
 
     /// Print all errors to stderr, grouped by category.
@@ -80,22 +95,59 @@ impl VerifyResult {
     }
 }
 
-/// Run verification on the entire MIR module.
+/// Where in the pipeline this verification runs.
+///
+/// `PreDropElab` is used between lowering and `kestrel_ownership::run`. At
+/// that point the MIR must contain no `Drop` / `DropIf` statements — those
+/// are exclusively emitted by drop-elaboration. `PostDropElab` is used
+/// afterwards (the normal `verify(module)` entry point).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyStage {
+    /// MIR straight out of lowering (and the legacy deinit pass). At this
+    /// point lowering must not have emitted any `Drop`/`DropIf` — those
+    /// are the exclusive job of `kestrel-ownership`.
+    PreDropElab,
+    /// Final MIR ready for codegen. `Drop`/`DropIf` are accepted.
+    PostDropElab,
+}
+
+/// Run verification on the entire MIR module, post-drop-elab.
 pub fn verify(module: &crate::MirModule) -> VerifyResult {
-    let mut ctx = VerifyCtx::new(module);
+    verify_with_stage(module, VerifyStage::PostDropElab)
+}
+
+/// Run verification with an explicit stage marker.
+pub fn verify_with_stage(module: &crate::MirModule, stage: VerifyStage) -> VerifyResult {
+    let mut ctx = VerifyCtx::new(module, stage);
     ctx.verify_all();
     VerifyResult { errors: ctx.errors }
 }
 
+/// Ownership state for a single droppable local during verification.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum OwnState {
+    Uninit,
+    Live,
+    Dead,
+    Mixed,
+}
+
+impl OwnState {
+    fn meet(self, other: Self) -> Self {
+        if self == other { self } else { OwnState::Mixed }
+    }
+}
+
 struct VerifyCtx<'a> {
     module: &'a crate::MirModule,
+    stage: VerifyStage,
     errors: Vec<VerifyError>,
     // Lookup maps built once
     entity_to_func: HashMap<Entity, FunctionId>,
 }
 
 impl<'a> VerifyCtx<'a> {
-    fn new(module: &'a crate::MirModule) -> Self {
+    fn new(module: &'a crate::MirModule, stage: VerifyStage) -> Self {
         let entity_to_func: HashMap<Entity, FunctionId> = module
             .functions
             .iter()
@@ -105,6 +157,7 @@ impl<'a> VerifyCtx<'a> {
 
         Self {
             module,
+            stage,
             errors: Vec::new(),
             entity_to_func,
         }
@@ -122,6 +175,7 @@ impl<'a> VerifyCtx<'a> {
         for (i, func) in self.module.functions.iter().enumerate() {
             self.verify_function(i, func);
         }
+        self.verify_ownership();
     }
 
     fn verify_function(&mut self, _idx: usize, func: &FunctionDef) {
@@ -161,6 +215,29 @@ impl<'a> VerifyCtx<'a> {
             );
         }
 
+        // Module/static init bodies (synthetic `__init$<name>` functions
+        // generated for static initializers) must contain no `Drop`/
+        // `DropIf`. The architecture explicitly rules out module/static
+        // deinit — there's no point where it could run.
+        if self.stage == VerifyStage::PostDropElab && name.starts_with("__init$") {
+            for (bi, block) in body.blocks.iter().enumerate() {
+                for stmt in &block.stmts {
+                    match &stmt.kind {
+                        StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {
+                            self.err(
+                                name,
+                                Some(bi),
+                                "module-init: Drop/DropIf emitted in a static-init body; \
+                                 static-init bodies must not own values that need dropping"
+                                    .into(),
+                            );
+                        },
+                        _ => {},
+                    }
+                }
+            }
+        }
+
         // Check each basic block
         for (bi, block) in body.blocks.iter().enumerate() {
             self.verify_block(name, bi, block, body, func);
@@ -182,14 +259,14 @@ impl<'a> VerifyCtx<'a> {
         bi: usize,
         block: &BasicBlock,
         body: &MirBody,
-        _func: &FunctionDef,
+        func: &FunctionDef,
     ) {
         // Verify statements
         for stmt in &block.stmts {
             match &stmt.kind {
                 StatementKind::Assign { dest, rvalue } => {
                     self.verify_place(func_name, bi, dest, body);
-                    self.verify_rvalue(func_name, bi, rvalue, body);
+                    self.verify_rvalue(func_name, bi, rvalue, body, func);
                 },
                 StatementKind::Call {
                     dest, callee, args, ..
@@ -198,12 +275,37 @@ impl<'a> VerifyCtx<'a> {
                         self.verify_place(func_name, bi, d, body);
                     }
                     for arg in args {
-                        self.verify_value(func_name, bi, &arg.value, body);
+                        self.verify_value(func_name, bi, arg, body, func);
                     }
                     self.verify_callee(func_name, bi, callee);
                 },
+                StatementKind::Drop { place } => {
+                    self.verify_place(func_name, bi, place, body);
+                    if self.stage == VerifyStage::PreDropElab {
+                        self.err(
+                            func_name,
+                            Some(bi),
+                            "drop: Drop statement present before drop-elaboration; \
+                             lowering must never emit Drop/DropIf"
+                                .into(),
+                        );
+                    }
+                },
                 StatementKind::Deinit { place } => {
                     self.verify_place(func_name, bi, place, body);
+                },
+                StatementKind::DropIf { place, flag } => {
+                    self.verify_place(func_name, bi, place, body);
+                    self.verify_local(func_name, bi, *flag, body);
+                    if self.stage == VerifyStage::PreDropElab {
+                        self.err(
+                            func_name,
+                            Some(bi),
+                            "drop: DropIf statement present before drop-elaboration; \
+                             lowering must never emit Drop/DropIf"
+                                .into(),
+                        );
+                    }
                 },
                 StatementKind::DeinitIf { place, flag } => {
                     self.verify_place(func_name, bi, place, body);
@@ -212,11 +314,40 @@ impl<'a> VerifyCtx<'a> {
                 StatementKind::SetDeinitFlag { flag, .. } => {
                     self.verify_local(func_name, bi, *flag, body);
                 },
+                StatementKind::ScopeLive(local) => {
+                    self.verify_local(func_name, bi, *local, body);
+                },
             }
         }
 
         // Verify terminator
-        self.verify_terminator(func_name, bi, &block.terminator.kind, body);
+        self.verify_terminator(func_name, bi, &block.terminator.kind, body, func);
+
+        // Panic-edge invariant: blocks ending in `Panic(_)` or
+        // `Unreachable` must not own any `Drop`/`DropIf` statements.
+        // Per the memory-model architecture, panic = abort; drops on a
+        // path that aborts are unreachable code that DropElab should
+        // have skipped. If they're here it's a placement bug.
+        if matches!(
+            block.terminator.kind,
+            TerminatorKind::Panic(_) | TerminatorKind::Unreachable
+        ) && self.stage == VerifyStage::PostDropElab
+        {
+            for stmt in &block.stmts {
+                match &stmt.kind {
+                    StatementKind::Drop { .. } | StatementKind::DropIf { .. } => {
+                        self.err(
+                            func_name,
+                            Some(bi),
+                            "panic-edge: Drop/DropIf in a block that terminates with \
+                             panic/unreachable; panic = abort, those drops never run"
+                                .into(),
+                        );
+                    },
+                    _ => {},
+                }
+            }
+        }
     }
 
     fn verify_place(&mut self, func: &str, bi: usize, place: &Place, body: &MirBody) {
@@ -270,51 +401,83 @@ impl<'a> VerifyCtx<'a> {
         }
     }
 
-    fn verify_value(&mut self, func: &str, bi: usize, value: &Value, body: &MirBody) {
+    fn verify_value(
+        &mut self,
+        func_name: &str,
+        bi: usize,
+        value: &Value,
+        body: &MirBody,
+        func: &FunctionDef,
+    ) {
         match value {
-            Value::Place(p) => self.verify_place(func, bi, p, body),
-            Value::Immediate(imm) => self.verify_immediate(func, bi, &imm.kind),
+            Value::Copy(p) => {
+                self.verify_place(func_name, bi, p, body);
+                self.verify_copy_legality(func_name, bi, p, body, func);
+            },
+            Value::Move(p) => {
+                self.verify_place(func_name, bi, p, body);
+                self.verify_move_legality(func_name, bi, p, body, func);
+            },
+            Value::Ref(p) | Value::RefMut(p) => {
+                self.verify_place(func_name, bi, p, body);
+            },
+            Value::Const(imm) => self.verify_immediate(func_name, bi, &imm.kind),
         }
     }
 
-    fn verify_rvalue(&mut self, func: &str, bi: usize, rvalue: &Rvalue, body: &MirBody) {
+    fn verify_rvalue(
+        &mut self,
+        func_name: &str,
+        bi: usize,
+        rvalue: &Rvalue,
+        body: &MirBody,
+        func: &FunctionDef,
+    ) {
         match rvalue {
-            Rvalue::Move(p) | Rvalue::Copy(p) | Rvalue::Ref(p) | Rvalue::RefMut(p) => {
-                self.verify_place(func, bi, p, body);
+            Rvalue::Copy(p) => {
+                self.verify_place(func_name, bi, p, body);
+                self.verify_copy_legality(func_name, bi, p, body, func);
+            },
+            Rvalue::Move(p) => {
+                self.verify_place(func_name, bi, p, body);
+                self.verify_move_legality(func_name, bi, p, body, func);
+            },
+            Rvalue::Ref(p) | Rvalue::RefMut(p) => {
+                self.verify_place(func_name, bi, p, body);
             },
             Rvalue::Const(imm) => {
-                self.verify_immediate(func, bi, &imm.kind);
+                self.verify_immediate(func_name, bi, &imm.kind);
             },
             Rvalue::Op1 { arg, .. } => {
-                self.verify_value(func, bi, arg, body);
+                self.verify_value(func_name, bi, arg, body, func);
             },
             Rvalue::Op2 { lhs, rhs, .. } => {
-                self.verify_value(func, bi, lhs, body);
-                self.verify_value(func, bi, rhs, body);
+                self.verify_value(func_name, bi, lhs, body, func);
+                self.verify_value(func_name, bi, rhs, body, func);
             },
             Rvalue::Op3 { a, b, c, .. } => {
-                self.verify_value(func, bi, a, body);
-                self.verify_value(func, bi, b, body);
-                self.verify_value(func, bi, c, body);
+                self.verify_value(func_name, bi, a, body, func);
+                self.verify_value(func_name, bi, b, body, func);
+                self.verify_value(func_name, bi, c, body, func);
             },
             Rvalue::Construct { fields, .. } => {
                 for (_, v) in fields {
-                    self.verify_value(func, bi, v, body);
+                    self.verify_value(func_name, bi, v, body, func);
                 }
             },
             Rvalue::Tuple(vals) => {
                 for v in vals {
-                    self.verify_value(func, bi, v, body);
+                    self.verify_value(func_name, bi, v, body, func);
                 }
             },
             Rvalue::EnumVariant { payload, .. } => {
                 for v in payload {
-                    self.verify_value(func, bi, v, body);
+                    self.verify_value(func_name, bi, v, body, func);
                 }
             },
             Rvalue::ArrayLiteral { values, .. } => {
                 for v in values {
-                    self.verify_value(func, bi, v, body);
+                    self.verify_value(func_name, bi, v, body, func);
                 }
             },
             Rvalue::ApplyPartial {
@@ -324,7 +487,7 @@ impl<'a> VerifyCtx<'a> {
                 // Check the target entity is a known function
                 if !self.entity_to_func.contains_key(target) {
                     self.err(
-                        func,
+                        func_name,
                         Some(bi),
                         format!(
                             "ApplyPartial: target entity {:?} not a known function",
@@ -333,9 +496,70 @@ impl<'a> VerifyCtx<'a> {
                     );
                 }
                 for cap in captures {
-                    self.verify_value(func, bi, cap, body);
+                    self.verify_value(func_name, bi, cap, body, func);
                 }
             },
+        }
+    }
+
+    /// `Value::Move(p)` is only legal when:
+    ///   - `p.ty.copy_behavior_with_constraints == None` (the type is
+    ///     affine), and
+    ///   - `p` is rooted in an owned local — not a `Deref` of a `&T` or
+    ///     `&var T` reference.
+    fn verify_move_legality(
+        &mut self,
+        func_name: &str,
+        bi: usize,
+        place: &Place,
+        body: &MirBody,
+        func: &FunctionDef,
+    ) {
+        if let Some(ty) = place_type(self.module, body, func, place) {
+            let behavior = ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
+            if !matches!(behavior, CopyBehavior::None) {
+                self.err(
+                    func_name,
+                    Some(bi),
+                    format!(
+                        "move: Value::Move on copyable type `{}` (CopyBehavior::{:?}); lowering should emit Copy instead",
+                        ty.display(self.module),
+                        copy_behavior_name(&behavior),
+                    ),
+                );
+            }
+        }
+        if let Some(reason) = move_root_violation(self.module, body, func, place) {
+            self.err(
+                func_name,
+                Some(bi),
+                format!("move: cannot move out of a borrow ({reason})"),
+            );
+        }
+    }
+
+    /// `Value::Copy(p)` requires the place's type to be copyable.
+    fn verify_copy_legality(
+        &mut self,
+        func_name: &str,
+        bi: usize,
+        place: &Place,
+        body: &MirBody,
+        func: &FunctionDef,
+    ) {
+        let Some(ty) = place_type(self.module, body, func, place) else {
+            return;
+        };
+        let behavior = ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
+        if matches!(behavior, CopyBehavior::None) {
+            self.err(
+                func_name,
+                Some(bi),
+                format!(
+                    "copy: Value::Copy on non-copyable type `{}`; lowering should emit Move",
+                    ty.display(self.module),
+                ),
+            );
         }
     }
 
@@ -396,7 +620,7 @@ impl<'a> VerifyCtx<'a> {
         func_name: &str,
         bi: usize,
         callee: &Callee,
-        args: &[crate::CallArg],
+        args: &[Value],
         _func: &FunctionDef,
         _body: &MirBody,
     ) {
@@ -435,33 +659,385 @@ impl<'a> VerifyCtx<'a> {
         }
     }
 
-    fn verify_terminator(&mut self, func: &str, bi: usize, kind: &TerminatorKind, body: &MirBody) {
+    // -----------------------------------------------------------------------
+    // Ownership verification — checks drop elaboration correctness
+    // -----------------------------------------------------------------------
+
+    fn verify_ownership(&mut self) {
+        let types_with_deinit = drop_elaboration::collect_types_with_deinit(self.module);
+        let structs_with_droppable = drop_elaboration::collect_structs_with_droppable_fields(
+            self.module, &types_with_deinit,
+        );
+        let types_needing_drop = drop_elaboration::compute_types_needing_drop(
+            self.module, &types_with_deinit, &structs_with_droppable,
+        );
+
+        let deinit_func_set: HashSet<Entity> = self.module.functions.iter()
+            .filter_map(|f| match &f.kind {
+                FunctionKind::Deinit { .. } => Some(f.entity),
+                _ => None,
+            })
+            .collect();
+
+        for func in &self.module.functions {
+            let Some(body) = &func.body else { continue };
+            self.verify_function_ownership(
+                &func.name, body, func, &types_needing_drop, &structs_with_droppable, &deinit_func_set,
+            );
+        }
+    }
+
+    fn verify_function_ownership(
+        &mut self,
+        name: &str,
+        body: &MirBody,
+        func: &FunctionDef,
+        types_needing_drop: &HashSet<Entity>,
+        structs_with_droppable: &HashSet<Entity>,
+        deinit_func_set: &HashSet<Entity>,
+    ) {
+        // Find droppable locals: Construct targets + loop-scoped + consuming params
+        let droppable = self.find_droppable_locals(body, func, types_needing_drop, structs_with_droppable);
+        if droppable.is_empty() {
+            return;
+        }
+
+        let num_locals = droppable.len();
+        let local_to_idx: HashMap<LocalId, usize> = droppable.iter()
+            .enumerate()
+            .map(|(i, &(id, _, _))| (id, i))
+            .collect();
+
+        let num_blocks = body.blocks.len();
+        let init_state: Vec<OwnState> = droppable.iter()
+            .map(|&(_, _, is_param)| if is_param { OwnState::Live } else { OwnState::Uninit })
+            .collect();
+
+        let mut block_entry: Vec<Vec<OwnState>> = vec![vec![OwnState::Uninit; num_locals]; num_blocks];
+        block_entry[body.entry.index()] = init_state;
+
+        let mut block_exit: Vec<Vec<OwnState>> = vec![vec![OwnState::Uninit; num_locals]; num_blocks];
+
+        // Compute RPO
+        let rpo = {
+            let mut visited = vec![false; num_blocks];
+            let mut postorder = Vec::new();
+            fn dfs(bi: usize, blocks: &[BasicBlock], visited: &mut Vec<bool>, po: &mut Vec<usize>) {
+                if visited[bi] { return; }
+                visited[bi] = true;
+                for succ in blocks[bi].successors() { dfs(succ.index(), blocks, visited, po); }
+                po.push(bi);
+            }
+            dfs(body.entry.index(), &body.blocks, &mut visited, &mut postorder);
+            postorder.reverse();
+            postorder
+        };
+
+        let _rpo_order: Vec<usize> = {
+            let mut order = vec![0; num_blocks];
+            for (pos, &b) in rpo.iter().enumerate() { order[b] = pos; }
+            order
+        };
+
+        // Build predecessors
+        let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); num_blocks];
+        for bi in 0..num_blocks {
+            for succ in body.blocks[bi].successors() {
+                predecessors[succ.index()].push(bi);
+            }
+        }
+
+        // Worklist
+        let mut worklist: Vec<usize> = rpo.clone();
+        let mut in_wl = vec![true; num_blocks];
+        let max_iter = num_blocks * 4 + 10;
+        let mut iter_count = 0;
+
+        while let Some(bi) = worklist.pop() {
+            in_wl[bi] = false;
+            iter_count += 1;
+            if iter_count > max_iter { break; }
+
+            let entry = body.entry.index();
+            let preds = &predecessors[bi];
+            if !preds.is_empty() && bi != entry {
+                let mut merged = block_exit[preds[0]].clone();
+                for &p in &preds[1..] {
+                    for i in 0..num_locals { merged[i] = merged[i].meet(block_exit[p][i]); }
+                }
+                block_entry[bi] = merged;
+            }
+
+            // Transfer
+            let mut state = block_entry[bi].clone();
+            for stmt in &body.blocks[bi].stmts {
+                self.ownership_transfer(&stmt.kind, &local_to_idx, &mut state, deinit_func_set);
+            }
+            // Return consumes the returned local
+            if let TerminatorKind::Return(val) = &body.blocks[bi].terminator.kind {
+                if let Some(p) = val.as_place() {
+                    if let Some(local) = p.root_local() {
+                        if let Some(&idx) = local_to_idx.get(&local) {
+                            state[idx] = OwnState::Dead;
+                        }
+                    }
+                }
+            }
+
+            if state != block_exit[bi] {
+                block_exit[bi] = state;
+                for succ in body.blocks[bi].successors() {
+                    let si = succ.index();
+                    if !in_wl[si] { in_wl[si] = true; worklist.push(si); }
+                }
+            }
+        }
+
+        // Check: at each Return, all droppable locals should be Dead or Uninit
+        for (bi, block) in body.blocks.iter().enumerate() {
+            if !matches!(block.terminator.kind, TerminatorKind::Return(_)) {
+                continue;
+            }
+            let state = &block_exit[bi];
+            for (i, &(local_id, _, _)) in droppable.iter().enumerate() {
+                let local_name = &body.locals[local_id.index()].name;
+                match state[i] {
+                    OwnState::Live => {
+                        self.err(name, Some(bi), format!(
+                            "ownership: local %{} is live at return (potential leak)", local_name
+                        ));
+                    }
+                    OwnState::Mixed => {
+                        // Mixed means some paths deinit, some don't — a DeinitIf should handle this.
+                        // Only flag if there's no DeinitIf/Branch pattern.
+                    }
+                    OwnState::Uninit | OwnState::Dead => {} // OK
+                }
+            }
+        }
+    }
+
+    /// Transfer function for ownership verification.
+    fn ownership_transfer(
+        &self,
+        kind: &StatementKind,
+        local_to_idx: &HashMap<LocalId, usize>,
+        state: &mut Vec<OwnState>,
+        deinit_func_set: &HashSet<Entity>,
+    ) {
+        match kind {
+            StatementKind::Assign { dest, rvalue } => {
+                if let Some(local) = dest.root_local() {
+                    if let Some(&idx) = local_to_idx.get(&local) {
+                        state[idx] = OwnState::Live;
+                    }
+                }
+                // Construct/EnumVariant/ApplyPartial consume field values
+                match rvalue {
+                    Rvalue::Construct { fields, .. } => {
+                        for (_, v) in fields {
+                            if let Some(p) = v.as_place() {
+                                if let Some(l) = p.root_local() {
+                                    if let Some(&idx) = local_to_idx.get(&l) {
+                                        state[idx] = OwnState::Dead;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Rvalue::EnumVariant { payload, .. } => {
+                        for v in payload {
+                            if let Some(p) = v.as_place() {
+                                if let Some(l) = p.root_local() {
+                                    if let Some(&idx) = local_to_idx.get(&l) {
+                                        state[idx] = OwnState::Dead;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Rvalue::ApplyPartial { captures, .. } => {
+                        for v in captures {
+                            if let Some(p) = v.as_place() {
+                                if let Some(l) = p.root_local() {
+                                    if let Some(&idx) = local_to_idx.get(&l) {
+                                        state[idx] = OwnState::Dead;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            StatementKind::Call { callee, args, .. } => {
+                // Check if this is a deinit call
+                if let Callee::Direct { func, .. } = callee {
+                    if deinit_func_set.contains(func) {
+                        // First arg is the deinited value (MutRef)
+                        if let Some(arg) = args.first() {
+                            if let Some(p) = arg.as_place() {
+                                if let Some(local) = p.root_local() {
+                                    if let Some(&idx) = local_to_idx.get(&local) {
+                                        state[idx] = OwnState::Dead;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Value::Move consumes
+                for arg in args {
+                    if let Value::Move(p) = arg {
+                        if let Some(local) = p.root_local() {
+                            if let Some(&idx) = local_to_idx.get(&local) {
+                                state[idx] = OwnState::Dead;
+                            }
+                        }
+                    }
+                }
+            }
+            StatementKind::ScopeLive(local) => {
+                if let Some(&idx) = local_to_idx.get(local) {
+                    state[idx] = OwnState::Uninit;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Find droppable locals for verification (mirrors drop_elaboration logic).
+    fn find_droppable_locals(
+        &self,
+        body: &MirBody,
+        func: &FunctionDef,
+        types_needing_drop: &HashSet<Entity>,
+        structs_with_droppable: &HashSet<Entity>,
+    ) -> Vec<(LocalId, ScopeId, bool)> {
+        // Construct/EnumVariant targets
+        let mut construct_targets: HashSet<LocalId> = HashSet::new();
+        for block in &body.blocks {
+            for stmt in &block.stmts {
+                match &stmt.kind {
+                    StatementKind::Assign { dest, rvalue: Rvalue::Construct { ty, .. } } => {
+                        if let MirTy::Named { entity, .. } = ty {
+                            if types_needing_drop.contains(entity) || structs_with_droppable.contains(entity) {
+                                if let Some(id) = dest.root_local() { construct_targets.insert(id); }
+                            }
+                        }
+                    }
+                    StatementKind::Assign { dest, rvalue: Rvalue::EnumVariant { enum_ty, .. } } => {
+                        if let MirTy::Named { entity, type_args } = enum_ty {
+                            let droppable_arg = type_args.iter().any(|a| match a {
+                                MirTy::Named { entity, .. } => types_needing_drop.contains(entity) || structs_with_droppable.contains(entity),
+                                _ => false,
+                            });
+                            if types_needing_drop.contains(entity) || droppable_arg {
+                                if let Some(id) = dest.root_local() { construct_targets.insert(id); }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Follow Construct->Copy/Move chains
+        let mut owners: HashSet<LocalId> = HashSet::new();
+        let mut copied_from: HashSet<LocalId> = HashSet::new();
+        for block in &body.blocks {
+            for stmt in &block.stmts {
+                let (dest, src) = match &stmt.kind {
+                    StatementKind::Assign { dest, rvalue: Rvalue::Copy(src) }
+                    | StatementKind::Assign { dest, rvalue: Rvalue::Move(src) } => (dest, src),
+                    _ => continue,
+                };
+                if let (Some(d), Some(s)) = (dest.root_local(), src.root_local()) {
+                    if construct_targets.contains(&s) {
+                        owners.insert(d);
+                        copied_from.insert(s);
+                    }
+                }
+            }
+        }
+
+        let mut result_set: HashSet<LocalId> = owners;
+        for &id in &construct_targets {
+            if !copied_from.contains(&id) { result_set.insert(id); }
+        }
+
+        // Add loop-scoped droppable locals
+        for (&local_id, _) in &body.local_scopes {
+            if drop_elaboration::is_type_droppable(
+                &body.locals[local_id.index()].ty, types_needing_drop, structs_with_droppable,
+            ) {
+                result_set.insert(local_id);
+            }
+        }
+
+        // Add consuming params (params whose type is not Ref/RefMut are owned)
+        for param in &func.params {
+            if is_consuming_param(&param.ty) {
+                if drop_elaboration::is_type_droppable(
+                    &body.locals[param.local.index()].ty, types_needing_drop, structs_with_droppable,
+                ) {
+                    result_set.insert(param.local);
+                }
+            }
+        }
+
+        // Filter non-consuming params
+        let mut result: Vec<(LocalId, ScopeId, bool)> = result_set.into_iter()
+            .filter(|id| {
+                let is_param = id.index() < body.param_count;
+                if is_param {
+                    func.params.iter().any(|p| p.local == *id && is_consuming_param(&p.ty))
+                } else { true }
+            })
+            .map(|id| {
+                let is_param = id.index() < body.param_count;
+                let scope = body.local_scopes.get(&id).copied().unwrap_or(ScopeId::Function);
+                (id, scope, is_param)
+            })
+            .collect();
+        result.sort_by_key(|&(id, _, _)| id.index());
+        result
+    }
+
+    fn verify_terminator(
+        &mut self,
+        func_name: &str,
+        bi: usize,
+        kind: &TerminatorKind,
+        body: &MirBody,
+        func: &FunctionDef,
+    ) {
         match kind {
             TerminatorKind::Jump(target) => {
-                self.verify_block_id(func, bi, *target, body);
+                self.verify_block_id(func_name, bi, *target, body);
             },
             TerminatorKind::Branch {
                 condition,
                 then_block,
                 else_block,
             } => {
-                self.verify_value(func, bi, condition, body);
-                self.verify_block_id(func, bi, *then_block, body);
-                self.verify_block_id(func, bi, *else_block, body);
+                self.verify_value(func_name, bi, condition, body, func);
+                self.verify_block_id(func_name, bi, *then_block, body);
+                self.verify_block_id(func_name, bi, *else_block, body);
             },
             TerminatorKind::Switch {
                 discriminant,
                 cases,
             } => {
-                self.verify_place(func, bi, discriminant, body);
+                self.verify_place(func_name, bi, discriminant, body);
                 for (case, target) in cases {
-                    self.verify_block_id(func, bi, *target, body);
+                    self.verify_block_id(func_name, bi, *target, body);
                     // Guard against display_name leakage on enum variants —
                     // case_by_name keys on short names, not display form.
                     if let crate::SwitchCase::Variant(name) = case
                         && (name.contains('(') || name.contains(')')) {
                             self.err(
-                                func,
+                                func_name,
                                 Some(bi),
                                 format!(
                                     "switch: case name '{}' contains parens (likely display_name leak)",
@@ -472,7 +1048,7 @@ impl<'a> VerifyCtx<'a> {
                 }
             },
             TerminatorKind::Return(val) => {
-                self.verify_value(func, bi, val, body);
+                self.verify_value(func_name, bi, val, body, func);
             },
             TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {},
         }
@@ -490,5 +1066,165 @@ impl<'a> VerifyCtx<'a> {
                 ),
             );
         }
+    }
+}
+
+/// A consuming parameter is one whose type is not a reference wrapper
+/// (`Ref`/`RefMut`). Owned parameters transfer ownership to the callee.
+fn is_consuming_param(ty: &MirTy) -> bool {
+    !matches!(ty, MirTy::Ref(_) | MirTy::RefMut(_))
+}
+
+/// Display name for a [`CopyBehavior`] variant — used in diagnostic
+/// messages.
+fn copy_behavior_name(behavior: &CopyBehavior) -> &'static str {
+    match behavior {
+        CopyBehavior::None => "None",
+        CopyBehavior::Bitwise => "Bitwise",
+        CopyBehavior::Clone(_) => "Clone",
+    }
+}
+
+/// Resolve a [`Place`] to its [`MirTy`] by walking the projection chain.
+///
+/// Returns `None` if the type can't be determined (out-of-bounds local,
+/// missing struct, unknown enum variant, etc.). The verifier treats
+/// `None` as "skip this check" rather than emitting a confusing
+/// secondary diagnostic — the root cause already surfaces via other
+/// rules.
+pub fn place_type(
+    module: &crate::MirModule,
+    body: &MirBody,
+    func: &FunctionDef,
+    place: &Place,
+) -> Option<MirTy> {
+    match place {
+        Place::Local(id) => body.locals.get(id.index()).map(|l| l.ty.clone()),
+        Place::Global(entity) => module
+            .statics
+            .iter()
+            .find(|s| s.entity == *entity)
+            .map(|s| s.ty.clone()),
+        Place::Field { parent, name } => {
+            let parent_ty = place_type(module, body, func, parent)?;
+            let MirTy::Named { entity, type_args } = parent_ty else {
+                return None;
+            };
+            let s = module.structs.iter().find(|s| s.entity == entity)?;
+            let field_id = s.field_by_name(name)?;
+            let field_ty = s.fields.get(field_id.index()).map(|f| f.ty.clone())?;
+            Some(substitute_struct_field_ty(&field_ty, s, &type_args))
+        },
+        Place::Index { parent, index } => {
+            let parent_ty = place_type(module, body, func, parent)?;
+            match parent_ty {
+                MirTy::Tuple(mut elems) if *index < elems.len() => Some(elems.swap_remove(*index)),
+                MirTy::Named { entity, type_args } => {
+                    let s = module.structs.iter().find(|s| s.entity == entity)?;
+                    let field = s.fields.get(*index)?;
+                    Some(substitute_struct_field_ty(&field.ty, s, &type_args))
+                },
+                _ => None,
+            }
+        },
+        Place::Downcast { parent, variant } => {
+            let parent_ty = place_type(module, body, func, parent)?;
+            let MirTy::Named { entity, type_args } = parent_ty else {
+                return None;
+            };
+            let e = module.enums.iter().find(|e| e.entity == entity)?;
+            let case = e.cases.iter().find(|c| c.name == *variant)?;
+            // The downcast yields the payload struct type, parameterized
+            // by the enum's type args.
+            let payload_def = module.structs.get(case.payload_struct.index())?;
+            Some(MirTy::Named {
+                entity: payload_def.entity,
+                type_args,
+            })
+        },
+        Place::Deref(inner) => {
+            let inner_ty = place_type(module, body, func, inner)?;
+            match inner_ty {
+                MirTy::Ref(t) | MirTy::RefMut(t) | MirTy::Pointer(t) => Some(*t),
+                _ => None,
+            }
+        },
+    }
+}
+
+/// Apply a struct's type-param substitutions to a field type.
+fn substitute_struct_field_ty(
+    field_ty: &MirTy,
+    struct_def: &crate::StructDef,
+    type_args: &[MirTy],
+) -> MirTy {
+    let subst: std::collections::HashMap<Entity, MirTy> = struct_def
+        .type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(tp, arg)| (tp.entity, arg.clone()))
+        .collect();
+    substitute_type_locally(field_ty, &subst)
+}
+
+/// Single-shot type-param substitution — duplicates `kestrel-codegen`'s
+/// `substitute_type` to keep the verifier free of that dependency.
+fn substitute_type_locally(ty: &MirTy, subst: &std::collections::HashMap<Entity, MirTy>) -> MirTy {
+    match ty {
+        MirTy::TypeParam(e) => subst.get(e).cloned().unwrap_or_else(|| ty.clone()),
+        MirTy::Ref(inner) => MirTy::Ref(Box::new(substitute_type_locally(inner, subst))),
+        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(substitute_type_locally(inner, subst))),
+        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(substitute_type_locally(inner, subst))),
+        MirTy::Tuple(elems) => MirTy::Tuple(
+            elems
+                .iter()
+                .map(|e| substitute_type_locally(e, subst))
+                .collect(),
+        ),
+        MirTy::Named { entity, type_args } => MirTy::Named {
+            entity: *entity,
+            type_args: type_args
+                .iter()
+                .map(|a| substitute_type_locally(a, subst))
+                .collect(),
+        },
+        MirTy::FuncThin { params, ret } => MirTy::FuncThin {
+            params: params.iter().map(|p| substitute_type_locally(p, subst)).collect(),
+            ret: Box::new(substitute_type_locally(ret, subst)),
+        },
+        MirTy::FuncThick { params, ret } => MirTy::FuncThick {
+            params: params.iter().map(|p| substitute_type_locally(p, subst)).collect(),
+            ret: Box::new(substitute_type_locally(ret, subst)),
+        },
+        _ => ty.clone(),
+    }
+}
+
+/// Walk a place's projection chain looking for a `Deref(p)` whose inner
+/// type is a `Ref(_)` or `RefMut(_)`. Returns `Some(reason)` if such a
+/// projection is found, else `None`.
+///
+/// Moving through a borrow would invalidate the caller's reference, so
+/// the verifier flags it.
+fn move_root_violation(
+    module: &crate::MirModule,
+    body: &MirBody,
+    func: &FunctionDef,
+    place: &Place,
+) -> Option<String> {
+    match place {
+        Place::Local(_) | Place::Global(_) => None,
+        Place::Field { parent, .. }
+        | Place::Index { parent, .. }
+        | Place::Downcast { parent, .. } => move_root_violation(module, body, func, parent),
+        Place::Deref(inner) => {
+            let inner_ty = place_type(module, body, func, inner)?;
+            match &inner_ty {
+                MirTy::Ref(_) => Some("deref of `&T`".into()),
+                MirTy::RefMut(_) => Some("deref of `&var T`".into()),
+                // Raw pointer deref is allowed (unsafe, but not a borrow).
+                _ => move_root_violation(module, body, func, inner),
+            }
+        },
     }
 }

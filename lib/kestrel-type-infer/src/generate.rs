@@ -4,7 +4,7 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::{Callable, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
@@ -429,11 +429,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // errors point at the mismatched expression, not the if keyword
                 let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
                 ctx.equal(then_tv, result_tv, then_span);
-                // Guard-let desugars to `if cond {} else { body }` where the
+                // Guard desugars to `if cond {} else { body }` where the
                 // else block is required to diverge. Don't equate its value
-                // type with the empty then branch — the guard_let_divergence
+                // type with the empty then branch — the guard divergence
                 // analyzer is responsible for enforcing divergence.
-                if !is_guard_let_if(hir, id) {
+                if !is_guard_if(hir, id) {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
                     ctx.equal(else_tv, result_tv, else_span);
@@ -512,7 +512,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 let val_tv = gen_expr(ctx, hir, *val);
-                ctx.coerce(val_tv, ctx.return_ty, id, span.clone());
+                ctx.coerce(val_tv, ctx.return_ty, *val, span.clone());
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
@@ -530,7 +530,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
-            ctx.coerce(value_tv, target_tv, id, span.clone());
+            ctx.coerce(value_tv, target_tv, *value, span.clone());
             ctx.tuple(vec![]) // assignment returns unit
         },
 
@@ -1003,6 +1003,9 @@ fn gen_struct_init(
         }
     }
 
+    // Track the matched init entity for effect wrapping
+    let mut matched_init: Option<Entity> = None;
+
     if !inits.is_empty() {
         // Collect all inits matching by arity + label pattern
         let matched: Vec<Entity> = inits
@@ -1021,6 +1024,7 @@ fn gen_struct_init(
         // type-directed disambiguation which happens during solving.
         if let [init] = matched.as_slice() {
             let init = *init;
+            matched_init = Some(init);
             // Record which init was selected so MIR lowering can use the init entity
             ctx.resolutions.insert(expr_id, init);
             // Build subs that includes both struct type params AND init's own type params
@@ -1053,7 +1057,7 @@ fn gen_struct_init(
                 for (arg, param_ty) in args.iter().zip(param_tys.iter()) {
                     if let Some(hir_ty) = param_ty {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
-                        ctx.coerce(arg.ty, param_tv, expr_id, span.clone());
+                        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
                     }
                 }
             }
@@ -1142,14 +1146,65 @@ fn gen_struct_init(
                 root,
             }) {
                 let field_tv = lower_hir_ty_with_subs(ctx, &hir_ty, &struct_subs);
-                ctx.coerce(arg.ty, field_tv, expr_id, span.clone());
+                ctx.coerce(arg.ty, field_tv, arg.value, span.clone());
             }
         }
     }
 
-    // Record this expr's type and return
-    ctx.expr_types.insert(expr_id, result_tv);
-    result_tv
+    // Wrap result through type operators for effectful inits (Self? or Self throws E)
+    let final_tv = if let Some(init) = matched_init {
+        wrap_init_result(ctx, init, result_tv, &struct_subs, span)
+    } else {
+        result_tv
+    };
+
+    ctx.expr_types.insert(expr_id, final_tv);
+    final_tv
+}
+
+// ===== Init effect wrapping =====
+
+/// Wrap a TyVar for an effectful init call site: `Self` → `Self?` or `Self throws E`.
+///
+/// Uses the init's `LowerTypeAnnotation` (e.g. `Optional[()]` or `Result[(), E]`) to get
+/// the wrapper entity, then substitutes the inner type for the first type arg.
+fn wrap_init_result(
+    ctx: &mut InferCtx<'_>,
+    init_entity: Entity,
+    inner_tv: TyVar,
+    struct_subs: &[(Entity, TyVar)],
+    _span: &Span,
+) -> TyVar {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    if qctx.get::<InitEffect>(init_entity).is_none() {
+        return inner_tv;
+    }
+
+    // The init's TypeAnnotation is ()? or () throws E, lowered to HirTy with the
+    // actual wrapper entity (Optional enum or Result enum). Replace the first type arg
+    // (which is ()) with the struct type to get Self? or Self throws E.
+    let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
+        entity: init_entity,
+        root,
+    }) else {
+        return inner_tv;
+    };
+
+    match &hir_ty {
+        HirTy::Enum { entity, args, .. } | HirTy::Struct { entity, args, .. } => {
+            let mut wrapped_args = Vec::with_capacity(args.len());
+            // First arg is () — replace with inner_tv (Self)
+            wrapped_args.push(inner_tv);
+            // Remaining args (e.g. error type E) — lower with struct subs
+            for arg in args.iter().skip(1) {
+                wrapped_args.push(lower_hir_ty_with_subs(ctx, arg, struct_subs));
+            }
+            ctx.named(*entity, wrapped_args)
+        }
+        _ => inner_tv,
+    }
 }
 
 // ===== Helpers =====
@@ -1162,6 +1217,7 @@ fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> 
             CallArg {
                 label: arg.label.clone(),
                 ty,
+                value: arg.value,
             }
         })
         .collect()
@@ -1279,6 +1335,39 @@ fn gen_closure(
 /// Instantiate an entity, using explicit type args if provided.
 /// Instantiate a generic entity, returning (entity_type, fresh_type_arg_vars).
 /// The type arg vars can be recorded in ctx.type_args for later retrieval.
+/// True when `protocol` is the enclosing Self for the current body —
+/// i.e. some ancestor of `ctx.owner` is either `protocol` itself or an
+/// `Extension` whose target resolves to `protocol`.
+///
+/// Used to lower `Def(Protocol)` values as `SelfType` rather than `Named`,
+/// so MIR sees `MirTy::SelfType` and monomorphization substitutes the
+/// concrete conforming type at the call site.
+fn is_enclosing_self_protocol(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    let qctx = ctx.query_ctx;
+    let mut current = Some(ctx.owner);
+    while let Some(entity) = current {
+        match qctx.get::<NodeKind>(entity) {
+            Some(&NodeKind::Protocol) if entity == protocol => return true,
+            Some(&NodeKind::Extension) => {
+                if qctx
+                    .query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: entity,
+                        root: ctx.root,
+                    })
+                    == Some(protocol)
+                {
+                    return true;
+                }
+            },
+            // Struct/Enum/Module/etc. — Self refers to those, not the protocol.
+            Some(&NodeKind::Struct | &NodeKind::Enum) => return false,
+            _ => {},
+        }
+        current = qctx.parent_of(entity);
+    }
+    false
+}
+
 fn instantiate_entity_with_args(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -1428,7 +1517,7 @@ fn instantiate_entity_inner(
                     .collect();
 
                 let ret_hir = qctx.query(LowerCallableReturnType { entity, root });
-                let ret_tv = lower_hir_ty_with_subs(ctx, &ret_hir, &subs);
+                let ret_tv = lower_return_ty_with_opaque(ctx, &ret_hir, entity, &subs);
 
                 ctx.function(param_tvs, ret_tv)
             } else {
@@ -1495,7 +1584,13 @@ fn instantiate_entity_inner(
             }
         },
 
-        // Types (struct, enum, protocol): return Named type with fresh args
+        // Types (struct, enum, protocol): return Named type with fresh args.
+        // Protocols reached as values (`Self()`, `Self.method()`) from inside
+        // the protocol's own body or an extension on it must surface as
+        // `SelfType` so monomorphization substitutes the concrete conformer.
+        Some(NodeKind::Protocol) if is_enclosing_self_protocol(ctx, entity) => {
+            ctx.self_type_ty(entity)
+        },
         Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
             ctx.named(entity, fresh_type_args)
         },
@@ -1665,6 +1760,90 @@ fn literal_protocol(ctx: &InferCtx<'_>, literal: LiteralKind) -> Option<Entity> 
 }
 
 /// Convert HirTy to TyVar, substituting type params found in `subs`.
+/// Lower a callee's return type, creating TyKind::Opaque for any `HirTy::Opaque`
+/// found at any depth in the type tree (e.g. `Optional[some Shape]`).
+fn lower_return_ty_with_opaque(
+    ctx: &mut InferCtx<'_>,
+    ret_hir: &HirTy,
+    callee: Entity,
+    subs: &[(Entity, TyVar)],
+) -> TyVar {
+    match ret_hir {
+        HirTy::Opaque { bounds, .. } => {
+            if ctx.owner == callee {
+                return ctx.return_ty;
+            }
+            lower_opaque_to_tyvar(ctx, bounds, callee, subs)
+        },
+        // Recurse into structural types so nested opaques are handled
+        HirTy::Struct { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> = args
+                .iter()
+                .map(|a| lower_return_ty_with_opaque(ctx, a, callee, subs))
+                .collect();
+            ctx.struct_ty(*entity, arg_tvs)
+        },
+        HirTy::Enum { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> = args
+                .iter()
+                .map(|a| lower_return_ty_with_opaque(ctx, a, callee, subs))
+                .collect();
+            ctx.enum_ty(*entity, arg_tvs)
+        },
+        HirTy::Tuple(elems, _) => {
+            let tvs: Vec<TyVar> = elems
+                .iter()
+                .map(|e| lower_return_ty_with_opaque(ctx, e, callee, subs))
+                .collect();
+            ctx.tuple(tvs)
+        },
+        HirTy::Function { params, ret, .. } => {
+            let param_tvs: Vec<TyVar> = params
+                .iter()
+                .map(|p| lower_return_ty_with_opaque(ctx, p, callee, subs))
+                .collect();
+            let ret_tv = lower_return_ty_with_opaque(ctx, ret, callee, subs);
+            ctx.function(param_tvs, ret_tv)
+        },
+        // Non-structural types: delegate to the standard path
+        _ => lower_hir_ty_with_subs(ctx, ret_hir, subs),
+    }
+}
+
+/// Create a TyKind::Opaque TyVar from opaque bounds.
+fn lower_opaque_to_tyvar(
+    ctx: &mut InferCtx<'_>,
+    bounds: &[HirTy],
+    callee: Entity,
+    subs: &[(Entity, TyVar)],
+) -> TyVar {
+    let mut opaque_bounds = Vec::new();
+    for bound in bounds {
+        let bound_tv = lower_hir_ty_with_subs(ctx, bound, subs);
+        let resolved = ctx.resolve(bound_tv);
+        if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Protocol {
+            entity: proto,
+            args,
+        }) = &ctx.types[resolved.0 as usize]
+        {
+            opaque_bounds.push((*proto, args.clone()));
+        }
+    }
+
+    let origin_args: Vec<TyVar> = subs.iter().map(|(_, tv)| *tv).collect();
+
+    let tv = ctx.fresh();
+    let resolved = ctx.resolve(tv);
+    ctx.types[resolved.0 as usize] =
+        crate::ty::TySlot::Resolved(crate::ty::TyKind::Opaque {
+            origin: callee,
+            bounds: opaque_bounds,
+            origin_args,
+            index: 0,
+        });
+    tv
+}
+
 /// Used when instantiating generic entities: type params become fresh TyVars.
 /// Also substitutes associated-type entities (where-clause equalities) in subs.
 pub(crate) fn lower_hir_ty_with_subs(
@@ -1694,6 +1873,11 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .collect();
             ctx.protocol_ty(*entity, arg_tvs)
         },
+        // Opaque types: in `lower_hir_ty_with_subs`, HirTy::Opaque is only
+        // reached for the defining body's own return type annotation, which
+        // `create_return_type` intercepts. If we get here, fall through to a
+        // fresh TyVar (defensive — shouldn't be reached in normal flow).
+        HirTy::Opaque { .. } => ctx.fresh(),
         HirTy::AliasUse { entity, args, .. } => {
             // Zero-arg alias uses participate in associated-type substitution:
             // where clauses map specific TypeAlias entities to TyVars.
@@ -1783,11 +1967,11 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
 }
 
 /// Extract the span from an expression.
-/// Whether this If expression is the desugared form of a guard-let.
-/// Guard-let lowers to `HirStmt::Expr { HirExpr::If { then: empty, else: body } }`
-/// and the statement id is tracked in `hir.guard_let_stmts`.
-fn is_guard_let_if(hir: &HirBody, expr_id: HirExprId) -> bool {
-    hir.guard_let_stmts.iter().any(
+/// Whether this If expression is the desugared form of a guard statement.
+/// Guard lowers to `HirStmt::Expr { HirExpr::If { then: empty, else: body } }`
+/// and the statement id is tracked in `hir.guard_stmts`.
+fn is_guard_if(hir: &HirBody, expr_id: HirExprId) -> bool {
+    hir.guard_stmts.iter().any(
         |&stmt_id| matches!(&hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id),
     )
 }
@@ -1847,6 +2031,7 @@ fn hir_ty_span(ty: &HirTy) -> Span {
         | HirTy::Function { span, .. }
         | HirTy::Param(_, span)
         | HirTy::SelfType(_, span)
+        | HirTy::Opaque { span, .. }
         | HirTy::Never(span)
         | HirTy::Infer(span)
         | HirTy::Error(span) => span.clone(),

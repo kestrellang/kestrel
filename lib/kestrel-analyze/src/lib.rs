@@ -40,7 +40,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Body checks
     r.add_body_check(body::exhaustive_return::ExhaustiveReturnAnalyzer);
     r.add_body_check(body::dead_code::DeadCodeAnalyzer);
-    r.add_body_check(body::guard_let::GuardLetDivergenceAnalyzer);
+    r.add_body_check(body::guard::GuardDivergenceAnalyzer);
     r.add_body_check(body::type_check::TypeCheckAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
@@ -50,7 +50,6 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::definite_assignment::DefiniteAssignmentAnalyzer);
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
-    r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
 
     // Wave 6: Pattern checks
@@ -81,6 +80,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
+    r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
     r.add_decl_check(decl::protocol_field_conformance::ProtocolFieldConformanceAnalyzer);
     r.add_decl_check(decl::generics::GenericsAnalyzer);

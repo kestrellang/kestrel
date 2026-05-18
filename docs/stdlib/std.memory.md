@@ -69,6 +69,256 @@ returned pointer instead.
 
 _Defined in `lang/std/memory/allocator.ks`._
 
+## struct `ArraySlice`
+
+```kestrel
+public struct ArraySlice[T] { /* private fields */ }
+```
+
+Non-owning view over a contiguous run of `T` values.
+
+`Slice` is the standard "borrow" type for arrays, buffers, and any
+other contiguous storage: it stores a pointer + length and provides
+safe and unchecked indexing, sub-slicing, iteration, and pattern
+matching. The slice does **not** track or extend the lifetime of the
+underlying storage — keeping a slice past the end of its source is a
+use-after-free.
+
+### Examples
+
+```
+let arr = [1, 2, 3, 4];
+let s = arr.asSlice();
+s[safe: 0]                    // .Some(1)
+s[safe: 99]                   // .None
+for x in s.iter() { print(x) }
+```
+
+### Memory Model
+
+Non-owning. Drop the source (`Array`, `Buffer`, literal scope) and the
+slice becomes dangling. Slices freely copy — they're just `(ptr, len)`
+pairs.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Members
+
+#### initializer `From Pointer`
+
+```kestrel
+public init(pointer: Pointer[T], count: Int64)
+```
+
+Builds a slice from an existing pointer and element count. The
+caller is responsible for ensuring `count` elements live at `pointer`.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Element count.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `first`
+
+```kestrel
+public func first() -> Optional[T]
+```
+
+First element, or `.None` for an empty slice.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when `count == 0`.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `last`
+
+```kestrel
+public func last() -> Optional[T]
+```
+
+Last element, or `.None` for an empty slice.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `pointer`
+
+```kestrel
+public var pointer: Pointer[T] { get }
+```
+
+Pointer to the first element. `pointer.offset(by: i)` reaches
+element `i` (0-indexed).
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `ArrayMatchable`
+
+#### typealias `Element`
+
+```kestrel
+type Element = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `matchGet`
+
+```kestrel
+public func matchGet(Int64) -> T
+```
+
+Compiler-driven element read; safe to skip the bounds check
+because the matcher emits `index < matchLength()` first.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `matchLength`
+
+```kestrel
+public func matchLength() -> Int64
+```
+
+Element count, exposed to the pattern matcher.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `matchSlice`
+
+```kestrel
+public func matchSlice(Int64, Int64) -> ArraySlice[T]
+```
+
+Sub-slice for rest-pattern bindings (`..rest`). As above, the
+matcher guarantees `0 <= from <= to <= matchLength()`.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Slice`
+
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> ArraySlice[T]
+```
+
+Returns `self` — `ArraySlice` is already the borrowed view.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `ensureUnique`
+
+```kestrel
+public mutating func ensureUnique()
+```
+
+No-op — `ArraySlice` is a non-owning view with no COW barrier.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = ArraySliceIterator[T]
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> ArraySliceIterator[T]
+```
+
+Forward iterator over the elements.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+func isEqual(to: Self) -> Bool
+```
+
+Returns `true` iff `self` and `other` are considered equal. Should
+be reflexive, symmetric, and transitive — `Hashable` requires equal
+values to hash equal, so don't drift from those laws.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+## struct `ArraySliceIterator`
+
+```kestrel
+public struct ArraySliceIterator[T] { /* private fields */ }
+```
+
+Forward iterator over an `ArraySlice[T]`. Holds a moving pointer and a
+remaining count; advancing reads through the pointer.
+
+### Representation
+
+A `Pointer[T]` cursor and an `Int64` countdown.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Members
+
+#### initializer `From Storage`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64)
+```
+
+Builds an iterator from a starting pointer and remaining count.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[T]
+```
+
+Yields the next element, or `.None` when the count reaches zero.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 ## struct `Buffer`
 
 ```kestrel
@@ -129,10 +379,10 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `asSlice`
 
 ```kestrel
-public func asSlice() -> Slice[T]
+public func asSlice() -> ArraySlice[T]
 ```
 
-Returns a `Slice[T]` over the entire buffer. The slice does not
+Returns a `ArraySlice[T]` over the entire buffer. The slice does not
 extend the buffer's lifetime; callers must keep the buffer alive
 for as long as they use the slice.
 
@@ -207,7 +457,7 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `slice`
 
 ```kestrel
-public func slice(from: Int64, to: Int64) -> Slice[T]?
+public func slice(from: Int64, to: Int64) -> ArraySlice[T]?
 ```
 
 Returns a slice over `[start, end)`, or `.None` when the range
@@ -240,6 +490,128 @@ Writes `value` to slot `index`. Returns `false` (and does
 nothing) when out of range.
 
 _Defined in `lang/std/memory/buffer.ks`._
+
+## struct `CowBox`
+
+```kestrel
+public struct CowBox[T] where T: Cloneable { /* private fields */ }
+```
+
+Copy-on-write wrapper around `RcBox[T]`.
+
+Mutable owners use `CowBox`; read-only shared owners (like
+`StringSlice`) hold the inner `RcBox` directly via `shareBox()`.
+The mutation protocol is `write()` → modify → `setValue()`.
+
+### Examples
+
+```
+var box = CowBox(MyStorage());
+var s = box.write();   // COW barrier — clones if shared
+s.len = s.len + 1;
+box.setValue(s);        // write back
+```
+
+### Representation
+
+A single `RcBox[T]` field.
+
+### Memory Model
+
+Same as `RcBox`: non-atomic refcount. Cloning bumps the count;
+`write` splits off a private copy when shared.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+### Members
+
+#### initializer `From Value`
+
+```kestrel
+public init(T)
+```
+
+Allocates fresh storage holding `value` with refcount 1.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### initializer `Inner`
+
+```kestrel
+public init(inner: RcBox[T])
+```
+
+Adopts an existing `RcBox` without allocating.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `isUnique`
+
+```kestrel
+public func isUnique() -> Bool
+```
+
+Returns `true` when no other clone shares this storage.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `read`
+
+```kestrel
+public func read() -> T
+```
+
+Read access — no clone, no refcount check.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `setValue`
+
+```kestrel
+public func setValue(consuming T)
+```
+
+Writes `value` into the storage in place. Only valid after
+a preceding `write()` call (which ensures uniqueness).
+Takes `value` by consuming so the drop pass sees the caller's
+local as moved (Dead) — prevents double-free of shared buffers.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `shareBox`
+
+```kestrel
+public func shareBox() -> RcBox[T]
+```
+
+Returns a shared `RcBox` pointing at the same storage
+(refcount bumped). Use this to hand read-only access to
+types like `StringSlice`.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `write`
+
+```kestrel
+public mutating func write() -> T
+```
+
+Write access — clones storage if shared, then returns the
+(now unique) value. Caller modifies and calls `setValue`.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> CowBox[T]
+```
+
+Shares storage with the returned clone (refcount bump).
+
+_Defined in `lang/std/memory/cowbox.ks`._
 
 ## typealias `GlobalAllocator`
 
@@ -365,10 +737,10 @@ _Defined in `lang/std/memory/layout.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Layout) -> Bool
+public func isEqual(to: Layout) -> Bool
 ```
 
 Equal when both fields match.
@@ -745,17 +1117,17 @@ _Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Pointer[T]) -> Bool
+public func isEqual(to: Pointer[T]) -> Bool
 ```
 
 Address-based equality.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -790,7 +1162,7 @@ hashing are address-based.
 ### Examples
 
 ```
-let p = RawPointer.nilPointer();
+let p = RawPointer.nullPointer();
 p.isNull                                // true
 let typed: Pointer[Int64] = p.cast[Int64]()
 ```
@@ -862,10 +1234,10 @@ Convenience for `address == 0`.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `nilPointer`
+#### function `nullPointer`
 
 ```kestrel
-public static func nilPointer() -> RawPointer
+public static func nullPointer() -> RawPointer
 ```
 
 Returns the canonical null pointer.
@@ -896,10 +1268,10 @@ _Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(RawPointer) -> Bool
+public func isEqual(to: RawPointer) -> Bool
 ```
 
 Address-based equality. Two `RawPointer`s pointing into different
@@ -907,7 +1279,7 @@ allocations are equal iff their addresses coincide.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -1047,288 +1419,16 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### function `setValue`
 
 ```kestrel
-public func setValue(T)
+public func setValue(consuming T)
 ```
 
 Overwrites the wrapped value in place. Safe only when this is the
 unique owner (`isUnique() == true`); otherwise other clones see the
 new value, defeating COW. The COW types check `isUnique` before
 calling this and `deepClone` otherwise.
+Takes `value` by consuming — the caller's copy is dead after this.
 
 _Defined in `lang/std/memory/rcbox.ks`._
-
-## struct `Slice`
-
-```kestrel
-public struct Slice[T] { /* private fields */ }
-```
-
-Non-owning view over a contiguous run of `T` values.
-
-`Slice` is the standard "borrow" type for arrays, buffers, and any
-other contiguous storage: it stores a pointer + length and provides
-safe and unchecked indexing, sub-slicing, iteration, and pattern
-matching. The slice does **not** track or extend the lifetime of the
-underlying storage — keeping a slice past the end of its source is a
-use-after-free.
-
-### Examples
-
-```
-let arr = [1, 2, 3, 4];
-let s = arr.asSlice();
-s[safe: 0]                    // .Some(1)
-s[safe: 99]                   // .None
-for x in s.iter() { print(x) }
-```
-
-### Memory Model
-
-Non-owning. Drop the source (`Array`, `Buffer`, literal scope) and the
-slice becomes dangling. Slices freely copy — they're just `(ptr, len)`
-pairs.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Members
-
-#### subscript `Checked Index`
-
-```kestrel
-public subscript[I](checked: I) -> I.SliceYield? { get }
-```
-
-Reads at `index`, returning `.None` on out-of-bounds.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### subscript `Clamping`
-
-```kestrel
-public subscript[I](clamped: I) -> I.SliceClampedYield { get set }
-```
-
-Reads or writes at `index` with bounds saturated to `[0, count)`.
-`Int64` yields `T?` (`None` on empty slice); range indexes yield
-`Slice[T]`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### initializer `From Pointer`
-
-```kestrel
-public init(pointer: Pointer[T], count: Int64)
-```
-
-Builds a slice from an existing pointer and element count. The
-caller is responsible for ensuring `count` elements live at `pointer`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### subscript `Indexed`
-
-```kestrel
-public subscript[I](I) -> I.SliceYield { get set }
-```
-
-Reads or writes at `index`, panicking on out-of-bounds.
-
-Generic over `SliceIndex[T]`: `Int64` reads/writes a single
-element, `Range[Int64]` and `ClosedRange[Int64]` read or replace
-a sub-slice. Range writes require the source slice's length to
-match the range's length and panic otherwise. Sub-slices alias
-the receiver's storage; don't outlive it.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### subscript `Unchecked Index`
-
-```kestrel
-public subscript[I](unchecked: I) -> I.SliceYield { get set }
-```
-
-Reads or writes at `index` without a bounds check.
-
-##### Safety
-
-Undefined behavior if the access falls outside `[0, count)`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### subscript `Wrapping`
-
-```kestrel
-public subscript[I](wrapped: I) -> I.SliceWrappedYield { get set }
-```
-
-Reads or writes at `index` using modulo-wrapping. Yields `T?` so
-the empty-slice case can surface as `None`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Element count.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `first`
-
-```kestrel
-public func first() -> Optional[T]
-```
-
-First element, or `.None` for an empty slice.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `isEmpty`
-
-```kestrel
-public var isEmpty: Bool { get }
-```
-
-`true` when `count == 0`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `iter`
-
-```kestrel
-public func iter() -> SliceIterator[T]
-```
-
-Forward iterator over the elements.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `last`
-
-```kestrel
-public func last() -> Optional[T]
-```
-
-Last element, or `.None` for an empty slice.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `pointer`
-
-```kestrel
-public var pointer: Pointer[T] { get }
-```
-
-Pointer to the first element. `pointer.offset(by: i)` reaches
-element `i` (0-indexed).
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `Equatable`
-
-#### function `equals`
-
-```kestrel
-public func equals(Slice[T]) -> Bool
-```
-
-Length-only equality (TODO: deepen to element-wise once an
-iterator-based comparison is wired up). Not a true structural
-equality yet — handle with care in tests.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `ArrayMatchable`
-
-#### typealias `Element`
-
-```kestrel
-type Element = T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `matchGet`
-
-```kestrel
-public func matchGet(Int64) -> T
-```
-
-Compiler-driven element read; safe to skip the bounds check
-because the matcher emits `index < matchLength()` first.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `matchLength`
-
-```kestrel
-public func matchLength() -> Int64
-```
-
-Element count, exposed to the pattern matcher.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `matchSlice`
-
-```kestrel
-public func matchSlice(Int64, Int64) -> Slice[T]
-```
-
-Sub-slice for rest-pattern bindings (`..rest`). As above, the
-matcher guarantees `0 <= from <= to <= matchLength()`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-## struct `SliceIterator`
-
-```kestrel
-public struct SliceIterator[T] { /* private fields */ }
-```
-
-Forward iterator over a `Slice[T]`. Holds a moving pointer and a
-remaining count; advancing reads through the pointer.
-
-### Representation
-
-A `Pointer[T]` cursor and an `Int64` countdown.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Members
-
-#### initializer `From Storage`
-
-```kestrel
-public init(ptr: Pointer[T], remaining: Int64)
-```
-
-Builds an iterator from a starting pointer and remaining count.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `Iterator`
-
-#### typealias `Item`
-
-```kestrel
-type Item = T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `next`
-
-```kestrel
-public mutating func next() -> Optional[T]
-```
-
-Yields the next element, or `.None` when the count reaches zero.
-
-_Defined in `lang/std/memory/pointer.ks`._
 
 ## struct `SystemAllocator`
 

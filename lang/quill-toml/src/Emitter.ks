@@ -98,9 +98,9 @@ func emitTomlValue(value: Value, mutating buf: String) {
                 buf.append("false")
             }
         },
-        .Int(n) => buf.append(n.format()),
+        .Int(n) => buf.append("\(n)"),
         .Float(f) => {
-            let s = f.format();
+            let s = "\(f)";
             buf.append(s);
             // Ensure float has decimal point
             var hasDot = false;
@@ -192,7 +192,7 @@ func emitTomlString(s: String, mutating buf: String) {
         } else if b == 8 {
             buf.append("\\b")
         } else {
-            buf.appendByte(b)
+            buf.append(char: Char(UInt32(from: b)).unwrap())
         }
         i = i + 1
     }

@@ -30,7 +30,7 @@ as a single `lang.f32`.
 ```
 let pi = Float64.pi;
 let area = pi * radius * radius;
-let s = area.format(options: .{precision: 2});  // "314.16"
+let s = area.format(.{precision: 2});  // "314.16"
 ```
 
 ```
@@ -150,6 +150,30 @@ let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a `Float32` from a string. Recognises decimal
+(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
+tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
+(case-insensitive). Returns `null` for any other input.
+
+##### Examples
+
+```
+Float32(parsing: "3.14");      // Some(3.14)
+Float32(parsing: "-2.5e10");   // Some(-2.5e10)
+Float32(parsing: "inf");       // Some(infinity)
+Float32(parsing: "nan");       // Some(nan)
+Float32(parsing: "abc");       // None
+Float32(parsing: "");          // None
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### function `abs`
 
 ```kestrel
@@ -227,10 +251,10 @@ from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
 ##### Examples
 
 ```
-(1.0).atan2(x: 1.0);    //  π/4   (Q1)
-(1.0).atan2(x: -1.0);   //  3π/4  (Q2)
-(-1.0).atan2(x: -1.0);  // -3π/4  (Q3)
-(-1.0).atan2(x: 1.0);   // -π/4   (Q4)
+(1.0).atan2(1.0);    //  π/4   (Q1)
+(1.0).atan2(-1.0);   //  3π/4  (Q2)
+(-1.0).atan2(-1.0);  // -3π/4  (Q3)
+(-1.0).atan2(1.0);   // -π/4   (Q4)
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -284,9 +308,9 @@ must ensure `min <= max`.
 ##### Examples
 
 ```
-(0.5).clamp(min: 0.0, max: 1.0);   // 0.5
-(-0.5).clamp(min: 0.0, max: 1.0);  // 0.0
-(1.5).clamp(min: 0.0, max: 1.0);   // 1.0
+(0.5).clamp(0.0, 1.0);   // 0.5
+(-0.5).clamp(0.0, 1.0);  // 0.0
+(1.5).clamp(0.0, 1.0);   // 1.0
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -414,7 +438,7 @@ More accurate (and often faster) than separate `multiply`/`add`.
 ##### Examples
 
 ```
-(2.0).fma(a: 3.0, b: 4.0);   // 10.0
+(2.0).fma(3.0, 4.0);   // 10.0
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -448,7 +472,7 @@ avoids intermediate overflow when one operand is very large.
 ##### Examples
 
 ```
-(3.0).hypot(other: 4.0);  // 5.0
+(3.0).hypot(4.0);  // 5.0
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -600,10 +624,10 @@ Linear interpolation — `self + (other - self) * t`. `t == 0` returns
 ##### Examples
 
 ```
-(0.0).lerp(to: 10.0, t: 0.0);   //  0.0
-(0.0).lerp(to: 10.0, t: 0.5);   //  5.0
-(0.0).lerp(to: 10.0, t: 1.0);   // 10.0
-(0.0).lerp(to: 10.0, t: 0.25);  //  2.5
+(0.0).lerp(to: 10.0, 0.0);   //  0.0
+(0.0).lerp(to: 10.0, 0.5);   //  5.0
+(0.0).lerp(to: 10.0, 1.0);   // 10.0
+(0.0).lerp(to: 10.0, 0.25);  //  2.5
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -762,30 +786,6 @@ fixed points; the largest finite value steps up to `+inf`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Float32?
-```
-
-Parses a `Float32` from a string. Recognises decimal
-(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
-tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
-(case-insensitive). Returns `None` for any other input.
-
-##### Examples
-
-```
-Float32.parse(string: "3.14");      // Some(3.14)
-Float32.parse(string: "-2.5e10");   // Some(-2.5e10)
-Float32.parse(string: "inf");       // Some(infinity)
-Float32.parse(string: "nan");       // Some(nan)
-Float32.parse(string: "abc");       // None
-Float32.parse(string: "");          // None
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### field `pi`
 
 ```kestrel
@@ -808,9 +808,9 @@ return NaN.
 ##### Examples
 
 ```
-(2.0).pow(exponent: 10.0);   // 1024.0
-(2.0).pow(exponent: 0.5);    // sqrt(2)
-(-2.0).pow(exponent: 0.5);   // nan
+(2.0).pow(10.0);   // 1024.0
+(2.0).pow(0.5);    // sqrt(2)
+(-2.0).pow(0.5);   // nan
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -828,8 +828,8 @@ exponents invert.
 ##### Examples
 
 ```
-(2.0).powi(exponent: 10);   // 1024.0
-(2.0).powi(exponent: -1);   // 0.5
+(2.0).powi(10);   // 1024.0
+(2.0).powi(-1);   // 0.5
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1051,20 +1051,20 @@ answer.
 ##### Examples
 
 ```
-(1.0).compare(other: 2.0);              // .Less
-(2.0).compare(other: 2.0);              // .Equal
-(3.0).compare(other: 2.0);              // .Greater
-(1.0).compare(other: Float64.infinity); // .Less
+(1.0).compare(2.0);              // .Less
+(2.0).compare(2.0);              // .Equal
+(3.0).compare(2.0);              // .Greater
+(1.0).compare(Float64.infinity); // .Less
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Float32) -> Bool
+public func isEqual(to: Float32) -> Bool
 ```
 
 IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
@@ -1072,9 +1072,9 @@ IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
 ##### Examples
 
 ```
-(3.14).equals(other: 3.14);                  // true
-(0.0).equals(other: -0.0);                   // true
-Float64.nan.equals(other: Float64.nan);      // false (!)
+(3.14).isEqual(to: 3.14);                  // true
+(0.0).isEqual(to: -0.0);                   // true
+Float64.nan.isEqual(to: Float64.nan);      // false (!)
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1084,33 +1084,21 @@ _Defined in `lang/std/numeric/float32.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the float to a `String`, honouring the supplied
+Formats the float directly into `writer`, honouring the supplied
 `FormatOptions`. Implements `Formattable`.
-
-Recognised options:
-- `precision` — digits after the decimal point (default 6).
-- `width` / `fill` / `alignment` — padding control.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `floatStyle` — `.Fixed`, `.Scientific`, `.Auto`, or `.Percent`.
-  `.Auto` picks fixed or scientific based on magnitude.
-  `.Percent` multiplies by 100 and appends `%`.
-
-String interpolation forwards through the same options:
-`"\{x:.2}"` is two decimal places, `"\{x:.2e}"` is scientific,
-`"\{x:%}"` is percentage.
 
 ##### Examples
 
 ```
 (3.14159).format();                                          // "3.14159"
-(3.14159).format(options: .{precision: 2});                  // "3.14"
-(1234.5).format(options: .{floatStyle: .Scientific});        // "1.2345e3"
-(0.756).format(options: .{floatStyle: .Percent});            // "75.6%"
-(3.14).format(options: .{width: 8, fill: '0'});              // "00003.14"
-(3.14).format(options: .{sign: .Always});                    // "+3.14"
+(3.14159).format(.{precision: 2});                  // "3.14"
+(1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
+(0.756).format(.{floatStyle: .Percent});            // "75.6%"
+(3.14).format(.{width: 8, fill: '0'});              // "00003.14"
+(3.14).format(.{sign: .Always});                    // "+3.14"
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1256,7 +1244,7 @@ Special cases:
 ##### Examples
 
 ```
-(10.0).divide(other: 4.0);  // 2.5
+(10.0).divide(4.0);  // 2.5
 1.0 / 0.0;                  // inf
 0.0 / 0.0;                  // nan
 ```
@@ -1350,7 +1338,7 @@ as a single `lang.f64`.
 ```
 let pi = Float64.pi;
 let area = pi * radius * radius;
-let s = area.format(options: .{precision: 2});  // "314.16"
+let s = area.format(.{precision: 2});  // "314.16"
 ```
 
 ```
@@ -1470,6 +1458,30 @@ let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a `Float64` from a string. Recognises decimal
+(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
+tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
+(case-insensitive). Returns `null` for any other input.
+
+##### Examples
+
+```
+Float64(parsing: "3.14");      // Some(3.14)
+Float64(parsing: "-2.5e10");   // Some(-2.5e10)
+Float64(parsing: "inf");       // Some(infinity)
+Float64(parsing: "nan");       // Some(nan)
+Float64(parsing: "abc");       // None
+Float64(parsing: "");          // None
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### function `abs`
 
 ```kestrel
@@ -1547,10 +1559,10 @@ from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
 ##### Examples
 
 ```
-(1.0).atan2(x: 1.0);    //  π/4   (Q1)
-(1.0).atan2(x: -1.0);   //  3π/4  (Q2)
-(-1.0).atan2(x: -1.0);  // -3π/4  (Q3)
-(-1.0).atan2(x: 1.0);   // -π/4   (Q4)
+(1.0).atan2(1.0);    //  π/4   (Q1)
+(1.0).atan2(-1.0);   //  3π/4  (Q2)
+(-1.0).atan2(-1.0);  // -3π/4  (Q3)
+(-1.0).atan2(1.0);   // -π/4   (Q4)
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -1604,9 +1616,9 @@ must ensure `min <= max`.
 ##### Examples
 
 ```
-(0.5).clamp(min: 0.0, max: 1.0);   // 0.5
-(-0.5).clamp(min: 0.0, max: 1.0);  // 0.0
-(1.5).clamp(min: 0.0, max: 1.0);   // 1.0
+(0.5).clamp(0.0, 1.0);   // 0.5
+(-0.5).clamp(0.0, 1.0);  // 0.0
+(1.5).clamp(0.0, 1.0);   // 1.0
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -1734,7 +1746,7 @@ More accurate (and often faster) than separate `multiply`/`add`.
 ##### Examples
 
 ```
-(2.0).fma(a: 3.0, b: 4.0);   // 10.0
+(2.0).fma(3.0, 4.0);   // 10.0
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -1768,7 +1780,7 @@ avoids intermediate overflow when one operand is very large.
 ##### Examples
 
 ```
-(3.0).hypot(other: 4.0);  // 5.0
+(3.0).hypot(4.0);  // 5.0
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -1920,10 +1932,10 @@ Linear interpolation — `self + (other - self) * t`. `t == 0` returns
 ##### Examples
 
 ```
-(0.0).lerp(to: 10.0, t: 0.0);   //  0.0
-(0.0).lerp(to: 10.0, t: 0.5);   //  5.0
-(0.0).lerp(to: 10.0, t: 1.0);   // 10.0
-(0.0).lerp(to: 10.0, t: 0.25);  //  2.5
+(0.0).lerp(to: 10.0, 0.0);   //  0.0
+(0.0).lerp(to: 10.0, 0.5);   //  5.0
+(0.0).lerp(to: 10.0, 1.0);   // 10.0
+(0.0).lerp(to: 10.0, 0.25);  //  2.5
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2082,30 +2094,6 @@ fixed points; the largest finite value steps up to `+inf`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Float64?
-```
-
-Parses a `Float64` from a string. Recognises decimal
-(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
-tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
-(case-insensitive). Returns `None` for any other input.
-
-##### Examples
-
-```
-Float64.parse(string: "3.14");      // Some(3.14)
-Float64.parse(string: "-2.5e10");   // Some(-2.5e10)
-Float64.parse(string: "inf");       // Some(infinity)
-Float64.parse(string: "nan");       // Some(nan)
-Float64.parse(string: "abc");       // None
-Float64.parse(string: "");          // None
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### field `pi`
 
 ```kestrel
@@ -2128,9 +2116,9 @@ return NaN.
 ##### Examples
 
 ```
-(2.0).pow(exponent: 10.0);   // 1024.0
-(2.0).pow(exponent: 0.5);    // sqrt(2)
-(-2.0).pow(exponent: 0.5);   // nan
+(2.0).pow(10.0);   // 1024.0
+(2.0).pow(0.5);    // sqrt(2)
+(-2.0).pow(0.5);   // nan
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2148,8 +2136,8 @@ exponents invert.
 ##### Examples
 
 ```
-(2.0).powi(exponent: 10);   // 1024.0
-(2.0).powi(exponent: -1);   // 0.5
+(2.0).powi(10);   // 1024.0
+(2.0).powi(-1);   // 0.5
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2371,20 +2359,20 @@ answer.
 ##### Examples
 
 ```
-(1.0).compare(other: 2.0);              // .Less
-(2.0).compare(other: 2.0);              // .Equal
-(3.0).compare(other: 2.0);              // .Greater
-(1.0).compare(other: Float64.infinity); // .Less
+(1.0).compare(2.0);              // .Less
+(2.0).compare(2.0);              // .Equal
+(3.0).compare(2.0);              // .Greater
+(1.0).compare(Float64.infinity); // .Less
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Float64) -> Bool
+public func isEqual(to: Float64) -> Bool
 ```
 
 IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
@@ -2392,9 +2380,9 @@ IEEE 754 equality. NaN is not equal to itself; `+0.0` equals `-0.0`.
 ##### Examples
 
 ```
-(3.14).equals(other: 3.14);                  // true
-(0.0).equals(other: -0.0);                   // true
-Float64.nan.equals(other: Float64.nan);      // false (!)
+(3.14).isEqual(to: 3.14);                  // true
+(0.0).isEqual(to: -0.0);                   // true
+Float64.nan.isEqual(to: Float64.nan);      // false (!)
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2404,33 +2392,21 @@ _Defined in `lang/std/numeric/float64.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the float to a `String`, honouring the supplied
+Formats the float directly into `writer`, honouring the supplied
 `FormatOptions`. Implements `Formattable`.
-
-Recognised options:
-- `precision` — digits after the decimal point (default 6).
-- `width` / `fill` / `alignment` — padding control.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `floatStyle` — `.Fixed`, `.Scientific`, `.Auto`, or `.Percent`.
-  `.Auto` picks fixed or scientific based on magnitude.
-  `.Percent` multiplies by 100 and appends `%`.
-
-String interpolation forwards through the same options:
-`"\{x:.2}"` is two decimal places, `"\{x:.2e}"` is scientific,
-`"\{x:%}"` is percentage.
 
 ##### Examples
 
 ```
 (3.14159).format();                                          // "3.14159"
-(3.14159).format(options: .{precision: 2});                  // "3.14"
-(1234.5).format(options: .{floatStyle: .Scientific});        // "1.2345e3"
-(0.756).format(options: .{floatStyle: .Percent});            // "75.6%"
-(3.14).format(options: .{width: 8, fill: '0'});              // "00003.14"
-(3.14).format(options: .{sign: .Always});                    // "+3.14"
+(3.14159).format(.{precision: 2});                  // "3.14"
+(1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
+(0.756).format(.{floatStyle: .Percent});            // "75.6%"
+(3.14).format(.{width: 8, fill: '0'});              // "00003.14"
+(3.14).format(.{sign: .Always});                    // "+3.14"
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2576,7 +2552,7 @@ Special cases:
 ##### Examples
 
 ```
-(10.0).divide(other: 4.0);  // 2.5
+(10.0).divide(4.0);  // 2.5
 1.0 / 0.0;                  // inf
 0.0 / 0.0;                  // nan
 ```
@@ -2718,6 +2694,39 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int16` from 2 bytes in native byte order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int16` from 2 bytes in big-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int16` from 2 bytes in little-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -2826,6 +2835,45 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int16`.
+
+##### Examples
+
+```
+Int16(parsing: "42");    // Some(42)
+Int16(parsing: "-7");    // Some(-7)
+Int16(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int16(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int16(parsing: "101010", radix: 2);  // Some(42)
+Int16(parsing: "z", radix: 36);      // Some(35)
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -2900,9 +2948,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
@@ -2945,39 +2993,6 @@ public func divideChecked(Int16) -> Int16?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int16?
-```
-
-Reassembles a `Int16` from 2 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int16?
-```
-
-Reassembles a `Int16` from 2 bytes in big-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int16?
-```
-
-Reassembles a `Int16` from 2 bytes in little-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3154,48 +3169,6 @@ public func negateSaturating() -> Int16
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int16?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int16`.
-
-##### Examples
-
-```
-Int16.parse(string: "42");    // Some(42)
-Int16.parse(string: "-7");    // Some(-7)
-Int16.parse(string: "abc");   // None
-Int16.parse(string: "");      // None
-```
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int16?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int16`.
-
-##### Examples
-
-```
-Int16.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-Int16.parse(string: "101010", radix: 2);  // Some(42)
-Int16.parse(string: "z", radix: 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3385,19 +3358,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Int16) -> Bool
+public func isEqual(to: Int16) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -3405,8 +3378,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
@@ -3419,7 +3392,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func matches(Int16) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3428,35 +3401,27 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -3579,6 +3544,30 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int16]
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int16]
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int16]
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int16]
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
@@ -3820,7 +3809,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> Int16
+public func shiftLeft(by: Int64) -> Int16
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -3841,7 +3830,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> Int16
+public func shiftRight(by: Int64) -> Int16
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -3951,7 +3940,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -3963,7 +3952,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -4034,6 +4023,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int16]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int16]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int16]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -4099,6 +4148,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int32` from 4 bytes in native byte order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int32` from 4 bytes in big-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int32` from 4 bytes in little-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4210,6 +4292,45 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int32`.
+
+##### Examples
+
+```
+Int32(parsing: "42");    // Some(42)
+Int32(parsing: "-7");    // Some(-7)
+Int32(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int32(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int32(parsing: "101010", radix: 2);  // Some(42)
+Int32(parsing: "z", radix: 36);      // Some(35)
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -4284,9 +4405,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
@@ -4329,39 +4450,6 @@ public func divideChecked(Int32) -> Int32?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int32?
-```
-
-Reassembles a `Int32` from 4 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int32?
-```
-
-Reassembles a `Int32` from 4 bytes in big-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int32?
-```
-
-Reassembles a `Int32` from 4 bytes in little-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4538,48 +4626,6 @@ public func negateSaturating() -> Int32
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int32?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int32`.
-
-##### Examples
-
-```
-Int32.parse(string: "42");    // Some(42)
-Int32.parse(string: "-7");    // Some(-7)
-Int32.parse(string: "abc");   // None
-Int32.parse(string: "");      // None
-```
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int32?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int32`.
-
-##### Examples
-
-```
-Int32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-Int32.parse(string: "101010", radix: 2);  // Some(42)
-Int32.parse(string: "z", radix: 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4769,19 +4815,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Int32) -> Bool
+public func isEqual(to: Int32) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -4789,8 +4835,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
@@ -4803,7 +4849,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func matches(Int32) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4812,35 +4858,27 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -4963,6 +5001,30 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int32]
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int32]
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int32]
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int32]
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
@@ -5204,7 +5266,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> Int32
+public func shiftLeft(by: Int64) -> Int32
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -5225,7 +5287,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> Int32
+public func shiftRight(by: Int64) -> Int32
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -5335,7 +5397,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -5347,7 +5409,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -5418,6 +5480,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int32]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int32]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int32]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -5483,6 +5605,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int64` from 8 bytes in native byte order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int64` from 8 bytes in big-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int64` from 8 bytes in little-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5594,6 +5749,45 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int64`.
+
+##### Examples
+
+```
+Int64(parsing: "42");    // Some(42)
+Int64(parsing: "-7");    // Some(-7)
+Int64(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int64(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int64(parsing: "101010", radix: 2);  // Some(42)
+Int64(parsing: "z", radix: 36);      // Some(35)
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -5668,9 +5862,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
@@ -5713,39 +5907,6 @@ public func divideChecked(Int64) -> Int64?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int64?
-```
-
-Reassembles a `Int64` from 8 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int64?
-```
-
-Reassembles a `Int64` from 8 bytes in big-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int64?
-```
-
-Reassembles a `Int64` from 8 bytes in little-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5922,48 +6083,6 @@ public func negateSaturating() -> Int64
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int64?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int64`.
-
-##### Examples
-
-```
-Int64.parse(string: "42");    // Some(42)
-Int64.parse(string: "-7");    // Some(-7)
-Int64.parse(string: "abc");   // None
-Int64.parse(string: "");      // None
-```
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int64?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int64`.
-
-##### Examples
-
-```
-Int64.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-Int64.parse(string: "101010", radix: 2);  // Some(42)
-Int64.parse(string: "z", radix: 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6153,19 +6272,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Int64) -> Bool
+public func isEqual(to: Int64) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -6173,8 +6292,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
@@ -6187,7 +6306,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func matches(Int64) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6196,35 +6315,27 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -6347,6 +6458,30 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int64]
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int64]
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int64]
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int64]
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
@@ -6588,7 +6723,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> Int64
+public func shiftLeft(by: Int64) -> Int64
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -6609,7 +6744,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> Int64
+public func shiftRight(by: Int64) -> Int64
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -6719,7 +6854,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -6731,7 +6866,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -6802,6 +6937,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int64]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int64]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int64]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -6814,209 +7009,107 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
-### Implements `ArrayIndex`
+### Implements `SeqIndex`
 
-#### typealias `ArrayYield`
-
-```kestrel
-type ArrayYield = T
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `readArray`
+#### typealias `SeqOutput`
 
 ```kestrel
-public func readArray(from: Array[T]) -> T
+type SeqOutput = T
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayChecked`
+#### function `readSeq`
 
 ```kestrel
-public func readArrayChecked(from: Array[T]) -> T?
+public func readSeq(from: ArraySlice[T]) -> T
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayUnchecked`
+#### function `readSeqChecked`
 
 ```kestrel
-public func readArrayUnchecked(from: Array[T]) -> T
+public func readSeqChecked(from: ArraySlice[T]) -> T?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArray`
+#### function `readSeqUnchecked`
 
 ```kestrel
-public func writeArray(to: mutating Array[T], with: T)
+public func readSeqUnchecked(from: ArraySlice[T]) -> T
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArrayUnchecked`
+#### function `writeSeq`
 
 ```kestrel
-public func writeArrayUnchecked(to: mutating Array[T], with: T)
+public func writeSeq(to: ArraySlice[T], with: T)
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-### Implements `ArrayClampable`
-
-#### typealias `ArrayClampedYield`
+#### function `writeSeqUnchecked`
 
 ```kestrel
-type ArrayClampedYield = T?
+public func writeSeqUnchecked(to: ArraySlice[T], with: T)
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayClamped`
+### Implements `SeqClampable`
+
+#### typealias `SeqClampedOutput`
 
 ```kestrel
-public func readArrayClamped(from: Array[T]) -> T?
+type SeqClampedOutput = T?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArrayClamped`
+#### function `readSeqClamped`
 
 ```kestrel
-public func writeArrayClamped(to: mutating Array[T], with: T?)
+public func readSeqClamped(from: ArraySlice[T]) -> T?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-### Implements `ArrayWrappable`
-
-#### typealias `ArrayWrappedYield`
+#### function `writeSeqClamped`
 
 ```kestrel
-type ArrayWrappedYield = T?
+public func writeSeqClamped(to: ArraySlice[T], with: T?)
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayWrapped`
+### Implements `SeqWrappable`
+
+#### typealias `SeqWrappedOutput`
 
 ```kestrel
-public func readArrayWrapped(from: Array[T]) -> T?
+type SeqWrappedOutput = T?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArrayWrapped`
+#### function `readSeqWrapped`
 
 ```kestrel
-public func writeArrayWrapped(to: mutating Array[T], with: T?)
+public func readSeqWrapped(from: ArraySlice[T]) -> T?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceYield`
+#### function `writeSeqWrapped`
 
 ```kestrel
-type SliceYield = T
+public func writeSeqWrapped(to: ArraySlice[T], with: T?)
 ```
 
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSlice`
-
-```kestrel
-public func readSlice(from: Slice[T]) -> T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceChecked`
-
-```kestrel
-public func readSliceChecked(from: Slice[T]) -> T?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceUnchecked`
-
-```kestrel
-public func readSliceUnchecked(from: Slice[T]) -> T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSlice`
-
-```kestrel
-public func writeSlice(to: Slice[T], with: T)
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSliceUnchecked`
-
-```kestrel
-public func writeSliceUnchecked(to: Slice[T], with: T)
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `SliceClampable`
-
-#### typealias `SliceClampedYield`
-
-```kestrel
-type SliceClampedYield = T?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceClamped`
-
-```kestrel
-public func readSliceClamped(from: Slice[T]) -> T?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSliceClamped`
-
-```kestrel
-public func writeSliceClamped(to: Slice[T], with: T?)
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `SliceWrappable`
-
-#### typealias `SliceWrappedYield`
-
-```kestrel
-type SliceWrappedYield = T?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceWrapped`
-
-```kestrel
-public func readSliceWrapped(from: Slice[T]) -> T?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSliceWrapped`
-
-```kestrel
-public func writeSliceWrapped(to: Slice[T], with: T?)
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
 ### Implements `BytesIndex`
 
@@ -7258,6 +7351,39 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int8` from 1 bytes in native byte order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int8` from 1 bytes in big-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int8` from 1 bytes in little-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -7366,6 +7492,45 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int8`.
+
+##### Examples
+
+```
+Int8(parsing: "42");    // Some(42)
+Int8(parsing: "-7");    // Some(-7)
+Int8(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int8(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int8(parsing: "101010", radix: 2);  // Some(42)
+Int8(parsing: "z", radix: 36);      // Some(35)
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -7440,9 +7605,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
@@ -7485,39 +7650,6 @@ public func divideChecked(Int8) -> Int8?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int8?
-```
-
-Reassembles a `Int8` from 1 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int8?
-```
-
-Reassembles a `Int8` from 1 bytes in big-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int8?
-```
-
-Reassembles a `Int8` from 1 bytes in little-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7694,48 +7826,6 @@ public func negateSaturating() -> Int8
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int8?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int8`.
-
-##### Examples
-
-```
-Int8.parse(string: "42");    // Some(42)
-Int8.parse(string: "-7");    // Some(-7)
-Int8.parse(string: "abc");   // None
-Int8.parse(string: "");      // None
-```
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int8?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int8`.
-
-##### Examples
-
-```
-Int8.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-Int8.parse(string: "101010", radix: 2);  // Some(42)
-Int8.parse(string: "z", radix: 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7925,19 +8015,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Int8) -> Bool
+public func isEqual(to: Int8) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -7945,8 +8035,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
@@ -7959,7 +8049,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func matches(Int8) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7968,35 +8058,27 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -8119,6 +8201,30 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int8]
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int8]
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int8]
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int8]
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
@@ -8360,7 +8466,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> Int8
+public func shiftLeft(by: Int64) -> Int8
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -8381,7 +8487,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> Int8
+public func shiftRight(by: Int64) -> Int8
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -8491,7 +8597,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -8503,7 +8609,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -8571,6 +8677,66 @@ public func inclusiveRange(to: Int8) -> ClosedRange[Int8]
 ```
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int8]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int8]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int8]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8870,6 +9036,39 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt16` from 2 bytes in native byte order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt16` from 2 bytes in big-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt16` from 2 bytes in little-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -8978,6 +9177,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt16`.
+
+##### Examples
+
+```
+let n = UInt16(parsing: "42");   // Some(42)
+let bad = UInt16(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt16`.
+
+##### Examples
+
+```
+let n = UInt16(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt16(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -9032,9 +9272,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
@@ -9076,39 +9316,6 @@ public func divideChecked(UInt16) -> UInt16?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt16?
-```
-
-Reassembles a `UInt16` from 2 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt16?
-```
-
-Reassembles a `UInt16` from 2 bytes in big-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt16?
-```
-
-Reassembles a `UInt16` from 2 bytes in little-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9263,48 +9470,6 @@ public func multiplySaturating(UInt16) -> UInt16
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt16?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt16`.
-
-##### Examples
-
-```
-UInt16.parse(string: "42");   // Some(42)
-UInt16.parse(string: "-1");   // None  (no sign for unsigned)
-UInt16.parse(string: "");     // None
-```
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt16?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt16`.
-
-##### Examples
-
-```
-UInt16.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-UInt16.parse(string: "101010", radix: 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9482,19 +9647,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(UInt16) -> Bool
+public func isEqual(to: UInt16) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -9502,8 +9667,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
@@ -9516,7 +9681,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func matches(UInt16) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9525,35 +9690,27 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -9668,6 +9825,30 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt16]
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt16]
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt16]
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt16]
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
@@ -9887,7 +10068,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> UInt16
+public func shiftLeft(by: Int64) -> UInt16
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -9908,7 +10089,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> UInt16
+public func shiftRight(by: Int64) -> UInt16
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -10018,7 +10199,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -10030,7 +10211,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -10101,6 +10282,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt16]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt16]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt16]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -10166,6 +10407,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt32` from 4 bytes in native byte order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt32` from 4 bytes in big-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt32` from 4 bytes in little-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10277,6 +10551,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt32`.
+
+##### Examples
+
+```
+let n = UInt32(parsing: "42");   // Some(42)
+let bad = UInt32(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt32`.
+
+##### Examples
+
+```
+let n = UInt32(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt32(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -10331,9 +10646,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
@@ -10375,39 +10690,6 @@ public func divideChecked(UInt32) -> UInt32?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt32?
-```
-
-Reassembles a `UInt32` from 4 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt32?
-```
-
-Reassembles a `UInt32` from 4 bytes in big-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt32?
-```
-
-Reassembles a `UInt32` from 4 bytes in little-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10562,48 +10844,6 @@ public func multiplySaturating(UInt32) -> UInt32
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt32?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt32`.
-
-##### Examples
-
-```
-UInt32.parse(string: "42");   // Some(42)
-UInt32.parse(string: "-1");   // None  (no sign for unsigned)
-UInt32.parse(string: "");     // None
-```
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt32?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt32`.
-
-##### Examples
-
-```
-UInt32.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-UInt32.parse(string: "101010", radix: 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10781,19 +11021,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(UInt32) -> Bool
+public func isEqual(to: UInt32) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -10801,8 +11041,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
@@ -10815,7 +11055,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func matches(UInt32) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10824,35 +11064,27 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -10967,6 +11199,30 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt32]
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt32]
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt32]
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt32]
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
@@ -11186,7 +11442,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> UInt32
+public func shiftLeft(by: Int64) -> UInt32
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -11207,7 +11463,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> UInt32
+public func shiftRight(by: Int64) -> UInt32
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -11317,7 +11573,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -11329,7 +11585,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -11400,6 +11656,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt32]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt32]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt32]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -11465,6 +11781,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt64` from 8 bytes in native byte order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt64` from 8 bytes in big-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt64` from 8 bytes in little-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -11576,6 +11925,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt64`.
+
+##### Examples
+
+```
+let n = UInt64(parsing: "42");   // Some(42)
+let bad = UInt64(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt64`.
+
+##### Examples
+
+```
+let n = UInt64(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt64(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -11630,9 +12020,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
@@ -11674,39 +12064,6 @@ public func divideChecked(UInt64) -> UInt64?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt64?
-```
-
-Reassembles a `UInt64` from 8 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt64?
-```
-
-Reassembles a `UInt64` from 8 bytes in big-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt64?
-```
-
-Reassembles a `UInt64` from 8 bytes in little-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -11861,48 +12218,6 @@ public func multiplySaturating(UInt64) -> UInt64
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt64?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt64`.
-
-##### Examples
-
-```
-UInt64.parse(string: "42");   // Some(42)
-UInt64.parse(string: "-1");   // None  (no sign for unsigned)
-UInt64.parse(string: "");     // None
-```
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt64?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt64`.
-
-##### Examples
-
-```
-UInt64.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-UInt64.parse(string: "101010", radix: 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12080,19 +12395,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(UInt64) -> Bool
+public func isEqual(to: UInt64) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -12100,8 +12415,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
@@ -12114,7 +12429,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func matches(UInt64) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12123,35 +12438,27 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -12266,6 +12573,30 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt64]
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt64]
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt64]
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt64]
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
@@ -12485,7 +12816,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> UInt64
+public func shiftLeft(by: Int64) -> UInt64
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -12506,7 +12837,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> UInt64
+public func shiftRight(by: Int64) -> UInt64
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -12616,7 +12947,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -12628,7 +12959,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -12699,6 +13030,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt64]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt64]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt64]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -12764,6 +13155,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt8` from 1 bytes in native byte order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt8` from 1 bytes in big-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt8` from 1 bytes in little-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -12875,6 +13299,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt8`.
+
+##### Examples
+
+```
+let n = UInt8(parsing: "42");   // Some(42)
+let bad = UInt8(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt8`.
+
+##### Examples
+
+```
+let n = UInt8(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt8(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -12929,9 +13394,9 @@ Clamps `self` into `[min, max]`. Caller is responsible for ensuring
 ##### Examples
 
 ```
-(5).clamp(min: 0, max: 10);    // 5
-(-5).clamp(min: 0, max: 10);   // 0
-(15).clamp(min: 0, max: 10);   // 10
+(5).clamp(0, 10);    // 5
+(-5).clamp(0, 10);   // 0
+(15).clamp(0, 10);   // 10
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
@@ -12973,39 +13438,6 @@ public func divideChecked(UInt8) -> UInt8?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt8?
-```
-
-Reassembles a `UInt8` from 1 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt8?
-```
-
-Reassembles a `UInt8` from 1 bytes in big-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt8?
-```
-
-Reassembles a `UInt8` from 1 bytes in little-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13160,48 +13592,6 @@ public func multiplySaturating(UInt8) -> UInt8
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt8?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt8`.
-
-##### Examples
-
-```
-UInt8.parse(string: "42");   // Some(42)
-UInt8.parse(string: "-1");   // None  (no sign for unsigned)
-UInt8.parse(string: "");     // None
-```
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt8?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt8`.
-
-##### Examples
-
-```
-UInt8.parse(string: "ff", radix: 16);     // Some(255 if it fits, else None)
-UInt8.parse(string: "101010", radix: 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13379,19 +13769,19 @@ using two's-complement ordering; unsigned types use natural ordering.
 ##### Examples
 
 ```
-(1).compare(other: 2);   // .Less
-(2).compare(other: 2);   // .Equal
-(3).compare(other: 2);   // .Greater
+(1).compare(2);   // .Less
+(2).compare(2);   // .Equal
+(3).compare(2);   // .Greater
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(UInt8) -> Bool
+public func isEqual(to: UInt8) -> Bool
 ```
 
 Bit-for-bit equality. Backs the `==` operator.
@@ -13399,8 +13789,8 @@ Bit-for-bit equality. Backs the `==` operator.
 ##### Examples
 
 ```
-(42).equals(other: 42);  // true
-42 == 42;                // true
+(42).isEqual(to: 42);  // true
+42 == 42;               // true
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
@@ -13413,7 +13803,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func matches(UInt8) -> Bool
 ```
 
-Pattern-matching hook for `Matchable`. Identical to `equals`.
+Pattern-matching hook for `Matchable`. Identical to `isEqual`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13422,35 +13812,27 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
-Renders the integer to a `String`, honouring the supplied
+Formats the integer directly into `writer`, honouring the supplied
 `FormatOptions`. Implements the `Formattable` protocol.
-
-Recognised options:
-- `radix` — base in `[2, 36]`; out-of-range values fall back to 10.
-- `width` — minimum output width; shorter values are padded.
-- `fill` / `alignment` — padding character and side.
-- `sign` — `.Negative` (default), `.Always`, or `.Space`.
-- `uppercase` — uppercase hex digits.
-- `alternate` — emit the `0b` / `0o` / `0x` prefix.
 
 ##### Examples
 
 ```
 (42).format();                                           // "42"
-(255).format(options: .{radix: 16});                     // "ff"
-(255).format(options: .{radix: 16, uppercase: true});    // "FF"
-(255).format(options: .{radix: 16, alternate: true});    // "0xff"
-(42).format(options: .{radix: 2, alternate: true});      // "0b101010"
-(42).format(options: .{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(options: .{sign: .Always});                 // "-42"
+(255).format(.{radix: 16});                     // "ff"
+(255).format(.{radix: 16, uppercase: true});    // "FF"
+(255).format(.{radix: 16, alternate: true});    // "0xff"
+(42).format(.{radix: 2, alternate: true});      // "0b101010"
+(42).format(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).format(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -13565,6 +13947,30 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt8]
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt8]
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt8]
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt8]
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
@@ -13784,7 +14190,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: lang.i64) -> UInt8
+public func shiftLeft(by: Int64) -> UInt8
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -13805,7 +14211,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: lang.i64) -> UInt8
+public func shiftRight(by: Int64) -> UInt8
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -13915,7 +14321,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### function `shiftLeftAssign`
 
 ```kestrel
-public mutating func shiftLeftAssign(by: lang.i64)
+public mutating func shiftLeftAssign(by: Int64)
 ```
 
 `self <<= count`
@@ -13927,7 +14333,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### function `shiftRightAssign`
 
 ```kestrel
-public mutating func shiftRightAssign(by: lang.i64)
+public mutating func shiftRightAssign(by: Int64)
 ```
 
 `self >>= count`
@@ -13995,6 +14401,66 @@ public func inclusiveRange(to: UInt8) -> ClosedRange[UInt8]
 ```
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt8]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt8]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt8]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
 
 _Defined in `lang/std/numeric/uint8.ks`._
 

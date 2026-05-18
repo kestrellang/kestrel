@@ -11,10 +11,13 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
-import std.memory.(Slice, Pointer)
+import std.memory.(ArraySlice, Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A {{BITS}}-bit {{SIGNEDNESS}} integer.
@@ -81,6 +84,9 @@ public struct {{TYPE_NAME}}:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
 {{CONVERTIBLE_CONFORMANCES}}{
     /// The underlying primitive `lang.{{LANG_TYPE}}` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -280,6 +286,21 @@ public struct {{TYPE_NAME}}:
         ClosedRange[{{TYPE_NAME}}](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[{{TYPE_NAME}}] {
+        RangeFrom[{{TYPE_NAME}}](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[{{TYPE_NAME}}] {
+        RangeUpTo[{{TYPE_NAME}}](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[{{TYPE_NAME}}] {
+        RangeThrough[{{TYPE_NAME}}](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -288,7 +309,7 @@ public struct {{TYPE_NAME}}:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
+        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
     }
 
     // ========================================================================
@@ -309,6 +330,9 @@ public struct {{TYPE_NAME}}:
     type RightShift.Output = {{TYPE_NAME}}
     type RangeConstructible.Output = Range[{{TYPE_NAME}}]
     type ClosedRangeConstructible.Output = ClosedRange[{{TYPE_NAME}}]
+    type RangeFromConstructible.Output = RangeFrom[{{TYPE_NAME}}]
+    type RangeUpToConstructible.Output = RangeUpTo[{{TYPE_NAME}}]
+    type RangeThroughConstructible.Output = RangeThrough[{{TYPE_NAME}}]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)

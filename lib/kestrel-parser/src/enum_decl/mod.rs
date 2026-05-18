@@ -15,7 +15,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::attribute::attribute_list_parser;
 use crate::common::{
     AttributeData, ConformanceListData, TypeDeclarationBodyItem, emit_attribute_list, emit_name,
-    emit_type_declaration_body_item, emit_visibility, identifier,
+    emit_type_declaration_body_item, emit_visibility, identifier, identifier_or_keyword,
     initializer_declaration_parser_internal, skip_trivia, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
@@ -182,7 +182,7 @@ pub fn enum_declaration_parser_internal<'tokens>()
 /// `Type`-only fallback when both would match.
 pub(crate) fn enum_case_parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, EnumCaseParameterData, ParserExtra<'tokens>> + Clone {
-    let named = identifier()
+    let named = identifier_or_keyword()
         .then(token(Token::Colon))
         .then(ty_parser())
         .map(|((label, colon), ty)| EnumCaseParameterData {

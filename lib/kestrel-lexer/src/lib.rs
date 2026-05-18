@@ -447,6 +447,9 @@ pub enum Token {
     #[token("null")]
     Null,
 
+    #[token("some")]
+    Some,
+
     // ===== Declaration Keywords =====
     #[token("extend")]
     Extend,
@@ -729,6 +732,57 @@ pub enum Token {
 
     #[token("@")]
     At,
+}
+
+impl Token {
+    /// Whether this token is a keyword that can appear as a parameter label.
+    /// Excludes `Mutating` and `Consuming` — they're parsed as access modes.
+    pub fn is_label_keyword(&self) -> bool {
+        matches!(
+            self,
+            Token::As
+                | Token::And
+                | Token::Break
+                | Token::Case
+                | Token::Continue
+                | Token::Deinit
+                | Token::Else
+                | Token::Enum
+                | Token::Extend
+                | Token::Fileprivate
+                | Token::For
+                | Token::Func
+                | Token::Get
+                | Token::Guard
+                | Token::If
+                | Token::Import
+                | Token::In
+                | Token::Indirect
+                | Token::Init
+                | Token::Internal
+                | Token::Let
+                | Token::Loop
+                | Token::Match
+                | Token::Module
+                | Token::Not
+                | Token::Or
+                | Token::Private
+                | Token::Protocol
+                | Token::Public
+                | Token::Return
+                | Token::Set
+                | Token::Static
+                | Token::Struct
+                | Token::Subscript
+                | Token::Throw
+                | Token::Throws
+                | Token::Try
+                | Token::Type
+                | Token::Var
+                | Token::Where
+                | Token::While
+        )
+    }
 }
 
 pub type SpannedToken = Spanned<Token>;

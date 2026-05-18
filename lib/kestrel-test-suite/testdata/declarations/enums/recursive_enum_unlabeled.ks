@@ -3,7 +3,7 @@
 
 module Test
 
-indirect enum List[T] {
+indirect enum List[T] { // ERROR: indirect enums are not yet supported
     case Cons(T, List[T])
     case Nil
 }

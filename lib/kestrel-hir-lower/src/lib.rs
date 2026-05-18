@@ -111,8 +111,25 @@ impl QueryFn for LowerBody {
                 .map(|&id| lower.lower_stmt(ast_body, id)),
         );
 
-        // Lower tail expression
-        let tail_expr = ast_body.tail_expr.map(|id| lower.lower_expr(ast_body, id));
+        // Lower tail expression.
+        // For effectful inits, wrap the tail (or synthesize one) in .Some(()) / .Ok(())
+        // so the implicit fall-through returns the success wrapper around unit.
+        let tail_expr = if let Some(id) = ast_body.tail_expr {
+            let lowered = lower.lower_expr(ast_body, id);
+            if let Some(wrapped) = lower.wrap_init_success_value(Span::synthetic(0)) {
+                // Effectful init: emit the original tail as a statement, return the wrapper
+                let stmt = lower.alloc_stmt(HirStmt::Expr {
+                    expr: lowered,
+                    span: Span::synthetic(0),
+                });
+                statements.push(stmt);
+                Some(wrapped)
+            } else {
+                Some(lowered)
+            }
+        } else {
+            lower.wrap_init_success_value(Span::synthetic(0))
+        };
 
         Some(HirBody {
             exprs: lower.exprs,
@@ -122,7 +139,7 @@ impl QueryFn for LowerBody {
             params: lower.params,
             statements,
             tail_expr,
-            guard_let_stmts: lower.guard_let_stmts,
+            guard_stmts: lower.guard_stmts,
             while_conditions: lower.while_conditions,
         })
     }

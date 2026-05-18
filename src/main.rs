@@ -138,6 +138,19 @@ enum DumpKind {
 }
 
 // ============================================================================
+// MIR pipeline
+// ============================================================================
+
+fn lower_with_ownership(
+    world: &kestrel_hecs::World,
+    root: kestrel_hecs::Entity,
+) -> kestrel_mir::MirModule {
+    let mut mir = lower_module(world, root);
+    kestrel_ownership::run(&mut mir);
+    mir.with_all_passes()
+}
+
+// ============================================================================
 // Build
 // ============================================================================
 
@@ -145,12 +158,13 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     let compiler = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
-    driver.analyze_all();
+    let analyze_summary = driver.analyze_all();
 
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
     driver.emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    emit_analyze_errors(&compiler, &analyze_summary);
+    if has_errors(&compiler) || analyze_summary.errors > 0 {
         return Err(ExitCode::FAILURE);
     }
 
@@ -163,7 +177,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
         eprintln!("  Building {}...", output_path.display());
     }
 
-    let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+    let mir = lower_with_ownership(compiler.world(), compiler.root());
     let target = globals.codegen_target()?;
     let options = CodegenOptions {
         opt_level: args.opt_level,
@@ -209,11 +223,11 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
     match args.kind {
         DumpKind::Mir => {
-            let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+            let mir = lower_with_ownership(compiler.world(), compiler.root());
             print!("{}", mir.display());
         },
         DumpKind::Cranelift => {
-            let mir = lower_module(compiler.world(), compiler.root()).with_all_passes();
+            let mir = lower_with_ownership(compiler.world(), compiler.root());
             let target = globals.codegen_target()?;
             let options = CodegenOptions {
                 emit_clif: true,
@@ -419,4 +433,48 @@ fn has_errors(compiler: &Compiler) -> bool {
         .diagnostics()
         .iter()
         .any(|d| d.severity >= Severity::Error)
+}
+
+/// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
+fn emit_analyze_errors(
+    compiler: &Compiler,
+    summary: &kestrel_compiler_driver::AnalyzeSummary,
+) {
+    use codespan_reporting::diagnostic::{Diagnostic, Label};
+    use kestrel_compiler::diagnostic::WorldFiles;
+
+    let error_diags: Vec<_> = summary
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
+        .collect();
+
+    if error_diags.is_empty() {
+        return;
+    }
+
+    let files = WorldFiles::from_world(compiler.world(), compiler.files());
+    let codespan_diags: Vec<Diagnostic<usize>> = error_diags
+        .iter()
+        .map(|d| {
+            let labels = d
+                .labels
+                .iter()
+                .map(|l| {
+                    let label = if l.is_primary {
+                        Label::primary(l.span.file_id, l.span.range())
+                    } else {
+                        Label::secondary(l.span.file_id, l.span.range())
+                    };
+                    label.with_message(&l.message)
+                })
+                .collect();
+            Diagnostic::error()
+                .with_message(format!("{} [{}]", d.message, d.descriptor_id))
+                .with_labels(labels)
+                .with_notes(d.notes.clone())
+        })
+        .collect();
+
+    kestrel_reporting::emit_all(&files, &codespan_diags).ok();
 }

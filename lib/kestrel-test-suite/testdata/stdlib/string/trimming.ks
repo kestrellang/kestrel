@@ -19,19 +19,19 @@ module Test
             s3.trimEnd();
             if s3.isEqual(to: "  hello") == false { return 3 }
 
-            // ---- Mutating trim(matching:) ----
+            // ---- Mutating trim(where:) ----
             var s4: std.text.String = "xxhelloxx";
-            s4.trim(matching: { (c) in c.isEqual(to: 'x') });
+            s4.trim(where: { (c) in c.isEqual(to: 'x') });
             if s4.isEqual(to: "hello") == false { return 4 }
 
-            // ---- Mutating trimStart(matching:) ----
+            // ---- Mutating trimStart(where:) ----
             var s5: std.text.String = "xxhelloxx";
-            s5.trimStart(matching: { (c) in c.isEqual(to: 'x') });
+            s5.trimStart(where: { (c) in c.isEqual(to: 'x') });
             if s5.isEqual(to: "helloxx") == false { return 5 }
 
-            // ---- Mutating trimEnd(matching:) ----
+            // ---- Mutating trimEnd(where:) ----
             var s6: std.text.String = "xxhelloxx";
-            s6.trimEnd(matching: { (c) in c.isEqual(to: 'x') });
+            s6.trimEnd(where: { (c) in c.isEqual(to: 'x') });
             if s6.isEqual(to: "xxhello") == false { return 6 }
 
             // ---- Non-mutating trimmedStart() ----
@@ -46,19 +46,19 @@ module Test
             let te = s8.trimmedEnd();
             if te.toOwned().isEqual(to: "  hello") == false { return 9 }
 
-            // ---- Non-mutating trimmed(matching:) ----
+            // ---- Non-mutating trimmed(where:) ----
             let s9: std.text.String = "..hello..";
-            let tm = s9.trimmed(matching: { (c) in c.isEqual(to: '.') });
+            let tm = s9.trimmed(where: { (c) in c.isEqual(to: '.') });
             if tm.toOwned().isEqual(to: "hello") == false { return 10 }
 
-            // ---- Non-mutating trimmedStart(matching:) ----
+            // ---- Non-mutating trimmedStart(where:) ----
             let s10: std.text.String = "..hello..";
-            let tsm = s10.trimmedStart(matching: { (c) in c.isEqual(to: '.') });
+            let tsm = s10.trimmedStart(where: { (c) in c.isEqual(to: '.') });
             if tsm.toOwned().isEqual(to: "hello..") == false { return 11 }
 
-            // ---- Non-mutating trimmedEnd(matching:) ----
+            // ---- Non-mutating trimmedEnd(where:) ----
             let s11: std.text.String = "..hello..";
-            let tem = s11.trimmedEnd(matching: { (c) in c.isEqual(to: '.') });
+            let tem = s11.trimmedEnd(where: { (c) in c.isEqual(to: '.') });
             if tem.toOwned().isEqual(to: "..hello") == false { return 12 }
 
             // ---- Trim with leading/trailing whitespace including newlines ----

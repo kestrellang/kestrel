@@ -47,13 +47,17 @@ fn compile_statement(
             Ok(())
         },
 
-        // Deinit is a no-op at the codegen level — the deinit pass has already
-        // expanded this into explicit calls
-        StatementKind::Deinit { .. } => Ok(()),
+        // Drop/DropIf are no-ops at the cranelift level today. Drop-elab
+        // emits them as structural markers; explicit `deinit` method calls
+        // are already lowered as regular Call statements.
+        //
+        // A future codegen pass will turn `Drop` into a structural destructor
+        // call sequence and `DropIf` into a branch on its flag local.
+        StatementKind::Drop { .. } | StatementKind::DropIf { .. } => Ok(()),
 
-        // DeinitIf: check flag, call deinit if live
-        // Also a no-op at codegen — the deinit pass handles this
-        StatementKind::DeinitIf { .. } => Ok(()),
+        // Deinit/DeinitIf: no-op at codegen — the deinit pass has already
+        // expanded these into explicit calls
+        StatementKind::Deinit { .. } | StatementKind::DeinitIf { .. } => Ok(()),
 
         // SetDeinitFlag: store a bool value into the flag local
         StatementKind::SetDeinitFlag { flag, value } => {
@@ -64,5 +68,8 @@ fn compile_statement(
             builder.def_var(var, val);
             Ok(())
         },
+
+        // ScopeLive: no-op at codegen — consumed by drop elaboration pass
+        StatementKind::ScopeLive(_) => Ok(()),
     }
 }

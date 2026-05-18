@@ -55,13 +55,21 @@ impl BodyCheck for ConditionCheckAnalyzer {
         });
 
         // Check all if-expression conditions
-        for (_expr_id, expr) in cx.hir.exprs.iter() {
+        for (expr_id, expr) in cx.hir.exprs.iter() {
             if let HirExpr::If { condition, .. } = expr {
                 // Skip desugared while conditions — checked separately below
                 if cx.hir.while_conditions.contains(condition) {
                     continue;
                 }
-                check_condition(cx, *condition, "if", bool_cond_protocol, &mut diags);
+                // Guard statements desugar to If; use "guard" label for those
+                let kind = if cx.hir.guard_stmts.iter().any(|&stmt_id| {
+                    matches!(&cx.hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id)
+                }) {
+                    "guard"
+                } else {
+                    "if"
+                };
+                check_condition(cx, *condition, kind, bool_cond_protocol, &mut diags);
             }
         }
 
@@ -176,5 +184,22 @@ fn describe_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
         ResolvedTy::Param { .. } => "type parameter".into(),
         ResolvedTy::SelfType { .. } => "Self".into(),
         ResolvedTy::Function { .. } => "function type".into(),
+        ResolvedTy::AssocProjection { .. } => "associated type".into(),
+        ResolvedTy::Opaque { bounds, .. } => {
+            if bounds.is_empty() {
+                "opaque type".into()
+            } else {
+                let names: Vec<String> = bounds
+                    .iter()
+                    .map(|(e, _)| {
+                        cx.query
+                            .get::<Name>(*e)
+                            .map(|n| n.0.clone())
+                            .unwrap_or_else(|| "?".into())
+                    })
+                    .collect();
+                format!("some {}", names.join(" and "))
+            }
+        },
     }
 }

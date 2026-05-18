@@ -53,7 +53,7 @@ _Defined in `lang/std/io/write.ks`._
 #### function `asSlice`
 
 ```kestrel
-public func asSlice() -> Slice[UInt8]
+public func asSlice() -> ArraySlice[UInt8]
 ```
 
 Returns a non-owning slice view over the buffered bytes. The slice
@@ -137,7 +137,7 @@ _Defined in `lang/std/io/write.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Appends every byte from `buf`. Always succeeds with `.Ok(buf.count)`.
@@ -198,7 +198,7 @@ _Defined in `lang/std/io/write.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Returns `.Ok(buf.count)` without storing the bytes.
@@ -223,7 +223,7 @@ loop until the whole slice is consumed.
 ```
 public struct CountingSink: Writable {
     var written: Int64 = 0
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         self.written = self.written + buf.count;
         .Ok(buf.count)
     }
@@ -251,7 +251,7 @@ _Defined in `lang/std/io/write.ks`._
 #### function `write`
 
 ```kestrel
-mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
+mutating func write(from: ArraySlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Writes up to `buf.count` bytes; returns how many actually moved.
@@ -264,7 +264,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeAll`
 
 ```kestrel
-public func writeAll[W](mutating W, from: Slice[UInt8]) -> Result[(), IoError] where W: Writable
+public func writeAll[__opaque_0](mutating __opaque_0, from: ArraySlice[UInt8]) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes every byte in `buf`, looping until the full slice has been
@@ -284,7 +284,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeByte`
 
 ```kestrel
-public func writeByte[W](mutating W, UInt8) -> Result[(), IoError] where W: Writable
+public func writeByte[__opaque_0](mutating __opaque_0, UInt8) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes a single byte, looping internally until it lands.
@@ -294,7 +294,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeLine`
 
 ```kestrel
-public func writeLine[W](mutating W, String) -> Result[(), IoError] where W: Writable
+public func writeLine[__opaque_0](mutating __opaque_0, String) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes `s` followed by a single `\n`. Does not append `\r` on any
@@ -305,7 +305,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeString`
 
 ```kestrel
-public func writeString[W](mutating W, String) -> Result[(), IoError] where W: Writable
+public func writeString[__opaque_0](mutating __opaque_0, String) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes the UTF-8 encoding of `s`. Empty strings short-circuit. Currently

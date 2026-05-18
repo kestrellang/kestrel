@@ -254,6 +254,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::TupleIndexOutOfBounds { .. } => "TupleIndexOutOfBounds",
         InferError::MemberAccessOnPrimitive { .. } => "MemberAccessOnPrimitive",
         InferError::PrimitiveMethodNotCalled { .. } => "PrimitiveMethodNotCalled",
+        InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
     }
 }
 
@@ -384,6 +385,10 @@ fn format_error(err: &InferError) -> String {
         InferError::PrimitiveMethodNotCalled { method, .. } => format!(
             "PrimitiveMethodNotCalled '{}' at {}:{}",
             method, span.file_id, span.start
+        ),
+        InferError::CircularOpaqueReturn { .. } => format!(
+            "CircularOpaqueReturn at {}:{}",
+            span.file_id, span.start
         ),
     }
 }

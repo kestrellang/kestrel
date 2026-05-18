@@ -9,7 +9,6 @@ use crate::ty::MirTy;
 use crate::value::Value;
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
-use std::fmt;
 
 /// A statement in a basic block.
 #[derive(Debug, Clone)]
@@ -42,18 +41,40 @@ pub enum StatementKind {
     Call {
         dest: Option<Place>,
         callee: Callee,
-        args: Vec<CallArg>,
+        args: Vec<Value>,
     },
 
+    /// `drop <place>` — unconditionally run destructor.
+    ///
+    /// Emitted exclusively by `kestrel-ownership::drop_elab`. Lowering must
+    /// never emit this. The verifier (Stage 6+) enforces both invariants.
+    Drop { place: Place },
+
     /// `deinit <place>` — unconditionally run destructor.
+    ///
+    /// Used internally by the drop elaboration pass. Phase D expands these
+    /// into explicit CFG + Call sequences.
     Deinit { place: Place },
+
+    /// `drop <place> if <flag>` — conditionally run destructor only when the
+    /// per-local `_init_*: Bool` flag (also maintained by drop-elab) is
+    /// `true`. The flag is initialised to `false` at function entry, set
+    /// `true` after each gen of the underlying path, and `false` after each
+    /// kill.
+    DropIf { place: Place, flag: LocalId },
 
     /// `deinit <place> if <flag>` — conditionally run destructor.
     /// The flag is a Bool local tracking whether the value is still live.
+    /// Used internally by the drop elaboration pass before expansion.
     DeinitIf { place: Place, flag: LocalId },
 
     /// `<flag> = true/false` — set a deinit tracking flag.
     SetDeinitFlag { flag: LocalId, value: bool },
+
+    /// `scope_live %local` — marks a local as entering scope.
+    /// The drop elaboration pass reads this as "init-state resets to dead here."
+    /// Emitted at loop headers so loop-scoped locals start each iteration uninitialized.
+    ScopeLive(LocalId),
 }
 
 /// The right-hand side of an assignment.
@@ -184,61 +205,7 @@ impl Callee {
     }
 }
 
-/// An argument to a function call, with its value and passing mode.
-#[derive(Debug, Clone)]
-pub struct CallArg {
-    pub value: Value,
-    pub mode: PassingMode,
-}
-
-impl CallArg {
-    pub fn new(value: Value, mode: PassingMode) -> Self {
-        Self { value, mode }
-    }
-
-    pub fn borrow(value: Value) -> Self {
-        Self::new(value, PassingMode::Ref)
-    }
-
-    pub fn mutating(value: Value) -> Self {
-        Self::new(value, PassingMode::MutRef)
-    }
-
-    pub fn copy(value: Value) -> Self {
-        Self::new(value, PassingMode::Copy)
-    }
-
-    pub fn moving(value: Value) -> Self {
-        Self::new(value, PassingMode::Move)
-    }
-}
-
-/// How an argument is passed to a function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PassingMode {
-    /// Immutable borrow (default).
-    Ref,
-    /// Mutable borrow.
-    MutRef,
-    /// Value copied, original retained.
-    Copy,
-    /// Value moved, original invalidated.
-    Move,
-}
-
-impl PassingMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PassingMode::Ref => "ref",
-            PassingMode::MutRef => "mut",
-            PassingMode::Copy => "copy",
-            PassingMode::Move => "move",
-        }
-    }
-}
-
-impl fmt::Display for PassingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// `CallArg` and `PassingMode` removed as part of the Stage 3 greenfield
+// memory-model rewrite. Call arguments are now `Vec<Value>`, and the four
+// pass-by modes are expressed directly via the `Value::{Copy, Move, Ref,
+// RefMut}` variants on the operand.

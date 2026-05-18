@@ -3,7 +3,6 @@
 module pokedex.data
 
 import quill.value.(Value)
-import pokedex.util.(capitalize)
 
 // ============================================================================
 // JSON HELPERS
@@ -69,11 +68,15 @@ public func getArrayField(obj: Value, key: String) -> Array[Value] {
 // KANTO POKEDEX (Gen 1, 151 entries) — single source of truth
 // ============================================================================
 
-public struct PokemonEntry {
+public struct PokemonEntry: Cloneable {
     public var id: Int64
     public var apiName: String
     public var displayName: String
     public var primaryType: String
+
+    public func clone() -> PokemonEntry {
+        PokemonEntry(id: self.id, apiName: self.apiName.clone(), displayName: self.displayName.clone(), primaryType: self.primaryType.clone())
+    }
 }
 
 /// Build the full Kanto pokedex. All 151 entries inline so id/apiName/

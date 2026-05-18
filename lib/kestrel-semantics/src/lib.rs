@@ -487,7 +487,7 @@ pub fn hir_type_copy_semantics(
         HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. } => {
             query_nominal_semantics(ctx, *entity, root)
         },
-        HirTy::Protocol { .. } => CopySemantics::Copyable,
+        HirTy::Protocol { .. } | HirTy::Opaque { .. } => CopySemantics::Copyable,
         HirTy::Tuple(elems, _) => {
             let mut saw_cloneable = false;
             for elem in elems {
@@ -556,6 +556,10 @@ pub fn hir_type_conforms_to_protocol(
             protocol,
             root,
         }),
+        // Opaque types conform if any of their bounds conform
+        HirTy::Opaque { bounds, .. } => bounds
+            .iter()
+            .any(|b| hir_type_conforms_to_protocol(ctx, b, protocol, context, root)),
         HirTy::Param(entity, _) => {
             let Some(parent) = ctx.parent_of(*entity) else {
                 return false;
@@ -598,6 +602,26 @@ fn nominal_copy_semantics_impl(
             };
         }
 
+    // Stdlib-less fallback: the Copyable builtin isn't resolvable when the
+    // test input doesn't import std.core, but `: not Copyable` is still
+    // meaningful syntactically. Match the last path segment by name so a
+    // minimal `protocol Copyable {}` + `: not Copyable` still classifies
+    // as NotCopyable. Mirrors the same fallback the legacy HIR
+    // move-tracker used; without it `stdlib: false` test fixtures lose
+    // their non-copyable semantics under Stage 7.
+    if copyable.is_none()
+        && let Some(conf) = ctx.get::<Conformances>(entity)
+        && conf.0.iter().any(|item| matches!(
+            item,
+            ConformanceItem::Negative(ast_ty, _) if ast_type_last_segment_is(ast_ty, "Copyable")
+        ))
+    {
+        return CopySemanticsInfo {
+            semantics: CopySemantics::NotCopyable,
+            reason: CopySemanticsReason::ExplicitNotCopyable,
+        };
+    }
+
     let child_types = collect_child_types(ctx, entity, root);
     for (child, ty) in &child_types {
         if hir_type_copy_semantics(ctx, ty, entity, root) == CopySemantics::NotCopyable {
@@ -630,6 +654,18 @@ fn nominal_copy_semantics_impl(
     }
 
     CopySemanticsInfo::copyable()
+}
+
+/// `Copyable`-name fallback for stdlib-less fixtures. Returns true when
+/// `ast_ty` is a single-segment named type whose last segment matches
+/// `name`. Matches the previous HIR-tracker behavior so tests like
+/// `struct Handle: not Copyable {}` (without `import std.core`) still
+/// pick up their non-copyable semantics.
+fn ast_type_last_segment_is(ast_ty: &AstType, name: &str) -> bool {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return false;
+    };
+    segments.last().is_some_and(|s| s.name == name)
 }
 
 fn collect_child_types(
@@ -749,7 +785,8 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Result { span, .. }
         | AstType::Unit(span)
         | AstType::Never(span)
-        | AstType::Inferred(span) => span.clone(),
+        | AstType::Inferred(span)
+        | AstType::Some { span, .. } => span.clone(),
     }
 }
 
@@ -769,5 +806,6 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
+        AstType::Some { .. } => "some".into(),
     }
 }

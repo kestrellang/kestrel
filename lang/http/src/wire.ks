@@ -45,25 +45,6 @@ public func findHeaderEnd(buf: Array[UInt8]) -> Int64 {
     return -1
 }
 
-/// Copies a range of bytes from an array into a new `String`.
-///
-/// Reads bytes in `[start, end)` and appends each to a fresh string.
-/// The caller must ensure the byte range contains valid UTF-8.
-///
-/// # Examples
-///
-/// ```
-/// let buf: Array[UInt8] = [72, 105];  // "Hi"
-/// bytesToString(buf, from: 0, to: 2);  // "Hi"
-/// ```
-public func bytesToString(buf: Array[UInt8], from start: Int64, to end: Int64) -> String {
-    var result = String();
-    for i in start..<end {
-        result.appendByte(buf(unchecked: i))
-    }
-    result
-}
-
 /// Parses a decimal integer string into an `Int64`.
 ///
 /// Walks the string byte-by-byte, accumulating digits. Non-digit
@@ -91,8 +72,7 @@ public func parseDecimal(s: String) -> Int64 {
 
 /// Copies a `String` into a new `Array[UInt8]`.
 ///
-/// The inverse of `bytesToString`. Copies raw UTF-8 bytes without any
-/// encoding transformation.
+/// Copies a string's raw UTF-8 bytes into a new array.
 ///
 /// # Examples
 ///
@@ -160,7 +140,7 @@ public func hexChar(value: Int64) -> UInt8 {
 /// ```
 /// // "5\r\nHello\r\n0\r\n\r\n"
 /// let decoded = dechunk(raw);
-/// bytesToString(decoded, from: 0, to: decoded.count);  // "Hello"
+/// String.fromUtf8(decoded.asSlice());  // Some("Hello")
 /// ```
 public func dechunk(raw: Array[UInt8]) -> Array[UInt8] {
     var result = Array[UInt8]();

@@ -24,7 +24,7 @@ pub mod where_clauses;
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, EnclosingContainer, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir_lower::{
     LowerBody, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
@@ -36,17 +36,13 @@ use resolve::WorldResolver;
 use result::TypedBody;
 
 /// Resolve the logical enclosing container for a function-like entity.
-/// For a Setter (child of Field/Subscript), skip through the accessor-owner
-/// parent so the true container (Struct/Enum/Extension/Protocol/Module) is
-/// used for `self` typing, type-param inheritance, and where-clause resolution.
-/// For plain Functions/Initializers/Deinits/Fields/Subscripts, returns the
-/// direct parent unchanged.
+/// Setters have an `EnclosingContainer` component set at build time;
+/// everything else just uses its direct parent.
 fn accessor_enclosing_container(qctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
-    let direct = qctx.parent_of(entity)?;
-    match qctx.get::<NodeKind>(direct) {
-        Some(NodeKind::Field) | Some(NodeKind::Subscript) => qctx.parent_of(direct),
-        _ => Some(direct),
+    if let Some(ec) = qctx.get::<EnclosingContainer>(entity) {
+        return Some(ec.0);
     }
+    qctx.parent_of(entity)
 }
 
 // ===== InferBody query =====
@@ -97,6 +93,19 @@ impl QueryFn for InferBody {
 
         // Solve
         solver::solve(&mut infer_ctx, &hir);
+
+        // Detect circular opaque returns: if the concrete type behind `some P`
+        // is itself another opaque, the body never grounded to a real type.
+        if let Some(ref info) = infer_ctx.opaque_return {
+            let resolved = infer_ctx.resolve(info.concrete_tv);
+            if let ty::TySlot::Resolved(ty::TyKind::Opaque { .. }) =
+                &infer_ctx.types[resolved.0 as usize]
+            {
+                infer_ctx.errors.push(error::InferError::CircularOpaqueReturn {
+                    span: info.span.clone(),
+                });
+            }
+        }
 
         // Build output
         Some(result::build_result(&infer_ctx))
@@ -223,10 +232,23 @@ fn create_param_types(
 /// Handles bounds (`I: Iterable`), associated type equalities (`I.Item = E`),
 /// and direct type param equalities (`V = Array[E]`).
 fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_>, entity: Entity) {
-    let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+    let mut clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
         entity,
         root: ctx.root,
     });
+    // Setters inherit the subscript/field parent's where clauses (e.g.
+    // `where I: SeqIndex[T]` on the subscript). The accessor owner is
+    // the direct parent (Subscript/Field); EnclosingContainer skips
+    // one further to the type container — we need the intermediate one.
+    if query_ctx.get::<EnclosingContainer>(entity).is_some() {
+        if let Some(accessor_owner) = query_ctx.parent_of(entity) {
+            let owner_clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+                entity: accessor_owner,
+                root: ctx.root,
+            });
+            clauses.extend(owner_clauses);
+        }
+    }
     if clauses.is_empty() {
         return;
     }
@@ -316,18 +338,113 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
 }
 
 /// Create return type TyVar from the TypeAnnotation component.
+///
+/// When the return annotation is `HirTy::Opaque` (i.e. `some P`), this
+/// implements the **internal view**: a fresh TyVar constrained by `Conforms`
+/// to each bound protocol. The body's return expressions unify with this
+/// TyVar normally. Callers (external view) see `TyKind::Opaque` instead,
+/// constructed in `lower_hir_ty_sub`.
 fn create_return_type(
     ctx: &mut InferCtx<'_>,
     query_ctx: &QueryContext<'_>,
     entity: Entity,
 ) -> ty::TyVar {
-    query_ctx
-        .query(LowerTypeAnnotation {
-            entity,
-            root: ctx.root,
-        })
-        .map(|hir_ty| generate::lower_hir_ty(ctx, &hir_ty))
-        .unwrap_or_else(|| ctx.fresh())
+    let hir_ty = query_ctx.query(LowerTypeAnnotation {
+        entity,
+        root: ctx.root,
+    });
+
+    match hir_ty {
+        Some(ref hir) if contains_hir_opaque(hir) => {
+            create_return_type_with_opaque(ctx, hir)
+        },
+        Some(hir_ty) => generate::lower_hir_ty(ctx, &hir_ty),
+        None => ctx.fresh(),
+    }
+}
+
+/// Check if a HirTy contains `Opaque` at any depth.
+fn contains_hir_opaque(ty: &kestrel_hir::ty::HirTy) -> bool {
+    use kestrel_hir::ty::HirTy;
+    match ty {
+        HirTy::Opaque { .. } => true,
+        HirTy::Struct { args, .. }
+        | HirTy::Enum { args, .. }
+        | HirTy::Protocol { args, .. }
+        | HirTy::AliasUse { args, .. } => args.iter().any(contains_hir_opaque),
+        HirTy::Tuple(elems, _) => elems.iter().any(contains_hir_opaque),
+        HirTy::Function { params, ret, .. } => {
+            params.iter().any(contains_hir_opaque) || contains_hir_opaque(ret)
+        },
+        HirTy::AssocProjection { base, .. } => contains_hir_opaque(base),
+        _ => false,
+    }
+}
+
+/// Lower a return type containing opaque positions. Replaces each `HirTy::Opaque`
+/// with a fresh TyVar + Conforms constraints (internal view), and records
+/// the opaque info for the outermost opaque found.
+fn create_return_type_with_opaque(
+    ctx: &mut InferCtx<'_>,
+    hir_ty: &kestrel_hir::ty::HirTy,
+) -> ty::TyVar {
+    use kestrel_hir::ty::HirTy;
+    match hir_ty {
+        HirTy::Opaque { bounds, span } => {
+            let concrete_ret = ctx.fresh();
+
+            let mut opaque_bounds = Vec::new();
+            for bound in bounds {
+                let bound_tv = generate::lower_hir_ty(ctx, bound);
+                let resolved = ctx.resolve(bound_tv);
+                match &ctx.types[resolved.0 as usize] {
+                    ty::TySlot::Resolved(ty::TyKind::Protocol { entity: proto, args }) => {
+                        opaque_bounds.push((*proto, args.clone()));
+                        ctx.conforms(concrete_ret, *proto, span.clone());
+                    },
+                    _ => {},
+                }
+            }
+
+            ctx.opaque_return = Some(ctx::OpaqueReturnInfo {
+                concrete_tv: concrete_ret,
+                bounds: opaque_bounds,
+                span: span.clone(),
+            });
+
+            concrete_ret
+        },
+        HirTy::Struct { entity, args, .. } => {
+            let arg_tvs: Vec<ty::TyVar> = args
+                .iter()
+                .map(|a| create_return_type_with_opaque(ctx, a))
+                .collect();
+            ctx.struct_ty(*entity, arg_tvs)
+        },
+        HirTy::Enum { entity, args, .. } => {
+            let arg_tvs: Vec<ty::TyVar> = args
+                .iter()
+                .map(|a| create_return_type_with_opaque(ctx, a))
+                .collect();
+            ctx.enum_ty(*entity, arg_tvs)
+        },
+        HirTy::Tuple(elems, _) => {
+            let tvs: Vec<ty::TyVar> = elems
+                .iter()
+                .map(|e| create_return_type_with_opaque(ctx, e))
+                .collect();
+            ctx.tuple(tvs)
+        },
+        HirTy::Function { params, ret, .. } => {
+            let param_tvs: Vec<ty::TyVar> = params
+                .iter()
+                .map(|p| create_return_type_with_opaque(ctx, p))
+                .collect();
+            let ret_tv = create_return_type_with_opaque(ctx, ret);
+            ctx.function(param_tvs, ret_tv)
+        },
+        _ => generate::lower_hir_ty(ctx, hir_ty),
+    }
 }
 
 /// Create Param TyVars for the struct's type parameters in method body setup.

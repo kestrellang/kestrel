@@ -51,6 +51,10 @@ fn stdlib_cache() -> &'static StdlibCache {
         let std_path = find_stdlib_path();
         compiler.load_dir(&std_path);
         CompilerDriver::new(&compiler).infer_all();
+        // Clear the changed set so cached queries survive snapshot.
+        // Queries whose deps point to unchanged stdlib entities will
+        // be verified as cache hits instead of re-executing.
+        compiler.begin_revision();
         StdlibCache { compiler }
     })
 }

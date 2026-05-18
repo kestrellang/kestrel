@@ -4,7 +4,7 @@ pub mod assignment;
 pub mod condition_check;
 pub mod dead_code;
 pub mod exhaustive_return;
-pub mod guard_let;
+pub mod guard;
 pub mod param_pattern;
 pub mod type_check;
 
@@ -13,7 +13,6 @@ pub mod access_mode;
 pub mod closure;
 pub mod definite_assignment;
 pub mod initializer;
-pub mod move_tracking;
 
 // Wave 6: Pattern checks
 pub mod exhaustiveness;

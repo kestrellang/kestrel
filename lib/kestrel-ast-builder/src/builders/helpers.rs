@@ -517,6 +517,7 @@ pub fn is_type_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::TyUnit
             | SyntaxKind::TyNever
             | SyntaxKind::TyInferred
+            | SyntaxKind::TySome
     )
 }
 
@@ -549,6 +550,11 @@ pub fn spawn_setter(
     world.set(setter, DeclSpan(get_decl_span(setter_clause, file_id)));
     world.set(setter, CstNode(setter_clause.clone()));
     world.set_parent(setter, parent);
+    // Setter → Subscript/Field → Container. Record the container so
+    // downstream code can skip the intermediate hop without walking.
+    if let Some(container) = world.parent_of(parent) {
+        world.set(setter, EnclosingContainer(container));
+    }
     world.set(setter, Callable { params, receiver });
     world.set(setter, Body(lower::lower_body(setter_body, file_id)));
     world.set(setter, Valued(setter_body.clone()));

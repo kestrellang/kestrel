@@ -192,10 +192,10 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "abc123".contains(matching: { (c) in c.isAsciiDigit });  // true
+    /// "abc123".contains(where: { (c) in c.isAsciiDigit });  // true
     /// ```
-    public func contains(matching predicate: (Char) -> Bool) -> Bool {
-        self.chars.firstIndex(matching: predicate).isSome()
+    public func contains(where predicate: (Char) -> Bool) -> Bool {
+        self.chars.firstIndex(where: predicate).isSome()
     }
 
     /// Returns true if this string starts with `prefix`.
@@ -338,10 +338,10 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "hello world".split(matching: { (c) in c.isWhitespace }).count;  // 2
+    /// "hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
     /// ```
-    public func split(matching predicate: (Char) -> Bool) -> SplitWhereView {
-        SplitWhereView(slice: self.asSlice(), matching: predicate)
+    public func split(where predicate: (Char) -> Bool) -> SplitWhereView {
+        SplitWhereView(slice: self.asSlice(), where: predicate)
     }
 
     // -- Trimming (non-mutating) -----------------------------------------------
@@ -461,9 +461,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "00042".trimmed(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
+    /// "00042".trimmed(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
     /// ```
-    public func trimmed(matching predicate: (Char) -> Bool) -> StringSlice {
+    public func trimmed(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
         let myLen = slice.byteCount;
         let basePtr = slice._rawPtr().offset(by: slice.start);
@@ -504,9 +504,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "000abc".trimmedStart(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+    /// "000abc".trimmedStart(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
     /// ```
-    public func trimmedStart(matching predicate: (Char) -> Bool) -> StringSlice {
+    public func trimmedStart(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
         let myLen = slice.byteCount;
         let basePtr = slice._rawPtr().offset(by: slice.start);
@@ -534,9 +534,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "abc000".trimmedEnd(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+    /// "abc000".trimmedEnd(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
     /// ```
-    public func trimmedEnd(matching predicate: (Char) -> Bool) -> StringSlice {
+    public func trimmedEnd(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
         let myLen = slice.byteCount;
         let basePtr = slice._rawPtr().offset(by: slice.start);
@@ -585,7 +585,7 @@ extend Str {
                     if unicode.hasLowercaseExpansion(c) {
                         result.append(unicode.lowercaseExpansion(c))
                     } else {
-                        result.appendChar(unicode.toLowercase(c))
+                        result.append(char: unicode.toLowercase(c))
                     }
                 }
                 return result
@@ -640,7 +640,7 @@ extend Str {
                     if unicode.hasUppercaseExpansion(c) {
                         result.append(unicode.uppercaseExpansion(c))
                     } else {
-                        result.appendChar(unicode.toUppercase(c))
+                        result.append(char: unicode.toUppercase(c))
                     }
                 }
                 return result
@@ -686,20 +686,20 @@ extend Str {
         var atWordStart = true;
         for c in self.chars.iter() {
             if c.isWhitespace {
-                result.appendChar(c);
+                result.append(char: c);
                 atWordStart = true
             } else if atWordStart {
                 if unicode.hasTitlecaseExpansion(c) {
                     result.append(unicode.titlecaseExpansion(c))
                 } else {
-                    result.appendChar(unicode.toTitlecase(c))
+                    result.append(char: unicode.toTitlecase(c))
                 }
                 atWordStart = false
             } else {
                 if unicode.hasLowercaseExpansion(c) {
                     result.append(unicode.lowercaseExpansion(c))
                 } else {
-                    result.appendChar(unicode.toLowercase(c))
+                    result.append(char: unicode.toLowercase(c))
                 }
             }
         }
@@ -802,7 +802,7 @@ extend Str {
     public func caseFolded() -> String {
         var result = String(capacity: self.byteCount);
         for c in self.chars {
-            result.appendChar(unicode.caseFold(c))
+            result.append(char: unicode.caseFold(c))
         }
         result
     }
@@ -926,7 +926,7 @@ extend Str {
         let paddingCount = length - currentLen;
         var result = String(capacity: self.byteCount + paddingCount * char.utf8Length());
         for i in 0..<paddingCount {
-            result.appendChar(char)
+            result.append(char: char)
         }
         let slice = self.asSlice();
         result._appendBytes(slice._rawPtr().offset(by: slice.start), slice.byteCount);
@@ -954,7 +954,7 @@ extend Str {
         let slice = self.asSlice();
         result._appendBytes(slice._rawPtr().offset(by: slice.start), slice.byteCount);
         for i in 0..<paddingCount {
-            result.appendChar(char)
+            result.append(char: char)
         }
         result
     }

@@ -441,14 +441,17 @@ impl<'a> CodegenContext<'a> {
                 .push(AbiParam::special(ptr_ty, ir::ArgumentPurpose::StructReturn));
         }
 
-        // Regular parameters. `mutating` (InOut) params are passed as pointers
-        // regardless of value type so the callee can write back to caller storage.
+        // Regular parameters. Ownership is encoded in the type — see
+        // `param_passed_by_ptr`: `RefMut(_)`, `Ref(aggregate)`, and owned
+        // aggregates pass via pointer; scalar `Ref` and owned scalars pass
+        // by value (using their inner type, since translate_type alone
+        // would map `Ref(T)` to a generic ptr).
         for param in &func_def.params {
             let ty = substitute_type_with_self(&param.ty, &subst, self_type, self.module);
-            let cl_ty = if matches!(param.mode, kestrel_mir::ParamMode::InOut) {
+            let cl_ty = if common::param_passed_by_ptr(&ty, &mut self.layouts) {
                 ptr_ty
             } else {
-                types::translate_type(&ty, self.target)
+                types::translate_type(common::param_inner_ty(&ty), self.target)
             };
             sig.params.push(AbiParam::new(cl_ty));
         }

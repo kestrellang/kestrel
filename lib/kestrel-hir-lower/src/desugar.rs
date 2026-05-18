@@ -167,6 +167,43 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
+    // ===== Postfix operators =====
+
+    /// Desugar a postfix operator to a ProtocolCall (e.g. `x..` → `x.rangeFrom()`).
+    pub(crate) fn desugar_postfix_op(
+        &mut self,
+        body: &AstBody,
+        op: &PostfixOp,
+        operand: ExprId,
+        span: &Span,
+    ) -> HirExprId {
+        let lowered_operand = self.lower_expr(body, operand);
+
+        if let Some((proto, method)) = lookup_postfix_op(op)
+            && let Some(protocol) = self.resolve_builtin(proto)
+        {
+            return self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_operand,
+                protocol,
+                method: HirName::name(method),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            });
+        }
+
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "unsupported postfix operator '{}'",
+                    postfix_op_symbol(op)
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
+        self.alloc_expr(HirExpr::Error { span: span.clone() })
+    }
+
     // ===== Compound assignment =====
 
     /// Desugar compound assignment (+=, -=, etc.) to a ProtocolCall, wrapped
@@ -305,7 +342,29 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Desugar `while let conditions { body }` → `loop { match ... }`
+    /// Desugar `while let conditions { body }` → `loop { match ... }`.
+    ///
+    /// For the common single-`let` case, lower to:
+    /// ```text
+    /// loop {
+    ///     match value {
+    ///         pattern => { body }
+    ///         _       => break
+    ///     }
+    /// }
+    /// ```
+    /// This puts the body **inside** the matching arm, so the move-check
+    /// dataflow doesn't lose the binding-then-use correlation through a
+    /// merge with the unmatched arm. The previous shape
+    /// (`loop { if !cond { break }; body }` where `cond` was a
+    /// `match v { pat => true, _ => false }`) joined the two arms before
+    /// the body, leaving the bound variable `MaybeInit` at the body's
+    /// reads — a flood of false-positive E501s in stdlib iterator code
+    /// (`Iterator.fold`, `Set.min`, `Array.appendFrom`, etc.).
+    ///
+    /// For multi-condition while-let (`while let .Some(x) = a, x > 0 { … }`)
+    /// the dataflow-friendly shape is harder to express, so we fall back
+    /// to the if-break-merge desugaring for those.
     pub(crate) fn desugar_while_let(
         &mut self,
         body: &AstBody,
@@ -314,10 +373,110 @@ impl LowerCtx<'_> {
         while_body: &AstBlock,
         span: &Span,
     ) -> HirExprId {
-        // Scope enclosing the condition + loop body so `while let` pattern
-        // bindings are visible inside the body but not after the loop.
+        // Single-`let` shape: lower to `loop { match v { pat => body, _ => break } }`
+        // — same structure as `desugar_for_loop`. No CFG merge before the body,
+        // so the move-check dataflow keeps the binding-then-use correlation.
+        if conditions.len() == 1
+            && let IfCondition::Let { pattern, value } = &conditions[0]
+        {
+            return self.desugar_while_let_single(
+                body,
+                label,
+                *pattern,
+                *value,
+                while_body,
+                span,
+            );
+        }
+
+        self.desugar_while_let_chain(body, label, conditions, while_body, span)
+    }
+
+    /// Single-let shape: `while let pat = value { body }` →
+    /// `loop { match value { pat => body, _ => break } }`. The body lives
+    /// inside the matching arm, so the move-check dataflow sees `pat`'s
+    /// bindings as `DefinitelyInit` at the body without a merge.
+    fn desugar_while_let_single(
+        &mut self,
+        body: &AstBody,
+        label: Option<&str>,
+        pattern: PatId,
+        value: ExprId,
+        while_body: &AstBlock,
+        span: &Span,
+    ) -> HirExprId {
+        let lowered_value = self.lower_expr(body, value);
+
+        // Pattern bindings are visible inside the loop body but not after.
         self.push_scope();
-        // Lower conditions to a boolean expression
+        let lowered_pat = self.lower_pat(body, pattern);
+
+        // Lower body inside the same scope as the pattern bindings, with
+        // the loop label in scope so `break` / `continue` can validate.
+        self.push_loop(label);
+        let lowered_body = self.lower_block(body, while_body);
+        self.pop_loop();
+        self.pop_scope();
+
+        let body_expr = self.alloc_expr(HirExpr::Block {
+            body: lowered_body,
+            span: span.clone(),
+        });
+
+        let wildcard_pat = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+        let break_expr = self.alloc_expr(HirExpr::Break {
+            label: label.map(|l| l.to_string()),
+            span: span.clone(),
+        });
+
+        let match_expr = self.alloc_expr(HirExpr::Match {
+            scrutinee: lowered_value,
+            arms: vec![
+                HirMatchArm {
+                    pattern: lowered_pat,
+                    guard: None,
+                    body: body_expr,
+                },
+                HirMatchArm {
+                    pattern: wildcard_pat,
+                    guard: None,
+                    body: break_expr,
+                },
+            ],
+            source: MatchSource::WhileLet,
+            span: span.clone(),
+        });
+
+        let match_stmt = self.alloc_stmt(HirStmt::Expr {
+            expr: match_expr,
+            span: span.clone(),
+        });
+
+        self.alloc_expr(HirExpr::Loop {
+            label: label.map(|l| l.to_string()),
+            body: HirBlock {
+                stmts: vec![match_stmt],
+                tail_expr: None,
+            },
+            span: span.clone(),
+        })
+    }
+
+    /// Multi-condition while-let — `while let .Some(x) = a, let .Some(y) = b
+    /// { … }` and friends. Falls back to the `loop { if !cond { break }; body }`
+    /// shape because the binding scope spans multiple match expressions, which
+    /// can't be expressed as a single arm body. The dataflow may emit
+    /// false-positive E501s for non-Copyable bindings in this shape; in
+    /// practice the chained shape isn't used in stdlib code.
+    fn desugar_while_let_chain(
+        &mut self,
+        body: &AstBody,
+        label: Option<&str>,
+        conditions: &[IfCondition],
+        while_body: &AstBlock,
+        span: &Span,
+    ) -> HirExprId {
+        self.push_scope();
         let cond = self.lower_if_conditions(body, conditions, MatchSource::WhileLet, span);
 
         let break_expr = self.alloc_expr(HirExpr::Break {
@@ -325,7 +484,6 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Negate: if !cond { break }
         let negated =
             if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
                 self.alloc_expr(HirExpr::ProtocolCall {
@@ -1249,6 +1407,15 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::BitNot => "!",
         UnaryOp::LogicalNot => "not",
         UnaryOp::Pos => "+",
+        UnaryOp::RangeUpTo => "..<",
+        UnaryOp::RangeThrough => "..=",
+    }
+}
+
+fn postfix_op_symbol(op: &PostfixOp) -> &'static str {
+    match op {
+        PostfixOp::Unwrap => "!",
+        PostfixOp::RangeFrom => "..",
     }
 }
 

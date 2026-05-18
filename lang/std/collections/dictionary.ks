@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Adda
 import std.text.(Formattable, FormatOptions, String, StringBuilder)
 import std.numeric.(Int64, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox)
 import std.iter.(Iterator, Iterable)
 import std.collections.(DefaultHasher, Array)
 
@@ -334,34 +334,28 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Concrete iterator type returned by `iter()`.
     type TargetIterator = DictionaryIterator[K, V]
 
-    /// Refcounted storage cell. Sharing this between `Dictionary`
-    /// copies enables COW.
-    private var storage: RcBox[DictionaryStorage[K, V, H]]
+    /// COW storage — `CowBox` handles the reference counting and
+    /// clone-on-write barrier.
+    private var storage: CowBox[DictionaryStorage[K, V, H]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.getValue().buckets }
+    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.read().buckets }
     /// Returns the live-entry count from storage. Internal helper.
-    private func len() -> Int64 { self.storage.getValue().len }
+    private func len() -> Int64 { self.storage.read().len }
     /// Returns the total bucket capacity from storage. Internal helper.
-    private func cap() -> Int64 { self.storage.getValue().cap }
+    private func cap() -> Int64 { self.storage.read().cap }
 
-    /// Ensures the storage is uniquely owned, deep-copying it if shared.
-    ///
-    /// COW write barrier: every mutating method calls this before
-    /// touching the bucket array, so writes never leak into other
-    /// `Dictionary` copies that share the same `RcBox`. No-op when
-    /// this is the only reference.
+    /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
-        if not self.storage.isUnique() {
-            self.storage = RcBox(self.storage.getValue().clone())
+        if self.storage.isUnique() == false {
+            var s = self.storage.write();
+            self.storage.setValue(s)
         }
     }
 
     /// @name From Storage
-    /// Wraps an existing storage box in a new `Dictionary`. Used by
-    /// `clone()` and other helpers that already have an `RcBox` in
-    /// hand.
-    private init(storage storage: RcBox[DictionaryStorage[K, V, H]]) {
+    /// Wraps an existing storage box in a new `Dictionary`.
+    private init(storage storage: CowBox[DictionaryStorage[K, V, H]]) {
         self.storage = storage;
     }
 
@@ -384,7 +378,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// d.capacity;  // 0
     /// ```
     public init() {
-        self.storage = RcBox(DictionaryStorage(
+        self.storage = CowBox(DictionaryStorage(
             buckets: Pointer[Bucket[K, V]].nullPointer(),
             len: 0,
             cap: 0
@@ -418,7 +412,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 for i in 0..<actualCap {
                     newBuckets.offset(by: i).write(.Empty);
                 }
-                self.storage = RcBox(DictionaryStorage(
+                self.storage = CowBox(DictionaryStorage(
                     buckets: newBuckets,
                     len: 0,
                     cap: actualCap
@@ -427,7 +421,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 fatalError("Dictionary allocation failed")
             }
         } else {
-            self.storage = RcBox(DictionaryStorage(
+            self.storage = CowBox(DictionaryStorage(
                 buckets: Pointer[Bucket[K, V]].nullPointer(),
                 len: 0,
                 cap: 0
@@ -834,7 +828,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Panics on allocation failure.
     private mutating func resize() {
         self.makeUnique();
-        let s = self.storage.getValue();
+        let s = self.storage.read();
         let newCap: Int64 = if s.cap == 0 {
             8
         } else {
@@ -883,12 +877,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 }
             }
 
-            // Free old table
-            if oldCap > 0 {
-                let oldLayout = Layout.array[Bucket[K, V]](oldCap);
-                allocator.deallocate(oldBuckets.asRaw(), oldLayout)
-            }
-
             self.storage.setValue(DictionaryStorage(
                 buckets: newBuckets,
                 len: newLen,
@@ -907,7 +895,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// not check. Triggers COW. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
         self.makeUnique();
-        let s = self.storage.getValue();
+        let s = self.storage.read();
         let oldBuckets = s.buckets;
         let oldCap = s.cap;
 
@@ -948,12 +936,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                     },
                     _ => {}
                 }
-            }
-
-            // Free old table
-            if oldCap > 0 {
-                let oldLayout = Layout.array[Bucket[K, V]](oldCap);
-                allocator.deallocate(oldBuckets.asRaw(), oldLayout)
             }
 
             self.storage.setValue(DictionaryStorage(
@@ -1026,7 +1008,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         // Find empty slot
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
-            var s = self.storage.getValue();
+            var s = self.storage.read();
             s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
             s.len = s.len + 1;
             self.storage.setValue(s)
@@ -1055,7 +1037,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            var s = self.storage.getValue();
+            var s = self.storage.read();
             let bucket = s.buckets.offset(by: index).read();
             let removedValue: V? = match bucket {
                 .Occupied(_, v, _) => .Some(v),
@@ -1088,7 +1070,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.getValue();
+        var s = self.storage.read();
         for i in 0..<s.cap {
             s.buckets.offset(by: i).write(.Empty);
         }
@@ -1216,7 +1198,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Two-pass implementation: collects keys to remove, then deletes
     /// them. Each removal leaves a tombstone — call `shrinkToFit()`
     /// afterwards if you've removed a large fraction. The mirror is
-    /// `removeAll(matching:)`.
+    /// `removeAll(where:)`.
     ///
     /// # Examples
     ///
@@ -1224,7 +1206,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2, "c": 3];
     /// dict.retain { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
-    public mutating func retain(matching predicate: (K, V) -> Bool) {
+    public mutating func retain(where predicate: (K, V) -> Bool) {
         self.makeUnique();
         let myCap = self.cap();
         let myBuckets = self.buckets();
@@ -1250,7 +1232,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// Removes every entry for which `predicate(key, value)` is true.
     ///
-    /// Inverse of `retain(matching:)`; implemented as `retain` over
+    /// Inverse of `retain(where:)`; implemented as `retain` over
     /// the negated predicate. Same tombstone caveat applies — consider
     /// `shrinkToFit()` after large removals.
     ///
@@ -1260,8 +1242,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2, "c": 3];
     /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
     /// ```
-    public mutating func removeAll(matching predicate: (K, V) -> Bool) {
-        self.retain(matching: { (k, v) in not predicate(k, v) })
+    public mutating func removeAll(where predicate: (K, V) -> Bool) {
+        self.retain(where: { (k, v) in not predicate(k, v) })
     }
 
     /// Grows the bucket array so at least `minimumCapacity` entries
@@ -1357,7 +1339,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 5].contains { (k, v) in v > 3 };  // true
     /// ["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
     /// ```
-    public func contains(matching predicate: (K, V) -> Bool) -> Bool {
+    public func contains(where predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1389,7 +1371,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
     /// dict.first { (k, v) in v > 99 }; // None
     /// ```
-    public func first(matching predicate: (K, V) -> Bool) -> (K, V)? {
+    public func first(where predicate: (K, V) -> Bool) -> (K, V)? {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1410,7 +1392,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// `true` when every entry satisfies `predicate(key, value)`
     /// (vacuously true for empty).
     ///
-    /// Short-circuits on the first failure. Dual of `any(matching:)`.
+    /// Short-circuits on the first failure. Dual of `any(where:)`.
     ///
     /// # Examples
     ///
@@ -1419,7 +1401,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2].all { (k, v) in v % 2 == 0 };  // false
     /// [:].all { (k, v) in false };                    // true (vacuous)
     /// ```
-    public func all(matching predicate: (K, V) -> Bool) -> Bool {
+    public func all(where predicate: (K, V) -> Bool) -> Bool {
         let myCap = self.cap();
         let myBuckets = self.buckets();
 
@@ -1439,7 +1421,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// `true` when at least one entry satisfies `predicate(key, value)`.
     ///
-    /// Alias for `contains(matching:)` — the two names exist so
+    /// Alias for `contains(where:)` — the two names exist so
     /// predicate-style code reads naturally regardless of context.
     /// Short-circuits on the first match.
     ///
@@ -1449,16 +1431,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 5].any { (k, v) in v > 3 };  // true
     /// [:].any { (k, v) in true };                // false (empty)
     /// ```
-    public func any(matching predicate: (K, V) -> Bool) -> Bool {
-        self.contains(matching: predicate)
+    public func any(where predicate: (K, V) -> Bool) -> Bool {
+        self.contains(where: predicate)
     }
 
     /// Returns the number of entries for which
     /// `predicate(key, value)` is true.
     ///
     /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(matching:)`; for a yes/no on every entry,
-    /// `all(matching:)`.
+    /// `any(where:)`; for a yes/no on every entry,
+    /// `all(where:)`.
     ///
     /// # Examples
     ///
@@ -1466,7 +1448,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2, "c": 3].countItems { (k, v) in v > 1 };  // 2
     /// [:].countItems { (k, v) in true };                        // 0
     /// ```
-    public func countItems(matching predicate: (K, V) -> Bool) -> Int64 {
+    public func countItems(where predicate: (K, V) -> Bool) -> Int64 {
         var result: Int64 = 0;
         let myCap = self.cap();
         let myBuckets = self.buckets();
@@ -1557,9 +1539,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Returns a new dictionary containing only entries for which
     /// `predicate(key, value)` is true.
     ///
-    /// Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+    /// Non-mutating mirror of `retain(where:)`. Allocates a fresh
     /// dictionary; for in-place filtering use `retain` or
-    /// `removeAll(matching:)`.
+    /// `removeAll(where:)`.
     ///
     /// # Examples
     ///
@@ -1567,7 +1549,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// let dict = ["a": 1, "b": 2, "c": 3];
     /// let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
-    public func filter(matching predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
+    public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
         var result = Dictionary[K, V, H]();
         let myCap = self.cap();
         let myBuckets = self.buckets();
@@ -1797,7 +1779,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
     /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
     /// ```
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
-        writer.appendChar('{');
+        writer.append(char: '{');
         var first = true;
         let myCap = self.capacity;
         let myBuckets = self.getBuckets();
@@ -1818,7 +1800,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
                 _ => {}
             }
         }
-        writer.appendChar('}')
+        writer.append(char: '}')
     }
 }
 
@@ -2144,7 +2126,7 @@ extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.E
     ///
     /// The compiler guarantees `_dictionaryLiteralPointer` points to
     /// exactly `_dictionaryLiteralCount` initialized `(K, V)` pairs.
-    public init(_dictionaryLiteralPointer: lang.ptr[(K, V)], _dictionaryLiteralCount: lang.i64) {
+    public init(consuming _dictionaryLiteralPointer: lang.ptr[(K, V)], consuming _dictionaryLiteralCount: lang.i64) {
         self.init(dictionaryLiteral: std.memory.LiteralSlice(pointer: _dictionaryLiteralPointer, count: _dictionaryLiteralCount))
     }
 

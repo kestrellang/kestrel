@@ -11,10 +11,13 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 64-bit unsigned integer.
@@ -81,6 +84,9 @@ public struct UInt64:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
@@ -338,6 +344,21 @@ public struct UInt64:
         ClosedRange[UInt64](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[UInt64] {
+        RangeFrom[UInt64](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[UInt64] {
+        RangeUpTo[UInt64](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[UInt64] {
+        RangeThrough[UInt64](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -367,6 +388,9 @@ public struct UInt64:
     type RightShift.Output = UInt64
     type RangeConstructible.Output = Range[UInt64]
     type ClosedRangeConstructible.Output = ClosedRange[UInt64]
+    type RangeFromConstructible.Output = RangeFrom[UInt64]
+    type RangeUpToConstructible.Output = RangeUpTo[UInt64]
+    type RangeThroughConstructible.Output = RangeThrough[UInt64]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)
@@ -702,11 +726,13 @@ public struct UInt64:
         result
     }
 
-    /// Reassembles a `UInt64` from 8 bytes in native (host) byte
-    /// order. Returns `None` if the input is not exactly 8 bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt64? {
+    /// @name From Bytes
+    /// Reassembles a `UInt64` from 8 bytes in native byte order.
+    /// Returns `null` if the input is not exactly 8 bytes long.
+    public init[S](fromBytes fromBytes: S)? where S: Slice[UInt8] {
+        let bytes = fromBytes.asSlice();
         if bytes.count != 8 {
-            return .None
+            return null
         }
         var value = UInt64.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
@@ -715,14 +741,16 @@ public struct UInt64:
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
-        .Some(value)
+        self.raw = value.raw;
     }
 
+    /// @name From Bytes Big Endian
     /// Reassembles a `UInt64` from 8 bytes in big-endian order.
-    /// Returns `None` if the input is not exactly 8 bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt64? {
+    /// Returns `null` if the input is not exactly 8 bytes long.
+    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Slice[UInt8] {
+        let bytes = fromBytesBigEndian.asSlice();
         if bytes.count != 8 {
-            return .None
+            return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -731,14 +759,16 @@ public struct UInt64:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        .Some(result)
+        self.raw = result.raw;
     }
 
+    /// @name From Bytes Little Endian
     /// Reassembles a `UInt64` from 8 bytes in little-endian order.
-    /// Returns `None` if the input is not exactly 8 bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt64? {
+    /// Returns `null` if the input is not exactly 8 bytes long.
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Slice[UInt8] {
+        let bytes = fromBytesLittleEndian.asSlice();
         if bytes.count != 8 {
-            return .None
+            return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -748,48 +778,45 @@ public struct UInt64:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        .Some(result)
+        self.raw = result.raw;
     }
 
     // ========================================================================
     // PARSING
     // ========================================================================
 
+    /// @name Parse
     /// Parses a base-10 unsigned integer literal, optionally prefixed
-    /// with `+`. A leading `-` is rejected. Returns `None` for an empty
+    /// with `+`. A leading `-` is rejected. Returns `null` for an empty
     /// string, a non-digit character, or a value that does not fit in
     /// `UInt64`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt64.parse("42");   // Some(42)
-    /// UInt64.parse("-1");   // None  (no sign for unsigned)
-    /// UInt64.parse("");     // None
+    /// let n = UInt64(parsing: "42");   // Some(42)
+    /// let bad = UInt64(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public static func parse(string: String) -> UInt64? {
+    public init(parsing string: String)? {
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
         var index: Int64 = 0;
 
-        // Check for optional + sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 43 {  // '+'
+        if firstByteVal == 43 {
             index = 1
-        } else if firstByteVal == 45 {  // '-' not allowed for unsigned
-            return .None
+        } else if firstByteVal == 45 {
+            return null
         }
 
-        // Must have at least one digit
         if index >= len {
-            return .None
+            return null
         }
 
-        // Parse digits using UInt64 for accumulation
         var result: UInt64 = 0;
         let maxBeforeMultiply: UInt64 = 1844674407370955161;
         let maxVal: UInt64 = UInt64.maxValue;
@@ -798,71 +825,66 @@ public struct UInt64:
             let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = UInt64(from: byte);
 
-            // Check if digit (0-9 = 48-57)
             if byteVal < 48 or byteVal > 57 {
-                return .None
+                return null
             }
 
             let digit = byteVal - 48;
 
-            // Check for overflow before multiply
             if result > maxBeforeMultiply {
-                return .None
+                return null
             }
             result = result * 10;
 
-            // Check for overflow before add
             if result > UInt64.maxValue - digit {
-                return .None
+                return null
             }
             result = result + digit;
 
             index = index + 1
         }
 
-        // Check bounds for target type
         if result > maxVal {
-            return .None
+            return null
         }
 
-        .Some(result)
+        self.raw = result.raw;
     }
-    /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-    /// a–z are case-insensitive and represent digit values 10–35. A
+    /// @name Parse Radix
+    /// Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+    /// a-z are case-insensitive and represent digit values 10-35. A
     /// leading `+` is allowed but a leading `-` is rejected. Returns
-    /// `None` for an out-of-range radix, an empty string, an
+    /// `null` for an out-of-range radix, an empty string, an
     /// unrecognised digit, or a value that overflows `UInt64`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt64.parse("ff", 16);     // Some(255 if it fits, else None)
-    /// UInt64.parse("101010", 2);  // Some(42)
+    /// let n = UInt64(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+    /// let m = UInt64(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public static func parse(string: String, radix: Int64) -> UInt64? {
+    public init(parsing string: String, radix radix: Int64)? {
         if radix < 2 or radix > 36 {
-            return .None
+            return null
         }
 
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
         var index: Int64 = 0;
 
-        // Optional `+`; reject leading `-` outright.
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {
             index = 1
         } else if firstByteVal == 45 {
-            return .None
+            return null
         }
 
-        // Must have at least one digit
         if index >= len {
-            return .None
+            return null
         }
 
         let radixU: UInt64 = UInt64(from: radix);
@@ -881,22 +903,22 @@ public struct UInt64:
             } else if byteVal >= 97 and byteVal <= 122 {
                 byteVal - 87
             } else {
-                return .None
+                return null
             };
 
             if digit >= radix {
-                return .None
+                return null
             }
 
             let digitU: UInt64 = UInt64(from: digit);
             if result > (maxVal - digitU) / radixU {
-                return .None
+                return null
             }
             result = result * radixU + digitU;
             index = index + 1
         }
 
-        .Some(result)
+        self.raw = result.raw;
     }
 
     // ========================================================================
@@ -952,9 +974,9 @@ public struct UInt64:
         var result = String();
 
         if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }
 
         if options.alternate {

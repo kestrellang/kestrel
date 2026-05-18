@@ -147,7 +147,7 @@ This is the governing principle for methods and labels. A call site should read 
 
 ```
 replace("foo", with: "bar")            → "replace foo with bar"
-fold(from: 0, combining: { a + b })    → "fold from 0 combining a+b"
+fold(from: 0, by: { a + b })           → "fold from 0 by a+b"
 offset(by: 3)                          → "offset by 3"
 chunks(of: 4)                          → "chunks of 4"
 isValid(index: 5)                      → "is valid index 5"
@@ -161,7 +161,7 @@ replace, filter, fold, collect, append, insert, remove
 isEmpty, isNull, isSorted(), isValid(index:), isSubset(of:)
 ```
 
-**Labels are prepositions or participles** — `with:`, `from:`, `by:`, `of:`, `at:`, `matching:`, `combining:`, `mapping:`, `using:`, `byKey:`. Not bare nouns like `transform:`, `action:`, `predicate:`, `element:`.
+**Labels are prepositions or participles** — `with:`, `from:`, `by:`, `of:`, `at:`, `where:`, `as:`, `or:`, `using:`, `byKey:`. Keywords are allowed as labels. Not bare nouns like `transform:`, `action:`, `predicate:`, `element:`.
 
 ```
 // Good
@@ -207,14 +207,14 @@ minBy(key: { it.age })
 String.fromUtf8(bytes: bytes)
 ```
 
-**Use `matching:` for all predicate closures.** One label, everywhere.
+**Use `where:` for all predicate closures.** One label, everywhere.
 
 ```
-filter(matching: { it > 0 })
-all(matching: { it > 0 })
-any(matching: { it.isReady })
-contains(matching: { it.isExpired })
-retain(matching: { it.isActive })
+filter(where: { it > 0 })
+all(where: { it > 0 })
+any(where: { it.isReady })
+contains(where: { it.isExpired })
+retain(where: { it.isActive })
 ```
 
 ## 8. Properties vs methods
@@ -292,26 +292,26 @@ asRaw()
 
 ## 13. Cross-library consistency
 
-When two libraries expose the same semantic operation, they must use the same name, label, and declaration form. A user shouldn't have to remember that `isEmpty` is a property on Array but a method on BytesView, or that predicates use `matching:` on Set but are unlabeled on Iterator.
+When two libraries expose the same semantic operation, they must use the same name, label, and declaration form. A user shouldn't have to remember that `isEmpty` is a property on Array but a method on BytesView, or that predicates use `where:` on Set but are unlabeled on Iterator.
 
 Concrete rules:
 
-- **Predicate closures** always use `matching:` — on every type, in every module.
+- **Predicate closures** always use `where:` — on every type, in every module.
 - **Key-extractor closures** always use `byKey:`.
-- **Combining closures** always use `combining:`.
-- **Mapping closures** always use `mapping:` (or are unlabeled for trailing closures like `map`, `flatMap`).
+- **Combining closures** always use `by:`.
+- **Mapping closures** always use `as:` (or are unlabeled for trailing closures like `map`, `flatMap`).
 - **State queries** (`isEmpty`, `count`, `capacity`) are always properties, never methods.
-- **Same concept, same name** — if collections call it `first(matching:)`, iterators call it `first(matching:)` too, not `find`.
+- **Same concept, same name** — if collections call it `first(where:)`, iterators call it `first(where:)` too, not `find`.
 
 ```
 // Good — consistent across Array, Set, Iterator, String
-filter(matching: { it > 0 })
-all(matching: { it.isReady })
-first(matching: { it.isExpired })
+filter(where: { it > 0 })
+all(where: { it.isReady })
+first(where: { it.isExpired })
 sort(byKey: { it.name })
-fold(from: 0, combining: { a + b })
+fold(from: 0, by: { a + b })
 
 // Bad — different names/labels for the same thing
-Array.all(satisfying: ...)   // vs Set.all(matching: ...)
-Iterator.find(...)           // vs Array.first(matching: ...)
+Array.all(satisfying: ...)   // vs Set.all(where: ...)
+Iterator.find(...)           // vs Array.first(where: ...)
 ```

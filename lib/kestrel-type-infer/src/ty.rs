@@ -72,6 +72,16 @@ pub enum TyKind {
     /// Unifies with anything.
     Never,
 
+    /// Opaque return type: `some P`. Callers see only the protocol bounds;
+    /// the concrete type is hidden. Created at call sites for functions with
+    /// opaque return types. Never created inside the defining body.
+    Opaque {
+        origin: Entity,
+        bounds: Vec<(Entity, Vec<TyVar>)>,
+        origin_args: Vec<TyVar>,
+        index: u32,
+    },
+
     /// Error poison — only created after a diagnostic is emitted.
     /// Unifies with anything silently, preventing cascading errors.
     Error,

@@ -18,6 +18,7 @@ kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
 kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-semantics = { path = "../kestrel-semantics" }
 
 [dev-dependencies]
 kestrel-compiler = { path = "../kestrel-compiler" }

@@ -30,7 +30,7 @@ import std.io.error.(IoError)
 /// });
 /// let _ = app.listen(8080);
 /// ```
-public struct App[T] {
+public struct App[T]: Cloneable where T: Cloneable {
     var router: Router[T]
     var context: T
 
@@ -38,6 +38,12 @@ public struct App[T] {
     public init(context: T) {
         self.router = Router[T]();
         self.context = context
+    }
+
+    public func clone() -> App[T] {
+        var copy = App[T](self.context.clone());
+        copy.router = self.router.clone();
+        copy
     }
 
     // ========================================================================
@@ -109,7 +115,7 @@ public struct App[T] {
     /// already in use, permission denied).
     public func listen(port: UInt16) -> Result[(), IoError] {
         var listener = try TcpListener.bind(port);
-        let _ = println("Perch listening on port " + Int64(from: port).format());
+        let _ = println("Perch listening on port \(port)");
 
         loop {
             var stream = try listener.accept();

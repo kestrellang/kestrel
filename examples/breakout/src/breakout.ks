@@ -7,6 +7,13 @@ import std.core.Range
 import Tui.(Style, StyleOption, Box, moveTo, home, clearScreen, hideCursor, showCursor, clearLine, repeatStr)
 import Input.(Key, InputManager)
 
+// Workaround for cross-module ExpressibleByArrayLiteral compiler bug:
+// Array literal syntax for Style doesn't resolve element types across modules.
+func makeStyle(options: Array[StyleOption]) -> Style {
+    let ptr = lang.cast_ptr[_, StyleOption](options.asPointer().asRaw().raw);
+    Style(_arrayLiteralPointer: ptr, _arrayLiteralCount: options.count.raw)
+}
+
 // ============================================
 // Configuration
 // ============================================
@@ -44,11 +51,11 @@ struct Config {
     // Brick style by row
     static func brickStyle(row row: Int64) -> Style {
         match row {
-            0 => [.Red, .Bold],
-            1 => [.Magenta, .Bold],
-            2 => [.Yellow, .Bold],
-            3 => [.Green, .Bold],
-            _ => [.Cyan],
+            0 => makeStyle([.Red, .Bold]),
+            1 => makeStyle([.Magenta, .Bold]),
+            2 => makeStyle([.Yellow, .Bold]),
+            3 => makeStyle([.Green, .Bold]),
+            _ => makeStyle([.Cyan]),
         }
     }
 }
@@ -57,16 +64,18 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles {
-    static var border: Style { [.White, .Dim] }
-    static var paddle: Style { [.White, .Bold] }
-    static var ball: Style { [.Yellow, .Bold] }
-    static var label: Style { [.Gray] }
-    static var value: Style { [.White, .Bold] }
-    static var lives: Style { [.Red, .Bold] }
-    static var gameOver: Style { [.Red, .Bold] }
-    static var win: Style { [.Green, .Bold] }
-    static var prompt: Style { [.Yellow] }
+struct Styles : Cloneable {
+    static var border: Style { makeStyle([.White, .Dim]) }
+    static var paddle: Style { makeStyle([.White, .Bold]) }
+    static var ball: Style { makeStyle([.Yellow, .Bold]) }
+    static var label: Style { makeStyle([.Gray]) }
+    static var value: Style { makeStyle([.White, .Bold]) }
+    static var lives: Style { makeStyle([.Red, .Bold]) }
+    static var gameOver: Style { makeStyle([.Red, .Bold]) }
+    static var win: Style { makeStyle([.Green, .Bold]) }
+    static var prompt: Style { makeStyle([.Yellow]) }
+
+    func clone() -> Styles { Styles() }
 }
 
 // ============================================

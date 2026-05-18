@@ -152,7 +152,7 @@ pub fn compile_stack_alloc(
     let layout = ctx.layouts.layout_of(&concrete_ty);
 
     let count = match arg {
-        Value::Immediate(Immediate {
+        Value::Const(Immediate {
             kind: ImmediateKind::IntLiteral { value, .. },
         }) => {
             if *value < 0 {

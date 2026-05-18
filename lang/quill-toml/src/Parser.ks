@@ -36,7 +36,7 @@ import quill.toml.error.(TomlParseError)
 ///
 /// Four fields: `source` (the full input), `pos` (current byte offset),
 /// `len` (cached `source.byteCount`), and `line` (1-based line counter).
-struct TomlCursor {
+struct TomlCursor: Cloneable {
     var source: String
     var pos: Int64
     var len: Int64
@@ -91,6 +91,15 @@ struct TomlCursor {
         }
 
         .Some((slice.subslice(from: start, to: self.len).toOwned(), lineNum))
+    }
+
+    /// Returns a copy of this cursor with the same position and state.
+    func clone() -> TomlCursor {
+        var c = TomlCursor(self.source.clone());
+        c.pos = self.pos;
+        c.len = self.len;
+        c.line = self.line;
+        c
     }
 }
 
@@ -285,15 +294,15 @@ func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError
 
             let esc = bytes(unchecked: i);
             if esc == 34 {
-                result.appendChar('"')
+                result.append(char: '"')
             } else if esc == 92 {
-                result.appendChar('\\')
+                result.append(char: '\\')
             } else if esc == 110 {
-                result.appendChar('\n')
+                result.append(char: '\n')
             } else if esc == 116 {
-                result.appendChar('\t')
+                result.append(char: '\t')
             } else if esc == 114 {
-                result.appendChar('\r')
+                result.append(char: '\r')
             } else {
                 return .Err(TomlParseError("invalid escape sequence", lineNum))
             }
@@ -533,7 +542,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
     var iter = s.chars.iter();
     while let .Some(c) = iter.next() {
         if c != '_' {
-            cleaned.appendChar(c)
+            cleaned.append(char: c)
         }
     }
 

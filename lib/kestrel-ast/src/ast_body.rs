@@ -209,7 +209,7 @@ pub enum AstStmt {
         expr: ExprId,
         span: Span,
     },
-    GuardLet {
+    Guard {
         conditions: Vec<IfCondition>,
         else_body: AstBlock,
         span: Span,
@@ -373,11 +373,14 @@ pub enum UnaryOp {
     BitNot,
     LogicalNot,
     Pos,
+    RangeUpTo,
+    RangeThrough,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PostfixOp {
     Unwrap,
+    RangeFrom,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

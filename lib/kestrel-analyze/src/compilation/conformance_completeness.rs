@@ -26,6 +26,9 @@
 //!
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
+//!
+//! ### E464 -- `init_effect_mismatch` (Error, Correctness)
+//! **Message:** "init has wrong effect for protocol '{proto}'"
 
 use std::collections::{HashMap, HashSet};
 
@@ -35,7 +38,7 @@ use crate::traits::{CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, Settable,
+    Callable, ConformanceItem, Conformances, InitEffect, Name, NodeKind, QualifiedTarget, Settable,
     TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
@@ -103,6 +106,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E463",
         name: "ambiguous_method_satisfies_multiple_protocols",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E464",
+        name: "init_effect_mismatch",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -254,6 +263,17 @@ fn check_protocol_requirements(
             continue;
         }
         let child = member.entity;
+        // A protocol method with an inline body is rejected separately by
+        // E417 (`protocol_method_has_body`). Emitting E454 in addition would
+        // double-flag the same mistake and tell the user to re-implement a
+        // method that's already (illegally) implemented. Skip — the body is
+        // visible to readers as a (would-be) default, so the conformance is
+        // not missing in the sense E454 is meant to flag.
+        if cx.query.get::<kestrel_ast_builder::Body>(child).is_some()
+            || cx.query.get::<kestrel_ast_builder::Valued>(child).is_some()
+        {
+            continue;
+        }
         let child_kind = cx.query.get::<NodeKind>(child);
         let Some(name) = member_lookup_name(cx, child) else {
             continue;
@@ -261,8 +281,8 @@ fn check_protocol_requirements(
         let proto_name = util::entity_name(cx.query, member.declaring_protocol);
 
         match child_kind {
-            Some(NodeKind::Function | NodeKind::Subscript) => {
-                // Required method — look for an overload on the impl side
+            Some(NodeKind::Function | NodeKind::Subscript | NodeKind::Initializer) => {
+                // Required method/init — look for an overload on the impl side
                 // whose signature shape (arity + labels) matches the
                 // protocol requirement. A name match with the wrong shape
                 // is treated as "not implemented" (lib1 parity: the impl
@@ -327,17 +347,24 @@ fn check_protocol_requirements(
                 }
 
                 if let Some(impl_method) = matched_impl {
-                    check_method_return_type(
-                        cx,
-                        child,
-                        impl_method,
-                        type_entity,
-                        member.declaring_protocol,
-                        proto_param_subs,
-                        &name,
-                        &proto_name,
-                        diags,
-                    );
+                    // Init return types are derived from the effect ((), ()?, () throws E),
+                    // so skip the structural return type check — check_init_effect validates
+                    // effect compatibility instead. Without this skip, widening (non-failable
+                    // satisfying failable) triggers a spurious E458 for () vs Optional[()].
+                    if !matches!(child_kind, Some(NodeKind::Initializer)) {
+                        check_method_return_type(
+                            cx,
+                            child,
+                            impl_method,
+                            type_entity,
+                            member.declaring_protocol,
+                            proto_param_subs,
+                            &name,
+                            &proto_name,
+                            diags,
+                        );
+                    }
+                    check_init_effect(cx, child, impl_method, &proto_name, diags);
                 }
             },
             Some(NodeKind::Field) => {
@@ -773,6 +800,63 @@ fn resolve_qualified_target(cx: &CompilationContext<'_>, alias: Entity) -> Optio
 /// Check that an impl method's return type matches the protocol method's.
 /// Return annotations are lowered to HIR and compared after substituting the
 /// conforming type for `Self` and resolving associated-type bindings.
+/// Check that an impl init's effect is compatible with the protocol requirement.
+/// Non-effectful satisfies effectful (widening), but not the reverse.
+fn check_init_effect(
+    cx: &CompilationContext<'_>,
+    proto_member: Entity,
+    impl_member: Entity,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let proto_effect = cx.query.get::<InitEffect>(proto_member);
+    let impl_effect = cx.query.get::<InitEffect>(impl_member);
+
+    // Only relevant when at least one side has an effect
+    if proto_effect.is_none() && impl_effect.is_none() {
+        return;
+    }
+
+    let compatible = match (proto_effect, impl_effect) {
+        (None, None) => true,
+        // Widening: non-effectful satisfies effectful
+        (Some(InitEffect::Failable), None) => true,
+        (Some(InitEffect::Throwing), None) => true,
+        // Same effect
+        (Some(InitEffect::Failable), Some(InitEffect::Failable)) => true,
+        (Some(InitEffect::Throwing), Some(InitEffect::Throwing)) => true,
+        // All other combinations are incompatible
+        _ => false,
+    };
+
+    if !compatible {
+        let expected = match proto_effect {
+            None => "non-failable init",
+            Some(InitEffect::Failable) => "failable init (init()?)",
+            Some(InitEffect::Throwing) => "throwing init (init() throws E)",
+        };
+        let found = match impl_effect {
+            None => "non-failable init",
+            Some(InitEffect::Failable) => "failable init (init()?)",
+            Some(InitEffect::Throwing) => "throwing init (init() throws E)",
+        };
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[9].id, // E464
+            severity: DESCRIPTORS[9].default_severity,
+            message: format!(
+                "init has wrong effect for protocol '{}': expected {}, found {}",
+                proto_name, expected, found,
+            ),
+            labels: vec![DiagLabel {
+                span: util::entity_span(cx.query, impl_member),
+                message: format!("expected {} here", expected),
+                is_primary: true,
+            }],
+            notes: vec![],
+        });
+    }
+}
+
 fn check_method_return_type(
     cx: &CompilationContext<'_>,
     proto_method: Entity,

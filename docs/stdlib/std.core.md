@@ -142,7 +142,7 @@ rest-binding through `matchSlice` — they take `Int64` bounds the
 compiler has already verified. A conformer may assume `0 <= index <
 matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 own bounds checks; the conformance is unsafe to satisfy if those
-invariants don't hold. `Array[T]` and `Slice[T]` are the canonical
+invariants don't hold. `Array[T]` and `ArraySlice[T]` are the canonical
 conformers.
 
 _Defined in `lang/std/core/protocols.ks`._
@@ -181,7 +181,7 @@ _Defined in `lang/std/core/protocols.ks`._
 #### function `matchSlice`
 
 ```kestrel
-func matchSlice(Int64, Int64) -> Slice[Element]
+func matchSlice(Int64, Int64) -> ArraySlice[Element]
 ```
 
 Returns the slice `[from, to)`. Caller guarantees
@@ -405,7 +405,7 @@ let alive = true;
 if alive { greet() }
 
 let votes = [true, false, true];
-let yesCount = votes.iter().filter({ |b| b }).count();   // 2
+let yesCount = votes.iter().filter { it }.count();   // 2
 ```
 
 ### Representation
@@ -429,10 +429,10 @@ _Defined in `lang/std/core/bool.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Bool) -> Bool
+public func isEqual(to: Bool) -> Bool
 ```
 
 Returns `true` if both bits agree. Drives `==` for `Bool`.
@@ -447,7 +447,7 @@ _Defined in `lang/std/core/bool.ks`._
 public func matches(Bool) -> Bool
 ```
 
-Pattern-match form of `equals`: `case true =>` and `case false =>`
+Pattern-match form of `isEqual`: `case true =>` and `case false =>`
 dispatch through here.
 
 _Defined in `lang/std/core/bool.ks`._
@@ -457,7 +457,7 @@ _Defined in `lang/std/core/bool.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders as `"true"` / `"false"`. With `options.debug`, wraps as
@@ -472,7 +472,7 @@ false.format(FormatOptions.debug())                 // "Bool(false)"
 
 _Defined in `lang/std/core/bool.ks`._
 
-### Implements `Hash`
+### Implements `Hashable`
 
 #### function `hash`
 
@@ -749,10 +749,10 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(ClosedRange[T]) -> Bool
+public func isEqual(to: ClosedRange[T]) -> Bool
 ```
 
 Equal when both bounds match.
@@ -787,105 +787,65 @@ Returns a fresh iterator over the range.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `ArrayIndex`
+### Implements `SeqIndex`
 
-#### typealias `ArrayYield`
-
-```kestrel
-type ArrayYield = Slice[T]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `readArray`
+#### typealias `SeqOutput`
 
 ```kestrel
-public func readArray(from: Array[T]) -> Slice[T]
+type SeqOutput = ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayChecked`
+#### function `readSeq`
 
 ```kestrel
-public func readArrayChecked(from: Array[T]) -> Slice[T]?
+public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayUnchecked`
+#### function `readSeqChecked`
 
 ```kestrel
-public func readArrayUnchecked(from: Array[T]) -> Slice[T]
+public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArray`
+#### function `readSeqUnchecked`
 
 ```kestrel
-public func writeArray(to: mutating Array[T], with: Slice[T])
+public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArrayUnchecked`
+#### function `writeSeq`
 
 ```kestrel
-public func writeArrayUnchecked(to: mutating Array[T], with: Slice[T])
+public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceYield`
+#### function `writeSeqUnchecked`
 
 ```kestrel
-type SliceYield = Slice[T]
+public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
 ```
 
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readSlice`
+### Implements `SeqRange`
+
+#### function `resolve`
 
 ```kestrel
-public func readSlice(from: Slice[T]) -> Slice[T]
+public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceChecked`
-
-```kestrel
-public func readSliceChecked(from: Slice[T]) -> Slice[T]?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceUnchecked`
-
-```kestrel
-public func readSliceUnchecked(from: Slice[T]) -> Slice[T]
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSlice`
-
-```kestrel
-public func writeSlice(to: Slice[T], with: Slice[T])
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSliceUnchecked`
-
-```kestrel
-public func writeSliceUnchecked(to: Slice[T], with: Slice[T])
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
 ### Implements `BytesIndex`
 
@@ -917,6 +877,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readBytesUnchecked(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesClampable`
+
+#### typealias `BytesClampedYield`
+
+```kestrel
+type BytesClampedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesClamped`
+
+```kestrel
+public func readBytesClamped(from: BytesView) -> BytesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -957,6 +935,24 @@ public func readCharsChecked(from: CharsView) -> CharsView?
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `CharsClampable`
+
+#### typealias `CharsClampedYield`
+
+```kestrel
+type CharsClampedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsClamped`
+
+```kestrel
+public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `CharsSubstringIndex`
 
 #### function `readCharsSubstring`
@@ -993,6 +989,24 @@ public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesClampable`
+
+#### typealias `GraphemesClampedYield`
+
+```kestrel
+type GraphemesClampedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesClamped`
+
+```kestrel
+public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `GraphemesSubstringIndex`
 
 #### function `readGraphemesSubstring`
@@ -1025,6 +1039,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesChecked(from: LinesView) -> LinesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesClampable`
+
+#### typealias `LinesClampedYield`
+
+```kestrel
+type LinesClampedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesClamped`
+
+```kestrel
+public func readLinesClamped(from: LinesView) -> LinesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1183,7 +1215,7 @@ last shadowing the `Equatable` default since it can be cheaper via
 public struct Version: Comparable {
     public var major: Int64
     public var minor: Int64
-    public func equals(other: Version) -> Bool {
+    public func isEqual(to other: Version) -> Bool {
         self.major == other.major and self.minor == other.minor
     }
     public func compare(other: Version) -> Ordering {
@@ -1211,14 +1243,14 @@ _Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-func equals(Self) -> Bool
+func isEqual(to: Self) -> Bool
 ```
 
 Returns `true` iff `self` and `other` are considered equal. Should
-be reflexive, symmetric, and transitive — `Hash` requires equal
+be reflexive, symmetric, and transitive — `Hashable` requires equal
 values to hash equal, so don't drift from those laws.
 
 _Defined in `lang/std/core/protocols.ks`._
@@ -1345,10 +1377,10 @@ type Output
 
 _Defined in `lang/std/core/comparison.ks`._
 
-#### function `notEquals`
+#### function `isNotEqual`
 
 ```kestrel
-public func notEquals(Self) -> Bool
+public func isNotEqual(to: Self) -> Bool
 ```
 
 `!=` derived from `compare`. Shadows the `Equatable` default with
@@ -1601,10 +1633,10 @@ type Output
 
 _Defined in `lang/std/core/comparison.ks`._
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-func equals(Other) -> Output
+func isEqual(to: Other) -> Output
 ```
 
 Returns the equality result as `Output` — typically `Bool`.
@@ -1620,7 +1652,7 @@ public protocol Equatable
 Protocol for types whose values can be compared for equality.
 
 `Equatable` is the semantic counterpart to the raw `Equal[Self]`
-operator protocol: conformers implement `equals` returning `Bool`, and a
+operator protocol: conformers implement `isEqual` returning `Bool`, and a
 blanket extension below derives both `==` and `!=`. Most types should
 reach for `Equatable` rather than `Equal` directly — the `Bool`
 associated-type binding is wired up automatically.
@@ -1631,7 +1663,7 @@ associated-type binding is wired up automatically.
 public struct Point: Equatable {
     public var x: Int64
     public var y: Int64
-    public func equals(other: Point) -> Bool {
+    public func isEqual(to other: Point) -> Bool {
         self.x == other.x and self.y == other.y
     }
 }
@@ -1659,14 +1691,14 @@ type Output = Bool
 
 _Defined in `lang/std/core/protocols.ks`._
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-func equals(Self) -> Bool
+func isEqual(to: Self) -> Bool
 ```
 
 Returns `true` iff `self` and `other` are considered equal. Should
-be reflexive, symmetric, and transitive — `Hash` requires equal
+be reflexive, symmetric, and transitive — `Hashable` requires equal
 values to hash equal, so don't drift from those laws.
 
 _Defined in `lang/std/core/protocols.ks`._
@@ -1681,13 +1713,13 @@ type Output
 
 _Defined in `lang/std/core/comparison.ks`._
 
-#### function `notEquals`
+#### function `isNotEqual`
 
 ```kestrel
-public func notEquals(Self) -> Bool
+public func isNotEqual(to: Self) -> Bool
 ```
 
-Default `!=` derived from `equals`.
+Default `!=` derived from `isEqual`.
 
 _Defined in `lang/std/core/protocols.ks`._
 
@@ -1709,7 +1741,7 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `Array Literal`
 
 ```kestrel
-init(LiteralSlice[Element])
+init(arrayLiteral: LiteralSlice[Element])
 ```
 
 Builds an instance from a literal slice of elements.
@@ -1729,10 +1761,16 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)
+init(_arrayLiteralPointer: consuming lang.ptr[Element], _arrayLiteralCount: consuming lang.i64)
 ```
 
 Compiler-emitted init taking a raw pointer and count.
+
+Both params are `consuming`: the compiler hands ownership of the
+stack buffer's address (and the count) over to the implementation,
+which stores them in its own storage. This convention is what the
+MIR lowering's structural predicate looks for — implementations
+that deviate will be silently skipped during literal lowering.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -1800,7 +1838,7 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `Dictionary Literal`
 
 ```kestrel
-init(LiteralSlice[(Key, Value)])
+init(dictionaryLiteral: LiteralSlice[(Key, Value)])
 ```
 
 Builds an instance from a literal slice of key-value pairs.
@@ -1820,10 +1858,16 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-init(lang.ptr[(Key, Value)], lang.i64)
+init(consuming lang.ptr[(Key, Value)], consuming lang.i64)
 ```
 
 Compiler-emitted init taking a raw `(Key, Value)` pointer and count.
+
+Both params are `consuming` for the same reason as the array
+bridge: the compiler hands ownership of the stack buffer to the
+implementation. MIR lowering matches on the unwrapped param
+shape, so an impl that deviates from this convention will be
+skipped during literal lowering.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -1917,9 +1961,8 @@ public protocol ExpressibleByStringLiteral
 
 Protocol for types that accept a string literal (`"…"`).
 
-The init receives a primitive `lang.str` (pointer + length pair) so that
-string literal lowering does not require the target type to already exist
-in stdlib form.
+The init receives a raw pointer and byte length so that string literal
+lowering does not require the target type to already exist in stdlib form.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -1928,7 +1971,7 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `String Literal`
 
 ```kestrel
-init(stringLiteral: lang.str)
+init(stringLiteral: lang.ptr[lang.i8], lang.i64)
 ```
 
 Builds an instance from a string literal.
@@ -2032,15 +2075,15 @@ Returns the greater-than-or-equal result as `Output` — typically `Bool`.
 
 _Defined in `lang/std/core/comparison.ks`._
 
-## protocol `Hash`
+## protocol `Hashable`
 
 ```kestrel
-public protocol Hash
+public protocol Hashable
 ```
 
 Protocol for types whose values can be hashed.
 
-`Hash` extends `Equatable`: the contract is that `a == b` implies
+`Hashable` extends `Equatable`: the contract is that `a == b` implies
 `a.hash(into:)` and `b.hash(into:)` feed the same bytes to the hasher.
 Violating this breaks `Set` and `Dictionary` — equal lookups won't
 land on the equal stored value. The hasher is generic so the same
@@ -2049,9 +2092,9 @@ hash impl works across hashing algorithms (SipHash, FxHash, etc.).
 ### Examples
 
 ```
-public struct Tag: Hash {
+public struct Tag: Hashable {
     public var name: String
-    public func equals(other: Tag) -> Bool { self.name == other.name }
+    public func isEqual(to other: Tag) -> Bool { self.name == other.name }
     public func hash[H](mutating into hasher: H) where H: Hasher {
         self.name.hash(into: hasher)
     }
@@ -2069,20 +2112,20 @@ func hash[H](into: mutating H) where H: Hasher
 ```
 
 Feeds this value's bytes into `hasher`. Must be deterministic
-across calls and consistent with `equals`.
+across calls and consistent with `isEqual`.
 
 _Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-func equals(Self) -> Bool
+func isEqual(to: Self) -> Bool
 ```
 
 Returns `true` iff `self` and `other` are considered equal. Should
-be reflexive, symmetric, and transitive — `Hash` requires equal
+be reflexive, symmetric, and transitive — `Hashable` requires equal
 values to hash equal, so don't drift from those laws.
 
 _Defined in `lang/std/core/protocols.ks`._
@@ -2093,9 +2136,9 @@ _Defined in `lang/std/core/protocols.ks`._
 public protocol Hasher
 ```
 
-Protocol for hash algorithm implementations consumed by `Hash`.
+Protocol for hash algorithm implementations consumed by `Hashable`.
 
-The contract is the same as Rust / Swift: `Hash`-conforming types
+The contract is the same as Rust / Swift: `Hashable`-conforming types
 `write` their bytes into the hasher; the hasher accumulates state
 and emits a `UInt64` digest on `finish()`. Used by `Set`,
 `Dictionary`, and any structure that wants stable hashes.
@@ -2118,7 +2161,7 @@ _Defined in `lang/std/core/protocols.ks`._
 #### function `write`
 
 ```kestrel
-mutating func write(Slice[UInt8])
+mutating func write(ArraySlice[UInt8])
 ```
 
 Mixes `bytes` into the running hash state.
@@ -2138,15 +2181,13 @@ _Defined in `lang/std/core/literals.ks`._
 ## protocol `LeftShift`
 
 ```kestrel
-public protocol LeftShift[Other = lang.i64]
+public protocol LeftShift[Other = Int64]
 ```
 
 Raw protocol backing the `<<` operator.
 
-`Other` defaults to the primitive `lang.i64` because protocol type defaults
-must be resolvable at parse time, before stdlib types like `Int64` are
-available. Conforming integer types narrow this to a more specific shift
-count where appropriate.
+`Other` defaults to `Int64` — the standard shift count type. Conforming
+types may narrow this to a different count where appropriate.
 
 ### Errors
 
@@ -2487,7 +2528,7 @@ public protocol NotEqual[Other = Self]
 
 Raw protocol backing the `!=` operator.
 
-`Equatable` provides a default `notEquals` derived from `equals`, so
+`Equatable` provides a default `isNotEqual` derived from `isEqual`, so
 conforming to `Equatable` is enough for both `==` and `!=`.
 
 _Defined in `lang/std/core/comparison.ks`._
@@ -2502,10 +2543,10 @@ type Output
 
 _Defined in `lang/std/core/comparison.ks`._
 
-#### function `notEquals`
+#### function `isNotEqual`
 
 ```kestrel
-func notEquals(Other) -> Output
+func isNotEqual(to: Other) -> Output
 ```
 
 Returns the inequality result as `Output` — typically `Bool`.
@@ -2622,16 +2663,6 @@ The receiver compared less than the argument.
 
 _Defined in `lang/std/core/ordering.ks`._
 
-#### function `notEquals`
-
-```kestrel
-public func notEquals(Ordering) -> Bool
-```
-
-Inverse of `equals`.
-
-_Defined in `lang/std/core/ordering.ks`._
-
 #### function `reverse`
 
 ```kestrel
@@ -2681,10 +2712,10 @@ _Defined in `lang/std/core/ordering.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Ordering) -> Bool
+public func isEqual(to: Ordering) -> Bool
 ```
 
 Equality on the orderings themselves: same variant ⇒ equal.
@@ -2696,7 +2727,7 @@ _Defined in `lang/std/core/ordering.ks`._
 #### function `format`
 
 ```kestrel
-public func format(FormatOptions) -> String
+public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 Renders as `"Less"`, `"Equal"`, or `"Greater"`. With `debug` set,
@@ -2785,10 +2816,10 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `Equatable`
 
-#### function `equals`
+#### function `isEqual`
 
 ```kestrel
-public func equals(Range[T]) -> Bool
+public func isEqual(to: Range[T]) -> Bool
 ```
 
 Equal when both bounds match. Useful for range-keyed lookups and
@@ -2825,157 +2856,91 @@ independent iterators — `Range` is value-typed.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `ArrayIndex`
+### Implements `SeqIndex`
 
-#### typealias `ArrayYield`
-
-```kestrel
-type ArrayYield = Slice[T]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `readArray`
+#### typealias `SeqOutput`
 
 ```kestrel
-public func readArray(from: Array[T]) -> Slice[T]
+type SeqOutput = ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayChecked`
+#### function `readSeq`
 
 ```kestrel
-public func readArrayChecked(from: Array[T]) -> Slice[T]?
+public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayUnchecked`
+#### function `readSeqChecked`
 
 ```kestrel
-public func readArrayUnchecked(from: Array[T]) -> Slice[T]
+public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArray`
+#### function `readSeqUnchecked`
 
 ```kestrel
-public func writeArray(to: mutating Array[T], with: Slice[T])
+public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArrayUnchecked`
+#### function `writeSeq`
 
 ```kestrel
-public func writeArrayUnchecked(to: mutating Array[T], with: Slice[T])
+public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-### Implements `ArrayClampable`
-
-#### typealias `ArrayClampedYield`
+#### function `writeSeqUnchecked`
 
 ```kestrel
-type ArrayClampedYield = Slice[T]
+public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readArrayClamped`
+### Implements `SeqClampable`
+
+#### typealias `SeqClampedOutput`
 
 ```kestrel
-public func readArrayClamped(from: Array[T]) -> Slice[T]
+type SeqClampedOutput = ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `writeArrayClamped`
+#### function `readSeqClamped`
 
 ```kestrel
-public func writeArrayClamped(to: mutating Array[T], with: Slice[T])
+public func readSeqClamped(from: ArraySlice[T]) -> ArraySlice[T]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceYield`
+#### function `writeSeqClamped`
 
 ```kestrel
-type SliceYield = Slice[T]
+public func writeSeqClamped(to: ArraySlice[T], with: ArraySlice[T])
 ```
 
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
-#### function `readSlice`
+### Implements `SeqRange`
+
+#### function `resolve`
 
 ```kestrel
-public func readSlice(from: Slice[T]) -> Slice[T]
+public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceChecked`
-
-```kestrel
-public func readSliceChecked(from: Slice[T]) -> Slice[T]?
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceUnchecked`
-
-```kestrel
-public func readSliceUnchecked(from: Slice[T]) -> Slice[T]
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSlice`
-
-```kestrel
-public func writeSlice(to: Slice[T], with: Slice[T])
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSliceUnchecked`
-
-```kestrel
-public func writeSliceUnchecked(to: Slice[T], with: Slice[T])
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `SliceClampable`
-
-#### typealias `SliceClampedYield`
-
-```kestrel
-type SliceClampedYield = Slice[T]
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `readSliceClamped`
-
-```kestrel
-public func readSliceClamped(from: Slice[T]) -> Slice[T]
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `writeSliceClamped`
-
-```kestrel
-public func writeSliceClamped(to: Slice[T], with: Slice[T])
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/slice.ks`._
 
 ### Implements `BytesIndex`
 
@@ -3234,6 +3199,464 @@ Builds the half-open range `[self, end)`.
 
 _Defined in `lang/std/core/range.ks`._
 
+## struct `RangeFrom`
+
+```kestrel
+public struct RangeFrom[T] where T: Steppable, T: Comparable { /* private fields */ }
+```
+
+Partial range `[start, +∞)` — produced by the postfix `..` operator.
+
+`RangeFrom` is `Iterable` and produces an infinite iterator. Use
+`break` to terminate iteration.
+
+### Examples
+
+```
+for i in 0.. {
+    if i >= 5 { break; }
+    print(i)
+}
+(10..).contains(42)   // true
+```
+
+### Representation
+
+Single value: `start`. No heap allocation.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### initializer `From Start`
+
+```kestrel
+public init(T)
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(T) -> Bool
+```
+
+Returns `true` iff `value >= start`.
+
+_Defined in `lang/std/core/range.ks`._
+
+#### field `start`
+
+```kestrel
+public var start: T
+```
+
+Lower bound — included in the range.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: RangeFrom[T]) -> Bool
+```
+
+Structural equality.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = RangeFromIterator[T]
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> RangeFromIterator[T]
+```
+
+Returns a fresh infinite iterator starting at `start`.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `SeqIndex`
+
+#### typealias `SeqOutput`
+
+```kestrel
+type SeqOutput = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeq`
+
+```kestrel
+public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeqChecked`
+
+```kestrel
+public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeqUnchecked`
+
+```kestrel
+public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `writeSeq`
+
+```kestrel
+public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `writeSeqUnchecked`
+
+```kestrel
+public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SeqRange`
+
+#### function `resolve`
+
+```kestrel
+public func resolve(Int64) -> Range[Int64]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `BytesIndex`
+
+#### typealias `BytesYield`
+
+```kestrel
+type BytesYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytes`
+
+```kestrel
+public func readBytes(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesChecked`
+
+```kestrel
+public func readBytesChecked(from: BytesView) -> BytesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesUnchecked`
+
+```kestrel
+public func readBytesUnchecked(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesClampable`
+
+#### typealias `BytesClampedYield`
+
+```kestrel
+type BytesClampedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesClamped`
+
+```kestrel
+public func readBytesClamped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesSubstringIndex`
+
+#### function `readBytesSubstring`
+
+```kestrel
+public func readBytesSubstring(from: BytesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsIndex`
+
+#### typealias `CharsYield`
+
+```kestrel
+type CharsYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readChars`
+
+```kestrel
+public func readChars(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsChecked`
+
+```kestrel
+public func readCharsChecked(from: CharsView) -> CharsView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsClampable`
+
+#### typealias `CharsClampedYield`
+
+```kestrel
+type CharsClampedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsClamped`
+
+```kestrel
+public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsSubstringIndex`
+
+#### function `readCharsSubstring`
+
+```kestrel
+public func readCharsSubstring(from: CharsView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesIndex`
+
+#### typealias `GraphemesYield`
+
+```kestrel
+type GraphemesYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemes`
+
+```kestrel
+public func readGraphemes(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesChecked`
+
+```kestrel
+public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesClampable`
+
+#### typealias `GraphemesClampedYield`
+
+```kestrel
+type GraphemesClampedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesClamped`
+
+```kestrel
+public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesSubstringIndex`
+
+#### function `readGraphemesSubstring`
+
+```kestrel
+public func readGraphemesSubstring(from: GraphemesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesIndex`
+
+#### typealias `LinesYield`
+
+```kestrel
+type LinesYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLines`
+
+```kestrel
+public func readLines(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesChecked`
+
+```kestrel
+public func readLinesChecked(from: LinesView) -> LinesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesClampable`
+
+#### typealias `LinesClampedYield`
+
+```kestrel
+type LinesClampedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesClamped`
+
+```kestrel
+public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesSubstringIndex`
+
+#### function `readLinesSubstring`
+
+```kestrel
+public func readLinesSubstring(from: LinesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## protocol `RangeFromConstructible`
+
+```kestrel
+public protocol RangeFromConstructible
+```
+
+Protocol backing the postfix `..` operator (`start..`).
+
+`Output` is the range type produced — usually `RangeFrom[Self]`.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+func rangeFrom() -> Output
+```
+
+Builds the partial range `[self, +∞)`.
+
+_Defined in `lang/std/core/range.ks`._
+
+## struct `RangeFromIterator`
+
+```kestrel
+public struct RangeFromIterator[T] where T: Steppable, T: Comparable { /* private fields */ }
+```
+
+Iterator over a `RangeFrom[T]`. Yields successive values via
+`Steppable.successor()` with no upper bound — callers must `break`.
+
+### Representation
+
+Single value: `current` (next yield).
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### initializer `From Start`
+
+```kestrel
+public init(current: T)
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> T?
+```
+
+Yields the next value. Never returns `.None` — infinite iterator.
+
+_Defined in `lang/std/core/range.ks`._
+
 ## struct `RangeIterator`
 
 ```kestrel
@@ -3330,10 +3753,772 @@ Returns `true` when `self < bound`. Powers `..<end` patterns.
 
 _Defined in `lang/std/core/protocols.ks`._
 
+## struct `RangeThrough`
+
+```kestrel
+public struct RangeThrough[T] where T: Comparable { /* private fields */ }
+```
+
+Partial range `(-∞, end]` — produced by the prefix `..=` operator.
+
+Not `Iterable` — there is no start to iterate from.
+
+### Examples
+
+```
+(..=10).contains(10)   // true
+(..=10).contains(11)   // false
+```
+
+### Representation
+
+Single value: `end`. No heap allocation.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### initializer `From End`
+
+```kestrel
+public init(T)
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(T) -> Bool
+```
+
+Returns `true` iff `value <= end`.
+
+_Defined in `lang/std/core/range.ks`._
+
+#### field `end`
+
+```kestrel
+public var end: T
+```
+
+Upper bound — included in the range.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: RangeThrough[T]) -> Bool
+```
+
+Structural equality.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `SeqIndex`
+
+#### typealias `SeqOutput`
+
+```kestrel
+type SeqOutput = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeq`
+
+```kestrel
+public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeqChecked`
+
+```kestrel
+public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeqUnchecked`
+
+```kestrel
+public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `writeSeq`
+
+```kestrel
+public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `writeSeqUnchecked`
+
+```kestrel
+public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SeqRange`
+
+#### function `resolve`
+
+```kestrel
+public func resolve(Int64) -> Range[Int64]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `BytesIndex`
+
+#### typealias `BytesYield`
+
+```kestrel
+type BytesYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytes`
+
+```kestrel
+public func readBytes(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesChecked`
+
+```kestrel
+public func readBytesChecked(from: BytesView) -> BytesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesUnchecked`
+
+```kestrel
+public func readBytesUnchecked(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesClampable`
+
+#### typealias `BytesClampedYield`
+
+```kestrel
+type BytesClampedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesClamped`
+
+```kestrel
+public func readBytesClamped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesSubstringIndex`
+
+#### function `readBytesSubstring`
+
+```kestrel
+public func readBytesSubstring(from: BytesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsIndex`
+
+#### typealias `CharsYield`
+
+```kestrel
+type CharsYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readChars`
+
+```kestrel
+public func readChars(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsChecked`
+
+```kestrel
+public func readCharsChecked(from: CharsView) -> CharsView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsClampable`
+
+#### typealias `CharsClampedYield`
+
+```kestrel
+type CharsClampedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsClamped`
+
+```kestrel
+public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsSubstringIndex`
+
+#### function `readCharsSubstring`
+
+```kestrel
+public func readCharsSubstring(from: CharsView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesIndex`
+
+#### typealias `GraphemesYield`
+
+```kestrel
+type GraphemesYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemes`
+
+```kestrel
+public func readGraphemes(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesChecked`
+
+```kestrel
+public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesClampable`
+
+#### typealias `GraphemesClampedYield`
+
+```kestrel
+type GraphemesClampedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesClamped`
+
+```kestrel
+public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesSubstringIndex`
+
+#### function `readGraphemesSubstring`
+
+```kestrel
+public func readGraphemesSubstring(from: GraphemesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesIndex`
+
+#### typealias `LinesYield`
+
+```kestrel
+type LinesYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLines`
+
+```kestrel
+public func readLines(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesChecked`
+
+```kestrel
+public func readLinesChecked(from: LinesView) -> LinesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesClampable`
+
+#### typealias `LinesClampedYield`
+
+```kestrel
+type LinesClampedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesClamped`
+
+```kestrel
+public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesSubstringIndex`
+
+#### function `readLinesSubstring`
+
+```kestrel
+public func readLinesSubstring(from: LinesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## protocol `RangeThroughConstructible`
+
+```kestrel
+public protocol RangeThroughConstructible
+```
+
+Protocol backing the prefix `..=` operator (`..=end`).
+
+`Output` is the range type produced — usually `RangeThrough[Self]`.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+func rangeThrough() -> Output
+```
+
+Builds the partial range `(-∞, self]`.
+
+_Defined in `lang/std/core/range.ks`._
+
+## struct `RangeUpTo`
+
+```kestrel
+public struct RangeUpTo[T] where T: Comparable { /* private fields */ }
+```
+
+Partial range `(-∞, end)` — produced by the prefix `..<` operator.
+
+Not `Iterable` — there is no start to iterate from.
+
+### Examples
+
+```
+(..<10).contains(5)    // true
+(..<10).contains(10)   // false
+```
+
+### Representation
+
+Single value: `end`. No heap allocation.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### initializer `From End`
+
+```kestrel
+public init(T)
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(T) -> Bool
+```
+
+Returns `true` iff `value < end`.
+
+_Defined in `lang/std/core/range.ks`._
+
+#### field `end`
+
+```kestrel
+public var end: T
+```
+
+Upper bound — excluded from the range.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: RangeUpTo[T]) -> Bool
+```
+
+Structural equality.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `SeqIndex`
+
+#### typealias `SeqOutput`
+
+```kestrel
+type SeqOutput = ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeq`
+
+```kestrel
+public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeqChecked`
+
+```kestrel
+public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `readSeqUnchecked`
+
+```kestrel
+public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `writeSeq`
+
+```kestrel
+public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `writeSeqUnchecked`
+
+```kestrel
+public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SeqRange`
+
+#### function `resolve`
+
+```kestrel
+public func resolve(Int64) -> Range[Int64]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `BytesIndex`
+
+#### typealias `BytesYield`
+
+```kestrel
+type BytesYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytes`
+
+```kestrel
+public func readBytes(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesChecked`
+
+```kestrel
+public func readBytesChecked(from: BytesView) -> BytesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesUnchecked`
+
+```kestrel
+public func readBytesUnchecked(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesClampable`
+
+#### typealias `BytesClampedYield`
+
+```kestrel
+type BytesClampedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesClamped`
+
+```kestrel
+public func readBytesClamped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `BytesSubstringIndex`
+
+#### function `readBytesSubstring`
+
+```kestrel
+public func readBytesSubstring(from: BytesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsIndex`
+
+#### typealias `CharsYield`
+
+```kestrel
+type CharsYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readChars`
+
+```kestrel
+public func readChars(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsChecked`
+
+```kestrel
+public func readCharsChecked(from: CharsView) -> CharsView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsClampable`
+
+#### typealias `CharsClampedYield`
+
+```kestrel
+type CharsClampedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsClamped`
+
+```kestrel
+public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsSubstringIndex`
+
+#### function `readCharsSubstring`
+
+```kestrel
+public func readCharsSubstring(from: CharsView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesIndex`
+
+#### typealias `GraphemesYield`
+
+```kestrel
+type GraphemesYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemes`
+
+```kestrel
+public func readGraphemes(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesChecked`
+
+```kestrel
+public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesClampable`
+
+#### typealias `GraphemesClampedYield`
+
+```kestrel
+type GraphemesClampedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesClamped`
+
+```kestrel
+public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `GraphemesSubstringIndex`
+
+#### function `readGraphemesSubstring`
+
+```kestrel
+public func readGraphemesSubstring(from: GraphemesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesIndex`
+
+#### typealias `LinesYield`
+
+```kestrel
+type LinesYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLines`
+
+```kestrel
+public func readLines(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesChecked`
+
+```kestrel
+public func readLinesChecked(from: LinesView) -> LinesView?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesClampable`
+
+#### typealias `LinesClampedYield`
+
+```kestrel
+type LinesClampedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesClamped`
+
+```kestrel
+public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesSubstringIndex`
+
+#### function `readLinesSubstring`
+
+```kestrel
+public func readLinesSubstring(from: LinesView) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## protocol `RangeUpToConstructible`
+
+```kestrel
+public protocol RangeUpToConstructible
+```
+
+Protocol backing the prefix `..<` operator (`..<end`).
+
+`Output` is the range type produced — usually `RangeUpTo[Self]`.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Members
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+func rangeUpTo() -> Output
+```
+
+Builds the partial range `(-∞, self)`.
+
+_Defined in `lang/std/core/range.ks`._
+
 ## protocol `RightShift`
 
 ```kestrel
-public protocol RightShift[Other = lang.i64]
+public protocol RightShift[Other = Int64]
 ```
 
 Raw protocol backing the `>>` operator.
@@ -3534,10 +4719,16 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)
+init(_arrayLiteralPointer: consuming lang.ptr[Element], _arrayLiteralCount: consuming lang.i64)
 ```
 
 Compiler-emitted init taking a raw pointer and count.
+
+Both params are `consuming`: the compiler hands ownership of the
+stack buffer's address (and the count) over to the implementation,
+which stores them in its own storage. This convention is what the
+MIR lowering's structural predicate looks for — implementations
+that deviate will be silently skipped during literal lowering.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -3568,10 +4759,16 @@ _Defined in `lang/std/core/literals.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-init(lang.ptr[(Key, Value)], lang.i64)
+init(consuming lang.ptr[(Key, Value)], consuming lang.i64)
 ```
 
 Compiler-emitted init taking a raw `(Key, Value)` pointer and count.
+
+Both params are `consuming` for the same reason as the array
+bridge: the compiler hands ownership of the stack buffer to the
+implementation. MIR lowering matches on the unwrapped param
+shape, so an impl that deviates from this convention will be
+skipped during literal lowering.
 
 _Defined in `lang/std/core/literals.ks`._
 

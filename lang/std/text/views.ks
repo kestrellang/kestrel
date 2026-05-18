@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, Cloneable, fatalError)
+import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, Cloneable, fatalError)
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
@@ -207,7 +207,7 @@ public struct BytesView: Iterable, Cloneable {
     /// an owned `String` covering the requested byte range. Equivalent
     /// to `self(range).toString()` for both `Range[Int64]` and
     /// `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: BytesSubstringIndex {
+    public func substring(range: some BytesSubstringIndex) -> String {
         range.readBytesSubstring(from: self)
     }
 
@@ -288,7 +288,7 @@ public struct CharsIterator: Iterator {
             // Invalid UTF-8 - skip byte and return replacement character
             self.byteIndex = self.byteIndex + 1;
             let replacementValue = UInt32(raw: 0xFFFD);
-            .Some(Char(replacementValue))
+            .Some(Char(unchecked: replacementValue))
         }
     }
 }
@@ -445,7 +445,7 @@ public struct CharsView: Iterable, Cloneable {
     /// an owned `String` covering the requested code-point range.
     /// Equivalent to `self(range).toString()` for both `Range[Int64]`
     /// and `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: CharsSubstringIndex {
+    public func substring(range: some CharsSubstringIndex) -> String {
         range.readCharsSubstring(from: self)
     }
 }
@@ -700,7 +700,7 @@ public struct GraphemesView: Iterable, Cloneable {
     /// produce an owned `String` covering the requested cluster range.
     /// Equivalent to `self(range).toString()` for both `Range[Int64]`
     /// and `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: GraphemesSubstringIndex {
+    public func substring(range: some GraphemesSubstringIndex) -> String {
         range.readGraphemesSubstring(from: self)
     }
 }
@@ -933,7 +933,7 @@ public struct LinesView: Iterable, Cloneable {
     /// original terminators preserved. Equivalent to
     /// `self(range).toString()` for both `Range[Int64]` and
     /// `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: LinesSubstringIndex {
+    public func substring(range: some LinesSubstringIndex) -> String {
         range.readLinesSubstring(from: self)
     }
 
@@ -1264,6 +1264,134 @@ extend ClosedRange[Int64]: BytesSubstringIndex {
     }
 }
 
+extend RangeFrom[Int64]: BytesIndex {
+    type BytesYield = BytesView
+
+    public func readBytes(from view: BytesView) -> BytesView {
+        let start = self.start;
+        let len = view.count;
+        if start < 0 or start > len {
+            fatalError("BytesView range out of bounds")
+        }
+        view._subView(startByte: start, endByte: len)
+    }
+
+    public func readBytesChecked(from view: BytesView) -> BytesView? {
+        let start = self.start;
+        let len = view.count;
+        if start < 0 or start > len {
+            return .None
+        }
+        .Some(view._subView(startByte: start, endByte: len))
+    }
+
+    public func readBytesUnchecked(from view: BytesView) -> BytesView {
+        view._subView(startByte: self.start, endByte: view.count)
+    }
+}
+
+extend RangeFrom[Int64]: BytesClampable {
+    type BytesClampedYield = BytesView
+
+    public func readBytesClamped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        var start = self.start;
+        if start < 0 { start = 0 }
+        if start > len { start = len }
+        view._subView(startByte: start, endByte: len)
+    }
+}
+
+extend RangeFrom[Int64]: BytesSubstringIndex {
+    public func readBytesSubstring(from view: BytesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeUpTo[Int64]: BytesIndex {
+    type BytesYield = BytesView
+
+    public func readBytes(from view: BytesView) -> BytesView {
+        let end = self.end;
+        if end < 0 or end > view.count {
+            fatalError("BytesView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: end)
+    }
+
+    public func readBytesChecked(from view: BytesView) -> BytesView? {
+        let end = self.end;
+        if end < 0 or end > view.count {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: end))
+    }
+
+    public func readBytesUnchecked(from view: BytesView) -> BytesView {
+        view._subView(startByte: 0, endByte: self.end)
+    }
+}
+
+extend RangeUpTo[Int64]: BytesClampable {
+    type BytesClampedYield = BytesView
+
+    public func readBytesClamped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        var end = self.end;
+        if end < 0 { end = 0 }
+        if end > len { end = len }
+        view._subView(startByte: 0, endByte: end)
+    }
+}
+
+extend RangeUpTo[Int64]: BytesSubstringIndex {
+    public func readBytesSubstring(from view: BytesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeThrough[Int64]: BytesIndex {
+    type BytesYield = BytesView
+
+    public func readBytes(from view: BytesView) -> BytesView {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            fatalError("BytesView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endExclusive)
+    }
+
+    public func readBytesChecked(from view: BytesView) -> BytesView? {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endExclusive))
+    }
+
+    public func readBytesUnchecked(from view: BytesView) -> BytesView {
+        view._subView(startByte: 0, endByte: self.end + 1)
+    }
+}
+
+extend RangeThrough[Int64]: BytesClampable {
+    type BytesClampedYield = BytesView
+
+    public func readBytesClamped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        var end = self.end + 1;
+        if end < 0 { end = 0 }
+        if end > len { end = len }
+        view._subView(startByte: 0, endByte: end)
+    }
+}
+
+extend RangeThrough[Int64]: BytesSubstringIndex {
+    public func readBytesSubstring(from view: BytesView) -> String {
+        view(self).toString()
+    }
+}
+
 // ============================================================================
 // CHARS VIEW INDEX PROTOCOLS
 // ============================================================================
@@ -1452,6 +1580,152 @@ extend ClosedRange[Int64]: CharsSubstringIndex {
     }
 }
 
+extend RangeFrom[Int64]: CharsIndex {
+    type CharsYield = CharsView
+
+    public func readChars(from view: CharsView) -> CharsView {
+        let s = self.start;
+        let n = view.count;
+        if s < 0 or s > n {
+            fatalError("CharsView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: n);
+        if foundStart == false or foundEnd == false {
+            fatalError("CharsView range out of bounds")
+        }
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+
+    public func readCharsChecked(from view: CharsView) -> CharsView? {
+        let s = self.start;
+        let n = view.count;
+        if s < 0 or s > n {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: n);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend RangeFrom[Int64]: CharsClampable {
+    type CharsClampedYield = CharsView
+
+    public func readCharsClamped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        var s = self.start;
+        if s < 0 { s = 0 }
+        if s > n { s = n }
+        let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: n);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend RangeFrom[Int64]: CharsSubstringIndex {
+    public func readCharsSubstring(from view: CharsView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeUpTo[Int64]: CharsIndex {
+    type CharsYield = CharsView
+
+    public func readChars(from view: CharsView) -> CharsView {
+        let e = self.end;
+        if e < 0 or e > view.count {
+            fatalError("CharsView range out of bounds")
+        }
+        let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: e);
+        if foundEnd == false {
+            fatalError("CharsView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endByte)
+    }
+
+    public func readCharsChecked(from view: CharsView) -> CharsView? {
+        let e = self.end;
+        if e < 0 or e > view.count {
+            return .None
+        }
+        let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: e);
+        if foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endByte))
+    }
+}
+
+extend RangeUpTo[Int64]: CharsClampable {
+    type CharsClampedYield = CharsView
+
+    public func readCharsClamped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        var e = self.end;
+        if e < 0 { e = 0 }
+        if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeUpTo[Int64]: CharsSubstringIndex {
+    public func readCharsSubstring(from view: CharsView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeThrough[Int64]: CharsIndex {
+    type CharsYield = CharsView
+
+    public func readChars(from view: CharsView) -> CharsView {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            fatalError("CharsView range out of bounds")
+        }
+        let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: endExclusive);
+        if foundEnd == false {
+            fatalError("CharsView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endByte)
+    }
+
+    public func readCharsChecked(from view: CharsView) -> CharsView? {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            return .None
+        }
+        let (endByte, foundEnd) = view._byteOffsetForCharIndex(charIndex: endExclusive);
+        if foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endByte))
+    }
+}
+
+extend RangeThrough[Int64]: CharsClampable {
+    type CharsClampedYield = CharsView
+
+    public func readCharsClamped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        var e = self.end + 1;
+        if e < 0 { e = 0 }
+        if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeThrough[Int64]: CharsSubstringIndex {
+    public func readCharsSubstring(from view: CharsView) -> String {
+        view(self).toString()
+    }
+}
+
 // ============================================================================
 // GRAPHEMES VIEW INDEX PROTOCOLS
 // ============================================================================
@@ -1633,6 +1907,152 @@ extend Range[Int64]: GraphemesSubstringIndex {
 }
 
 extend ClosedRange[Int64]: GraphemesSubstringIndex {
+    public func readGraphemesSubstring(from view: GraphemesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeFrom[Int64]: GraphemesIndex {
+    type GraphemesYield = GraphemesView
+
+    public func readGraphemes(from view: GraphemesView) -> GraphemesView {
+        let s = self.start;
+        let n = view.count;
+        if s < 0 or s > n {
+            fatalError("GraphemesView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: n);
+        if foundStart == false or foundEnd == false {
+            fatalError("GraphemesView range out of bounds")
+        }
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+
+    public func readGraphemesChecked(from view: GraphemesView) -> GraphemesView? {
+        let s = self.start;
+        let n = view.count;
+        if s < 0 or s > n {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: n);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend RangeFrom[Int64]: GraphemesClampable {
+    type GraphemesClampedYield = GraphemesView
+
+    public func readGraphemesClamped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        var s = self.start;
+        if s < 0 { s = 0 }
+        if s > n { s = n }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: n);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend RangeFrom[Int64]: GraphemesSubstringIndex {
+    public func readGraphemesSubstring(from view: GraphemesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeUpTo[Int64]: GraphemesIndex {
+    type GraphemesYield = GraphemesView
+
+    public func readGraphemes(from view: GraphemesView) -> GraphemesView {
+        let e = self.end;
+        if e < 0 or e > view.count {
+            fatalError("GraphemesView range out of bounds")
+        }
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        if foundEnd == false {
+            fatalError("GraphemesView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endByte)
+    }
+
+    public func readGraphemesChecked(from view: GraphemesView) -> GraphemesView? {
+        let e = self.end;
+        if e < 0 or e > view.count {
+            return .None
+        }
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        if foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endByte))
+    }
+}
+
+extend RangeUpTo[Int64]: GraphemesClampable {
+    type GraphemesClampedYield = GraphemesView
+
+    public func readGraphemesClamped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        var e = self.end;
+        if e < 0 { e = 0 }
+        if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeUpTo[Int64]: GraphemesSubstringIndex {
+    public func readGraphemesSubstring(from view: GraphemesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeThrough[Int64]: GraphemesIndex {
+    type GraphemesYield = GraphemesView
+
+    public func readGraphemes(from view: GraphemesView) -> GraphemesView {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            fatalError("GraphemesView range out of bounds")
+        }
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: endExclusive);
+        if foundEnd == false {
+            fatalError("GraphemesView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endByte)
+    }
+
+    public func readGraphemesChecked(from view: GraphemesView) -> GraphemesView? {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            return .None
+        }
+        let (endByte, foundEnd) = view._byteOffsetForGraphemeIndex(graphemeIndex: endExclusive);
+        if foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endByte))
+    }
+}
+
+extend RangeThrough[Int64]: GraphemesClampable {
+    type GraphemesClampedYield = GraphemesView
+
+    public func readGraphemesClamped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        var e = self.end + 1;
+        if e < 0 { e = 0 }
+        if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeThrough[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
         view(self).toString()
     }
@@ -1825,6 +2245,152 @@ extend ClosedRange[Int64]: LinesSubstringIndex {
     }
 }
 
+extend RangeFrom[Int64]: LinesIndex {
+    type LinesYield = LinesView
+
+    public func readLines(from view: LinesView) -> LinesView {
+        let s = self.start;
+        let n = view.count;
+        if s < 0 or s > n {
+            fatalError("LinesView range out of bounds")
+        }
+        let (startByte, foundStart) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: n);
+        if foundStart == false or foundEnd == false {
+            fatalError("LinesView range out of bounds")
+        }
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+
+    public func readLinesChecked(from view: LinesView) -> LinesView? {
+        let s = self.start;
+        let n = view.count;
+        if s < 0 or s > n {
+            return .None
+        }
+        let (startByte, foundStart) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: n);
+        if foundStart == false or foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: startByte, endByte: endByte))
+    }
+}
+
+extend RangeFrom[Int64]: LinesClampable {
+    type LinesClampedYield = LinesView
+
+    public func readLinesClamped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        var s = self.start;
+        if s < 0 { s = 0 }
+        if s > n { s = n }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: n);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend RangeFrom[Int64]: LinesSubstringIndex {
+    public func readLinesSubstring(from view: LinesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeUpTo[Int64]: LinesIndex {
+    type LinesYield = LinesView
+
+    public func readLines(from view: LinesView) -> LinesView {
+        let e = self.end;
+        if e < 0 or e > view.count {
+            fatalError("LinesView range out of bounds")
+        }
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: e);
+        if foundEnd == false {
+            fatalError("LinesView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endByte)
+    }
+
+    public func readLinesChecked(from view: LinesView) -> LinesView? {
+        let e = self.end;
+        if e < 0 or e > view.count {
+            return .None
+        }
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: e);
+        if foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endByte))
+    }
+}
+
+extend RangeUpTo[Int64]: LinesClampable {
+    type LinesClampedYield = LinesView
+
+    public func readLinesClamped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        var e = self.end;
+        if e < 0 { e = 0 }
+        if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeUpTo[Int64]: LinesSubstringIndex {
+    public func readLinesSubstring(from view: LinesView) -> String {
+        view(self).toString()
+    }
+}
+
+extend RangeThrough[Int64]: LinesIndex {
+    type LinesYield = LinesView
+
+    public func readLines(from view: LinesView) -> LinesView {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            fatalError("LinesView range out of bounds")
+        }
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: endExclusive);
+        if foundEnd == false {
+            fatalError("LinesView range out of bounds")
+        }
+        view._subView(startByte: 0, endByte: endByte)
+    }
+
+    public func readLinesChecked(from view: LinesView) -> LinesView? {
+        let endExclusive = self.end + 1;
+        if endExclusive < 0 or endExclusive > view.count {
+            return .None
+        }
+        let (endByte, foundEnd) = view._byteOffsetForLineIndex(lineIndex: endExclusive);
+        if foundEnd == false {
+            return .None
+        }
+        .Some(view._subView(startByte: 0, endByte: endByte))
+    }
+}
+
+extend RangeThrough[Int64]: LinesClampable {
+    type LinesClampedYield = LinesView
+
+    public func readLinesClamped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        var e = self.end + 1;
+        if e < 0 { e = 0 }
+        if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeThrough[Int64]: LinesSubstringIndex {
+    public func readLinesSubstring(from view: LinesView) -> String {
+        view(self).toString()
+    }
+}
+
 // ============================================================================
 // TYPED INDEX CONFORMANCES
 // ============================================================================
@@ -1866,7 +2432,7 @@ extend CharIndex: CharsIndex {
         let result = decodeUtf8(view.ptr, view.length, at: self.byteOffset);
         match result {
             .Some(d) => d.char,
-            .None => Char(0xFFFD)
+            .None => Char(unchecked: 0xFFFD)
         }
     }
 
@@ -1877,7 +2443,7 @@ extend CharIndex: CharsIndex {
         let result = decodeUtf8(view.ptr, view.length, at: self.byteOffset);
         match result {
             .Some(d) => .Some(d.char),
-            .None => .Some(Char(0xFFFD))
+            .None => .Some(Char(unchecked: 0xFFFD))
         }
     }
 }
@@ -2007,7 +2573,7 @@ extend CharsView {
     }
 
     /// Returns the index of the first code point matching `predicate`, or `.None`.
-    public func firstIndex(matching predicate: (Char) -> Bool) -> CharIndex? {
+    public func firstIndex(where predicate: (Char) -> Bool) -> CharIndex? {
         var byteIdx: Int64 = 0;
         while byteIdx < self.length {
             let result = decodeUtf8(self.ptr, self.length, at: byteIdx);
@@ -2024,7 +2590,7 @@ extend CharsView {
     }
 
     /// Returns the index of the last code point matching `predicate`, or `.None`.
-    public func lastIndex(matching predicate: (Char) -> Bool) -> CharIndex? {
+    public func lastIndex(where predicate: (Char) -> Bool) -> CharIndex? {
         var lastFound: CharIndex? = .None;
         var byteIdx: Int64 = 0;
         while byteIdx < self.length {
@@ -2044,7 +2610,7 @@ extend CharsView {
 
 extend GraphemesView {
     /// Returns the index of the first grapheme matching `predicate`, or `.None`.
-    public func firstIndex(matching predicate: (Grapheme) -> Bool) -> GraphemeIndex? {
+    public func firstIndex(where predicate: (Grapheme) -> Bool) -> GraphemeIndex? {
         var byteIdx: Int64 = 0;
         var it = self.iter();
         while let .Some(g) = it.next() {
@@ -2192,7 +2758,7 @@ public struct IndexedCharsIterator: Iterator {
         } else {
             self.byteIndex = self.byteIndex + 1;
             let replacementValue = UInt32(raw: 0xFFFD);
-            .Some((idx, Char(replacementValue)))
+            .Some((idx, Char(unchecked: replacementValue)))
         }
     }
 }
@@ -2363,7 +2929,7 @@ public struct ReversedCharsIterator: Iterator {
         if let .Some(decoded) = result {
             .Some(decoded.char)
         } else {
-            .Some(Char(UInt32(raw: 0xFFFD)))
+            .Some(Char(unchecked: UInt32(raw: 0xFFFD)))
         }
     }
 }
@@ -2640,7 +3206,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     fileprivate var index: Int64
     fileprivate var done: Bool
 
-    public init(slice slice: StringSlice, matching predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, where predicate: (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -2649,7 +3215,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         self.done = false;
     }
 
-    fileprivate init(slice slice: StringSlice, matching predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
+    fileprivate init(slice slice: StringSlice, where predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -2659,7 +3225,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     }
 
     public func clone() -> SplitWhereViewIterator {
-        SplitWhereViewIterator(slice: self.slice.clone(), matching: self.predicate, index: self.index, done: self.done)
+        SplitWhereViewIterator(slice: self.slice.clone(), where: self.predicate, index: self.index, done: self.done)
     }
 
     public mutating func next() -> StringSlice? {
@@ -2708,17 +3274,17 @@ public struct SplitWhereView: Iterable, Cloneable {
     fileprivate var slice: StringSlice
     fileprivate var predicate: (Char) -> Bool
 
-    public init(slice slice: StringSlice, matching predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, where predicate: (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
     }
 
     public func clone() -> SplitWhereView {
-        SplitWhereView(slice: self.slice.clone(), matching: self.predicate)
+        SplitWhereView(slice: self.slice.clone(), where: self.predicate)
     }
 
     public func iter() -> SplitWhereViewIterator {
-        SplitWhereViewIterator(slice: self.slice.clone(), matching: self.predicate)
+        SplitWhereViewIterator(slice: self.slice.clone(), where: self.predicate)
     }
 
     /// True when the source slice is empty.

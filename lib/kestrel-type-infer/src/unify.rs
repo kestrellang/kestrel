@@ -298,6 +298,45 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             Ok(())
         },
 
+        // Opaque types: same origin + same index → pairwise unify bound args
+        (
+            TyKind::Opaque {
+                origin: oa,
+                bounds: ba,
+                index: ia,
+                ..
+            },
+            TyKind::Opaque {
+                origin: ob,
+                bounds: bb,
+                index: ib,
+                ..
+            },
+        ) => {
+            if oa != ob || ia != ib || ba.len() != bb.len() {
+                return Err(UnifyError::Mismatch);
+            }
+            // Pairwise unify the protocol type args within each bound
+            for (bound_a, bound_b) in ba.iter().zip(bb.iter()) {
+                if bound_a.0 != bound_b.0 || bound_a.1.len() != bound_b.1.len() {
+                    return Err(UnifyError::Mismatch);
+                }
+                let pairs: Vec<(TyVar, TyVar)> = bound_a
+                    .1
+                    .iter()
+                    .copied()
+                    .zip(bound_b.1.iter().copied())
+                    .collect();
+                for (a, b) in pairs {
+                    unify(ctx, a, b)?;
+                }
+            }
+            Ok(())
+        },
+
+        // Opaque vs any concrete type is a mismatch (opaque hides identity)
+        (TyKind::Opaque { .. }, _) | (_, TyKind::Opaque { .. }) => Err(UnifyError::Mismatch),
+
         // Error already handled above; remaining combos are mismatches
         _ => Err(UnifyError::Mismatch),
     }
@@ -332,6 +371,19 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
             occurs_check(ctx, tv, *ret)
         },
         TySlot::Resolved(TyKind::AssocProjection { base, .. }) => occurs_check(ctx, tv, *base),
+        TySlot::Resolved(TyKind::Opaque {
+            bounds, origin_args, ..
+        }) => {
+            for (_, args) in bounds {
+                for &arg in args {
+                    occurs_check(ctx, tv, arg)?;
+                }
+            }
+            for &arg in origin_args {
+                occurs_check(ctx, tv, arg)?;
+            }
+            Ok(())
+        },
         _ => Ok(()),
     }
 }

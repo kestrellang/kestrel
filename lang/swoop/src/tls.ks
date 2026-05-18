@@ -90,7 +90,7 @@ public struct TlsStream: Readable, Writable {
         self.fd = fd;
     }
 
-    public mutating func read(into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_read(
             self.ssl,
@@ -103,7 +103,7 @@ public struct TlsStream: Readable, Writable {
         .Ok(Int64(from: n))
     }
 
-    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(
             self.ssl,

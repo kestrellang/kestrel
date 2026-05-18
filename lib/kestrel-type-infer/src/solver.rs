@@ -12,7 +12,7 @@ use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
@@ -294,6 +294,16 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
                 params.iter().any(|&param| walk(ctx, param, seen)) || walk(ctx, *ret, seen)
             },
             TySlot::Resolved(TyKind::AssocProjection { base, .. }) => walk(ctx, *base, seen),
+            TySlot::Resolved(TyKind::Opaque {
+                bounds,
+                origin_args,
+                ..
+            }) => {
+                bounds
+                    .iter()
+                    .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
+                    || origin_args.iter().any(|&a| walk(ctx, a, seen))
+            },
             TySlot::Resolved(
                 TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::Never | TyKind::Error,
             ) => false,
@@ -1655,15 +1665,16 @@ fn solve_call(
             }
             // Normal function call — unify params and return
             for (arg, param) in args.iter().zip(params.iter()) {
-                ctx.coerce(arg.ty, *param, expr, span.clone());
+                ctx.coerce(arg.ty, *param, arg.value, span.clone());
             }
             ctx.equal(result, ret, span);
             SolveResult::Solved
         },
-        TyKind::Param { .. } => {
-            // `T(...)` where T is a generic param → init call on the bound.
+        TyKind::Param { .. } | TyKind::SelfType { .. } => {
+            // `T(...)` where T is a generic param, or `Self()` whose callee
+            // already resolved to SelfType — dispatch as init on the bound.
             // The init's declared return is () but the actual result is an
-            // instance of the type param. Override via an equal(result, callee).
+            // instance of the type / Self.
             let init_result = ctx.fresh();
             let res = solve_member(
                 ctx,
@@ -1677,7 +1688,43 @@ fn solve_call(
                 &[],
                 span.clone(),
             );
-            ctx.equal(result, callee, span);
+            // Effectful inits: wrap T → T? or T throws E
+            let final_result = if let Some(&init_entity) = ctx.resolutions.get(&expr) {
+                wrap_init_call_result(ctx, init_entity, callee, &[], &span)
+            } else {
+                callee
+            };
+            ctx.equal(result, final_result, span);
+            res
+        },
+        TyKind::Protocol { entity, .. } => {
+            // `Self()` in a protocol body or protocol extension reaches
+            // here with the protocol entity as callee. Treat the call as
+            // an init on `Self` (the conforming type, abstract here), so
+            // monomorphization gets `MirTy::SelfType` and substitutes the
+            // caller's concrete type. The protocol entity itself is never
+            // constructible — there's no other path that lands `Def(Protocol)`
+            // as a Call callee.
+            let self_tv = ctx.self_type_ty(entity);
+            let init_result = ctx.fresh();
+            let res = solve_member(
+                ctx,
+                self_tv,
+                "init",
+                args,
+                init_result,
+                expr,
+                true,
+                true,
+                &[],
+                span.clone(),
+            );
+            let final_result = if let Some(&init_entity) = ctx.resolutions.get(&expr) {
+                wrap_init_call_result(ctx, init_entity, self_tv, &[], &span)
+            } else {
+                self_tv
+            };
+            ctx.equal(result, final_result, span);
             res
         },
         TyKind::Enum { .. } if args.is_empty() => {
@@ -1687,8 +1734,6 @@ fn solve_call(
         },
         TyKind::Struct { .. }
         | TyKind::Enum { .. }
-        | TyKind::Protocol { .. }
-        | TyKind::SelfType { .. }
         | TyKind::TypeAlias { .. }
         | TyKind::AssocProjection { .. } => {
             // Instance subscript call (e.g. dict(key)).
@@ -1903,7 +1948,7 @@ fn emit_resolved_call(
         for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
             if let Some(hir_ty) = param_ty {
                 let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
-                ctx.coerce(arg.ty, param_tv, expr, span.clone());
+                ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
             }
         }
     }
@@ -1913,10 +1958,11 @@ fn emit_resolved_call(
     // leak an unresolved slot at every no-return-type call site.
     let ret_tv = qctx
         .query(LowerTypeAnnotation { entity, root })
-        .map(|hir_ty| lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs))
+        .map(|hir_ty| lower_opaque_aware(ctx, &hir_ty, entity, None, TyVar(0), &subs))
         .unwrap_or_else(|| ctx.tuple(Vec::new()));
 
-    // For inits and enum cases, result type is the parent type
+    // For inits and enum cases, result type is the parent type.
+    // Effectful inits wrap through type operators: Self? or Self throws E.
     if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
         if let Some(parent) = qctx.parent_of(entity) {
             let parent_tps: Vec<Entity> = qctx
@@ -1928,7 +1974,9 @@ fn emit_resolved_call(
                 .filter_map(|tp| subs.iter().find(|(e, _)| e == tp).map(|&(_, tv)| tv))
                 .collect();
             let parent_ty = ctx.named(parent, parent_args);
-            ctx.equal(result, parent_ty, span);
+            let final_ty =
+                wrap_init_call_result(ctx, entity, parent_ty, &subs, &span);
+            ctx.equal(result, final_ty, span);
         } else {
             ctx.equal(result, ret_tv, span);
         }
@@ -2625,11 +2673,11 @@ fn solve_member(
     // Equate argument types with parameter types
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
         let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
-        ctx.coerce(arg.ty, param_tv, expr, span.clone());
+        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
     }
 
     // Equate result with return type
-    let ret_tv = lower_hir_ty_sub(ctx, &resolution.return_type, self_entity, receiver, &subs);
+    let ret_tv = lower_opaque_aware(ctx, &resolution.return_type, resolution.entity, self_entity, receiver, &subs);
 
     ctx.equal(result, ret_tv, span.clone());
 
@@ -2735,7 +2783,7 @@ fn solve_implicit(
     let self_entity = resolution.self_type;
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
         let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, expected, &subs);
-        ctx.coerce(arg.ty, param_tv, expr, span.clone());
+        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
     }
 
     // Equate result with the expected type
@@ -3273,6 +3321,38 @@ pub fn kind_to_tyvar_sub(
             let ret_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *ret), self_entity, recv_tv);
             ctx.function(param_tvs, ret_tv)
         },
+        TyKind::Opaque {
+            origin,
+            bounds,
+            origin_args,
+            index,
+        } => {
+            // Remap bound args and origin_args through the substitution
+            let new_bounds: Vec<(Entity, Vec<TyVar>)> = bounds
+                .iter()
+                .map(|(proto, args)| {
+                    let new_args: Vec<TyVar> = args
+                        .iter()
+                        .map(|a| {
+                            kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *a), self_entity, recv_tv)
+                        })
+                        .collect();
+                    (*proto, new_args)
+                })
+                .collect();
+            let new_origin_args: Vec<TyVar> = origin_args
+                .iter()
+                .map(|a| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *a), self_entity, recv_tv))
+                .collect();
+            let idx = ctx.types.len() as u32;
+            ctx.types.push(TySlot::Resolved(TyKind::Opaque {
+                origin: *origin,
+                bounds: new_bounds,
+                origin_args: new_origin_args,
+                index: *index,
+            }));
+            TyVar(idx)
+        },
         TyKind::Never => ctx.never(),
         TyKind::Error => {
             let idx = ctx.types.len() as u32;
@@ -3483,6 +3563,50 @@ fn emit_type_alias_where_clauses(
     }
 }
 
+/// Lower a callee's return type, intercepting HirTy::Opaque to create TyKind::Opaque
+/// with the correct origin entity and origin_args from the call-site substitution.
+/// Passes through `self_entity` and `recv_tv` so Self-type substitution works
+/// correctly for protocol method return types (e.g. `-> Item?`).
+fn lower_opaque_aware(
+    ctx: &mut InferCtx<'_>,
+    hir_ty: &kestrel_hir::ty::HirTy,
+    callee: kestrel_hecs::Entity,
+    self_entity: Option<kestrel_hecs::Entity>,
+    recv_tv: TyVar,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+) -> TyVar {
+    if let kestrel_hir::ty::HirTy::Opaque { bounds, .. } = hir_ty {
+        if ctx.owner == callee {
+            return ctx.return_ty;
+        }
+
+        let mut opaque_bounds = Vec::new();
+        for bound in bounds {
+            let bound_tv = lower_hir_ty_sub(ctx, bound, self_entity, recv_tv, subs);
+            let resolved = ctx.resolve(bound_tv);
+            if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Protocol { entity, args }) =
+                &ctx.types[resolved.0 as usize]
+            {
+                opaque_bounds.push((*entity, args.clone()));
+            }
+        }
+
+        let origin_args: Vec<TyVar> = subs.iter().map(|(_, tv)| *tv).collect();
+
+        let tv = ctx.fresh();
+        let resolved = ctx.resolve(tv);
+        ctx.types[resolved.0 as usize] = crate::ty::TySlot::Resolved(crate::ty::TyKind::Opaque {
+            origin: callee,
+            bounds: opaque_bounds,
+            origin_args,
+            index: 0,
+        });
+        tv
+    } else {
+        lower_hir_ty_sub(ctx, hir_ty, self_entity, recv_tv, subs)
+    }
+}
+
 /// Convert HirTy to TyVar with substitutions.
 /// - Self entity → receiver TyVar
 /// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
@@ -3600,6 +3724,13 @@ fn lower_hir_ty_sub(
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
             ctx.function(param_tvs, ret_tv)
         },
+        // Opaque types at call sites: create a fresh TyVar for now.
+        // Full `TyKind::Opaque` creation requires the callee entity (origin),
+        // which is not available in `lower_hir_ty_sub`. The callee entity
+        // lives at the `solve_member`/`resolve_overload` level. A future
+        // pass will thread it through so external call sites produce proper
+        // `TyKind::Opaque` with origin/bounds/origin_args.
+        HirTy::Opaque { .. } => ctx.fresh(),
         HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
         HirTy::Error(_) => {
@@ -3613,4 +3744,40 @@ fn lower_hir_ty_sub(
 /// Convert HirTy to TyVar without substitution.
 pub fn lower_hir_ty_plain(ctx: &mut InferCtx<'_>, ty: &kestrel_hir::ty::HirTy) -> TyVar {
     lower_hir_ty_sub(ctx, ty, None, TyVar(0), &[])
+}
+
+/// Wrap a TyVar for an effectful init call site: `Self` → `Self?` or `Self throws E`.
+fn wrap_init_call_result(
+    ctx: &mut InferCtx<'_>,
+    init_entity: kestrel_hecs::Entity,
+    inner_tv: TyVar,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+    _span: &kestrel_span::Span,
+) -> TyVar {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    if qctx.get::<InitEffect>(init_entity).is_none() {
+        return inner_tv;
+    }
+
+    let Some(hir_ty) = qctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: init_entity,
+        root,
+    }) else {
+        return inner_tv;
+    };
+
+    match &hir_ty {
+        kestrel_hir::ty::HirTy::Enum { entity, args, .. }
+        | kestrel_hir::ty::HirTy::Struct { entity, args, .. } => {
+            let mut wrapped_args = Vec::with_capacity(args.len());
+            wrapped_args.push(inner_tv);
+            for arg in args.iter().skip(1) {
+                wrapped_args.push(lower_hir_ty_sub(ctx, arg, None, TyVar(0), subs));
+            }
+            ctx.named(*entity, wrapped_args)
+        }
+        _ => inner_tv,
+    }
 }

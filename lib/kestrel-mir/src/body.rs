@@ -2,10 +2,24 @@
 //!
 //! Self-contained: a statement in function A never references a local in function B.
 
+use std::collections::{HashMap, HashSet};
+
 use crate::id::{BlockId, LocalId};
 use crate::statement::Statement;
 use crate::terminator::Terminator;
 use crate::ty::MirTy;
+
+/// Identifies the scope that owns a local for drop purposes.
+/// Used by the drop elaboration pass to determine WHERE cleanup is inserted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScopeId {
+    /// Function-level — cleaned at return.
+    Function,
+    /// Loop body — cleaned at back-edge, break, continue, and return-from-inside.
+    /// header: the loop header block (where ScopeLive is emitted).
+    /// exit: the block that break jumps to (outside the loop).
+    Loop { header: BlockId, exit: BlockId },
+}
 
 /// A function body containing locals and basic blocks.
 #[derive(Debug, Clone)]
@@ -18,6 +32,13 @@ pub struct MirBody {
     pub entry: BlockId,
     /// Number of parameters — the first `param_count` locals are parameters.
     pub param_count: usize,
+    /// Blocks whose Return terminator is a failure path in an effectful init.
+    /// The deinit pass uses this to insert partial-drop cleanup.
+    pub failure_return_blocks: HashSet<BlockId>,
+    /// Scope each droppable local belongs to. Locals absent from this map
+    /// are function-scoped (the default). Populated by lowering so the drop
+    /// elaboration pass knows which exit points trigger cleanup for which locals.
+    pub local_scopes: HashMap<LocalId, ScopeId>,
 }
 
 impl MirBody {
@@ -28,6 +49,8 @@ impl MirBody {
             blocks: Vec::new(),
             entry: BlockId::new(0),
             param_count: 0,
+            failure_return_blocks: HashSet::new(),
+            local_scopes: HashMap::new(),
         }
     }
 
@@ -107,6 +130,10 @@ pub struct LocalDef {
     pub name: String,
     /// Type of this local.
     pub ty: MirTy,
+    /// True for locals loaded from a closure env struct. These are
+    /// borrowed views of the parent scope's values — the closure does
+    /// not own them and drop elaboration must skip them.
+    pub borrowed: bool,
 }
 
 impl LocalDef {
@@ -114,6 +141,15 @@ impl LocalDef {
         Self {
             name: name.into(),
             ty,
+            borrowed: false,
+        }
+    }
+
+    pub fn borrowed(name: impl Into<String>, ty: MirTy) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            borrowed: true,
         }
     }
 }

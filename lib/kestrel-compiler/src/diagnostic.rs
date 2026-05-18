@@ -267,6 +267,16 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_notes(vec![format!(
                     "primitive methods cannot be used as first-class values; use '.{method}()' instead"
                 )]),
+
+            InferError::CircularOpaqueReturn { .. } => Diagnostic::error()
+                .with_message("circular opaque return type")
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message("concrete type cannot be determined"),
+                ])
+                .with_notes(vec![
+                    "mutually recursive functions with 'some' return types must have at least one non-opaque base case".into(),
+                ]),
         }
     }
 }

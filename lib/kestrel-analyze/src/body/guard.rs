@@ -1,19 +1,20 @@
-//! # Guard-Let Divergence Analyzer
+//! # Guard Divergence Analyzer
 //!
-//! Verifies that guard-let else blocks always diverge (return, break, continue).
-//! Guard-let is desugared to `if condition { } else { else_body }` in the HIR.
-//! The `HirBody.guard_let_stmts` field marks which statements originated from
-//! guard-let desugaring, so this analyzer can identify them reliably.
+//! Verifies that guard/guard-let else blocks always diverge (return, break,
+//! continue). Both `guard <condition> else { ... }` and `guard let <pattern> = <expr> else { ... }`
+//! are desugared to `if condition { } else { else_body }` in the HIR.
+//! The `HirBody.guard_stmts` field marks which statements originated from
+//! guard desugaring, so this analyzer can identify them reliably.
 //!
 //! ## Diagnostics
 //!
 //! ### E003 — `guard_let_else_must_diverge` (Error, Correctness)
 //!
-//! **Message:** "guard-let else block must diverge (return, break, continue, or throw)"
+//! **Message:** "guard else block must diverge (return, break, continue, or throw)"
 //!
 //! **Labels:**
-//! - Primary: the guard-let statement
-//!   - Span source: `util::stmt_span` on the guard-let `HirStmtId`
+//! - Primary: the guard statement
+//!   - Span source: `util::stmt_span` on the guard `HirStmtId`
 //!   - Message: "else block does not diverge"
 //!
 //! **Notes:** (none)
@@ -31,23 +32,23 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     category: Category::Correctness,
 }];
 
-pub struct GuardLetDivergenceAnalyzer;
+pub struct GuardDivergenceAnalyzer;
 
-impl Describe for GuardLetDivergenceAnalyzer {
+impl Describe for GuardDivergenceAnalyzer {
     fn id(&self) -> &'static str {
-        "guard_let_divergence"
+        "guard_divergence"
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
     }
 }
 
-impl BodyCheck for GuardLetDivergenceAnalyzer {
+impl BodyCheck for GuardDivergenceAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
         // Check each guard-let-originated statement
-        for &stmt_id in &cx.hir.guard_let_stmts {
+        for &stmt_id in &cx.hir.guard_stmts {
             // The desugared form is: HirStmt::Expr { HirExpr::If { then: empty, else: body } }
             let HirStmt::Expr { expr, .. } = &cx.hir.stmts[stmt_id] else {
                 continue;
@@ -71,7 +72,7 @@ impl BodyCheck for GuardLetDivergenceAnalyzer {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
                     message:
-                        "guard-let else block must diverge (return, break, continue, or throw)"
+                        "guard else block must diverge (return, break, continue, or throw)"
                             .into(),
                     labels: vec![DiagLabel {
                         span,
