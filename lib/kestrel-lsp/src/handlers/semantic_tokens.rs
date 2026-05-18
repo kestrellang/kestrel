@@ -73,7 +73,8 @@ pub async fn handle(
 
 fn classify(token: Token, lexeme: &str) -> Option<u32> {
     use Token::*;
-    Some(match token {
+    // `Option::Some` because `use Token::*` brings `Token::Some` into scope.
+    Option::Some(match token {
         // Trivia
         LineComment | BlockComment => COMMENT,
         Whitespace | Newline => return None,
@@ -88,7 +89,7 @@ fn classify(token: Token, lexeme: &str) -> Option<u32> {
         | Mutating | Private | Protocol | Public | Static | Struct | Type | Var | Where | Enum
         | Case | Indirect | And | Not | Or | As | Break | Consuming | Continue | Else | For
         | If | In | Loop | Return | Throw | Try | Throws | While | Match | Guard | Get | Set
-        | Subscript => KEYWORD,
+        | Subscript | Some => KEYWORD,
 
         // Identifiers — heuristic. PascalCase → type, anything else → variable.
         Identifier => {

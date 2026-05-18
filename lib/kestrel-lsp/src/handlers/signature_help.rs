@@ -362,6 +362,7 @@ fn ast_type_span(ty: &AstType) -> Span {
         AstType::Unit(span) => span.clone(),
         AstType::Never(span) => span.clone(),
         AstType::Inferred(span) => span.clone(),
+        AstType::Some { span, .. } => span.clone(),
     }
 }
 

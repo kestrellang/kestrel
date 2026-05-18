@@ -20,23 +20,57 @@ pub mod types;
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::server::{ServerState, SharedState};
 
+/// Debounce delay for `didChange` → diagnostics refresh. Coalesces rapid
+/// keystrokes so we don't rebuild the world on every character.
+const DEBOUNCE_MS: u64 = 150;
+
 pub struct Backend {
     client: Client,
     state: SharedState,
+    /// Poked by `did_change`; the debounce task waits on this and
+    /// coalesces notifications before triggering a refresh.
+    debounce_notify: Arc<Notify>,
 }
 
 impl Backend {
     pub fn new(client: Client) -> Self {
+        let state: SharedState = Arc::new(Mutex::new(ServerState::new()));
+        let debounce_notify = Arc::new(Notify::new());
+
+        // Spawn the debounce task. It waits for a notification, then
+        // sleeps DEBOUNCE_MS — resetting on each new notification — and
+        // fires a refresh only after the dust settles.
+        {
+            let state = state.clone();
+            let client = client.clone();
+            let notify = debounce_notify.clone();
+            tokio::spawn(async move {
+                loop {
+                    notify.notified().await;
+                    loop {
+                        tokio::select! {
+                            _ = tokio::time::sleep(
+                                std::time::Duration::from_millis(DEBOUNCE_MS),
+                            ) => break,
+                            _ = notify.notified() => continue,
+                        }
+                    }
+                    handlers::diagnostics::refresh(state.clone(), client.clone()).await;
+                }
+            });
+        }
+
         Self {
             client,
-            state: Arc::new(Mutex::new(ServerState::new())),
+            state,
+            debounce_notify,
         }
     }
 
@@ -322,7 +356,7 @@ impl LanguageServer for Backend {
             state.set_source(key, text);
             state.revision_token += 1;
         }
-        self.refresh().await;
+        self.debounce_notify.notify_one();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {

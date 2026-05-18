@@ -13,7 +13,7 @@ enum Pattern: Formattable {
             .Blinker => "BLINKER",
             .Lwss => "LWSS",
             .Pulsar => "PULSAR",
-            .GosperGun => "GOSPER GUN"
+            .GosperGun => "GOSPER GUN",
         };
         writer.append(s);
     }

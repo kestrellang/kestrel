@@ -30,6 +30,8 @@ func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Con
     var timer = Timer.start();
     var simAccum: Int64 = 0;
 
+    simAccum.abs();
+
     while state.running {
         while let .Some(event) = i.getEvent() {
             match event {

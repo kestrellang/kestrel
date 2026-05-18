@@ -21,6 +21,7 @@
 //! policy change lands; the rest of the worker stays the same.
 
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use kestrel_compiler::Compiler;
@@ -135,7 +136,22 @@ fn run_worker(mut rx: mpsc::UnboundedReceiver<Request>) {
         // to swap stdlib entities out from under cached queries.
         let stdlib_reset = sync_stdlib(&mut state, &req.stdlib_sources);
         sync_user(&mut state, &req.user_sources, stdlib_reset);
-        (req.job)(&state.compiler, &state.by_path);
+        // Handler closures can panic (e.g. on unexpected compiler
+        // state). Catch and log rather than killing the worker — the
+        // oneshot reply_tx will be dropped, returning None to the
+        // caller, which every handler already handles gracefully.
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+            (req.job)(&state.compiler, &state.by_path);
+        })) {
+            let msg = match payload.downcast_ref::<&str>() {
+                Some(s) => (*s).to_string(),
+                None => match payload.downcast_ref::<String>() {
+                    Some(s) => s.clone(),
+                    None => "unknown panic".to_string(),
+                },
+            };
+            eprintln!("[kestrel-lsp] worker caught panic: {msg}");
+        }
         if verify {
             verify_against_fresh(&state, &req.stdlib_sources, &req.user_sources);
         }
