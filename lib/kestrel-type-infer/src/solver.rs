@@ -1958,7 +1958,7 @@ fn emit_resolved_call(
     // leak an unresolved slot at every no-return-type call site.
     let ret_tv = qctx
         .query(LowerTypeAnnotation { entity, root })
-        .map(|hir_ty| lower_opaque_aware(ctx, &hir_ty, entity, &subs))
+        .map(|hir_ty| lower_opaque_aware(ctx, &hir_ty, entity, None, TyVar(0), &subs))
         .unwrap_or_else(|| ctx.tuple(Vec::new()));
 
     // For inits and enum cases, result type is the parent type.
@@ -2677,7 +2677,7 @@ fn solve_member(
     }
 
     // Equate result with return type
-    let ret_tv = lower_opaque_aware(ctx, &resolution.return_type, resolution.entity, &subs);
+    let ret_tv = lower_opaque_aware(ctx, &resolution.return_type, resolution.entity, self_entity, receiver, &subs);
 
     ctx.equal(result, ret_tv, span.clone());
 
@@ -3565,25 +3565,24 @@ fn emit_type_alias_where_clauses(
 
 /// Lower a callee's return type, intercepting HirTy::Opaque to create TyKind::Opaque
 /// with the correct origin entity and origin_args from the call-site substitution.
+/// Passes through `self_entity` and `recv_tv` so Self-type substitution works
+/// correctly for protocol method return types (e.g. `-> Item?`).
 fn lower_opaque_aware(
     ctx: &mut InferCtx<'_>,
     hir_ty: &kestrel_hir::ty::HirTy,
     callee: kestrel_hecs::Entity,
+    self_entity: Option<kestrel_hecs::Entity>,
+    recv_tv: TyVar,
     subs: &[(kestrel_hecs::Entity, TyVar)],
 ) -> TyVar {
     if let kestrel_hir::ty::HirTy::Opaque { bounds, .. } = hir_ty {
-        if std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok() {
-            eprintln!("lower_opaque_aware: HirTy::Opaque with {} bounds, callee={:?}, owner={:?}", bounds.len(), callee, ctx.owner);
-        }
-        // Self-reference: inside a function with opaque return, recursive calls
-        // see the concrete type, not an opaque wrapper.
         if ctx.owner == callee {
             return ctx.return_ty;
         }
 
         let mut opaque_bounds = Vec::new();
         for bound in bounds {
-            let bound_tv = lower_hir_ty_sub(ctx, bound, None, TyVar(0), subs);
+            let bound_tv = lower_hir_ty_sub(ctx, bound, self_entity, recv_tv, subs);
             let resolved = ctx.resolve(bound_tv);
             if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Protocol { entity, args }) =
                 &ctx.types[resolved.0 as usize]
@@ -3604,7 +3603,7 @@ fn lower_opaque_aware(
         });
         tv
     } else {
-        lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), subs)
+        lower_hir_ty_sub(ctx, hir_ty, self_entity, recv_tv, subs)
     }
 }
 
