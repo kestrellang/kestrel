@@ -292,8 +292,40 @@ pub(crate) fn ty_parser<'tokens>()
             )
             .boxed();
 
-        // Try never first, then inferred, then paren types, then array/dict, then path
-        let base_ty = never
+        // Opaque type: some P, some P and Q
+        let some_type = skip_trivia()
+            .ignore_then(just(Token::Some).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(
+                // Each bound is a path type with optional type args
+                path_segments_parser()
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::LBracket))
+                            .ignore_then(
+                                ty.clone()
+                                    .separated_by(just(Token::Comma))
+                                    .allow_trailing()
+                                    .collect::<Vec<_>>(),
+                            )
+                            .then_ignore(skip_trivia())
+                            .then_ignore(just(Token::RBracket))
+                            .or_not(),
+                    )
+                    .map(|(segments, args)| TyVariant::Path { segments, args })
+                    .separated_by(
+                        skip_trivia()
+                            .ignore_then(just(Token::And))
+                            .ignore_then(skip_trivia()),
+                    )
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .map(|(some_span, bounds)| TyVariant::Some(some_span, bounds))
+            .boxed();
+
+        // Try some first (prefix keyword), then never, inferred, parens, array/dict, path
+        let base_ty = some_type
+            .or(never)
             .or(inferred)
             .or(paren_types)
             .or(array_or_dict)
@@ -418,6 +450,9 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Result(success_ty, throws_span, error_ty) => {
             emit_result_type(sink, success_ty, throws_span.clone(), error_ty);
         },
+        TyVariant::Some(some_span, bounds) => {
+            emit_some_type(sink, some_span.clone(), bounds);
+        },
     }
 }
 
@@ -442,6 +477,8 @@ pub enum TyVariant {
     Optional(Box<TyVariant>, Span), // (base_type, question_span)
     /// Result type: T throws E
     Result(Box<TyVariant>, Span, Box<TyVariant>), // (success_type, throws_span, error_type)
+    /// Opaque type: some P, some P and Q
+    Some(Span, Vec<TyVariant>), // (some_span, bound types)
 }
 
 /// Emit events for an inferred type: _
@@ -644,6 +681,23 @@ pub(crate) fn emit_result_type(
     emit_ty_variant(sink, error_ty);
 
     sink.finish_node(); // Finish TyResult
+    sink.finish_node(); // Finish Ty
+}
+
+pub(crate) fn emit_some_type(sink: &mut EventSink, some_span: Span, bounds: &[TyVariant]) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TySome);
+
+    sink.add_token(SyntaxKind::Some, some_span);
+    for (i, bound) in bounds.iter().enumerate() {
+        if i > 0 {
+            // `and` tokens between bounds aren't tracked as separate spans
+            // since they're consumed during parsing; emit the bound type directly
+        }
+        emit_ty_variant(sink, bound);
+    }
+
+    sink.finish_node(); // Finish TySome
     sink.finish_node(); // Finish Ty
 }
 

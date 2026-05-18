@@ -146,6 +146,11 @@ pub struct InferCtx<'a> {
     /// type variable. If no break is reachable the var stays unconstrained
     /// and defaults to Never via never-fallback.
     pub(crate) loop_break_tys: Vec<(Option<String>, TyVar)>,
+
+    /// Metadata for a function with an opaque return type (`some P`).
+    /// Set in `create_return_type` when the return annotation is `HirTy::Opaque`.
+    /// Used by `build_result` to extract the concrete type for `TypedBody`.
+    pub(crate) opaque_return: Option<OpaqueReturnInfo>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -155,6 +160,18 @@ pub struct PromotionInfo {
     pub method: Entity,
     /// Target type (what we're promoting to).
     pub target_ty: TyVar,
+}
+
+/// Metadata for a function with an opaque return type (`some P`).
+/// Stored on `InferCtx` during inference of the defining body.
+/// The `concrete_tv` is a fresh TyVar that the body's return expressions
+/// unify with; `bounds` are the protocol constraints callers see.
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // bounds/span used by future phases (external view, diagnostics)
+pub(crate) struct OpaqueReturnInfo {
+    pub concrete_tv: TyVar,
+    pub bounds: Vec<(Entity, Vec<TyVar>)>,
+    pub span: Span,
 }
 
 impl<'a> InferCtx<'a> {
@@ -196,6 +213,7 @@ impl<'a> InferCtx<'a> {
             wildcard_tvars: HashSet::new(),
             witness_protocol_args: HashMap::new(),
             loop_break_tys: Vec::new(),
+            opaque_return: None,
         }
     }
 

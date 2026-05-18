@@ -1517,7 +1517,7 @@ fn instantiate_entity_inner(
                     .collect();
 
                 let ret_hir = qctx.query(LowerCallableReturnType { entity, root });
-                let ret_tv = lower_hir_ty_with_subs(ctx, &ret_hir, &subs);
+                let ret_tv = lower_return_ty_with_opaque(ctx, &ret_hir, entity, &subs);
 
                 ctx.function(param_tvs, ret_tv)
             } else {
@@ -1760,6 +1760,90 @@ fn literal_protocol(ctx: &InferCtx<'_>, literal: LiteralKind) -> Option<Entity> 
 }
 
 /// Convert HirTy to TyVar, substituting type params found in `subs`.
+/// Lower a callee's return type, creating TyKind::Opaque for any `HirTy::Opaque`
+/// found at any depth in the type tree (e.g. `Optional[some Shape]`).
+fn lower_return_ty_with_opaque(
+    ctx: &mut InferCtx<'_>,
+    ret_hir: &HirTy,
+    callee: Entity,
+    subs: &[(Entity, TyVar)],
+) -> TyVar {
+    match ret_hir {
+        HirTy::Opaque { bounds, .. } => {
+            if ctx.owner == callee {
+                return ctx.return_ty;
+            }
+            lower_opaque_to_tyvar(ctx, bounds, callee, subs)
+        },
+        // Recurse into structural types so nested opaques are handled
+        HirTy::Struct { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> = args
+                .iter()
+                .map(|a| lower_return_ty_with_opaque(ctx, a, callee, subs))
+                .collect();
+            ctx.struct_ty(*entity, arg_tvs)
+        },
+        HirTy::Enum { entity, args, .. } => {
+            let arg_tvs: Vec<TyVar> = args
+                .iter()
+                .map(|a| lower_return_ty_with_opaque(ctx, a, callee, subs))
+                .collect();
+            ctx.enum_ty(*entity, arg_tvs)
+        },
+        HirTy::Tuple(elems, _) => {
+            let tvs: Vec<TyVar> = elems
+                .iter()
+                .map(|e| lower_return_ty_with_opaque(ctx, e, callee, subs))
+                .collect();
+            ctx.tuple(tvs)
+        },
+        HirTy::Function { params, ret, .. } => {
+            let param_tvs: Vec<TyVar> = params
+                .iter()
+                .map(|p| lower_return_ty_with_opaque(ctx, p, callee, subs))
+                .collect();
+            let ret_tv = lower_return_ty_with_opaque(ctx, ret, callee, subs);
+            ctx.function(param_tvs, ret_tv)
+        },
+        // Non-structural types: delegate to the standard path
+        _ => lower_hir_ty_with_subs(ctx, ret_hir, subs),
+    }
+}
+
+/// Create a TyKind::Opaque TyVar from opaque bounds.
+fn lower_opaque_to_tyvar(
+    ctx: &mut InferCtx<'_>,
+    bounds: &[HirTy],
+    callee: Entity,
+    subs: &[(Entity, TyVar)],
+) -> TyVar {
+    let mut opaque_bounds = Vec::new();
+    for bound in bounds {
+        let bound_tv = lower_hir_ty_with_subs(ctx, bound, subs);
+        let resolved = ctx.resolve(bound_tv);
+        if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Protocol {
+            entity: proto,
+            args,
+        }) = &ctx.types[resolved.0 as usize]
+        {
+            opaque_bounds.push((*proto, args.clone()));
+        }
+    }
+
+    let origin_args: Vec<TyVar> = subs.iter().map(|(_, tv)| *tv).collect();
+
+    let tv = ctx.fresh();
+    let resolved = ctx.resolve(tv);
+    ctx.types[resolved.0 as usize] =
+        crate::ty::TySlot::Resolved(crate::ty::TyKind::Opaque {
+            origin: callee,
+            bounds: opaque_bounds,
+            origin_args,
+            index: 0,
+        });
+    tv
+}
+
 /// Used when instantiating generic entities: type params become fresh TyVars.
 /// Also substitutes associated-type entities (where-clause equalities) in subs.
 pub(crate) fn lower_hir_ty_with_subs(
@@ -1789,6 +1873,11 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .collect();
             ctx.protocol_ty(*entity, arg_tvs)
         },
+        // Opaque types: in `lower_hir_ty_with_subs`, HirTy::Opaque is only
+        // reached for the defining body's own return type annotation, which
+        // `create_return_type` intercepts. If we get here, fall through to a
+        // fresh TyVar (defensive — shouldn't be reached in normal flow).
+        HirTy::Opaque { .. } => ctx.fresh(),
         HirTy::AliasUse { entity, args, .. } => {
             // Zero-arg alias uses participate in associated-type substitution:
             // where clauses map specific TypeAlias entities to TyVars.
@@ -1942,6 +2031,7 @@ fn hir_ty_span(ty: &HirTy) -> Span {
         | HirTy::Function { span, .. }
         | HirTy::Param(_, span)
         | HirTy::SelfType(_, span)
+        | HirTy::Opaque { span, .. }
         | HirTy::Never(span)
         | HirTy::Infer(span)
         | HirTy::Error(span) => span.clone(),

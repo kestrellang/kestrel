@@ -294,6 +294,16 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
                 params.iter().any(|&param| walk(ctx, param, seen)) || walk(ctx, *ret, seen)
             },
             TySlot::Resolved(TyKind::AssocProjection { base, .. }) => walk(ctx, *base, seen),
+            TySlot::Resolved(TyKind::Opaque {
+                bounds,
+                origin_args,
+                ..
+            }) => {
+                bounds
+                    .iter()
+                    .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
+                    || origin_args.iter().any(|&a| walk(ctx, a, seen))
+            },
             TySlot::Resolved(
                 TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::Never | TyKind::Error,
             ) => false,
@@ -1948,7 +1958,7 @@ fn emit_resolved_call(
     // leak an unresolved slot at every no-return-type call site.
     let ret_tv = qctx
         .query(LowerTypeAnnotation { entity, root })
-        .map(|hir_ty| lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs))
+        .map(|hir_ty| lower_opaque_aware(ctx, &hir_ty, entity, &subs))
         .unwrap_or_else(|| ctx.tuple(Vec::new()));
 
     // For inits and enum cases, result type is the parent type.
@@ -2667,7 +2677,7 @@ fn solve_member(
     }
 
     // Equate result with return type
-    let ret_tv = lower_hir_ty_sub(ctx, &resolution.return_type, self_entity, receiver, &subs);
+    let ret_tv = lower_opaque_aware(ctx, &resolution.return_type, resolution.entity, &subs);
 
     ctx.equal(result, ret_tv, span.clone());
 
@@ -3311,6 +3321,38 @@ pub fn kind_to_tyvar_sub(
             let ret_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *ret), self_entity, recv_tv);
             ctx.function(param_tvs, ret_tv)
         },
+        TyKind::Opaque {
+            origin,
+            bounds,
+            origin_args,
+            index,
+        } => {
+            // Remap bound args and origin_args through the substitution
+            let new_bounds: Vec<(Entity, Vec<TyVar>)> = bounds
+                .iter()
+                .map(|(proto, args)| {
+                    let new_args: Vec<TyVar> = args
+                        .iter()
+                        .map(|a| {
+                            kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *a), self_entity, recv_tv)
+                        })
+                        .collect();
+                    (*proto, new_args)
+                })
+                .collect();
+            let new_origin_args: Vec<TyVar> = origin_args
+                .iter()
+                .map(|a| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *a), self_entity, recv_tv))
+                .collect();
+            let idx = ctx.types.len() as u32;
+            ctx.types.push(TySlot::Resolved(TyKind::Opaque {
+                origin: *origin,
+                bounds: new_bounds,
+                origin_args: new_origin_args,
+                index: *index,
+            }));
+            TyVar(idx)
+        },
         TyKind::Never => ctx.never(),
         TyKind::Error => {
             let idx = ctx.types.len() as u32;
@@ -3521,6 +3563,51 @@ fn emit_type_alias_where_clauses(
     }
 }
 
+/// Lower a callee's return type, intercepting HirTy::Opaque to create TyKind::Opaque
+/// with the correct origin entity and origin_args from the call-site substitution.
+fn lower_opaque_aware(
+    ctx: &mut InferCtx<'_>,
+    hir_ty: &kestrel_hir::ty::HirTy,
+    callee: kestrel_hecs::Entity,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+) -> TyVar {
+    if let kestrel_hir::ty::HirTy::Opaque { bounds, .. } = hir_ty {
+        if std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok() {
+            eprintln!("lower_opaque_aware: HirTy::Opaque with {} bounds, callee={:?}, owner={:?}", bounds.len(), callee, ctx.owner);
+        }
+        // Self-reference: inside a function with opaque return, recursive calls
+        // see the concrete type, not an opaque wrapper.
+        if ctx.owner == callee {
+            return ctx.return_ty;
+        }
+
+        let mut opaque_bounds = Vec::new();
+        for bound in bounds {
+            let bound_tv = lower_hir_ty_sub(ctx, bound, None, TyVar(0), subs);
+            let resolved = ctx.resolve(bound_tv);
+            if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Protocol { entity, args }) =
+                &ctx.types[resolved.0 as usize]
+            {
+                opaque_bounds.push((*entity, args.clone()));
+            }
+        }
+
+        let origin_args: Vec<TyVar> = subs.iter().map(|(_, tv)| *tv).collect();
+
+        let tv = ctx.fresh();
+        let resolved = ctx.resolve(tv);
+        ctx.types[resolved.0 as usize] = crate::ty::TySlot::Resolved(crate::ty::TyKind::Opaque {
+            origin: callee,
+            bounds: opaque_bounds,
+            origin_args,
+            index: 0,
+        });
+        tv
+    } else {
+        lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), subs)
+    }
+}
+
 /// Convert HirTy to TyVar with substitutions.
 /// - Self entity → receiver TyVar
 /// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
@@ -3638,6 +3725,13 @@ fn lower_hir_ty_sub(
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
             ctx.function(param_tvs, ret_tv)
         },
+        // Opaque types at call sites: create a fresh TyVar for now.
+        // Full `TyKind::Opaque` creation requires the callee entity (origin),
+        // which is not available in `lower_hir_ty_sub`. The callee entity
+        // lives at the `solve_member`/`resolve_overload` level. A future
+        // pass will thread it through so external call sites produce proper
+        // `TyKind::Opaque` with origin/bounds/origin_args.
+        HirTy::Opaque { .. } => ctx.fresh(),
         HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
         HirTy::Error(_) => {

@@ -38,6 +38,11 @@ pub struct TypedBody {
 
     /// Human-readable error descriptions with resolved types.
     pub error_details: Vec<String>,
+
+    /// If this body has an opaque return type (`some P`), the resolved
+    /// concrete type that the body's return expressions unified to.
+    /// Used by MIR lowering to substitute the opaque type with concrete.
+    pub opaque_concrete_type: Option<ResolvedTy>,
 }
 
 /// Manual Hash: hash each map as sorted (key, value) pairs for determinism.
@@ -69,6 +74,9 @@ impl std::hash::Hash for TypedBody {
             k.hash(state);
             v.hash(state);
         }
+
+        // Hash opaque_concrete_type
+        self.opaque_concrete_type.hash(state);
     }
 }
 
@@ -99,6 +107,15 @@ pub enum ResolvedTy {
     Function {
         params: Vec<ResolvedTy>,
         ret: Box<ResolvedTy>,
+    },
+    /// Opaque return type from a call to a function with `some P` return.
+    /// Preserved through inference output so MIR lowering can resolve it
+    /// to the concrete type by querying InferBody on the origin.
+    Opaque {
+        origin: Entity,
+        bounds: Vec<(Entity, Vec<ResolvedTy>)>,
+        origin_args: Vec<ResolvedTy>,
+        index: u32,
     },
     Never,
     Error,
@@ -165,6 +182,30 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .collect(),
             ret: Box::new(resolve_to_concrete(ctx, *ret)),
         },
+        TyKind::Opaque {
+            origin,
+            bounds,
+            origin_args,
+            index,
+        } => ResolvedTy::Opaque {
+            origin: *origin,
+            bounds: bounds
+                .iter()
+                .map(|(e, args)| {
+                    (
+                        *e,
+                        args.iter()
+                            .map(|&tv| resolve_to_concrete(ctx, tv))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            origin_args: origin_args
+                .iter()
+                .map(|&tv| resolve_to_concrete(ctx, tv))
+                .collect(),
+            index: *index,
+        },
         TyKind::Never => ResolvedTy::Never,
         TyKind::Error => ResolvedTy::Error,
     }
@@ -211,6 +252,12 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         })
         .collect();
 
+    // If this body has an opaque return type, resolve the concrete TyVar
+    let opaque_concrete_type = ctx
+        .opaque_return
+        .as_ref()
+        .map(|info| resolve_to_concrete(ctx, info.concrete_tv));
+
     TypedBody {
         expr_types,
         local_types,
@@ -219,6 +266,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         type_args,
         errors: ctx.errors.clone(),
         error_details: ctx.error_details.clone(),
+        opaque_concrete_type,
     }
 }
 
@@ -300,6 +348,22 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
         TyKind::Function { params, ret } => {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
             format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
+        },
+        TyKind::Opaque { bounds, .. } => {
+            if bounds.is_empty() {
+                "some ?".into()
+            } else {
+                let bound_names: Vec<String> = bounds
+                    .iter()
+                    .map(|(e, _)| {
+                        ctx.query_ctx
+                            .get::<kestrel_ast_builder::Name>(*e)
+                            .map(|n| n.0.clone())
+                            .unwrap_or_else(|| format!("{:?}", e))
+                    })
+                    .collect();
+                format!("some {}", bound_names.join(" and "))
+            }
         },
         TyKind::Never => "Never".into(),
         TyKind::Error => "Error".into(),

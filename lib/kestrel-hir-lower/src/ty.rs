@@ -137,6 +137,16 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
+        AstType::Some { bounds, span } => {
+            let hir_bounds: Vec<HirTy> = bounds
+                .iter()
+                .map(|b| lower_ast_type(ctx, owner, root, b))
+                .collect();
+            HirTy::Opaque {
+                bounds: hir_bounds,
+                span: span.clone(),
+            }
+        },
     }
 }
 
@@ -375,7 +385,8 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         | HirTy::AssocProjection { span: s, .. }
         | HirTy::Error(s)
         | HirTy::Infer(s)
-        | HirTy::Never(s) => *s = span.clone(),
+        | HirTy::Never(s)
+        | HirTy::Opaque { span: s, .. } => *s = span.clone(),
     }
 }
 
@@ -698,7 +709,8 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Result { span, .. }
         | AstType::Unit(span)
         | AstType::Never(span)
-        | AstType::Inferred(span) => span.clone(),
+        | AstType::Inferred(span)
+        | AstType::Some { span, .. } => span.clone(),
     }
 }
 

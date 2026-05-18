@@ -234,6 +234,35 @@ impl TypeResolver for WorldResolver<'_> {
             }
         }
 
+        // Opaque types: delegate member resolution to the protocol bounds.
+        // Only the protocol interface and protocol extensions are visible;
+        // concrete-type extensions must NOT leak through.
+        if let TyKind::Opaque { bounds, .. } = receiver_ty {
+            let bound_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
+            let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+            match self.select_bound_candidate(&bound_protocols, name, &arg_labels)? {
+                Some(m) => return self.build_member_resolution(m),
+                None => {
+                    // Expand to parent protocols for the full closure
+                    let mut expanded = bound_protocols;
+                    let mut visited = std::collections::HashSet::new();
+                    for p in &expanded {
+                        visited.insert(*p);
+                    }
+                    kestrel_name_res::expand_protocol_closure_in_place(
+                        self.ctx,
+                        self.root,
+                        &mut expanded,
+                        &mut visited,
+                    );
+                    match self.select_bound_candidate(&expanded, name, &arg_labels)? {
+                        Some(m) => return self.build_member_resolution(m),
+                        None => return Err(MemberError::NotFound),
+                    }
+                },
+            }
+        }
+
         let Some(entity) = receiver_ty.entity() else {
             return Err(MemberError::NotFound);
         };
@@ -446,6 +475,21 @@ impl TypeResolver for WorldResolver<'_> {
                 // Conformance bounds on the associated type.
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 bound_protocols.contains(&protocol)
+            },
+            TyKind::Opaque { bounds, .. } => {
+                // Expand all bounds through superprotocol chains
+                let mut all_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
+                let mut visited = std::collections::HashSet::new();
+                for p in &all_protocols {
+                    visited.insert(*p);
+                }
+                kestrel_name_res::expand_protocol_closure_in_place(
+                    self.ctx,
+                    self.root,
+                    &mut all_protocols,
+                    &mut visited,
+                );
+                all_protocols.contains(&protocol)
             },
             _ => false,
         }

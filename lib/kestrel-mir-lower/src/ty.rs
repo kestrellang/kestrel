@@ -33,6 +33,17 @@ pub fn resolve_callable_return_type(ctx: &mut LowerCtx, entity: Entity) -> MirTy
         entity,
         root: ctx.root,
     });
+    // Opaque return types (including nested, e.g. Optional[some Shape]):
+    // resolve to the concrete type from inference
+    if contains_opaque(&hir_ty) {
+        let body = ctx.query.query(kestrel_type_infer::InferBody {
+            entity,
+            root: ctx.root,
+        });
+        if let Some(concrete) = body.as_ref().and_then(|b| b.opaque_concrete_type.as_ref()) {
+            return crate::resolved_ty::lower_resolved_ty(ctx, concrete);
+        }
+    }
     lower_type(ctx, &hir_ty)
 }
 
@@ -106,6 +117,8 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
                 name,
             }
         },
+        // Opaque types should be resolved by inference; treat as Error if they reach MIR
+        HirTy::Opaque { .. } => MirTy::Error,
         HirTy::Never(_) => MirTy::Never,
         HirTy::Infer(_) => MirTy::Error, // shouldn't happen after inference
         HirTy::Error(_) => MirTy::Error,
@@ -201,5 +214,22 @@ fn try_lang_primitive(world: &World, entity: Entity, type_args: &[MirTy]) -> Opt
             }
         },
         _ => None,
+    }
+}
+
+/// Check if a HirTy contains `HirTy::Opaque` at any depth.
+fn contains_opaque(ty: &HirTy) -> bool {
+    match ty {
+        HirTy::Opaque { .. } => true,
+        HirTy::Struct { args, .. }
+        | HirTy::Enum { args, .. }
+        | HirTy::Protocol { args, .. }
+        | HirTy::AliasUse { args, .. } => args.iter().any(contains_opaque),
+        HirTy::Tuple(elems, _) => elems.iter().any(contains_opaque),
+        HirTy::Function { params, ret, .. } => {
+            params.iter().any(contains_opaque) || contains_opaque(ret)
+        },
+        HirTy::AssocProjection { base, .. } => contains_opaque(base),
+        _ => false,
     }
 }

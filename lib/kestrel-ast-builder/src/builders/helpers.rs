@@ -517,6 +517,7 @@ pub fn is_type_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::TyUnit
             | SyntaxKind::TyNever
             | SyntaxKind::TyInferred
+            | SyntaxKind::TySome
     )
 }
 

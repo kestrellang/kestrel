@@ -325,18 +325,113 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
 }
 
 /// Create return type TyVar from the TypeAnnotation component.
+///
+/// When the return annotation is `HirTy::Opaque` (i.e. `some P`), this
+/// implements the **internal view**: a fresh TyVar constrained by `Conforms`
+/// to each bound protocol. The body's return expressions unify with this
+/// TyVar normally. Callers (external view) see `TyKind::Opaque` instead,
+/// constructed in `lower_hir_ty_sub`.
 fn create_return_type(
     ctx: &mut InferCtx<'_>,
     query_ctx: &QueryContext<'_>,
     entity: Entity,
 ) -> ty::TyVar {
-    query_ctx
-        .query(LowerTypeAnnotation {
-            entity,
-            root: ctx.root,
-        })
-        .map(|hir_ty| generate::lower_hir_ty(ctx, &hir_ty))
-        .unwrap_or_else(|| ctx.fresh())
+    let hir_ty = query_ctx.query(LowerTypeAnnotation {
+        entity,
+        root: ctx.root,
+    });
+
+    match hir_ty {
+        Some(ref hir) if contains_hir_opaque(hir) => {
+            create_return_type_with_opaque(ctx, hir)
+        },
+        Some(hir_ty) => generate::lower_hir_ty(ctx, &hir_ty),
+        None => ctx.fresh(),
+    }
+}
+
+/// Check if a HirTy contains `Opaque` at any depth.
+fn contains_hir_opaque(ty: &kestrel_hir::ty::HirTy) -> bool {
+    use kestrel_hir::ty::HirTy;
+    match ty {
+        HirTy::Opaque { .. } => true,
+        HirTy::Struct { args, .. }
+        | HirTy::Enum { args, .. }
+        | HirTy::Protocol { args, .. }
+        | HirTy::AliasUse { args, .. } => args.iter().any(contains_hir_opaque),
+        HirTy::Tuple(elems, _) => elems.iter().any(contains_hir_opaque),
+        HirTy::Function { params, ret, .. } => {
+            params.iter().any(contains_hir_opaque) || contains_hir_opaque(ret)
+        },
+        HirTy::AssocProjection { base, .. } => contains_hir_opaque(base),
+        _ => false,
+    }
+}
+
+/// Lower a return type containing opaque positions. Replaces each `HirTy::Opaque`
+/// with a fresh TyVar + Conforms constraints (internal view), and records
+/// the opaque info for the outermost opaque found.
+fn create_return_type_with_opaque(
+    ctx: &mut InferCtx<'_>,
+    hir_ty: &kestrel_hir::ty::HirTy,
+) -> ty::TyVar {
+    use kestrel_hir::ty::HirTy;
+    match hir_ty {
+        HirTy::Opaque { bounds, span } => {
+            let concrete_ret = ctx.fresh();
+
+            let mut opaque_bounds = Vec::new();
+            for bound in bounds {
+                let bound_tv = generate::lower_hir_ty(ctx, bound);
+                let resolved = ctx.resolve(bound_tv);
+                match &ctx.types[resolved.0 as usize] {
+                    ty::TySlot::Resolved(ty::TyKind::Protocol { entity: proto, args }) => {
+                        opaque_bounds.push((*proto, args.clone()));
+                        ctx.conforms(concrete_ret, *proto, span.clone());
+                    },
+                    _ => {},
+                }
+            }
+
+            ctx.opaque_return = Some(ctx::OpaqueReturnInfo {
+                concrete_tv: concrete_ret,
+                bounds: opaque_bounds,
+                span: span.clone(),
+            });
+
+            concrete_ret
+        },
+        HirTy::Struct { entity, args, .. } => {
+            let arg_tvs: Vec<ty::TyVar> = args
+                .iter()
+                .map(|a| create_return_type_with_opaque(ctx, a))
+                .collect();
+            ctx.struct_ty(*entity, arg_tvs)
+        },
+        HirTy::Enum { entity, args, .. } => {
+            let arg_tvs: Vec<ty::TyVar> = args
+                .iter()
+                .map(|a| create_return_type_with_opaque(ctx, a))
+                .collect();
+            ctx.enum_ty(*entity, arg_tvs)
+        },
+        HirTy::Tuple(elems, _) => {
+            let tvs: Vec<ty::TyVar> = elems
+                .iter()
+                .map(|e| create_return_type_with_opaque(ctx, e))
+                .collect();
+            ctx.tuple(tvs)
+        },
+        HirTy::Function { params, ret, .. } => {
+            let param_tvs: Vec<ty::TyVar> = params
+                .iter()
+                .map(|p| create_return_type_with_opaque(ctx, p))
+                .collect();
+            let ret_tv = create_return_type_with_opaque(ctx, ret);
+            ctx.function(param_tvs, ret_tv)
+        },
+        _ => generate::lower_hir_ty(ctx, hir_ty),
+    }
 }
 
 /// Create Param TyVars for the struct's type parameters in method body setup.

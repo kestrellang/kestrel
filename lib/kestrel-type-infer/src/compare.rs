@@ -107,6 +107,8 @@ fn normalize_hir_type(
                     .collect(),
             }
         },
+        // Opaque types don't have a single entity; treat as Error for now
+        HirTy::Opaque { .. } => ResolvedTy::Error,
         HirTy::AliasUse { entity, args, .. } => {
             if let Some(sub) = state.param_subs.get(entity) {
                 return sub.clone();
@@ -232,6 +234,10 @@ fn contains_error(ty: &ResolvedTy) -> bool {
             params.iter().any(contains_error) || contains_error(ret)
         },
         ResolvedTy::AssocProjection { base, .. } => contains_error(base),
+        ResolvedTy::Opaque { bounds, origin_args, .. } => {
+            bounds.iter().any(|(_, args)| args.iter().any(contains_error))
+                || origin_args.iter().any(contains_error)
+        },
         ResolvedTy::Param { .. } | ResolvedTy::SelfType { .. } | ResolvedTy::Never => false,
     }
 }
