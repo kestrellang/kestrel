@@ -7,7 +7,7 @@ module Test
             // appendFrom(iterable:) with a range
             var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1); arr.append(2);
-            arr.appendFrom(std.core.Range[std.numeric.Int64](3, 6));
+            arr.append(from: std.core.Range[std.numeric.Int64](3, 6));
             if arr.count != 5 { return 1 }
             if arr(0) != 1 { return 2 }
             if arr(1) != 2 { return 3 }
@@ -16,12 +16,12 @@ module Test
             if arr(4) != 5 { return 6 }
 
             // appendFrom with empty range
-            arr.appendFrom(std.core.Range[std.numeric.Int64](0, 0));
+            arr.append(from: std.core.Range[std.numeric.Int64](0, 0));
             if arr.count != 5 { return 7 }
 
             // appendFrom on empty array
             var emptyArr = std.collections.Array[std.numeric.Int64]();
-            emptyArr.appendFrom(std.core.Range[std.numeric.Int64](10, 13));
+            emptyArr.append(from: std.core.Range[std.numeric.Int64](10, 13));
             if emptyArr.count != 3 { return 8 }
             if emptyArr(0) != 10 { return 9 }
             if emptyArr(1) != 11 { return 10 }

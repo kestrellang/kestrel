@@ -119,7 +119,7 @@ public struct ArrayBuilder[T] {
     }
 
     /// Appends every element produced by `iterable`.
-    public mutating func appendFrom[I](iterable: I) where I: Iterable, I.Item = T {
+    public mutating func append[I](from iterable: I) where I: Iterable, I.Item = T {
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
             self.append(item)

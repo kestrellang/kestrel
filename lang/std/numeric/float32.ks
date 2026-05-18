@@ -1217,11 +1217,11 @@ public struct Float32:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendChar('-')
+                result.append(char: '-')
             } else if options.sign == .Always {
-                result.appendChar('+')
+                result.append(char: '+')
             } else if options.sign == .Space {
-                result.appendChar(' ')
+                result.append(char: ' ')
             }
         }
         if trimTrailingZeros {
@@ -1270,7 +1270,7 @@ public struct Float32:
 
         result.append(number);
         if suffixPercent {
-            result.appendChar('%')
+            result.append(char: '%')
         }
 
         _writePadded(into: writer, result, options)

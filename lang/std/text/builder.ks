@@ -18,7 +18,7 @@ import std.text.(Char, encodeUtf8, String, StringSlice, StringStorage, Str, _tex
 /// ```
 /// var b = StringBuilder();
 /// b.append("hello");
-/// b.appendChar(' ');
+/// b.append(char: ' ');
 /// b.append("world");
 /// let s = b.build();   // "hello world", zero-copy
 /// ```
@@ -83,7 +83,7 @@ public struct StringBuilder: Cloneable {
 
     /// Appends the UTF-8 bytes of `other` to this builder. Accepts any
     /// type conforming to `Str` — `String`, `StringSlice`, etc.
-    public mutating func append[S](other: S) where S: Str {
+    public mutating func append(other: some Str) {
         let slice = other.asSlice();
         let otherLen = slice.byteCount;
         if otherLen == 0 { return }
@@ -94,7 +94,7 @@ public struct StringBuilder: Cloneable {
     }
 
     /// Appends a single code point, encoding it as UTF-8.
-    public mutating func appendChar(c: Char) {
+    public mutating func append(char c: Char) {
         let utf8Len = c.utf8Length();
         self.grow(self.len + utf8Len);
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self.ptr.asRaw().raw);
@@ -103,14 +103,14 @@ public struct StringBuilder: Cloneable {
     }
 
     /// Appends a raw byte. Caller must ensure UTF-8 validity.
-    public mutating func appendByte(byte: UInt8) {
+    internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len + 1);
         self.ptr.offset(by: self.len).write(byte);
         self.len = self.len + 1
     }
 
     /// Appends `count` bytes from `ptr`. Caller must ensure UTF-8 validity.
-    public mutating func appendBytes(ptr ptr: Pointer[UInt8], count count: Int64) {
+    internal mutating func appendBytes(ptr ptr: Pointer[UInt8], count count: Int64) {
         if count <= 0 { return }
         self.grow(self.len + count);
         _memcpyBytes(dst: self.ptr.offset(by: self.len), src: ptr, n: count);

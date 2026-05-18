@@ -711,7 +711,7 @@ extend Optional[T]: Formattable where T: Formattable {
             .Some(value) => {
                 writer.append("Some(");
                 value.format(into: writer, options);
-                writer.appendChar(')')
+                writer.append(char: ')')
             },
             .None => writer.append("None")
         }

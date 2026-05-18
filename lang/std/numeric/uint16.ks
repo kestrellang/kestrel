@@ -974,9 +974,9 @@ public struct UInt16:
         var result = String();
 
         if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }
 
         if options.alternate {

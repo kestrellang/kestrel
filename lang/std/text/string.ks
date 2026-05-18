@@ -379,11 +379,11 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
             while i < count {
                 match decodeUtf8(rawPtr, count, at: i) {
                     .Some(decoded) => {
-                        result.appendChar(decoded.char);
+                        result.append(char: decoded.char);
                         i = i + decoded.bytesConsumed
                     },
                     .None => {
-                        result.appendChar(Char(unchecked: UInt32(intLiteral: 0xFFFD)));
+                        result.append(char: Char(unchecked: UInt32(intLiteral: 0xFFFD)));
                         i = i + 1
                     }
                 }
@@ -505,15 +505,17 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// s.append(", world");
     /// s;  // "hello, world"
     /// ```
-    public mutating func append(other: String) {
-        let otherLen = other.len();
+    public mutating func append(other: some Str) {
+        let slice = other.asSlice();
+        let otherLen = slice.byteCount;
         if otherLen == 0 {
             return
         }
         let myLen = self.len();
         self.grow(myLen + otherLen);
         var s = self.storage.write();
-        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: other.ptr(), n: otherLen);
+        let srcPtr = slice._rawPtr().offset(by: slice.start);
+        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
         s.len = s.len + otherLen;
         self.storage.setValue(s)
     }
@@ -527,11 +529,11 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     ///
     /// ```
     /// var s = "h";
-    /// s.appendChar('i');
-    /// s.appendChar('\u{1F600}');
+    /// s.append(char: 'i');
+    /// s.append(char: '\u{1F600}');
     /// s;  // "hi😀"
     /// ```
-    public mutating func appendChar(c: Char) {
+    public mutating func append(char c: Char) {
         let utf8Len = c.utf8Length();
         self.grow(self.len() + utf8Len);
         var s = self.storage.write();
@@ -871,7 +873,7 @@ extend String {
         var b = StringBuilder();
         var iter = chars.iter();
         while let .Some(c) = iter.next() {
-            b.appendChar(c)
+            b.append(char: c)
         }
         self = b.build();
     }

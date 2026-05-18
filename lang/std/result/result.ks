@@ -356,12 +356,12 @@ extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
             .Ok(value) => {
                 writer.append("Ok(");
                 value.format(into: writer, options);
-                writer.appendChar(')')
+                writer.append(char: ')')
             },
             .Err(error) => {
                 writer.append("Err(");
                 error.format(into: writer, options);
-                writer.appendChar(')')
+                writer.append(char: ')')
             }
         }
     }

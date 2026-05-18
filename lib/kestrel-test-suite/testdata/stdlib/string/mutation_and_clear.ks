@@ -6,15 +6,15 @@ module Test
         func main() -> lang.i64 {
             // Test appendChar
             var s = std.text.String();
-            s.appendChar('H');
-            s.appendChar('i');
+            s.append(char: 'H');
+            s.append(char: 'i');
             if s.byteCount != 2 { return 1 }
             if s.isEqual(to: "Hi") == false { return 2 }
 
             // Test appendChar
             var s2 = std.text.String();
-            s2.appendChar('A');
-            s2.appendChar('B');
+            s2.append(char: 'A');
+            s2.append(char: 'B');
             if s2.byteCount != 2 { return 3 }
             if s2.isEqual(to: "AB") == false { return 4 }
 

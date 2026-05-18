@@ -480,7 +480,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// Converts this code point to an owned `String`.
     public func toString() -> String {
         var s = String();
-        s.appendChar(self);
+        s.append(char: self);
         s
     }
 }
@@ -489,7 +489,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 
 extend Char: Formattable {
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
-        writer.appendChar(self)
+        writer.append(char: self)
     }
 }
 
@@ -727,7 +727,7 @@ extend Grapheme: Hashable {
 extend Grapheme: Formattable {
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         for c in self.chars {
-            writer.appendChar(c)
+            writer.append(char: c)
         }
     }
 }

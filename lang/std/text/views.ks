@@ -207,7 +207,7 @@ public struct BytesView: Iterable, Cloneable {
     /// an owned `String` covering the requested byte range. Equivalent
     /// to `self(range).toString()` for both `Range[Int64]` and
     /// `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: BytesSubstringIndex {
+    public func substring(range: some BytesSubstringIndex) -> String {
         range.readBytesSubstring(from: self)
     }
 
@@ -445,7 +445,7 @@ public struct CharsView: Iterable, Cloneable {
     /// an owned `String` covering the requested code-point range.
     /// Equivalent to `self(range).toString()` for both `Range[Int64]`
     /// and `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: CharsSubstringIndex {
+    public func substring(range: some CharsSubstringIndex) -> String {
         range.readCharsSubstring(from: self)
     }
 }
@@ -700,7 +700,7 @@ public struct GraphemesView: Iterable, Cloneable {
     /// produce an owned `String` covering the requested cluster range.
     /// Equivalent to `self(range).toString()` for both `Range[Int64]`
     /// and `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: GraphemesSubstringIndex {
+    public func substring(range: some GraphemesSubstringIndex) -> String {
         range.readGraphemesSubstring(from: self)
     }
 }
@@ -933,7 +933,7 @@ public struct LinesView: Iterable, Cloneable {
     /// original terminators preserved. Equivalent to
     /// `self(range).toString()` for both `Range[Int64]` and
     /// `ClosedRange[Int64]`.
-    public func substring[I](range: I) -> String where I: LinesSubstringIndex {
+    public func substring(range: some LinesSubstringIndex) -> String {
         range.readLinesSubstring(from: self)
     }
 

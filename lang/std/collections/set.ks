@@ -1223,7 +1223,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
     /// "\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
     /// ```
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
-        writer.appendChar('{');
+        writer.append(char: '{');
         var first = true;
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -1233,7 +1233,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
             first = false;
             elem.format(into: writer, options)
         }
-        writer.appendChar('}')
+        writer.append(char: '}')
     }
 }
 

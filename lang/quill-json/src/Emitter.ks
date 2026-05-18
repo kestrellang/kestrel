@@ -208,7 +208,7 @@ func emitString(s: String, mutating buf: String) {
         } else if b < 32 {
             buf.append("\\u00\(b:02x)")
         } else {
-            buf.appendChar(Char(UInt32(from: b)).unwrap())
+            buf.append(char: Char(UInt32(from: b)).unwrap())
         }
         i = i + 1
     }

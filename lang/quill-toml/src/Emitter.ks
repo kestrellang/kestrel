@@ -192,7 +192,7 @@ func emitTomlString(s: String, mutating buf: String) {
         } else if b == 8 {
             buf.append("\\b")
         } else {
-            buf.appendChar(Char(UInt32(from: b)).unwrap())
+            buf.append(char: Char(UInt32(from: b)).unwrap())
         }
         i = i + 1
     }

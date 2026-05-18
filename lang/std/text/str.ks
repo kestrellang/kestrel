@@ -585,7 +585,7 @@ extend Str {
                     if unicode.hasLowercaseExpansion(c) {
                         result.append(unicode.lowercaseExpansion(c))
                     } else {
-                        result.appendChar(unicode.toLowercase(c))
+                        result.append(char: unicode.toLowercase(c))
                     }
                 }
                 return result
@@ -640,7 +640,7 @@ extend Str {
                     if unicode.hasUppercaseExpansion(c) {
                         result.append(unicode.uppercaseExpansion(c))
                     } else {
-                        result.appendChar(unicode.toUppercase(c))
+                        result.append(char: unicode.toUppercase(c))
                     }
                 }
                 return result
@@ -686,20 +686,20 @@ extend Str {
         var atWordStart = true;
         for c in self.chars.iter() {
             if c.isWhitespace {
-                result.appendChar(c);
+                result.append(char: c);
                 atWordStart = true
             } else if atWordStart {
                 if unicode.hasTitlecaseExpansion(c) {
                     result.append(unicode.titlecaseExpansion(c))
                 } else {
-                    result.appendChar(unicode.toTitlecase(c))
+                    result.append(char: unicode.toTitlecase(c))
                 }
                 atWordStart = false
             } else {
                 if unicode.hasLowercaseExpansion(c) {
                     result.append(unicode.lowercaseExpansion(c))
                 } else {
-                    result.appendChar(unicode.toLowercase(c))
+                    result.append(char: unicode.toLowercase(c))
                 }
             }
         }
@@ -802,7 +802,7 @@ extend Str {
     public func caseFolded() -> String {
         var result = String(capacity: self.byteCount);
         for c in self.chars {
-            result.appendChar(unicode.caseFold(c))
+            result.append(char: unicode.caseFold(c))
         }
         result
     }
@@ -926,7 +926,7 @@ extend Str {
         let paddingCount = length - currentLen;
         var result = String(capacity: self.byteCount + paddingCount * char.utf8Length());
         for i in 0..<paddingCount {
-            result.appendChar(char)
+            result.append(char: char)
         }
         let slice = self.asSlice();
         result._appendBytes(slice._rawPtr().offset(by: slice.start), slice.byteCount);
@@ -954,7 +954,7 @@ extend Str {
         let slice = self.asSlice();
         result._appendBytes(slice._rawPtr().offset(by: slice.start), slice.byteCount);
         for i in 0..<paddingCount {
-            result.appendChar(char)
+            result.append(char: char)
         }
         result
     }
