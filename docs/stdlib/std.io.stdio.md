@@ -150,7 +150,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `eprint`
 
 ```kestrel
-public func eprint[F](F) -> Result[(), IoError] where F: Formattable
+public func eprint[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
 ```
 
 Stderr counterpart to `print`. Useful for diagnostics that must not
@@ -161,7 +161,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `eprintln`
 
 ```kestrel
-public func eprintln[F](F) -> Result[(), IoError] where F: Formattable
+public func eprintln[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
 ```
 
 Stderr counterpart to `println`.
@@ -171,7 +171,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `print`
 
 ```kestrel
-public func print[F](F) -> Result[(), IoError] where F: Formattable
+public func print[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
 ```
 
 Formats `value` with its default `FormatOptions` and writes the
@@ -189,7 +189,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `println`
 
 ```kestrel
-public func println[F](F) -> Result[(), IoError] where F: Formattable
+public func println[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
 ```
 
 Like `print`, plus a trailing `\n`.

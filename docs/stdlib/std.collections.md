@@ -157,7 +157,7 @@ Creates an array by collecting every element produced by an iterable.
 Drains `iterable` to completion via `append`, so the resulting
 capacity is whatever the growth policy lands on (not necessarily
 equal to `count`). For a sized source you can shave reallocations
-by following with `shrinkToFit()`. See also `appendFrom(iterable:)`
+by following with `shrinkToFit()`. See also `append(from:)`
 to add elements to an existing array.
 
 ##### Examples
@@ -187,7 +187,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64)
+public init(_arrayLiteralPointer: consuming lang.ptr[T], _arrayLiteralCount: consuming lang.i64)
 ```
 
 Compiler-emitted bridge initializer for `[a, b, c]` array literals.
@@ -266,7 +266,7 @@ Amortized O(1). Triggers a reallocation (and COW if storage is
 shared) when `count == capacity`. For appending many elements,
 `reserveCapacity(...)` first to avoid intermediate growths; for
 adding multiple elements at once see `append(contentsOf:)` or
-`appendFrom(iterable:)`.
+`append(from:)`.
 
 ##### Examples
 
@@ -280,7 +280,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: Array[T])
+public mutating func append[__opaque_0](contentsOf: __opaque_0) where __opaque_0: Slice[T]
 ```
 
 Appends every element of `other` to the end of this array.
@@ -289,7 +289,7 @@ Reserves the exact required capacity in one growth step then
 copies the elements over, so it's faster than calling `append`
 in a loop. Sharing semantics: `other` is read-only here, but if
 `self` shares storage with anything else, COW fires once at the
-start. See also `appendFrom(iterable:)` for arbitrary iterable
+start. See also `append(from:)` for arbitrary iterable
 sources.
 
 ##### Examples
@@ -302,10 +302,10 @@ arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `appendFrom`
+#### function `append`
 
 ```kestrel
-public mutating func appendFrom[I](I) where I: Iterable, I.Item == T
+public mutating func append[I](from: I) where I: Iterable, I.Item == T
 ```
 
 Appends every element produced by an arbitrary iterable.
@@ -318,7 +318,7 @@ rather than to an exact target — for sized sources like another
 
 ```
 var arr = [1, 2];
-arr.appendFrom(3..<6);  // [1, 2, 3, 4, 5]
+arr.append(from: 3..<6);  // [1, 2, 3, 4, 5]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -628,22 +628,22 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `removeAll`
 
 ```kestrel
-public mutating func removeAll(matching: (T) -> Bool)
+public mutating func removeAll(where: (T) -> Bool)
 ```
 
 Removes every element for which `predicate` returns true.
 
-The inverse of `retain(matching:)` — implemented as
+The inverse of `retain(where:)` — implemented as
 `retain` over the negated predicate. O(n), stable.
 
 ##### Examples
 
 ```
 var arr = [1, 2, 3, 4, 5];
-arr.removeAll(matching: { (x) in x % 2 == 0 });  // [1, 3, 5]
+arr.removeAll(where: { (x) in x % 2 == 0 });  // [1, 3, 5]
 
 var names = ["Alice", "", "Bob", ""];
-names.removeAll(matching: { (s) in s.isEmpty });  // ["Alice", "Bob"]
+names.removeAll(where: { (s) in s.isEmpty });  // ["Alice", "Bob"]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -693,7 +693,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `removeSubrange`
 
 ```kestrel
-public mutating func removeSubrange(Range[Int64])
+public mutating func removeSubrange[R](R) where R: SeqRange
 ```
 
 Removes every element in `range`, shifting later elements left.
@@ -721,7 +721,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `replaceSubrange`
 
 ```kestrel
-public mutating func replaceSubrange(Range[Int64], with: Array[T])
+public mutating func replaceSubrange[R](R, with: Array[T]) where R: SeqRange
 ```
 
 Replaces the elements in `range` with the elements of `replacement`.
@@ -777,21 +777,21 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `retain`
 
 ```kestrel
-public mutating func retain(matching: (T) -> Bool)
+public mutating func retain(where: (T) -> Bool)
 ```
 
 Keeps only elements for which `predicate` returns true; removes
 the rest in place.
 
 O(n), single pass, stable (relative order preserved). The mirror
-operation is `removeAll(matching:)`. For a copy instead of an
+operation is `removeAll(where:)`. For a copy instead of an
 in-place edit, use `iter().filter(...).collect()`.
 
 ##### Examples
 
 ```
 var arr = [1, 2, 3, 4, 5];
-arr.retain(matching: { (x) in x % 2 == 0 });  // [2, 4]
+arr.retain(where: { (x) in x % 2 == 0 });  // [2, 4]
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -868,7 +868,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `shuffle`
 
 ```kestrel
-public mutating func shuffle[R](using: R) where R: RandomNumberGenerator
+public mutating func shuffle[__opaque_0](using: __opaque_0) where __opaque_0: RandomNumberGenerator
 ```
 
 Shuffles the array in place using `rng`.
@@ -912,7 +912,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `shuffled`
 
 ```kestrel
-public func shuffled[R](using: R) -> Array[T] where R: RandomNumberGenerator
+public func shuffled[__opaque_0](using: __opaque_0) -> Array[T] where __opaque_0: RandomNumberGenerator
 ```
 
 Returns a new array shuffled with `rng`. The original is unchanged.
@@ -1133,7 +1133,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `Array Literal`
 
 ```kestrel
-init(LiteralSlice[Element])
+init(arrayLiteral: LiteralSlice[Element])
 ```
 
 Builds an instance from a literal slice of elements.
@@ -1166,10 +1166,16 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)
+init(_arrayLiteralPointer: consuming lang.ptr[Element], _arrayLiteralCount: consuming lang.i64)
 ```
 
 Compiler-emitted init taking a raw pointer and count.
+
+Both params are `consuming`: the compiler hands ownership of the
+stack buffer's address (and the count) over to the implementation,
+which stores them in its own storage. This convention is what the
+MIR lowering's structural predicate looks for — implementations
+that deviate will be silently skipped during literal lowering.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -1357,10 +1363,10 @@ Appends every element of `slice`.
 
 _Defined in `lang/std/collections/builder.ks`._
 
-#### function `appendFrom`
+#### function `append`
 
 ```kestrel
-public mutating func appendFrom[I](I) where I: Iterable, I.Item == T
+public mutating func append[I](from: I) where I: Iterable, I.Item == T
 ```
 
 Appends every element produced by `iterable`.
@@ -2615,7 +2621,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-public init(lang.ptr[(K, V)], lang.i64)
+public init(consuming lang.ptr[(K, V)], consuming lang.i64)
 ```
 
 Compiler-emitted bridge for `[k: v, ...]` literals.
@@ -2767,13 +2773,13 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `all`
 
 ```kestrel
-public func all(matching: (K, V) -> Bool) -> Bool
+public func all(where: (K, V) -> Bool) -> Bool
 ```
 
 `true` when every entry satisfies `predicate(key, value)`
 (vacuously true for empty).
 
-Short-circuits on the first failure. Dual of `any(matching:)`.
+Short-circuits on the first failure. Dual of `any(where:)`.
 
 ##### Examples
 
@@ -2809,12 +2815,12 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `any`
 
 ```kestrel
-public func any(matching: (K, V) -> Bool) -> Bool
+public func any(where: (K, V) -> Bool) -> Bool
 ```
 
 `true` when at least one entry satisfies `predicate(key, value)`.
 
-Alias for `contains(matching:)` — the two names exist so
+Alias for `contains(where:)` — the two names exist so
 predicate-style code reads naturally regardless of context.
 Short-circuits on the first match.
 
@@ -2918,7 +2924,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (K, V) -> Bool) -> Bool
+public func contains(where: (K, V) -> Bool) -> Bool
 ```
 
 `true` if any entry satisfies `predicate(key, value)`.
@@ -2980,15 +2986,15 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `countItems`
 
 ```kestrel
-public func countItems(matching: (K, V) -> Bool) -> Int64
+public func countItems(where: (K, V) -> Bool) -> Int64
 ```
 
 Returns the number of entries for which
 `predicate(key, value)` is true.
 
 Linear scan, no short-circuit. For just a presence check use
-`any(matching:)`; for a yes/no on every entry,
-`all(matching:)`.
+`any(where:)`; for a yes/no on every entry,
+`all(where:)`.
 
 ##### Examples
 
@@ -3026,15 +3032,15 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (K, V) -> Bool) -> Dictionary[K, V, H]
+public func filter(where: (K, V) -> Bool) -> Dictionary[K, V, H]
 ```
 
 Returns a new dictionary containing only entries for which
 `predicate(key, value)` is true.
 
-Non-mutating mirror of `retain(matching:)`. Allocates a fresh
+Non-mutating mirror of `retain(where:)`. Allocates a fresh
 dictionary; for in-place filtering use `retain` or
-`removeAll(matching:)`.
+`removeAll(where:)`.
 
 ##### Examples
 
@@ -3048,7 +3054,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `first`
 
 ```kestrel
-public func first(matching: (K, V) -> Bool) -> (K, V)?
+public func first(where: (K, V) -> Bool) -> (K, V)?
 ```
 
 Returns *some* entry matching `predicate(key, value)`, or
@@ -3276,12 +3282,12 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `removeAll`
 
 ```kestrel
-public mutating func removeAll(matching: (K, V) -> Bool)
+public mutating func removeAll(where: (K, V) -> Bool)
 ```
 
 Removes every entry for which `predicate(key, value)` is true.
 
-Inverse of `retain(matching:)`; implemented as `retain` over
+Inverse of `retain(where:)`; implemented as `retain` over
 the negated predicate. Same tombstone caveat applies — consider
 `shrinkToFit()` after large removals.
 
@@ -3321,7 +3327,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `retain`
 
 ```kestrel
-public mutating func retain(matching: (K, V) -> Bool)
+public mutating func retain(where: (K, V) -> Bool)
 ```
 
 Keeps only entries for which `predicate(key, value)` is true.
@@ -3329,7 +3335,7 @@ Keeps only entries for which `predicate(key, value)` is true.
 Two-pass implementation: collects keys to remove, then deletes
 them. Each removal leaves a tombstone — call `shrinkToFit()`
 afterwards if you've removed a large fraction. The mirror is
-`removeAll(matching:)`.
+`removeAll(where:)`.
 
 ##### Examples
 
@@ -3589,10 +3595,16 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-init(lang.ptr[(Key, Value)], lang.i64)
+init(consuming lang.ptr[(Key, Value)], consuming lang.i64)
 ```
 
 Compiler-emitted init taking a raw `(Key, Value)` pointer and count.
+
+Both params are `consuming` for the same reason as the array
+bridge: the compiler hands ownership of the stack buffer to the
+implementation. MIR lowering matches on the unwrapped param
+shape, so an impl that deviates from this convention will be
+skipped during literal lowering.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -3611,7 +3623,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Dictionary Literal`
 
 ```kestrel
-init(LiteralSlice[(Key, Value)])
+init(dictionaryLiteral: LiteralSlice[(Key, Value)])
 ```
 
 Builds an instance from a literal slice of key-value pairs.
@@ -4367,6 +4379,29 @@ public func iter() -> ReversedSliceIterator[T]
 
 _Defined in `lang/std/collections/views.ks`._
 
+## protocol `SeqRange`
+
+```kestrel
+public protocol SeqRange
+```
+
+Resolves any range-like type to a half-open `Range[Int64]` given a
+collection length. Used by `removeSubrange` and `replaceSubrange` so
+they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
+`RangeThrough` through a single generic parameter.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Members
+
+#### function `resolve`
+
+```kestrel
+func resolve(Int64) -> Range[Int64]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ## struct `Set`
 
 ```kestrel
@@ -4521,7 +4556,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### initializer `Literal Bridge`
 
 ```kestrel
-public init(_arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount: lang.i64)
+public init(_arrayLiteralPointer: consuming lang.ptr[T], _arrayLiteralCount: consuming lang.i64)
 ```
 
 Compiler-emitted bridge for `[a, b, c]` literals constructing
@@ -4564,7 +4599,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `all`
 
 ```kestrel
-public func all(matching: (T) -> Bool) -> Bool
+public func all(where: (T) -> Bool) -> Bool
 ```
 
 `true` when every element satisfies `predicate` (vacuously
@@ -4586,7 +4621,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `any`
 
 ```kestrel
-public func any(matching: (T) -> Bool) -> Bool
+public func any(where: (T) -> Bool) -> Bool
 ```
 
 `true` when at least one element satisfies `predicate`.
@@ -4694,7 +4729,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (T) -> Bool) -> Bool
+public func contains(where: (T) -> Bool) -> Bool
 ```
 
 `true` if any element satisfies `predicate`.
@@ -4734,7 +4769,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `countItems`
 
 ```kestrel
-public func countItems(matching: (T) -> Bool) -> Int64
+public func countItems(where: (T) -> Bool) -> Int64
 ```
 
 Returns the number of elements for which `predicate` is true.
@@ -4813,7 +4848,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (T) -> Bool) -> Set[T, H]
+public func filter(where: (T) -> Bool) -> Set[T, H]
 ```
 
 Returns a new set containing only elements for which
@@ -4835,7 +4870,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `first`
 
 ```kestrel
-public func first(matching: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> T?
 ```
 
 Returns *some* element matching `predicate`, or `None`.
@@ -5273,7 +5308,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `removeAll`
 
 ```kestrel
-public mutating func removeAll(matching: (T) -> Bool)
+public mutating func removeAll(where: (T) -> Bool)
 ```
 
 Removes every element for which `predicate` is true.
@@ -5316,7 +5351,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `retain`
 
 ```kestrel
-public mutating func retain(matching: (T) -> Bool)
+public mutating func retain(where: (T) -> Bool)
 ```
 
 Keeps only elements for which `predicate` is true.
@@ -5583,7 +5618,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### initializer `Array Literal`
 
 ```kestrel
-init(LiteralSlice[Element])
+init(arrayLiteral: LiteralSlice[Element])
 ```
 
 Builds an instance from a literal slice of elements.
@@ -5702,7 +5737,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `all`
 
 ```kestrel
-public func all(matching: (T) -> Bool) -> Bool
+public func all(where: (T) -> Bool) -> Bool
 ```
 
 `true` when every element satisfies `predicate`. O(n).
@@ -5713,8 +5748,8 @@ collections.
 ##### Examples
 
 ```
-[2, 4, 6].all(matching: { it % 2 == 0 });  // true
-[2, 3, 6].all(matching: { it % 2 == 0 });  // false
+[2, 4, 6].all(where: { it % 2 == 0 });  // true
+[2, 3, 6].all(where: { it % 2 == 0 });  // false
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -5722,7 +5757,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `any`
 
 ```kestrel
-public func any(matching: (T) -> Bool) -> Bool
+public func any(where: (T) -> Bool) -> Bool
 ```
 
 `true` when at least one element satisfies `predicate`. O(n).
@@ -5733,8 +5768,8 @@ collections.
 ##### Examples
 
 ```
-[1, 2, 3].any(matching: { it > 2 });  // true
-[1, 2, 3].any(matching: { it > 5 });  // false
+[1, 2, 3].any(where: { it > 2 });  // true
+[1, 2, 3].any(where: { it > 5 });  // false
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -5869,7 +5904,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `countItems`
 
 ```kestrel
-public func countItems(matching: (T) -> Bool) -> Int64
+public func countItems(where: (T) -> Bool) -> Int64
 ```
 
 Number of elements for which `predicate` is true. O(n).
@@ -5877,7 +5912,7 @@ Number of elements for which `predicate` is true. O(n).
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].countItems(matching: { it % 2 == 0 });  // 2
+[1, 2, 3, 4, 5].countItems(where: { it % 2 == 0 });  // 2
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -5929,7 +5964,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `ends`
 
 ```kestrel
-public func ends[S](with: S) -> Bool where S: Slice[T]
+public func ends[__opaque_0](with: __opaque_0) -> Bool where __opaque_0: Slice[T]
 ```
 
 `true` if the trailing elements match `suffix`. O(k) where k is
@@ -5956,7 +5991,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (T) -> Bool) -> Array[T]
+public func filter(where: (T) -> Bool) -> Array[T]
 ```
 
 Returns a new array containing every element matching `predicate`.
@@ -5965,7 +6000,7 @@ O(n). Result size is unknown; uses geometric growth.
 ##### Examples
 
 ```
-[1, 2, 3, 4].filter(matching: { it % 2 == 0 });  // [2, 4]
+[1, 2, 3, 4].filter(where: { it % 2 == 0 });  // [2, 4]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -5993,7 +6028,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `first`
 
 ```kestrel
-public func first(matching: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> T?
 ```
 
 First element matching `predicate`, or `None`. O(n).
@@ -6001,7 +6036,7 @@ First element matching `predicate`, or `None`. O(n).
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].first(matching: { it > 3 });  // Some(4)
+[1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6009,7 +6044,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(matching: (T) -> Bool) -> Int64?
+public func firstIndex(where: (T) -> Bool) -> Int64?
 ```
 
 Index of the first element matching `predicate`, or `None`. O(n).
@@ -6020,8 +6055,8 @@ Short-circuits on the first match. For value-based search on
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].firstIndex(matching: { it > 3 });   // Some(3)
-[1, 2, 3].firstIndex(matching: { it > 10 });         // None
+[1, 2, 3, 4, 5].firstIndex(where: { it > 3 });   // Some(3)
+[1, 2, 3].firstIndex(where: { it > 10 });         // None
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6192,7 +6227,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `last`
 
 ```kestrel
-public func last(matching: (T) -> Bool) -> T?
+public func last(where: (T) -> Bool) -> T?
 ```
 
 Last element matching `predicate`, or `None`. O(n).
@@ -6200,7 +6235,7 @@ Last element matching `predicate`, or `None`. O(n).
 ##### Examples
 
 ```
-[1, 2, 3, 2, 1].last(matching: { it > 1 });  // Some(2)
+[1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6208,7 +6243,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `lastIndex`
 
 ```kestrel
-public func lastIndex(matching: (T) -> Bool) -> Int64?
+public func lastIndex(where: (T) -> Bool) -> Int64?
 ```
 
 Index of the last element matching `predicate`, or `None`. O(n).
@@ -6218,7 +6253,7 @@ Scans from the back; short-circuits on the first match.
 ##### Examples
 
 ```
-[1, 2, 3, 2, 1].lastIndex(matching: { it == 2 });  // Some(3)
+[1, 2, 3, 2, 1].lastIndex(where: { it == 2 });  // Some(3)
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6359,7 +6394,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `split`
 
 ```kestrel
-public func split(matching: (T) -> Bool) -> ArraySplitWhereView[T]
+public func split(where: (T) -> Bool) -> ArraySplitWhereView[T]
 ```
 
 Multi-pass lazy view over the segments produced by splitting at
@@ -6368,7 +6403,7 @@ each element matching `predicate`. Matching elements are dropped.
 ##### Examples
 
 ```
-let v = [1, -1, 2, 3, -1, 4].split(matching: { it < 0 });
+let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
 for seg in v { ... }
 ```
 
@@ -6403,7 +6438,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `starts`
 
 ```kestrel
-public func starts[S](with: S) -> Bool where S: Slice[T]
+public func starts[__opaque_0](with: __opaque_0) -> Bool where __opaque_0: Slice[T]
 ```
 
 `true` if the leading elements match `prefix`. O(k) where k is

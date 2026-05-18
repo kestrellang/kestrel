@@ -220,7 +220,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readAll`
 
 ```kestrel
-public func readAll[R](mutating R, into: mutating Array[UInt8]) -> Result[Int64, IoError] where R: Readable
+public func readAll[__opaque_0](mutating __opaque_0, into: mutating Array[UInt8]) -> Result[Int64, IoError] where __opaque_0: Readable
 ```
 
 Drains `reader` into `buf`, appending every byte until EOF. Reads in
@@ -239,7 +239,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readByte`
 
 ```kestrel
-public func readByte[R](mutating R) -> Result[Optional[UInt8], IoError] where R: Readable
+public func readByte[__opaque_0](mutating __opaque_0) -> Result[Optional[UInt8], IoError] where __opaque_0: Readable
 ```
 
 Reads exactly one byte. Returns `.Ok(.None)` on EOF, `.Ok(.Some(b))`
@@ -259,7 +259,7 @@ _Defined in `lang/std/io/read.ks`._
 ## function `readExact`
 
 ```kestrel
-public func readExact[R](mutating R, into: ArraySlice[UInt8]) -> Result[(), IoError] where R: Readable
+public func readExact[__opaque_0](mutating __opaque_0, into: ArraySlice[UInt8]) -> Result[(), IoError] where __opaque_0: Readable
 ```
 
 Reads exactly `buf.count` bytes; treats a short read (EOF reached

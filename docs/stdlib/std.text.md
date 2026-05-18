@@ -505,7 +505,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: BytesSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: BytesSubstringIndex
 ```
 
 Convenience: dispatches to a `BytesSubstringIndex` to produce
@@ -625,24 +625,55 @@ let c: Char = 'a';  // lowers to Char(charLiteral: ...)
 
 _Defined in `lang/std/text/char.ks`._
 
+#### initializer `From Digit`
+
+```kestrel
+public init(fromDigit: UInt32)
+```
+
+Returns the ASCII digit `Char` for a numeric value `0`–`9`, `null` otherwise.
+
+Inverse of `digitValue`. Values outside `0..=9` return `null`.
+
+##### Examples
+
+```
+Char(fromDigit: 7);   // Some('7')
+Char(fromDigit: 12);  // None
+```
+
+_Defined in `lang/std/text/char.ks`._
+
 #### initializer `From Value`
 
 ```kestrel
 public init(UInt32)
 ```
 
-Wraps a raw `UInt32` scalar value as a `Char`.
-
-No range or surrogate validation is performed; pass values you
-already know are valid Unicode scalars. Prefer the literal syntax
-(`'a'`, `'\u{...}'`) when the value is known at compile time.
+Returns a `Char` if the value is a valid Unicode scalar, `null` otherwise.
+Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
 
 ##### Examples
 
 ```
-let c = Char(value: UInt32(intLiteral: 0x41));
-c == 'A';  // true
+let c = Char(65);      // Some('A')
+let bad = Char(0xD800); // None (surrogate)
 ```
+
+_Defined in `lang/std/text/char.ks`._
+
+#### initializer `Unchecked`
+
+```kestrel
+public init(unchecked: UInt32)
+```
+
+Wraps a raw `UInt32` scalar value as a `Char` without validation.
+
+##### Safety
+
+The caller must ensure `value` is a valid Unicode scalar
+(0..=0x10FFFF, excluding surrogates U+D800..U+DFFF).
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -662,25 +693,6 @@ Inverse of `fromDigit`. Non-ASCII digit characters return `None`
 ```
 '7'.digitValue();  // Some(7)
 'a'.digitValue();  // None
-```
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `fromDigit`
-
-```kestrel
-public static func fromDigit(UInt32) -> Char?
-```
-
-Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.
-
-Inverse of `digitValue`. Values outside `0..=9` return `None`.
-
-##### Examples
-
-```
-Char.fromDigit(7);   // Some('7')
-Char.fromDigit(12);  // None
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -1033,17 +1045,6 @@ size buffers before calling `encodeUtf8`.
 '\u{20AC}'.utf8Length();   // 3 (€)
 '\u{1F600}'.utf8Length();  // 4 (😀)
 ```
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `validated`
-
-```kestrel
-public static func validated(UInt32) -> Char?
-```
-
-Returns a `Char` if the value is a valid Unicode scalar, `.None` otherwise.
-Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -1518,7 +1519,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(matching: (Char) -> Bool) -> CharIndex?
+public func firstIndex(where: (Char) -> Bool) -> CharIndex?
 ```
 
 Returns the index of the first code point matching `predicate`, or `.None`.
@@ -1580,7 +1581,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `lastIndex`
 
 ```kestrel
-public func lastIndex(matching: (Char) -> Bool) -> CharIndex?
+public func lastIndex(where: (Char) -> Bool) -> CharIndex?
 ```
 
 Returns the index of the last code point matching `predicate`, or `.None`.
@@ -1620,7 +1621,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: CharsSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: CharsSubstringIndex
 ```
 
 Convenience: dispatches to a `CharsSubstringIndex` to produce
@@ -1759,7 +1760,7 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `With Capacity`
 
 ```kestrel
-init(Int64, Int64)
+init(literalCapacity: Int64, interpolationCount: Int64)
 ```
 
 Constructs an empty accumulator with capacity hints derived from the literal at compile time.
@@ -1773,7 +1774,7 @@ _Defined in `lang/std/text/format.ks`._
 #### function `appendInterpolation`
 
 ```kestrel
-public mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
+public mutating func appendInterpolation[__opaque_0](__opaque_0, FormatOptions) where __opaque_0: Formattable
 ```
 
 Formats one interpolation hole directly into the buffer.
@@ -1844,7 +1845,7 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `String Literal`
 
 ```kestrel
-init(stringLiteral: lang.str)
+init(stringLiteral: lang.ptr[lang.i8], lang.i64)
 ```
 
 Builds an instance from a string literal.
@@ -2739,7 +2740,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(matching: (Grapheme) -> Bool) -> GraphemeIndex?
+public func firstIndex(where: (Grapheme) -> Bool) -> GraphemeIndex?
 ```
 
 Returns the index of the first grapheme matching `predicate`, or `.None`.
@@ -2814,7 +2815,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: GraphemesSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: GraphemesSubstringIndex
 ```
 
 Convenience: dispatches to a `GraphemesSubstringIndex` to
@@ -3017,7 +3018,7 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `With Capacity`
 
 ```kestrel
-init(Int64, Int64)
+init(literalCapacity: Int64, interpolationCount: Int64)
 ```
 
 Constructs an empty accumulator with capacity hints derived from the literal at compile time.
@@ -3031,7 +3032,7 @@ _Defined in `lang/std/text/format.ks`._
 #### function `appendInterpolation`
 
 ```kestrel
-mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
+mutating func appendInterpolation[__opaque_0](__opaque_0, FormatOptions) where __opaque_0: Formattable
 ```
 
 Appends one formatted interpolation hole.
@@ -3396,7 +3397,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: LinesSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: LinesSubstringIndex
 ```
 
 Convenience: dispatches to a `LinesSubstringIndex` to produce
@@ -3915,7 +3916,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: StringSlice, matching: (Char) -> Bool)
+public init(slice: StringSlice, where: (Char) -> Bool)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3993,7 +3994,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: StringSlice, matching: (Char) -> Bool)
+public init(slice: StringSlice, where: (Char) -> Bool)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4141,7 +4142,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (Char) -> Bool) -> Bool
+public func contains(where: (Char) -> Bool) -> Bool
 ```
 
 Returns true if any code point matches `predicate`.
@@ -4149,7 +4150,7 @@ Returns true if any code point matches `predicate`.
 ##### Examples
 
 ```
-"abc123".contains(matching: { (c) in c.isAsciiDigit });  // true
+"abc123".contains(where: { (c) in c.isAsciiDigit });  // true
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4432,7 +4433,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `split`
 
 ```kestrel
-public func split(matching: (Char) -> Bool) -> SplitWhereView
+public func split(where: (Char) -> Bool) -> SplitWhereView
 ```
 
 Returns a lazy view that splits at every code point matching
@@ -4443,7 +4444,7 @@ The matching characters are not included in any segment.
 ##### Examples
 
 ```
-"hello world".split(matching: { (c) in c.isWhitespace }).count;  // 2
+"hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4535,7 +4536,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `trimmed`
 
 ```kestrel
-public func trimmed(matching: (Char) -> Bool) -> StringSlice
+public func trimmed(where: (Char) -> Bool) -> StringSlice
 ```
 
 Returns a zero-copy slice with leading and trailing code points
@@ -4548,7 +4549,7 @@ is the last character that does *not* match.
 ##### Examples
 
 ```
-"00042".trimmed(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
+"00042".trimmed(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4575,7 +4576,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `trimmedEnd`
 
 ```kestrel
-public func trimmedEnd(matching: (Char) -> Bool) -> StringSlice
+public func trimmedEnd(where: (Char) -> Bool) -> StringSlice
 ```
 
 Returns a zero-copy slice with trailing code points matching
@@ -4584,7 +4585,7 @@ Returns a zero-copy slice with trailing code points matching
 ##### Examples
 
 ```
-"abc000".trimmedEnd(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+"abc000".trimmedEnd(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4611,7 +4612,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `trimmedStart`
 
 ```kestrel
-public func trimmedStart(matching: (Char) -> Bool) -> StringSlice
+public func trimmedStart(where: (Char) -> Bool) -> StringSlice
 ```
 
 Returns a zero-copy slice with leading code points matching
@@ -4620,7 +4621,7 @@ Returns a zero-copy slice with leading code points matching
 ##### Examples
 
 ```
-"000abc".trimmedStart(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+"000abc".trimmedStart(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4923,6 +4924,54 @@ and other std.text code that constructs strings from raw storage.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### initializer `From UTF-8`
+
+```kestrel
+public init[S](fromUtf8: S) where S: Slice[UInt8]
+```
+
+Constructs a string from validated UTF-8 bytes, returning `null`
+if the input is not valid UTF-8.
+
+##### Examples
+
+```
+let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
+```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### initializer `From UTF-8 Lossy`
+
+```kestrel
+public init[S](fromUtf8Lossy: S) where S: Slice[UInt8]
+```
+
+Constructs a string from bytes, replacing invalid UTF-8 sequences
+with the Unicode replacement character (U+FFFD).
+
+##### Examples
+
+```
+let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
+```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### initializer `From UTF-8 Unchecked`
+
+```kestrel
+public init[S](fromUtf8Unchecked: S) where S: Slice[UInt8]
+```
+
+Constructs a string by copying bytes without UTF-8 validation.
+
+##### Safety
+
+The caller must ensure the bytes are valid UTF-8.
+
+_Defined in `lang/std/text/string.ks`._
+
 #### initializer `String Literal`
 
 ```kestrel
@@ -4989,7 +5038,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(String)
+public mutating func append[__opaque_0](__opaque_0) where __opaque_0: Str
 ```
 
 Appends `other`'s bytes to this string. COW.
@@ -5007,24 +5056,10 @@ s;  // "hello, world"
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `appendByte`
+#### function `append`
 
 ```kestrel
-internal mutating func appendByte(UInt8)
-```
-
-Appends a raw byte. Internal — caller ensures UTF-8 validity.
-
-Do not use to append ASCII characters: prefer `appendChar(c)` or
-`append(other)`. This exists only for low-level UTF-8 plumbing
-inside the stdlib (e.g. an encoder that already produced bytes).
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `appendChar`
-
-```kestrel
-public mutating func appendChar(Char)
+public mutating func append(char: Char)
 ```
 
 Appends a single code point, encoding it as UTF-8.
@@ -5036,10 +5071,24 @@ writing.
 
 ```
 var s = "h";
-s.appendChar('i');
-s.appendChar('\u{1F600}');
+s.append(char: 'i');
+s.append(char: '\u{1F600}');
 s;  // "hi😀"
 ```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### function `appendByte`
+
+```kestrel
+internal mutating func appendByte(UInt8)
+```
+
+Appends a raw byte. Internal — caller ensures UTF-8 validity.
+
+Do not use to append ASCII characters: prefer `appendChar(c)` or
+`append(other)`. This exists only for low-level UTF-8 plumbing
+inside the stdlib (e.g. an encoder that already produced bytes).
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5109,16 +5158,7 @@ _Defined in `lang/std/text/string.ks`._
 static func fromBytesUnchecked(Pointer[UInt8], Int64) -> String
 ```
 
-Constructs a string by copying `count` bytes starting at `ptr`, without UTF-8 validation.
-
-Internal helper used by split iterators and substring helpers
-that already know the byte range falls on UTF-8 boundaries.
-
-##### Safety
-
-`ptr` must reference at least `count` valid UTF-8 bytes; the
-range starting at `ptr` and ending at `ptr + count` must not
-split a multi-byte sequence.
+Internal helper: copies `count` bytes from `ptr` without validation.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5128,45 +5168,7 @@ _Defined in `lang/std/text/string.ks`._
 static func fromRawBytes(lang.ptr[lang.i8], Int64) -> String
 ```
 
-Constructs a string by copying `count` bytes from a raw `lang.ptr[lang.i8]`.
-
-Internal helper for view-side code that holds raw pointers but
-needs to materialize an owned `String`. No UTF-8 validation.
-
-##### Safety
-
-`rawPtr` must reference at least `count` valid UTF-8 bytes; the
-range must not split a multi-byte sequence.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `fromUtf8`
-
-```kestrel
-public static func fromUtf8(ArraySlice[UInt8]) -> String?
-```
-
-Constructs a string by copying validated UTF-8 bytes from `bytes`,
-returning `.None` if the slice is not valid UTF-8.
-
-Walks the slice end-to-end with `decodeUtf8`; any malformed,
-truncated, or overlong sequence produces `.None`. The empty slice
-is valid and yields the empty string. On success the bytes are
-copied into a fresh heap allocation, so the returned `String`
-owns its storage independently of `bytes`.
-
-##### Errors
-
-Panics with `"String allocation failed"` if the system allocator
-returns null. Returns `.None` only for invalid UTF-8 — the
-allocation case is unrecoverable.
-
-##### Examples
-
-```
-String.fromUtf8("héllo".bytes.asSlice());  // Some("héllo")
-String.fromUtf8(badSlice);                 // None
-```
+Internal helper: copies `count` bytes from a raw `lang.ptr[lang.i8]`.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5296,7 +5298,7 @@ Removes leading and trailing ASCII whitespace in place.
 
 Recognises the same whitespace set as `Char.isWhitespace`:
 space, tab, LF, CR, form feed. For Unicode-aware trimming, use
-the `(matching:)` overloads with a custom predicate. Non-mutating
+the `(where:)` overloads with a custom predicate. Non-mutating
 mirrors live under `trimmed*`.
 
 ##### Examples
@@ -5312,7 +5314,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trim`
 
 ```kestrel
-public mutating func trim(matching: (Char) -> Bool)
+public mutating func trim(where: (Char) -> Bool)
 ```
 
 Removes leading and trailing code points matching `predicate`, in place.
@@ -5340,7 +5342,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimEnd`
 
 ```kestrel
-public mutating func trimEnd(matching: (Char) -> Bool)
+public mutating func trimEnd(where: (Char) -> Bool)
 ```
 
 Removes trailing code points matching `predicate`, in place.
@@ -5360,7 +5362,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimStart`
 
 ```kestrel
-public mutating func trimStart(matching: (Char) -> Bool)
+public mutating func trimStart(where: (Char) -> Bool)
 ```
 
 Removes leading code points matching `predicate`, in place.
@@ -5585,7 +5587,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `String Literal`
 
 ```kestrel
-init(stringLiteral: lang.str)
+init(stringLiteral: lang.ptr[lang.i8], lang.i64)
 ```
 
 Builds an instance from a string literal.
@@ -5648,7 +5650,7 @@ without copying. The builder resets to empty and can be reused.
 ```
 var b = StringBuilder();
 b.append("hello");
-b.appendChar(' ');
+b.append(char: ' ');
 b.append("world");
 let s = b.build();   // "hello world", zero-copy
 ```
@@ -5690,7 +5692,7 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append[S](S) where S: Str
+public mutating func append[__opaque_0](__opaque_0) where __opaque_0: Str
 ```
 
 Appends the UTF-8 bytes of `other` to this builder. Accepts any
@@ -5698,10 +5700,20 @@ type conforming to `Str` — `String`, `StringSlice`, etc.
 
 _Defined in `lang/std/text/builder.ks`._
 
+#### function `append`
+
+```kestrel
+public mutating func append(char: Char)
+```
+
+Appends a single code point, encoding it as UTF-8.
+
+_Defined in `lang/std/text/builder.ks`._
+
 #### function `appendByte`
 
 ```kestrel
-public mutating func appendByte(UInt8)
+internal mutating func appendByte(UInt8)
 ```
 
 Appends a raw byte. Caller must ensure UTF-8 validity.
@@ -5711,20 +5723,10 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `appendBytes`
 
 ```kestrel
-public mutating func appendBytes(ptr: Pointer[UInt8], count: Int64)
+internal mutating func appendBytes(ptr: Pointer[UInt8], count: Int64)
 ```
 
 Appends `count` bytes from `ptr`. Caller must ensure UTF-8 validity.
-
-_Defined in `lang/std/text/builder.ks`._
-
-#### function `appendChar`
-
-```kestrel
-public mutating func appendChar(Char)
-```
-
-Appends a single code point, encoding it as UTF-8.
 
 _Defined in `lang/std/text/builder.ks`._
 

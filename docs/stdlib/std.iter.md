@@ -430,7 +430,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, matching: (I.Item) -> Bool)
+public init(inner: I, where: (I.Item) -> Bool)
 ```
 
 Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
@@ -496,7 +496,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, mapping: (I.Item) -> U?)
+public init(inner: I, as: (I.Item) -> U?)
 ```
 
 Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
@@ -561,7 +561,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, mapping: (I.Item) -> U)
+public init(inner: I, as: (I.Item) -> U)
 ```
 
 Builds a `FlatMapIterator` with no inner iterator buffered.
@@ -1045,7 +1045,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `all`
 
 ```kestrel
-public mutating func all(matching: (Item) -> Bool) -> Bool
+public mutating func all(where: (Item) -> Bool) -> Bool
 ```
 
 True if every element satisfies `predicate`. Stops at the first
@@ -1064,7 +1064,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `any`
 
 ```kestrel
-public mutating func any(matching: (Item) -> Bool) -> Bool
+public mutating func any(where: (Item) -> Bool) -> Bool
 ```
 
 True if any element satisfies `predicate`. Stops at the first
@@ -1210,7 +1210,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(matching: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -1227,7 +1227,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U]((Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -1247,7 +1247,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `first`
 
 ```kestrel
-public mutating func first(matching: (Item) -> Bool) -> Item?
+public mutating func first(where: (Item) -> Bool) -> Item?
 ```
 
 First element matching `predicate`, or `None`. Stops at the first
@@ -1277,7 +1277,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public mutating func firstIndex(matching: (Item) -> Bool) -> Int64?
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
 ```
 
 Index of the first element matching `predicate`, or `None`.
@@ -1285,8 +1285,8 @@ Index of the first element matching `predicate`, or `None`.
 ##### Examples
 
 ```
-["a", "b", "c"].iter().firstIndex(matching: { it == "b" });   // Some(1)
-[1, 2, 3].iter().firstIndex(matching: { it > 10 });           // None
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -1294,7 +1294,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U]((Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -1339,7 +1339,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `fold`
 
 ```kestrel
-public consuming func fold[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> Acc
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
 ```
 
 Left fold — start at `initial` and walk left to right, applying
@@ -1530,7 +1530,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U]((Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -1676,7 +1676,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `reduce`
 
 ```kestrel
-public consuming func reduce(combining: (Item, Item) -> Item) -> Item?
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
 ```
 
 Like `fold`, but seeds the accumulator with the first element
@@ -1696,7 +1696,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, combining: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -1734,7 +1734,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(matching: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -1825,7 +1825,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(matching: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -1844,7 +1844,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryFold`
 
 ```kestrel
-public mutating func tryFold[Acc, E](from: Acc, combining: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
 ```
 
 Fold with early exit on `Err`. The combine returns `Result`; the
@@ -1992,7 +1992,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, mapping: (I.Item) -> U)
+public init(inner: I, as: (I.Item) -> U)
 ```
 
 Builds a `MapIterator` from `inner` and `transform`. Prefer
@@ -2379,7 +2379,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, from: Acc, combining: (Acc, I.Item) -> Acc)
+public init(inner: I, from: Acc, by: (Acc, I.Item) -> Acc)
 ```
 
 Builds a `ScanIterator` seeded with `initial`.
@@ -2519,7 +2519,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, matching: (I.Item) -> Bool)
+public init(inner: I, where: (I.Item) -> Bool)
 ```
 
 Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
@@ -2732,7 +2732,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, matching: (I.Item) -> Bool)
+public init(inner: I, where: (I.Item) -> Bool)
 ```
 
 Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.

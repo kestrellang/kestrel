@@ -19,7 +19,7 @@ codespan-reporting = { workspace = true }
 clap = { workspace = true }
 
 [workspace.package]
-version = "0.15.0"
+version = "0.16.0"
 edition = "2024"
 license = "Apache-2.0"
 

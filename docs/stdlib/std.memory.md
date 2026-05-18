@@ -568,11 +568,13 @@ _Defined in `lang/std/memory/cowbox.ks`._
 #### function `setValue`
 
 ```kestrel
-public func setValue(T)
+public func setValue(consuming T)
 ```
 
 Writes `value` into the storage in place. Only valid after
 a preceding `write()` call (which ensures uniqueness).
+Takes `value` by consuming so the drop pass sees the caller's
+local as moved (Dead) — prevents double-free of shared buffers.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -1417,13 +1419,14 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### function `setValue`
 
 ```kestrel
-public func setValue(T)
+public func setValue(consuming T)
 ```
 
 Overwrites the wrapped value in place. Safe only when this is the
 unique owner (`isUnique() == true`); otherwise other clones see the
 new value, defeating COW. The COW types check `isUnique` before
 calling this and `deepClone` otherwise.
+Takes `value` by consuming — the caller's copy is dead after this.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 

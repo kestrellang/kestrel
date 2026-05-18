@@ -150,6 +150,30 @@ let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a `Float32` from a string. Recognises decimal
+(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
+tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
+(case-insensitive). Returns `null` for any other input.
+
+##### Examples
+
+```
+Float32(parsing: "3.14");      // Some(3.14)
+Float32(parsing: "-2.5e10");   // Some(-2.5e10)
+Float32(parsing: "inf");       // Some(infinity)
+Float32(parsing: "nan");       // Some(nan)
+Float32(parsing: "abc");       // None
+Float32(parsing: "");          // None
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### function `abs`
 
 ```kestrel
@@ -759,30 +783,6 @@ public func nextUp() -> Float32
 
 Next representable value greater than `self`. `+inf` and `nan` are
 fixed points; the largest finite value steps up to `+inf`.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Float32?
-```
-
-Parses a `Float32` from a string. Recognises decimal
-(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
-tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
-(case-insensitive). Returns `None` for any other input.
-
-##### Examples
-
-```
-Float32.parse("3.14");      // Some(3.14)
-Float32.parse("-2.5e10");   // Some(-2.5e10)
-Float32.parse("inf");       // Some(infinity)
-Float32.parse("nan");       // Some(nan)
-Float32.parse("abc");       // None
-Float32.parse("");          // None
-```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -1458,6 +1458,30 @@ let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a `Float64` from a string. Recognises decimal
+(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
+tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
+(case-insensitive). Returns `null` for any other input.
+
+##### Examples
+
+```
+Float64(parsing: "3.14");      // Some(3.14)
+Float64(parsing: "-2.5e10");   // Some(-2.5e10)
+Float64(parsing: "inf");       // Some(infinity)
+Float64(parsing: "nan");       // Some(nan)
+Float64(parsing: "abc");       // None
+Float64(parsing: "");          // None
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### function `abs`
 
 ```kestrel
@@ -2070,30 +2094,6 @@ fixed points; the largest finite value steps up to `+inf`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Float64?
-```
-
-Parses a `Float64` from a string. Recognises decimal
-(`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
-tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
-(case-insensitive). Returns `None` for any other input.
-
-##### Examples
-
-```
-Float64.parse("3.14");      // Some(3.14)
-Float64.parse("-2.5e10");   // Some(-2.5e10)
-Float64.parse("inf");       // Some(infinity)
-Float64.parse("nan");       // Some(nan)
-Float64.parse("abc");       // None
-Float64.parse("");          // None
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### field `pi`
 
 ```kestrel
@@ -2694,6 +2694,39 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int16` from 2 bytes in native byte order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int16` from 2 bytes in big-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int16` from 2 bytes in little-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -2798,6 +2831,45 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int16`.
+
+##### Examples
+
+```
+Int16(parsing: "42");    // Some(42)
+Int16(parsing: "-7");    // Some(-7)
+Int16(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int16(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int16(parsing: "101010", radix: 2);  // Some(42)
+Int16(parsing: "z", radix: 36);      // Some(35)
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
@@ -2921,39 +2993,6 @@ public func divideChecked(Int16) -> Int16?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int16?
-```
-
-Reassembles a `Int16` from 2 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int16?
-```
-
-Reassembles a `Int16` from 2 bytes in big-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int16?
-```
-
-Reassembles a `Int16` from 2 bytes in little-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3130,48 +3169,6 @@ public func negateSaturating() -> Int16
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int16?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int16`.
-
-##### Examples
-
-```
-Int16.parse("42");    // Some(42)
-Int16.parse("-7");    // Some(-7)
-Int16.parse("abc");   // None
-Int16.parse("");      // None
-```
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int16?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int16`.
-
-##### Examples
-
-```
-Int16.parse("ff", 16);     // Some(255 if it fits, else None)
-Int16.parse("101010", 2);  // Some(42)
-Int16.parse("z", 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3547,6 +3544,30 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int16]
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int16]
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int16]
+```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int16]
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
@@ -4002,6 +4023,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int16]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int16]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int16]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -4067,6 +4148,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int32` from 4 bytes in native byte order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int32` from 4 bytes in big-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int32` from 4 bytes in little-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4174,6 +4288,45 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int32`.
+
+##### Examples
+
+```
+Int32(parsing: "42");    // Some(42)
+Int32(parsing: "-7");    // Some(-7)
+Int32(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int32(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int32(parsing: "101010", radix: 2);  // Some(42)
+Int32(parsing: "z", radix: 36);      // Some(35)
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
@@ -4297,39 +4450,6 @@ public func divideChecked(Int32) -> Int32?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int32?
-```
-
-Reassembles a `Int32` from 4 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int32?
-```
-
-Reassembles a `Int32` from 4 bytes in big-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int32?
-```
-
-Reassembles a `Int32` from 4 bytes in little-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4506,48 +4626,6 @@ public func negateSaturating() -> Int32
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int32?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int32`.
-
-##### Examples
-
-```
-Int32.parse("42");    // Some(42)
-Int32.parse("-7");    // Some(-7)
-Int32.parse("abc");   // None
-Int32.parse("");      // None
-```
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int32?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int32`.
-
-##### Examples
-
-```
-Int32.parse("ff", 16);     // Some(255 if it fits, else None)
-Int32.parse("101010", 2);  // Some(42)
-Int32.parse("z", 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4923,6 +5001,30 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int32]
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int32]
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int32]
+```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int32]
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
@@ -5378,6 +5480,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int32]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int32]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int32]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -5443,6 +5605,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int64` from 8 bytes in native byte order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int64` from 8 bytes in big-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int64` from 8 bytes in little-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5550,6 +5745,45 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int64`.
+
+##### Examples
+
+```
+Int64(parsing: "42");    // Some(42)
+Int64(parsing: "-7");    // Some(-7)
+Int64(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int64(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int64(parsing: "101010", radix: 2);  // Some(42)
+Int64(parsing: "z", radix: 36);      // Some(35)
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
@@ -5673,39 +5907,6 @@ public func divideChecked(Int64) -> Int64?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int64?
-```
-
-Reassembles a `Int64` from 8 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int64?
-```
-
-Reassembles a `Int64` from 8 bytes in big-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int64?
-```
-
-Reassembles a `Int64` from 8 bytes in little-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5882,48 +6083,6 @@ public func negateSaturating() -> Int64
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int64?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int64`.
-
-##### Examples
-
-```
-Int64.parse("42");    // Some(42)
-Int64.parse("-7");    // Some(-7)
-Int64.parse("abc");   // None
-Int64.parse("");      // None
-```
-
-_Defined in `lang/std/numeric/int64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int64?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int64`.
-
-##### Examples
-
-```
-Int64.parse("ff", 16);     // Some(255 if it fits, else None)
-Int64.parse("101010", 2);  // Some(42)
-Int64.parse("z", 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6299,6 +6458,30 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int64]
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int64]
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int64]
+```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int64]
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
@@ -6754,6 +6937,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int64]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int64]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int64]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -7108,6 +7351,39 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int8` from 1 bytes in native byte order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int8` from 1 bytes in big-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `Int8` from 1 bytes in little-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -7212,6 +7488,45 @@ You will rarely call this directly — write the literal and let the
 
 ```
 let n: Int64 = 42;            // implicit
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Parsing`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+Returns `null` for an empty string, a non-digit character,
+or a value that does not fit in `Int8`.
+
+##### Examples
+
+```
+Int8(parsing: "42");    // Some(42)
+Int8(parsing: "-7");    // Some(-7)
+Int8(parsing: "abc");   // None
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Parsing with Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+case-insensitive and represent digit values 10-35.
+
+##### Examples
+
+```
+Int8(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+Int8(parsing: "101010", radix: 2);  // Some(42)
+Int8(parsing: "z", radix: 36);      // Some(35)
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
@@ -7335,39 +7650,6 @@ public func divideChecked(Int8) -> Int8?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> Int8?
-```
-
-Reassembles a `Int8` from 1 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> Int8?
-```
-
-Reassembles a `Int8` from 1 bytes in big-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> Int8?
-```
-
-Reassembles a `Int8` from 1 bytes in little-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7544,48 +7826,6 @@ public func negateSaturating() -> Int8
 ```
 
 Negation that returns `maxValue` instead of wrapping `minValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> Int8?
-```
-
-Parses a base-10 integer literal, optionally prefixed with `+` or
-`-`. Returns `None` for an empty string, a non-digit character,
-or a value that does not fit in `Int8`.
-
-##### Examples
-
-```
-Int8.parse("42");    // Some(42)
-Int8.parse("-7");    // Some(-7)
-Int8.parse("abc");   // None
-Int8.parse("");      // None
-```
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> Int8?
-```
-
-Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-case-insensitive and represent digit values 10–35. Returns `None`
-for an out-of-range radix, an empty string, an unrecognised digit,
-or a value that overflows `Int8`.
-
-##### Examples
-
-```
-Int8.parse("ff", 16);     // Some(255 if it fits, else None)
-Int8.parse("101010", 2);  // Some(42)
-Int8.parse("z", 36);      // Some(35)
-```
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7961,6 +8201,30 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ```kestrel
 type Output = ClosedRange[Int8]
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[Int8]
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[Int8]
+```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[Int8]
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
@@ -8416,6 +8680,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[Int8]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[Int8]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[Int8]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -8712,6 +9036,39 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt16` from 2 bytes in native byte order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt16` from 2 bytes in big-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt16` from 2 bytes in little-endian order.
+Returns `null` if the input is not exactly 2 bytes long.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -8820,6 +9177,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt16`.
+
+##### Examples
+
+```
+let n = UInt16(parsing: "42");   // Some(42)
+let bad = UInt16(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt16`.
+
+##### Examples
+
+```
+let n = UInt16(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt16(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -8918,39 +9316,6 @@ public func divideChecked(UInt16) -> UInt16?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt16?
-```
-
-Reassembles a `UInt16` from 2 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt16?
-```
-
-Reassembles a `UInt16` from 2 bytes in big-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt16?
-```
-
-Reassembles a `UInt16` from 2 bytes in little-endian order.
-Returns `None` if the input is not exactly 2 bytes long.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9105,48 +9470,6 @@ public func multiplySaturating(UInt16) -> UInt16
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt16?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt16`.
-
-##### Examples
-
-```
-UInt16.parse("42");   // Some(42)
-UInt16.parse("-1");   // None  (no sign for unsigned)
-UInt16.parse("");     // None
-```
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt16?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt16`.
-
-##### Examples
-
-```
-UInt16.parse("ff", 16);     // Some(255 if it fits, else None)
-UInt16.parse("101010", 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9502,6 +9825,30 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt16]
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt16]
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt16]
+```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt16]
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
@@ -9935,6 +10282,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt16]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt16]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt16]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -10000,6 +10407,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt32` from 4 bytes in native byte order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt32` from 4 bytes in big-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt32` from 4 bytes in little-endian order.
+Returns `null` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10111,6 +10551,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt32`.
+
+##### Examples
+
+```
+let n = UInt32(parsing: "42");   // Some(42)
+let bad = UInt32(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt32`.
+
+##### Examples
+
+```
+let n = UInt32(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt32(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -10209,39 +10690,6 @@ public func divideChecked(UInt32) -> UInt32?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt32?
-```
-
-Reassembles a `UInt32` from 4 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt32?
-```
-
-Reassembles a `UInt32` from 4 bytes in big-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt32?
-```
-
-Reassembles a `UInt32` from 4 bytes in little-endian order.
-Returns `None` if the input is not exactly 4 bytes long.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10396,48 +10844,6 @@ public func multiplySaturating(UInt32) -> UInt32
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt32?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt32`.
-
-##### Examples
-
-```
-UInt32.parse("42");   // Some(42)
-UInt32.parse("-1");   // None  (no sign for unsigned)
-UInt32.parse("");     // None
-```
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt32?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt32`.
-
-##### Examples
-
-```
-UInt32.parse("ff", 16);     // Some(255 if it fits, else None)
-UInt32.parse("101010", 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10793,6 +11199,30 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt32]
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt32]
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt32]
+```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt32]
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
@@ -11226,6 +11656,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt32]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt32]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt32]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -11291,6 +11781,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt64` from 8 bytes in native byte order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt64` from 8 bytes in big-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt64` from 8 bytes in little-endian order.
+Returns `null` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -11402,6 +11925,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt64`.
+
+##### Examples
+
+```
+let n = UInt64(parsing: "42");   // Some(42)
+let bad = UInt64(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt64`.
+
+##### Examples
+
+```
+let n = UInt64(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt64(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -11500,39 +12064,6 @@ public func divideChecked(UInt64) -> UInt64?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt64?
-```
-
-Reassembles a `UInt64` from 8 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt64?
-```
-
-Reassembles a `UInt64` from 8 bytes in big-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt64?
-```
-
-Reassembles a `UInt64` from 8 bytes in little-endian order.
-Returns `None` if the input is not exactly 8 bytes long.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -11687,48 +12218,6 @@ public func multiplySaturating(UInt64) -> UInt64
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt64?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt64`.
-
-##### Examples
-
-```
-UInt64.parse("42");   // Some(42)
-UInt64.parse("-1");   // None  (no sign for unsigned)
-UInt64.parse("");     // None
-```
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt64?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt64`.
-
-##### Examples
-
-```
-UInt64.parse("ff", 16);     // Some(255 if it fits, else None)
-UInt64.parse("101010", 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12084,6 +12573,30 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt64]
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt64]
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt64]
+```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt64]
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
@@ -12517,6 +13030,66 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt64]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt64]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt64]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 ### Implements `Convertible`
 
 #### initializer `From Source`
@@ -12582,6 +13155,39 @@ Creates the zero value, satisfying `Defaultable`.
 ```
 let n = Int64();   // 0
 ```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `From Bytes`
+
+```kestrel
+public init[S](fromBytes: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt8` from 1 bytes in native byte order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `From Bytes Big Endian`
+
+```kestrel
+public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt8` from 1 bytes in big-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `From Bytes Little Endian`
+
+```kestrel
+public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+```
+
+Reassembles a `UInt8` from 1 bytes in little-endian order.
+Returns `null` if the input is not exactly 1 bytes long.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -12693,6 +13299,47 @@ let n: Int64 = 42;            // implicit
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### initializer `Parse`
+
+```kestrel
+public init(parsing: String)
+```
+
+Parses a base-10 unsigned integer literal, optionally prefixed
+with `+`. A leading `-` is rejected. Returns `null` for an empty
+string, a non-digit character, or a value that does not fit in
+`UInt8`.
+
+##### Examples
+
+```
+let n = UInt8(parsing: "42");   // Some(42)
+let bad = UInt8(parsing: "-1"); // null (no sign for unsigned)
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Parse Radix`
+
+```kestrel
+public init(parsing: String, radix: Int64)
+```
+
+Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+a-z are case-insensitive and represent digit values 10-35. A
+leading `+` is allowed but a leading `-` is rejected. Returns
+`null` for an out-of-range radix, an empty string, an
+unrecognised digit, or a value that overflows `UInt8`.
+
+##### Examples
+
+```
+let n = UInt8(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+let m = UInt8(parsing: "101010", radix: 2);   // Some(42)
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -12791,39 +13438,6 @@ public func divideChecked(UInt8) -> UInt8?
 ```
 
 Division that returns `None` for divide-by-zero.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `fromBytes`
-
-```kestrel
-public static func fromBytes(std.collections.Array[UInt8]) -> UInt8?
-```
-
-Reassembles a `UInt8` from 1 bytes in native (host) byte
-order. Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `fromBytesBigEndian`
-
-```kestrel
-public static func fromBytesBigEndian(std.collections.Array[UInt8]) -> UInt8?
-```
-
-Reassembles a `UInt8` from 1 bytes in big-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `fromBytesLittleEndian`
-
-```kestrel
-public static func fromBytesLittleEndian(std.collections.Array[UInt8]) -> UInt8?
-```
-
-Reassembles a `UInt8` from 1 bytes in little-endian order.
-Returns `None` if the input is not exactly 1 bytes long.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -12978,48 +13592,6 @@ public func multiplySaturating(UInt8) -> UInt8
 ```
 
 Multiplication that clamps to `maxValue` on overflow.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String) -> UInt8?
-```
-
-Parses a base-10 unsigned integer literal, optionally prefixed
-with `+`. A leading `-` is rejected. Returns `None` for an empty
-string, a non-digit character, or a value that does not fit in
-`UInt8`.
-
-##### Examples
-
-```
-UInt8.parse("42");   // Some(42)
-UInt8.parse("-1");   // None  (no sign for unsigned)
-UInt8.parse("");     // None
-```
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `parse`
-
-```kestrel
-public static func parse(String, Int64) -> UInt8?
-```
-
-Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-a–z are case-insensitive and represent digit values 10–35. A
-leading `+` is allowed but a leading `-` is rejected. Returns
-`None` for an out-of-range radix, an empty string, an
-unrecognised digit, or a value that overflows `UInt8`.
-
-##### Examples
-
-```
-UInt8.parse("ff", 16);     // Some(255 if it fits, else None)
-UInt8.parse("101010", 2);  // Some(42)
-```
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13375,6 +13947,30 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ```kestrel
 type Output = ClosedRange[UInt8]
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeFrom[UInt8]
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeUpTo[UInt8]
+```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = RangeThrough[UInt8]
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
@@ -13805,6 +14401,66 @@ public func inclusiveRange(to: UInt8) -> ClosedRange[UInt8]
 ```
 
 Builds a closed range `self..=end`. Sugar for the `..=` operator.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+### Implements `RangeFromConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeFrom`
+
+```kestrel
+public func rangeFrom() -> RangeFrom[UInt8]
+```
+
+Builds a partial range `self..` (from self, no upper bound).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+### Implements `RangeUpToConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeUpTo`
+
+```kestrel
+public func rangeUpTo() -> RangeUpTo[UInt8]
+```
+
+Builds a partial range `..<self` (up to self, exclusive).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+### Implements `RangeThroughConstructible`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/range.ks`._
+
+#### function `rangeThrough`
+
+```kestrel
+public func rangeThrough() -> RangeThrough[UInt8]
+```
+
+Builds a partial range `..=self` (through self, inclusive).
 
 _Defined in `lang/std/numeric/uint8.ks`._
 

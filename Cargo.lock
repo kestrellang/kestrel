@@ -756,7 +756,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "kestrel"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "clap",
  "codespan-reporting",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-analyze"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -794,14 +794,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-ast"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-span",
 ]
 
 [[package]]
 name = "kestrel-ast-builder"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-codegen"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "kestrel-debug",
@@ -825,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-codegen-cranelift"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-compiler"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-compiler-driver"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
@@ -885,11 +885,11 @@ dependencies = [
 
 [[package]]
 name = "kestrel-debug"
-version = "0.15.0"
+version = "0.16.0"
 
 [[package]]
 name = "kestrel-doc"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "clap",
  "kestrel-ast-builder",
@@ -902,11 +902,11 @@ dependencies = [
 
 [[package]]
 name = "kestrel-hecs"
-version = "0.15.0"
+version = "0.16.0"
 
 [[package]]
 name = "kestrel-hir"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-hir-lower"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-lexer"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-span",
  "logos",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-lsp"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-mir"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "indexmap",
  "kestrel-hecs",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-mir-lower"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-name-res"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-ownership"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-hecs",
  "kestrel-mir",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-parser"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "chumsky",
  "kestrel-lexer",
@@ -1032,7 +1032,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-pattern-matching"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -1045,14 +1045,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-reporting"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
 name = "kestrel-semantics"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -1065,14 +1065,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-span"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
 name = "kestrel-syntax-tree"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "kestrel-lexer",
  "kestrel-span",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-test-suite"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-type-infer"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-ast",
