@@ -152,6 +152,12 @@ fn check_ast_type(
             check_ast_type(cx, ok, context, diags);
             check_ast_type(cx, err, context, diags);
         },
+        // Opaque types — recurse into protocol bounds
+        AstType::Some { bounds, .. } => {
+            for b in bounds {
+                check_ast_type(cx, b, context, diags);
+            }
+        },
         // Unit, Never, Inferred — no type references to check
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }

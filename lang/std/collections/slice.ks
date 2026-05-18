@@ -1164,7 +1164,7 @@ extend Slice[T] where T: Equatable {
     /// [1, 2, 3].starts(with: [2, 3]);     // false
     /// [1, 2, 3].starts(with: []);          // true (vacuous)
     /// ```
-    public func starts[S](with prefix: S) -> Bool where S: Slice[T] {
+    public func starts(with prefix: some Slice[T]) -> Bool {
         let a = self.asSlice();
         let b = prefix.asSlice();
         if b.count > a.count {
@@ -1188,7 +1188,7 @@ extend Slice[T] where T: Equatable {
     /// [1, 2, 3].ends(with: [1, 2]);  // false
     /// [1, 2, 3].ends(with: []);       // true (vacuous)
     /// ```
-    public func ends[S](with suffix: S) -> Bool where S: Slice[T] {
+    public func ends(with suffix: some Slice[T]) -> Bool {
         let a = self.asSlice();
         let b = suffix.asSlice();
         if b.count > a.count {
@@ -1414,7 +1414,7 @@ extend Slice[T] where T: Formattable {
     /// [].format();          // "[]"
     /// ```
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
-        writer.appendChar('[');
+        writer.append(char: '[');
         let s = self.asSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
@@ -1423,6 +1423,6 @@ extend Slice[T] where T: Formattable {
             }
             myPtr.offset(by: i).read().format(into: writer, options)
         }
-        writer.appendChar(']')
+        writer.append(char: ']')
     }
 }

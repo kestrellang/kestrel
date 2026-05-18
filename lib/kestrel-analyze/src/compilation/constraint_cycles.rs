@@ -225,6 +225,11 @@ fn collect_param_refs(
             collect_param_refs(cx, ok, context, param_set, out);
             collect_param_refs(cx, err, context, param_set, out);
         },
+        AstType::Some { bounds, .. } => {
+            for b in bounds {
+                collect_param_refs(cx, b, context, param_set, out);
+            }
+        },
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }
 }

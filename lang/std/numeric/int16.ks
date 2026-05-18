@@ -1050,11 +1050,11 @@ public struct Int16:
         var result = String();
 
         if isNegative {
-            result.appendChar('-')
+            result.append(char: '-')
         } else if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }
 
         if options.alternate {

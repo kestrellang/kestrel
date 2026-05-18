@@ -294,15 +294,15 @@ func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError
 
             let esc = bytes(unchecked: i);
             if esc == 34 {
-                result.appendChar('"')
+                result.append(char: '"')
             } else if esc == 92 {
-                result.appendChar('\\')
+                result.append(char: '\\')
             } else if esc == 110 {
-                result.appendChar('\n')
+                result.append(char: '\n')
             } else if esc == 116 {
-                result.appendChar('\t')
+                result.append(char: '\t')
             } else if esc == 114 {
-                result.appendChar('\r')
+                result.append(char: '\r')
             } else {
                 return .Err(TomlParseError("invalid escape sequence", lineNum))
             }
@@ -542,7 +542,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
     var iter = s.chars.iter();
     while let .Some(c) = iter.next() {
         if c != '_' {
-            cleaned.appendChar(c)
+            cleaned.append(char: c)
         }
     }
 

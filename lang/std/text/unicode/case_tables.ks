@@ -317,9 +317,9 @@ public func uppercaseExpansion(c: Char) -> String {
         let entry = UPPER_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(unchecked: UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(unchecked: UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(unchecked: UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1
@@ -350,9 +350,9 @@ public func lowercaseExpansion(c: Char) -> String {
         let entry = LOWER_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(unchecked: UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(unchecked: UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(unchecked: UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1
@@ -381,9 +381,9 @@ public func titlecaseExpansion(c: Char) -> String {
         let entry = TITLE_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(unchecked: UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(unchecked: UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(unchecked: UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1

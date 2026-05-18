@@ -411,12 +411,12 @@ public func _writePadded(mutating into writer: StringBuilder, content: String, o
             }
 
             while padLeft > 0 {
-                writer.appendChar(options.fill);
+                writer.append(char: options.fill);
                 padLeft = padLeft - 1
             }
             writer.append(content);
             while padRight > 0 {
-                writer.appendChar(options.fill);
+                writer.append(char: options.fill);
                 padRight = padRight - 1
             }
             return
@@ -459,7 +459,7 @@ public protocol Interpolatable {
     /// Receives the runtime `value`, the parsed `options` from the
     /// trailing spec (or defaults if no spec was given), and a generic
     /// constraint that the value is `Formattable`.
-    mutating func appendInterpolation[T](value: T, options: FormatOptions) where T: Formattable
+    mutating func appendInterpolation(value: some Formattable, options: FormatOptions)
 }
 
 /// Marker protocol for types constructible from a completed string interpolation.
@@ -539,7 +539,7 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
 
     /// Formats one interpolation hole directly into the buffer.
     @builtin(.DefaultStringInterpolationAppendInterpolation)
-    public mutating func appendInterpolation[T](value: T, options: FormatOptions = FormatOptions.default()) where T: Formattable {
+    public mutating func appendInterpolation(value: some Formattable, options: FormatOptions = FormatOptions.default()) {
         value.format(into: self.builder, options);
     }
 

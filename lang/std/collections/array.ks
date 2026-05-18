@@ -422,7 +422,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// Drains `iterable` to completion via `append`, so the resulting
     /// capacity is whatever the growth policy lands on (not necessarily
     /// equal to `count`). For a sized source you can shave reallocations
-    /// by following with `shrinkToFit()`. See also `appendFrom(iterable:)`
+    /// by following with `shrinkToFit()`. See also `append(from:)`
     /// to add elements to an existing array.
     ///
     /// # Examples
@@ -558,7 +558,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// shared) when `count == capacity`. For appending many elements,
     /// `reserveCapacity(...)` first to avoid intermediate growths; for
     /// adding multiple elements at once see `append(contentsOf:)` or
-    /// `appendFrom(iterable:)`.
+    /// `append(from:)`.
     ///
     /// # Examples
     ///
@@ -582,7 +582,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// copies the elements over, so it's faster than calling `append`
     /// in a loop. Sharing semantics: `other` is read-only here, but if
     /// `self` shares storage with anything else, COW fires once at the
-    /// start. See also `appendFrom(iterable:)` for arbitrary iterable
+    /// start. See also `append(from:)` for arbitrary iterable
     /// sources.
     ///
     /// # Examples
@@ -592,8 +592,9 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: Array[T]) {
-        let otherLen = other.count;
+    public mutating func append(contentsOf other: some Slice[T]) {
+        let sl = other.asSlice();
+        let otherLen = sl.count;
         if otherLen == 0 {
             return
         }
@@ -601,7 +602,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         self.makeUnique();
         self.grow(myLen + otherLen);
         var s = self.storage.read();
-        let otherPtr = other.asPointer();
+        let otherPtr = sl.asPointer();
         for i in 0..<otherLen {
             s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
             s.len = s.len + 1
@@ -619,9 +620,9 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     ///
     /// ```
     /// var arr = [1, 2];
-    /// arr.appendFrom(3..<6);  // [1, 2, 3, 4, 5]
+    /// arr.append(from: 3..<6);  // [1, 2, 3, 4, 5]
     /// ```
-    public mutating func appendFrom[I](iterable: I) where I: Iterable, I.Item = T {
+    public mutating func append[I](from iterable: I) where I: Iterable, I.Item = T {
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
             self.append(item)
@@ -1070,7 +1071,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// var rng = Lcg64(seed: 42);
     /// arr.shuffle(using: rng);  // deterministic for the seed
     /// ```
-    public mutating func shuffle[R](using rng: R) where R: RandomNumberGenerator {
+    public mutating func shuffle(using rng: some RandomNumberGenerator) {
         let n = self.len();
         if n <= 1 {
             return
@@ -1126,7 +1127,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// let result = arr.shuffled(using: rng);
     /// // arr is still [1, 2, 3, 4, 5]
     /// ```
-    public func shuffled[R](using rng: R) -> Array[T] where R: RandomNumberGenerator {
+    public func shuffled(using rng: some RandomNumberGenerator) -> Array[T] {
         var result = self.clone();
         result.shuffle(using: rng);
         result

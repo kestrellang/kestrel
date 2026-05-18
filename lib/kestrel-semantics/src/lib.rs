@@ -487,7 +487,7 @@ pub fn hir_type_copy_semantics(
         HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. } => {
             query_nominal_semantics(ctx, *entity, root)
         },
-        HirTy::Protocol { .. } => CopySemantics::Copyable,
+        HirTy::Protocol { .. } | HirTy::Opaque { .. } => CopySemantics::Copyable,
         HirTy::Tuple(elems, _) => {
             let mut saw_cloneable = false;
             for elem in elems {
@@ -556,6 +556,10 @@ pub fn hir_type_conforms_to_protocol(
             protocol,
             root,
         }),
+        // Opaque types conform if any of their bounds conform
+        HirTy::Opaque { bounds, .. } => bounds
+            .iter()
+            .any(|b| hir_type_conforms_to_protocol(ctx, b, protocol, context, root)),
         HirTy::Param(entity, _) => {
             let Some(parent) = ctx.parent_of(*entity) else {
                 return false;
@@ -781,7 +785,8 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Result { span, .. }
         | AstType::Unit(span)
         | AstType::Never(span)
-        | AstType::Inferred(span) => span.clone(),
+        | AstType::Inferred(span)
+        | AstType::Some { span, .. } => span.clone(),
     }
 }
 
@@ -801,5 +806,6 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
+        AstType::Some { .. } => "some".into(),
     }
 }

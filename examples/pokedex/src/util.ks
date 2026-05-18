@@ -15,7 +15,7 @@ public func capitalize(s: String) -> String {
     // If first byte is lowercase ASCII a-z, uppercase it
     if first >= 97 and first <= 122 {
         var out = String();
-        out.appendChar(Char(UInt32(from: first - 32)).unwrap());
+        out.append(char: Char(UInt32(from: first - 32)).unwrap());
         out.append(s.asSlice().subslice(from: 1, to: len).toOwned());
         return out
     };

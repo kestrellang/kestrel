@@ -188,7 +188,7 @@ public func percentEncode(s: String) -> String {
         let b = Int64(from: s.bytes(unchecked: i));
         if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57)
             or b == 45 or b == 95 or b == 46 or b == 126 {
-            out.appendChar(Char(UInt32(from: b)).unwrap())
+            out.append(char: Char(UInt32(from: b)).unwrap())
         } else if b == 32 {
             out.append("+")
         } else {

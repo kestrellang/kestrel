@@ -51,4 +51,9 @@ pub enum AstType {
     Never(Span),
     /// Inferred type `_`
     Inferred(Span),
+    /// Opaque type, e.g. `some P`, `some P and Q`
+    Some {
+        bounds: Vec<AstType>,
+        span: Span,
+    },
 }

@@ -39,7 +39,7 @@ func escapeHtml(s: String) -> String {
             '>' => out.append("&gt;"),
             '"' => out.append("&quot;"),
             '\'' => out.append("&#39;"),
-            _ => out.appendChar(c),
+            _ => out.append(char: c),
         }
     }
     out
@@ -200,12 +200,12 @@ public struct Template: Cloneable {
             next = iter.next();
 
             if c != '{' and c != '}' {
-                out.appendChar(c);
+                out.append(char: c);
                 continue
             }
 
             if c == '}' {
-                out.appendChar('}');
+                out.append(char: '}');
                 if let .Some('}') = next {
                     next = iter.next()
                 }
@@ -214,7 +214,7 @@ public struct Template: Cloneable {
 
             // c == '{'
             if let .Some('{') = next {
-                out.appendChar('{');
+                out.append(char: '{');
                 next = iter.next();
                 continue
             }
@@ -225,13 +225,13 @@ public struct Template: Cloneable {
             if let .Some('}') = next {
                 closed = true
             } else if let .Some(n) = next {
-                key.appendChar(n);
+                key.append(char: n);
                 while let .Some(k) = iter.next() {
                     if k == '}' {
                         closed = true;
                         break
                     }
-                    key.appendChar(k)
+                    key.append(char: k)
                 }
             }
 
@@ -240,7 +240,7 @@ public struct Template: Cloneable {
                     out.append(val)
                 }
             } else {
-                out.appendChar('{');
+                out.append(char: '{');
                 out.append(key)
             }
             next = iter.next()

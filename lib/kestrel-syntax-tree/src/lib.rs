@@ -116,6 +116,7 @@ pub enum SyntaxKind {
     TyResult,     // T throws E - result type
     TyList,
     TyInferred, // _ - inferred type placeholder
+    TySome,     // some P - opaque type
 
     // Path nodes (shared between types and other constructs)
     Path,
@@ -534,6 +535,7 @@ impl Language for KestrelLanguage {
         const TY_RESULT: u16 = SyntaxKind::TyResult as u16;
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
         const TY_INFERRED: u16 = SyntaxKind::TyInferred as u16;
+        const TY_SOME: u16 = SyntaxKind::TySome as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
         const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
         const CODE_BLOCK: u16 = SyntaxKind::CodeBlock as u16;
@@ -792,6 +794,7 @@ impl Language for KestrelLanguage {
             TY_RESULT => SyntaxKind::TyResult,
             TY_LIST => SyntaxKind::TyList,
             TY_INFERRED => SyntaxKind::TyInferred,
+            TY_SOME => SyntaxKind::TySome,
             TY_OPTIONAL => SyntaxKind::TyOptional,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,

@@ -142,6 +142,18 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
         SyntaxKind::TyUnit => Some(AstType::Unit(span)),
         SyntaxKind::TyNever => Some(AstType::Never(span)),
         SyntaxKind::TyInferred => Some(AstType::Inferred(span)),
+        SyntaxKind::TySome => {
+            let bounds: Vec<AstType> = node
+                .children()
+                .filter(|c| is_type_node(c.kind()))
+                .filter_map(|c| ast_type_from_cst(&c, file_id))
+                .collect();
+            if bounds.is_empty() {
+                None
+            } else {
+                Some(AstType::Some { bounds, span })
+            }
+        },
 
         // For wrapper nodes like Ty, recurse into the child
         SyntaxKind::Ty => node
@@ -168,6 +180,7 @@ pub(crate) fn is_type_node(kind: SyntaxKind) -> bool {
             | SyntaxKind::TyUnit
             | SyntaxKind::TyNever
             | SyntaxKind::TyInferred
+            | SyntaxKind::TySome
     )
 }
 

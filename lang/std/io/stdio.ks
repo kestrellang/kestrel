@@ -140,13 +140,13 @@ public func stderr() -> Stderr {
 /// try print("count: ");
 /// try println(42);
 /// ```
-public func print[F](value: F) -> Result[(), IoError] where F: Formattable {
+public func print(value: some Formattable) -> Result[(), IoError] {
     var out = stdout();
     writeString(out, value.formatted())
 }
 
 /// Like `print`, plus a trailing `\n`.
-public func println[F](value: F) -> Result[(), IoError] where F: Formattable {
+public func println(value: some Formattable) -> Result[(), IoError] {
     var out = stdout();
     writeLine(out, value.formatted())
 }
@@ -159,13 +159,13 @@ public func printlnEmpty() -> Result[(), IoError] {
 
 /// Stderr counterpart to `print`. Useful for diagnostics that must not
 /// pollute a piped stdout.
-public func eprint[F](value: F) -> Result[(), IoError] where F: Formattable {
+public func eprint(value: some Formattable) -> Result[(), IoError] {
     var err = stderr();
     writeString(err, value.formatted())
 }
 
 /// Stderr counterpart to `println`.
-public func eprintln[F](value: F) -> Result[(), IoError] where F: Formattable {
+public func eprintln(value: some Formattable) -> Result[(), IoError] {
     var err = stderr();
     writeLine(err, value.formatted())
 }

@@ -33,7 +33,81 @@ pub fn resolve_callable_return_type(ctx: &mut LowerCtx, entity: Entity) -> MirTy
         entity,
         root: ctx.root,
     });
+    // Opaque return types: resolve the opaque positions to their concrete types
+    // from inference, keeping structural wrappers intact (e.g. Optional[some Shape]
+    // becomes Optional[Circle], not just Circle).
+    if contains_opaque(&hir_ty) {
+        let body = ctx.query.query(kestrel_type_infer::InferBody {
+            entity,
+            root: ctx.root,
+        });
+        if let Some(concrete) = body.as_ref().and_then(|b| b.opaque_concrete_type.as_ref()) {
+            return lower_type_replacing_opaque(ctx, &hir_ty, concrete);
+        }
+    }
     lower_type(ctx, &hir_ty)
+}
+
+/// Walk HirTy, replacing `HirTy::Opaque` nodes with the concrete type from
+/// inference while preserving structural wrappers (Optional, tuples, etc.).
+fn lower_type_replacing_opaque(
+    ctx: &mut LowerCtx,
+    ty: &HirTy,
+    concrete: &kestrel_type_infer::result::ResolvedTy,
+) -> MirTy {
+    match ty {
+        HirTy::Opaque { .. } => crate::resolved_ty::lower_resolved_ty(ctx, concrete),
+        HirTy::Struct { entity, args, .. }
+        | HirTy::Enum { entity, args, .. }
+        | HirTy::Protocol { entity, args, .. } => {
+            let type_args: Vec<MirTy> = args
+                .iter()
+                .map(|a| {
+                    if contains_opaque(a) {
+                        lower_type_replacing_opaque(ctx, a, concrete)
+                    } else {
+                        lower_type(ctx, a)
+                    }
+                })
+                .collect();
+            crate::ty::lower_named_type_from_entity(ctx, *entity, &type_args)
+        },
+        HirTy::Tuple(elems, _) => {
+            let lowered: Vec<MirTy> = elems
+                .iter()
+                .map(|e| {
+                    if contains_opaque(e) {
+                        lower_type_replacing_opaque(ctx, e, concrete)
+                    } else {
+                        lower_type(ctx, e)
+                    }
+                })
+                .collect();
+            MirTy::Tuple(lowered)
+        },
+        HirTy::Function { params, ret, .. } => {
+            let lowered_params: Vec<MirTy> = params
+                .iter()
+                .map(|p| {
+                    if contains_opaque(p) {
+                        lower_type_replacing_opaque(ctx, p, concrete)
+                    } else {
+                        lower_type(ctx, p)
+                    }
+                })
+                .collect();
+            let lowered_ret = if contains_opaque(ret) {
+                lower_type_replacing_opaque(ctx, ret, concrete)
+            } else {
+                lower_type(ctx, ret)
+            };
+            MirTy::FuncThick {
+                params: lowered_params,
+                ret: Box::new(lowered_ret),
+            }
+        },
+        _ => lower_type(ctx, ty),
+    }
 }
 
 /// Resolve a Callable entity's parameter types via the query system.
@@ -106,6 +180,8 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> MirTy {
                 name,
             }
         },
+        // Opaque types should be resolved by inference; treat as Error if they reach MIR
+        HirTy::Opaque { .. } => MirTy::Error,
         HirTy::Never(_) => MirTy::Never,
         HirTy::Infer(_) => MirTy::Error, // shouldn't happen after inference
         HirTy::Error(_) => MirTy::Error,
@@ -201,5 +277,22 @@ fn try_lang_primitive(world: &World, entity: Entity, type_args: &[MirTy]) -> Opt
             }
         },
         _ => None,
+    }
+}
+
+/// Check if a HirTy contains `HirTy::Opaque` at any depth.
+fn contains_opaque(ty: &HirTy) -> bool {
+    match ty {
+        HirTy::Opaque { .. } => true,
+        HirTy::Struct { args, .. }
+        | HirTy::Enum { args, .. }
+        | HirTy::Protocol { args, .. }
+        | HirTy::AliasUse { args, .. } => args.iter().any(contains_opaque),
+        HirTy::Tuple(elems, _) => elems.iter().any(contains_opaque),
+        HirTy::Function { params, ret, .. } => {
+            params.iter().any(contains_opaque) || contains_opaque(ret)
+        },
+        HirTy::AssocProjection { base, .. } => contains_opaque(base),
+        _ => false,
     }
 }

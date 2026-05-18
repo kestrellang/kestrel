@@ -1779,7 +1779,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
     /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
     /// ```
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
-        writer.appendChar('{');
+        writer.append(char: '{');
         var first = true;
         let myCap = self.capacity;
         let myBuckets = self.getBuckets();
@@ -1800,7 +1800,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
                 _ => {}
             }
         }
-        writer.appendChar('}')
+        writer.append(char: '}')
     }
 }
 

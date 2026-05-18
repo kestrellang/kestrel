@@ -221,6 +221,9 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         InferError::PrimitiveMethodNotCalled { method, .. } => {
             (detail.to_string(), format!("add () to call '{}'", method))
         },
+        InferError::CircularOpaqueReturn { .. } => {
+            ("circular opaque return type".into(), "concrete type cannot be determined".into())
+        },
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }
