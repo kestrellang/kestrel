@@ -14,6 +14,7 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-14
@@ -102,6 +103,7 @@ jobs:
 
   release:
     needs: [build]
+    if: always() && contains(needs.build.result, 'success')
     runs-on: ubuntu-latest
 
     steps:
