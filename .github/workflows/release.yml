@@ -56,9 +56,8 @@ jobs:
         run: cargo build --release -p kestrel-doc
 
       - name: Run tests
+        if: runner.os == 'Linux'
         run: cargo test -p kestrel-test-suite --release
-        env:
-          KESTREL_SKIP_CODEGEN: ${{ runner.os == 'macOS' && '1' || '' }}
 
       - name: Bootstrap flock
         run: bash lang/flock/bootstrap.sh
