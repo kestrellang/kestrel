@@ -185,6 +185,65 @@ pub(super) fn member_access_parser<'tokens>()
         .boxed()
 }
 
+/// Parser for `.identifier` / `.identifier[T]` / `.0` / `.init` that crosses
+/// newline boundaries. Identical to [`member_access_parser`] but uses
+/// `skip_trivia()` before the dot so `.method(...)` on a continuation line is
+/// consumed as postfix on the preceding expression.
+pub(super) fn member_access_continuation_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, PostfixOp, ParserExtra<'tokens>> + Clone {
+    let member_token = select! {
+        Token::Identifier = e => (Token::Identifier, to_kestrel_span(e.span())),
+        Token::Integer = e => (Token::Integer, to_kestrel_span(e.span())),
+        Token::Init = e => (Token::Init, to_kestrel_span(e.span())),
+    }
+    .map(Some)
+    .or(empty().to(None));
+
+    skip_trivia()
+        .ignore_then(just(Token::Dot).map_with(|_, e| to_kestrel_span(e.span())))
+        .then(skip_trivia().ignore_then(member_token))
+        .then(full_type_args_parser().or_not())
+        .validate(|((dot, member), type_args), e, emitter| {
+            if member.is_none() {
+                emitter.emit(Rich::custom(e.span(), "expected identifier after `.`"));
+            }
+            ((dot, member), type_args)
+        })
+        .map(|((dot, member), type_args)| match member {
+            Some((Token::Integer, span)) => PostfixOp::TupleIndex { dot, index: span },
+            Some((_, span)) => PostfixOp::MemberAccess {
+                dot,
+                member: Some(span),
+                type_args,
+            },
+            None => PostfixOp::MemberAccess {
+                dot,
+                member: None,
+                type_args,
+            },
+        })
+        .boxed()
+}
+
+/// A single continuation step: newline-crossing member access followed by
+/// zero or more tight (same-line) postfix ops. Used to parse multi-line
+/// method chains like `Command("life")\n    .about("desc")`.
+pub(super) fn continuation_postfix_op_parser<'tokens, P>(
+    expr: P,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Vec<PostfixOp>, ParserExtra<'tokens>> + Clone
+where
+    P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
+{
+    member_access_continuation_parser()
+        .then(postfix_op_parser(expr).repeated().collect::<Vec<_>>())
+        .map(|(first, rest)| {
+            let mut ops = vec![first];
+            ops.extend(rest);
+            ops
+        })
+        .boxed()
+}
+
 /// Parser for the postfix `!` unwrap operator.
 pub(super) fn postfix_bang_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, PostfixOp, ParserExtra<'tokens>> + Clone {

@@ -133,6 +133,200 @@ public struct Argument: Cloneable {
         self.defaultValue = .None;
     }
 
+    /// @name Flag
+    /// Creates a boolean flag argument.
+    ///
+    /// The long flag is set to `name`, so `Argument(flag: "verbose")`
+    /// responds to `--verbose`. Flags are always optional.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument(flag: "verbose");
+    /// arg.isFlag;  // true
+    /// ```
+    public init(flag name: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Flag;
+        self.longFlag = .Some(name);
+        self.shortFlag = .None;
+        self.helpText = .None;
+        self.valueName = .None;
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
+    /// @name Flag with Description
+    /// Creates a boolean flag with help text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument(flag: "verbose", about: "Enable verbose output");
+    /// arg.isFlag;    // true
+    /// arg.helpText;  // .Some("Enable verbose output")
+    /// ```
+    public init(flag name: String, about about: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Flag;
+        self.longFlag = .Some(name);
+        self.shortFlag = .None;
+        self.helpText = .Some(about);
+        self.valueName = .None;
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
+    /// @name Flag with Short Alias and Description
+    /// Creates a boolean flag with a short alias and help text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument(flag: "verbose", short: "v", about: "Enable verbose output");
+    /// arg.isFlag;      // true
+    /// arg.shortFlag;   // .Some("v")
+    /// ```
+    public init(flag name: String, short short: String, about about: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Flag;
+        self.longFlag = .Some(name);
+        self.shortFlag = .Some(short);
+        self.helpText = .Some(about);
+        self.valueName = .None;
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
+    /// @name Positional
+    /// Creates a required positional argument.
+    ///
+    /// Positionals are matched by order, not by flag prefix. Unlike
+    /// options, they default to required.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument(positional: "file");
+    /// arg.isPositional;  // true
+    /// arg.isRequired;    // true
+    /// ```
+    public init(positional name: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Positional;
+        self.longFlag = .None;
+        self.shortFlag = .None;
+        self.helpText = .None;
+        self.valueName = .None;
+        self.isRequired = true;
+        self.defaultValue = .None;
+    }
+
+    /// @name Positional with Description
+    /// Creates a required positional argument with help text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument(positional: "file", about: "Input file");
+    /// arg.isPositional;  // true
+    /// arg.isRequired;    // true
+    /// ```
+    public init(positional name: String, about about: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Positional;
+        self.longFlag = .None;
+        self.shortFlag = .None;
+        self.helpText = .Some(about);
+        self.valueName = .None;
+        self.isRequired = true;
+        self.defaultValue = .None;
+    }
+
+    /// @name Option with Description
+    /// Creates an option argument with help text.
+    ///
+    /// The long flag is set to `name` automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument("target", about: "Target triple");
+    /// arg.isOption;   // true
+    /// arg.helpText;   // .Some("Target triple")
+    /// ```
+    public init(name: String, about about: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Option;
+        self.longFlag = .Some(name);
+        self.shortFlag = .None;
+        self.helpText = .Some(about);
+        self.valueName = .None;
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
+    /// @name Option with Short Alias and Description
+    /// Creates an option with a short alias and help text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument("output", short: "o", about: "Output path");
+    /// arg.shortFlag;  // .Some("o")
+    /// ```
+    public init(name: String, short short: String, about about: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Option;
+        self.longFlag = .Some(name);
+        self.shortFlag = .Some(short);
+        self.helpText = .Some(about);
+        self.valueName = .None;
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
+    /// @name Option with Description and Placeholder
+    /// Creates an option with help text and a placeholder name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument("target", about: "Target triple", placeholder: "TRIPLE");
+    /// arg.valueName;  // .Some("TRIPLE")
+    /// ```
+    public init(name: String, about about: String, placeholder placeholder: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Option;
+        self.longFlag = .Some(name);
+        self.shortFlag = .None;
+        self.helpText = .Some(about);
+        self.valueName = .Some(placeholder);
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
+    /// @name Option with Short Alias, Description, and Placeholder
+    /// Creates a fully specified option argument.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument("output", short: "o", about: "Output path", placeholder: "FILE");
+    /// arg.shortFlag;  // .Some("o")
+    /// arg.valueName;  // .Some("FILE")
+    /// ```
+    public init(name: String, short short: String, about about: String, placeholder placeholder: String) {
+        self.name = name;
+        self.kind = ArgumentKind.Option;
+        self.longFlag = .Some(name);
+        self.shortFlag = .Some(short);
+        self.helpText = .Some(about);
+        self.valueName = .Some(placeholder);
+        self.isRequired = false;
+        self.defaultValue = .None;
+    }
+
     /// Creates a deep copy of every field.
     public func clone() -> Argument {
         var a = Argument(self.name.clone());
@@ -230,6 +424,39 @@ public struct Argument: Cloneable {
     public func required() -> Argument {
         var copy = self.clone();
         copy.isRequired = true;
+        copy
+    }
+
+    /// Returns a copy marked as optional (not required).
+    ///
+    /// Useful for overriding the default-required behavior of
+    /// positionals created with `init(positional:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument(positional: "version").optional();
+    /// arg.isRequired;  // false
+    /// ```
+    public func optional() -> Argument {
+        var copy = self.clone();
+        copy.isRequired = false;
+        copy
+    }
+
+    /// Returns a copy marked as optional with a default value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arg = Argument("jobs", about: "Parallel jobs").optional(defaultsTo: "4");
+    /// arg.isRequired;    // false
+    /// arg.defaultValue;  // .Some("4")
+    /// ```
+    public func optional(defaultsTo value: String) -> Argument {
+        var copy = self.clone();
+        copy.isRequired = false;
+        copy.defaultValue = .Some(value);
         copy
     }
 

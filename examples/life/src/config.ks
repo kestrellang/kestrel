@@ -66,14 +66,12 @@ func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
 }
 
 func buildCommand() -> Command {
-    var cmd = Command("life");
-    cmd = cmd.about("Conway's Game of Life — an SDL example");
-    cmd = cmd.argument(Argument("width").short("W").help("Board width (5..2000)").defaultsTo("80"));
-    cmd = cmd.argument(Argument("height").short("H").help("Board height (5..2000)").defaultsTo("60"));
-    cmd = cmd.argument(Argument("cell-size").short("c").help("Cell size in pixels (1..40, auto if omitted)"));
-    cmd = cmd.argument(Argument("headless").toFlag().help("Run headless benchmark (no window)"));
-    cmd = cmd.argument(Argument("iters").short("n").help("Number of generations for headless mode").defaultsTo("1000"));
-    cmd
+    Command("life", about: "Conway's Game of Life — an SDL example")
+        .with(argument: Argument("width", short: "W", about: "Board width (5..2000)").optional(defaultsTo: "80"))
+        .with(argument: Argument("height", short: "H", about: "Board height (5..2000)").optional(defaultsTo: "60"))
+        .argument("cell-size", short: "c", about: "Cell size in pixels (1..40, auto if omitted)")
+        .argument(flag: "headless", about: "Run headless benchmark (no window)")
+        .with(argument: Argument("iters", short: "n", about: "Number of generations for headless mode").optional(defaultsTo: "1000"))
 }
 
 func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default fallback: Int64) -> Int64 {
