@@ -103,7 +103,7 @@ jobs:
 
   release:
     needs: [build]
-    if: always() && contains(needs.build.result, 'success')
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
 
     steps:
