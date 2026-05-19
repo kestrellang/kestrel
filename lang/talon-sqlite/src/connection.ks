@@ -10,6 +10,7 @@ import talon.sqlite.error.(SqliteError)
 import talon.sqlite.value.(SqliteValue)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(Row, FromRow)
+import std.core.Copyable
 
 // SQLITE_TRANSIENT tells sqlite3 to copy bound string data immediately
 func SQLITE_TRANSIENT() -> RawPointer {
@@ -159,26 +160,24 @@ func readRow(stmt: RawPointer) -> Row {
     Row(columns: columns)
 }
 
-// Opens a sqlite3 database and returns the raw handle.
-// Separated from Connection to avoid try-from-Result with a deinit type.
-func openRawDb(path: String) -> RawPointer throws SqliteError {
-    var dbRaw = RawPointer.nullPointer();
-    let cpath = path.toCString();
-    let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
-    cpath.free();
-
-    if result != ffi.SQLITE_OK() {
-        if not dbRaw.isNull {
-            let _ = ffi.sqlite3_close(dbRaw);
-        }
-        throw SqliteError.Error("failed to open database: " + path);
-    }
-    .Ok(dbRaw)
-}
-
 /// Internal connection wrapping a sqlite3 handle.
-struct Connection {
+struct Connection: not Copyable {
     var db: RawPointer
+
+    static func open(path: String) -> Result[Connection, SqliteError] {
+        var dbRaw = RawPointer.nullPointer();
+        let cpath = path.toCString();
+        let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
+        cpath.free();
+
+        if result != ffi.SQLITE_OK() {
+            if not dbRaw.isNull {
+                let _ = ffi.sqlite3_close(dbRaw);
+            }
+            return .Err(SqliteError.Error("failed to open database: " + path));
+        }
+        .Ok(Connection(db: dbRaw))
+    }
 
     func execute(sql: SQL) -> () throws SqliteError {
         executeOnDb(self.db, sql)

@@ -12,7 +12,7 @@
 
 module talon.sqlite.database
 
-import talon.sqlite.connection.(Connection, execRawOnDb, openRawDb)
+import talon.sqlite.connection.(Connection, execRawOnDb)
 import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(FromRow)
@@ -31,8 +31,7 @@ public struct Database: SqliteExecutor {
     /// Use `":memory:"` for a transient in-memory database.
     public init(path: String) throws SqliteError {
         self.conn = Connection(db: RawPointer.nullPointer());
-        // openRawDb returns RawPointer (no deinit), safe to extract via try
-        self.conn = Connection(db: try openRawDb(path));
+        self.conn = try Connection.open(path);
     }
 
     public func execute(sql: SQL) -> () throws SqliteError {
