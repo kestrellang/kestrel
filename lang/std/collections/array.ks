@@ -566,7 +566,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// var arr = [1, 2];
     /// arr.append(3);  // [1, 2, 3]
     /// ```
-    public mutating func append(element: T) {
+    public mutating func append(consuming element: T) {
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + 1);

@@ -189,7 +189,7 @@ public struct Pointer[T]: Equatable, Hashable {
 
     /// Writes `value` through the pointer. Same safety preconditions as
     /// `pointee.set`.
-    public func write(value: T) {
+    public func write(consuming value: T) {
         lang.ptr_write(self._raw, value)
     }
 
