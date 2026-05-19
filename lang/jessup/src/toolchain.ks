@@ -10,7 +10,7 @@ module jessup.toolchain
 import jessup.error.(JessupError)
 import jessup.config.(jessupHome, binDir, toolchainsDir, ensureDirectories, readConfig, writeConfig, JessupConfig)
 import jessup.platform.(Platform, detectPlatform)
-import jessup.github.(Release, fetchRelease, fetchJessupRelease)
+import jessup.github.(Release, fetchRelease, fetchJessupRelease, fetchVsixRelease)
 
 // ============================================================================
 // INSTALL
@@ -169,6 +169,9 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     installedMsg.append("Installed ");
     installedMsg.append(toolchainName);
     let _ = println(installedMsg);
+
+    // Install the VS Code / Cursor extension if an editor is available.
+    installEditorExtension(channel: channel, platform: platform);
 
     .Ok(toolchainName)
 }
@@ -613,6 +616,73 @@ public func selfUpdate() -> Result[(), JessupError] {
     let _ = println("jessup has been updated");
 
     .Ok(())
+}
+
+// ============================================================================
+// EDITOR EXTENSION
+// ============================================================================
+
+/// Attempts to install the Kestrel VS Code extension (.vsix) into any
+/// detected editor (VS Code, Cursor, or codium). Silently skips if no
+/// supported editor CLI is found or the VSIX isn't available.
+public func installEditorExtension(channel channel: String, platform platform: Platform) {
+    // Detect which editor CLIs are available.
+    var editors = Array[String]();
+    if spawn("which code > /dev/null 2>&1") == 0 {
+        editors.append("code")
+    }
+    if spawn("which cursor > /dev/null 2>&1") == 0 {
+        editors.append("cursor")
+    }
+    if spawn("which codium > /dev/null 2>&1") == 0 {
+        editors.append("codium")
+    }
+    if editors.count == 0 {
+        return
+    }
+
+    // Fetch the VSIX download URL from the same release.
+    var vsixUrl = "";
+    match fetchVsixRelease(channel: channel, platform: platform) {
+        .Err(_) => return,
+        .Ok(url) => vsixUrl = url
+    }
+
+    // Download the VSIX to a temp file.
+    let tmpVsix = "/tmp/jessup-kestrel-extension.vsix";
+    var dlCmd = String();
+    dlCmd.append("curl -sL -o ");
+    dlCmd.append(tmpVsix);
+    dlCmd.append(" ");
+    dlCmd.append(vsixUrl);
+    if spawn(dlCmd) != 0 {
+        return
+    }
+
+    // Install into each detected editor.
+    var i: Int64 = 0;
+    while i < editors.count {
+        let editor = editors(unchecked: i);
+        var installMsg = String();
+        installMsg.append("Installing Kestrel extension for ");
+        installMsg.append(editor);
+        installMsg.append("...");
+        let _ = println(installMsg);
+
+        var installCmd = String();
+        installCmd.append(editor);
+        installCmd.append(" --install-extension ");
+        installCmd.append(tmpVsix);
+        installCmd.append(" --force 2>/dev/null");
+        let _ = spawn(installCmd);
+        i = i + 1
+    }
+
+    // Clean up.
+    var rmVsix = String();
+    rmVsix.append("rm -f ");
+    rmVsix.append(tmpVsix);
+    let _ = spawn(rmVsix);
 }
 
 // ============================================================================

@@ -185,7 +185,34 @@ pub fn local_references(
     sites
 }
 
-fn entity_file(world: &World, entity: Entity) -> Option<Entity> {
+/// For `MemberAccess` and `Pattern` spans, find the trailing identifier
+/// substring and return its sub-span. For `Direct`, the span is already the
+/// identifier.
+pub fn clip_to_identifier(source: &str, span: &Span, kind: RefKind) -> Span {
+    if matches!(kind, RefKind::Direct) {
+        return span.clone();
+    }
+    let text = match source.get(span.start..span.end) {
+        Some(t) => t,
+        None => return span.clone(),
+    };
+    let trailing_start_in_text = text
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_ident_char(*c))
+        .last()
+        .map(|(i, _)| i);
+    match trailing_start_in_text {
+        Some(start) => Span::new(span.file_id, span.start + start..span.end),
+        None => span.clone(),
+    }
+}
+
+pub fn is_ident_char(c: char) -> bool {
+    c == '_' || c.is_alphanumeric()
+}
+
+pub fn entity_file(world: &World, entity: Entity) -> Option<Entity> {
     if let Some(fid) = world.get::<FileId>(entity) {
         return Some(fid.0);
     }

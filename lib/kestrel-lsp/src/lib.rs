@@ -236,6 +236,9 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: Default::default(),
                 }),
+                document_highlight_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -281,6 +284,13 @@ impl LanguageServer for Backend {
         Ok(handlers::references::handle(self.state.clone(), params).await)
     }
 
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        Ok(handlers::document_highlight::handle(self.state.clone(), params).await)
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -313,6 +323,55 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         Ok(handlers::inlay_hints::handle(self.state.clone(), params).await)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        Ok(handlers::workspace_symbols::handle(self.state.clone(), params).await)
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        Ok(handlers::call_hierarchy::prepare(self.state.clone(), params).await)
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        Ok(handlers::call_hierarchy::incoming(self.state.clone(), params).await)
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        Ok(handlers::call_hierarchy::outgoing(self.state.clone(), params).await)
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        Ok(handlers::type_hierarchy::prepare(self.state.clone(), params).await)
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        Ok(handlers::type_hierarchy::supertypes(self.state.clone(), params).await)
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        Ok(handlers::type_hierarchy::subtypes(self.state.clone(), params).await)
     }
 
     async fn initialized(&self, _: InitializedParams) {

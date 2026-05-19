@@ -246,6 +246,77 @@ func findJessupAsset(json json: Value, platform platform: Platform) -> Result[St
     .Err(JessupError.NotFound("no jessup binary found for platform " + target))
 }
 
+func vsixRepoApi() -> String {
+    "https://api.github.com/repos/kestrellang/kestrel-vscode/releases"
+}
+
+/// Fetches the VS Code extension (.vsix) URL for the given platform from the latest release.
+public func fetchVsixRelease(channel channel: String, platform platform: Platform) -> Result[String, JessupError] {
+    var client = Swoop();
+    client = client.header("Accept", "application/vnd.github+json");
+    client = client.header("User-Agent", "jessup/0.1.0");
+
+    // The VSIX is published on the kestrel-vscode repo.
+    var url = vsixRepoApi() + "/latest";
+
+    match client.fetch(url) {
+        .Err(_) => .Err(JessupError.NetworkError("failed to fetch release for extension")),
+        .Ok(resp) => {
+            if not resp.status.isSuccess() {
+                return .Err(JessupError.NotFound("no release found"))
+            };
+            match resp.json() {
+                .Err(_) => .Err(JessupError.ParseError("invalid JSON in release response")),
+                .Ok(json) => findVsixAsset(json: json, platform: platform)
+            }
+        }
+    }
+}
+
+/// Finds the .vsix asset in a release for the given platform.
+func findVsixAsset(json json: Value, platform platform: Platform) -> Result[String, JessupError] {
+    let target = platform.assetTarget();
+
+    match json.value(forKey: "assets") {
+        .None => return .Err(JessupError.ParseError("missing assets in release")),
+        .Some(assetsVal) => {
+            match assetsVal.asArray() {
+                .None => return .Err(JessupError.ParseError("assets is not an array")),
+                .Some(assets) => {
+                    var i: Int64 = 0;
+                    while i < assets.count {
+                        let asset = assets(unchecked: i);
+                        match asset.value(forKey: "name") {
+                            .Some(nameVal) => {
+                                match nameVal.asString() {
+                                    .Some(name) => {
+                                        if stringContains(haystack: name, needle: ".vsix") and stringContains(haystack: name, needle: target) {
+                                            match asset.value(forKey: "browser_download_url") {
+                                                .Some(urlVal) => {
+                                                    match urlVal.asString() {
+                                                        .Some(assetUrl) => return .Ok(assetUrl),
+                                                        .None => {}
+                                                    }
+                                                },
+                                                .None => {}
+                                            }
+                                        }
+                                    },
+                                    .None => {}
+                                }
+                            },
+                            .None => {}
+                        }
+                        i = i + 1
+                    }
+                }
+            }
+        }
+    }
+
+    .Err(JessupError.NotFound("no .vsix extension found for platform " + target))
+}
+
 /// Parses an array of releases and extracts tag names.
 func parseReleaseTags(json json: Value) -> Result[Array[String], JessupError] {
     match json.asArray() {

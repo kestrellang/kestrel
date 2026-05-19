@@ -361,7 +361,7 @@ fn render_signature(
     }
     .unwrap_or_else(|| "_".to_string());
 
-    let file_path = entity_file_path(world, entity);
+    let file_path = crate::semantic::entity_file_path(world, entity);
     let source = file_path
         .as_ref()
         .and_then(|p| sources.get(p).map(|s| s.as_str()));
@@ -469,14 +469,6 @@ fn ast_type_span(ty: &AstType) -> Span {
     }
 }
 
-fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
-    use kestrel_ast_builder::{FileId, FilePath};
-    if let Some(p) = world.get::<FilePath>(entity) {
-        return Some(p.0.clone());
-    }
-    let fid = world.get::<FileId>(entity)?;
-    world.get::<FilePath>(fid.0).map(|p| p.0.clone())
-}
 
 #[cfg(test)]
 mod tests {

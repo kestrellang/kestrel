@@ -343,3 +343,113 @@ fn goto_definition_responds() {
     assert!(resp.get("result").is_some());
     c.shutdown();
 }
+
+#[test]
+fn document_highlight_returns_highlights() {
+    let mut c = LspClient::spawn();
+    c.initialize();
+    let uri = "file:///tmp/test_hl.ks";
+    c.open(
+        uri,
+        "module Hl\nfunc target() -> lang.i64 { 1 }\nfunc caller() -> lang.i64 { target() }",
+    );
+    let _ = c.flush_notifications();
+
+    let resp = c.request("textDocument/documentHighlight", json!({
+        "textDocument": {"uri": uri},
+        "position": {"line": 1, "character": 5}
+    }));
+    let result = resp.pointer("/result").and_then(|v| v.as_array());
+    assert!(result.is_some(), "expected highlights array");
+    assert!(
+        result.unwrap().len() >= 2,
+        "expected >=2 highlights (decl + call), got {}",
+        result.unwrap().len()
+    );
+    c.shutdown();
+}
+
+#[test]
+fn workspace_symbol_search() {
+    let mut c = LspClient::spawn();
+    c.initialize();
+    let uri = "file:///tmp/test_ws.ks";
+    c.open(uri, "module Ws\nstruct Alpha {}\nfunc beta() -> lang.i64 { 1 }");
+    let _ = c.flush_notifications();
+
+    let resp = c.request("workspace/symbol", json!({"query": "Alpha"}));
+    let result = resp.pointer("/result").and_then(|v| v.as_array());
+    assert!(result.is_some(), "expected symbols array");
+    let names: Vec<&str> = result
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.get("name").and_then(|n| n.as_str()))
+        .collect();
+    assert!(names.contains(&"Alpha"), "expected Alpha in {names:?}");
+    assert!(!names.contains(&"beta"), "beta should be filtered out by query");
+    c.shutdown();
+}
+
+#[test]
+fn hover_content_includes_signature() {
+    let mut c = LspClient::spawn();
+    c.initialize();
+    let uri = "file:///tmp/test_hov2.ks";
+    c.open(uri, "module Hov2\n/// Adds numbers.\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { a }");
+    let _ = c.flush_notifications();
+
+    let resp = c.request("textDocument/hover", json!({
+        "textDocument": {"uri": uri},
+        "position": {"line": 2, "character": 5}
+    }));
+    let content = resp
+        .pointer("/result/contents/value")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(content.contains("func add"), "hover should include signature: {content}");
+    assert!(content.contains("Adds numbers"), "hover should include doc: {content}");
+    c.shutdown();
+}
+
+#[test]
+fn goto_definition_points_to_decl() {
+    let mut c = LspClient::spawn();
+    c.initialize();
+    let uri = "file:///tmp/test_goto2.ks";
+    c.open(uri, "module Goto2\nfunc target() -> lang.i64 { 1 }\nfunc caller() -> lang.i64 { target() }");
+    let _ = c.flush_notifications();
+
+    // Cursor on `target()` call on line 2.
+    let resp = c.request("textDocument/definition", json!({
+        "textDocument": {"uri": uri},
+        "position": {"line": 2, "character": 28}
+    }));
+    let target_line = resp
+        .pointer("/result/range/start/line")
+        .and_then(|v| v.as_u64());
+    assert_eq!(target_line, Some(1), "definition should point to line 1 (the decl)");
+    c.shutdown();
+}
+
+#[test]
+fn call_hierarchy_prepare_responds() {
+    let mut c = LspClient::spawn();
+    c.initialize();
+    let uri = "file:///tmp/test_ch.ks";
+    c.open(uri, "module Ch\nfunc foo() -> lang.i64 { 1 }\nfunc bar() -> lang.i64 { foo() }");
+    let _ = c.flush_notifications();
+
+    let resp = c.request("textDocument/prepareCallHierarchy", json!({
+        "textDocument": {"uri": uri},
+        "position": {"line": 1, "character": 5}
+    }));
+    let items = resp.pointer("/result").and_then(|v| v.as_array());
+    assert!(items.is_some(), "expected call hierarchy items");
+    let name = items
+        .unwrap()
+        .first()
+        .and_then(|i| i.get("name"))
+        .and_then(|n| n.as_str());
+    assert_eq!(name, Some("foo"), "prepare should return foo");
+    c.shutdown();
+}

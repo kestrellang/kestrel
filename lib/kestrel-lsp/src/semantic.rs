@@ -3,7 +3,7 @@
 //! Most of M2's "what's at the cursor?" logic funnels through these helpers
 //! so handlers stay narrow and the lookup rules stay in one place.
 
-use kestrel_ast_builder::{Body, DeclSpan, FileId, NodeKind, Valued};
+use kestrel_ast_builder::{Body, DeclSpan, FileId, FilePath, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat, HirPatId};
 use kestrel_span::Span;
@@ -13,6 +13,15 @@ use rowan::TextSize;
 /// Look up the file entity for a compiler-key path.
 pub fn file_entity_for_path(compiler: &kestrel_compiler::Compiler, path: &str) -> Option<Entity> {
     compiler.files().get(path).copied()
+}
+
+/// Find the on-disk path of the file that contains `entity`.
+pub fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
+    if let Some(p) = world.get::<FilePath>(entity) {
+        return Some(p.0.clone());
+    }
+    let fid = world.get::<FileId>(entity)?;
+    world.get::<FilePath>(fid.0).map(|p| p.0.clone())
 }
 
 /// Smallest entity with a `Valued` body whose CST range contains `offset` and

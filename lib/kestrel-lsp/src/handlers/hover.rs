@@ -12,7 +12,7 @@
 //! `Documentation` component attached during AST building.
 
 use kestrel_ast_builder::{
-    CstNode, DeclSpan, Documentation, FileId, FilePath, Name, NodeKind, Valued,
+    CstNode, DeclSpan, Documentation, Name, NodeKind, Valued,
 };
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat};
@@ -414,7 +414,7 @@ fn render_entity(
     }
     let cst = world.get::<CstNode>(entity)?;
     let decl_span = world.get::<DeclSpan>(entity)?.0.clone();
-    let file_path = entity_file_path(world, entity)?;
+    let file_path = crate::semantic::entity_file_path(world, entity)?;
     let source = sources.get(&file_path)?;
 
     let signature = signature_text(source, &cst.0, &decl_span);
@@ -485,18 +485,6 @@ fn first_body_block_offset(cst: &SyntaxNode) -> Option<usize> {
     None
 }
 
-/// Find the on-disk path of the file that contains `entity`. Decl entities
-/// carry a `FileId(file_entity)` pointing at the file entity, which itself
-/// owns the `FilePath` — `FilePath` is NOT propagated to children, so we
-/// resolve via `FileId` rather than walking parents.
-fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
-    if let Some(p) = world.get::<FilePath>(entity) {
-        return Some(p.0.clone());
-    }
-    let fid = world.get::<FileId>(entity)?;
-    world.get::<FilePath>(fid.0).map(|p| p.0.clone())
-}
-
 /// Build a `file://` URL pointing at an entity's declaration site.
 /// Returns `None` for intrinsic entities with no `FilePath` (e.g. `lang.i64`).
 fn entity_link(
@@ -504,7 +492,7 @@ fn entity_link(
     sources: &HashMap<String, String>,
     entity: Entity,
 ) -> Option<String> {
-    let path = entity_file_path(world, entity)?;
+    let path = crate::semantic::entity_file_path(world, entity)?;
     let span = world.get::<DeclSpan>(entity)?.0.clone();
     let source = sources.get(&path)?;
     let li = crate::position::LineIndex::new(source.clone());

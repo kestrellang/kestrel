@@ -134,7 +134,7 @@ fn build_symbol(
 /// Map a Kestrel `NodeKind` to an LSP `SymbolKind`. Returns `None` for kinds
 /// we deliberately exclude from the outline (imports, param defaults, type
 /// parameters, anonymous accessors).
-fn node_kind_to_symbol_kind(kind: &NodeKind) -> Option<SymbolKind> {
+pub(crate) fn node_kind_to_symbol_kind(kind: &NodeKind) -> Option<SymbolKind> {
     Some(match kind {
         NodeKind::Module => SymbolKind::MODULE,
         NodeKind::Struct => SymbolKind::STRUCT,
