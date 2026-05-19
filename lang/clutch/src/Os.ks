@@ -102,7 +102,7 @@ public func getArgv() -> Array[String] {
     while pos < n {
         if buf(pos) == 0 {
             if argIndex > 0 {
-                let s = String.fromUtf8(buf.asSlice()(argStart..<pos)) ?? String();
+                let s = String(fromUtf8: buf.asSlice()(argStart..<pos)) ?? String();
                 result.append(s);
             }
             argIndex = argIndex + 1;
