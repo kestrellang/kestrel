@@ -65,24 +65,24 @@ fi
     "$LANG_DIR/clutch/src/ParseError.ks" \
     "$LANG_DIR/clutch/src/Argument.ks" \
     "$LANG_DIR/clutch/src/ArgumentMatches.ks" \
-    "$LANG_DIR/clutch/src/parser.ks" \
-    "$LANG_DIR/clutch/src/help.ks" \
-    "$LANG_DIR/clutch/src/command.ks" \
-    "$LANG_DIR/clutch/src/os.ks" \
-    "$LANG_DIR/clutch/src/clutch.ks" \
+    "$LANG_DIR/clutch/src/Parser.ks" \
+    "$LANG_DIR/clutch/src/Help.ks" \
+    "$LANG_DIR/clutch/src/Command.ks" \
+    "$LANG_DIR/clutch/src/Os.ks" \
+    "$LANG_DIR/clutch/src/Clutch.ks" \
     "$LANG_DIR/http/src/method.ks" \
     "$LANG_DIR/http/src/url.ks" \
     "$LANG_DIR/http/src/status.ks" \
     "$LANG_DIR/http/src/cookie.ks" \
     "$LANG_DIR/http/src/headers.ks" \
     "$LANG_DIR/http/src/wire.ks" \
-    "$LANG_DIR/swoop/src/Error.ks" \
-    "$LANG_DIR/swoop/src/Response.ks" \
-    "$LANG_DIR/swoop/src/Body.ks" \
-    "$LANG_DIR/swoop/src/Url.ks" \
-    "$LANG_DIR/swoop/src/Send.ks" \
-    "$LANG_DIR/swoop/src/Swoop.ks" \
-    "$LANG_DIR/swoop/src/Tls.ks" \
+    "$LANG_DIR/swoop/src/error.ks" \
+    "$LANG_DIR/swoop/src/response.ks" \
+    "$LANG_DIR/swoop/src/body.ks" \
+    "$LANG_DIR/swoop/src/url.ks" \
+    "$LANG_DIR/swoop/src/send.ks" \
+    "$LANG_DIR/swoop/src/swoop.ks" \
+    "$LANG_DIR/swoop/src/tls.ks" \
     "$SCRIPT_DIR/src/error.ks" \
     "$SCRIPT_DIR/src/version.ks" \
     "$SCRIPT_DIR/src/dependency.ks" \
