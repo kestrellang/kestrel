@@ -1,4 +1,8 @@
 [package]
 name = "repro"
 version = "0.1.0"
-description = "Minimal reproduction of struct field corruption"
+description = "Minimal TCP accept loop test"
+
+[dependencies]
+http = { path = "../../lang/http" }
+

@@ -1,48 +1,30 @@
-// Mutating func on a non-generic struct that appends Entry[String].
+// Instrumented: trace all TcpStream.deinit calls
 
 module repro.main
 
-struct Entry[T]: Cloneable {
-    var name: String
-    var items: Array[String]
-    var handler: (String, T) -> String
+import http.wire.(stringToBytes)
+import std.io.error.(IoError)
 
-    func clone() -> Entry[T] {
-        Entry[T](
-            name: self.name.clone(),
-            items: self.items.clone(),
-            handler: self.handler
-        )
-    }
-}
-
-struct Box: Cloneable {
-    var entries: Array[Entry[String]]
-
-    func clone() -> Box {
-        Box(entries: self.entries.clone())
-    }
-
-    mutating func add(name: String, items: Array[String], handler: (String, String) -> String) {
-        self.entries.append(Entry[String](
-            name: name,
-            items: items,
-            handler: handler
-        ))
+func serve(port: UInt16) -> Result[(), IoError] {
+    var listener = try TcpListener.bind(port);
+    loop {
+        println("=== calling accept ===");
+        var stream = try listener.accept();
+        let fd = stream.rawFd();
+        println("accepted fd=\(fd)");
+        var buf = Array[UInt8](repeating: 0, count: 1024);
+        let slice = ArraySlice(pointer: buf.asPointer(), count: 1024);
+        let bytesRead = recv(fd, slice.pointer, slice.count, 0);
+        println("recv=\(bytesRead)");
+        let resp = stringToBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK");
+        let _ = send(fd, resp.asPointer(), resp.count, 0);
+        println("sent response");
     }
 }
 
 func main() {
-    var b = Box(entries: Array[Entry[String]]());
-
-    b.add("/", Array[String](), { (a: String, b: String) in "x" });
-
-    var items2 = Array[String]();
-    items2.append("x");
-    b.add("/x", items2, { (a: String, b: String) in "y" });
-
-    // Expected: 0, 1
-    for entry in b.entries {
-        println(entry.items.count.formatted());
+    match serve(8090) {
+        .Ok(_) => {},
+        .Err(e) => {}
     }
 }

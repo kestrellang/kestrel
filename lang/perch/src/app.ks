@@ -88,20 +88,30 @@ public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
         let _ = println("Perch listening on port \(port)");
 
         loop {
-            var stream = try listener.accept();
-            let fd = stream.rawFd();
+            // match instead of try: workaround for compiler bug where
+            // try in a loop defers $try_value deinit past the next
+            // accept(), closing the new connection's fd.
+            match listener.accept() {
+                .Ok(stream) => {
+                    let fd = stream.rawFd();
 
-            match parseHttpRequest(fd) {
-                .Ok(request) => {
-                    let response = self.dispatch(request);
-                    let _ = sendResponse(response, to: fd);
+                    match parseHttpRequest(fd) {
+                        .Ok(request) => {
+                            let response = self.dispatch(request);
+                            let _ = sendResponse(response, to: fd);
+                        },
+                        .Err(_) => {
+                            let badReq = Response.badRequest(Text("Bad Request"));
+                            let _ = sendResponse(badReq, to: fd);
+                        }
+                    }
                 },
                 .Err(_) => {
-                    let badReq = Response.badRequest(Text("Bad Request"));
-                    let _ = sendResponse(badReq, to: fd);
+                    break
                 }
             }
         }
+        .Ok(())
     }
 
     // ========================================================================
