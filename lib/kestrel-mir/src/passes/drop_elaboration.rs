@@ -523,47 +523,17 @@ fn transfer_statement(
     consuming_receiver_funcs: &HashSet<Entity>,
 ) {
     match kind {
-        // Assignment to a droppable local makes it Live
+        // Assignment kills consumed RHS values first, then makes the
+        // destination live. This keeps `x = move x` live after rebinding.
         StatementKind::Assign { dest, rvalue } => {
+            for local in collect_consumed_locals(rvalue) {
+                if let Some(&idx) = local_to_idx.get(&local) {
+                    state[idx] = InitState::Dead;
+                }
+            }
             if let Some(local) = dest.root_local() {
                 if let Some(&idx) = local_to_idx.get(&local) {
                     state[idx] = InitState::Live;
-                }
-            }
-            // Construct consumes field values
-            if let Rvalue::Construct { fields, .. } = rvalue {
-                for (_, value) in fields {
-                    if let Some(place) = value.as_place() {
-                        if let Some(local) = place.root_local() {
-                            if let Some(&idx) = local_to_idx.get(&local) {
-                                state[idx] = InitState::Dead;
-                            }
-                        }
-                    }
-                }
-            }
-            // EnumVariant consumes payload values
-            if let Rvalue::EnumVariant { payload, .. } = rvalue {
-                for value in payload {
-                    if let Some(place) = value.as_place() {
-                        if let Some(local) = place.root_local() {
-                            if let Some(&idx) = local_to_idx.get(&local) {
-                                state[idx] = InitState::Dead;
-                            }
-                        }
-                    }
-                }
-            }
-            // ApplyPartial consumes capture values
-            if let Rvalue::ApplyPartial { captures, .. } = rvalue {
-                for value in captures {
-                    if let Some(place) = value.as_place() {
-                        if let Some(local) = place.root_local() {
-                            if let Some(&idx) = local_to_idx.get(&local) {
-                                state[idx] = InitState::Dead;
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -635,21 +605,20 @@ fn insert_flag_updates(
         let mut insertions: Vec<(usize, Statement)> = Vec::new();
         for (si, stmt) in body.blocks[bi].stmts.iter().enumerate() {
             match &stmt.kind {
-                // Assignment → local becomes live → flag = false (needs deinit)
+                // Assignment consumes RHS values first, then initializes dest.
                 StatementKind::Assign { dest, rvalue } => {
-                    if let Some(local) = dest.root_local() {
-                        if let Some(&flag) = flags.get(&local) {
-                            insertions.push((si + 1, Statement::new(
-                                StatementKind::SetDeinitFlag { flag, value: false },
-                            )));
-                        }
-                    }
-                    // Construct field consumption → flag = true (skip deinit)
                     let consumed = collect_consumed_locals(rvalue);
                     for local in consumed {
                         if let Some(&flag) = flags.get(&local) {
                             insertions.push((si + 1, Statement::new(
                                 StatementKind::SetDeinitFlag { flag, value: true },
+                            )));
+                        }
+                    }
+                    if let Some(local) = dest.root_local() {
+                        if let Some(&flag) = flags.get(&local) {
+                            insertions.push((si + 1, Statement::new(
+                                StatementKind::SetDeinitFlag { flag, value: false },
                             )));
                         }
                     }
@@ -757,43 +726,62 @@ fn insert_overwrite_drops(
     }
 }
 
-/// Collect locals consumed by an rvalue (Construct fields, EnumVariant payload, ApplyPartial captures).
-/// Note: Rvalue::Move is handled separately in the main dataflow, not here —
-/// this function is for effectful init flag tracking where Move of a temp
-/// should not mark the source field as "skip deinit".
+/// Collect locals consumed by an rvalue.
 fn collect_consumed_locals(rvalue: &Rvalue) -> Vec<LocalId> {
     let mut consumed = Vec::new();
     match rvalue {
+        Rvalue::Move(place) => push_consumed_place(place, &mut consumed),
         Rvalue::Construct { fields, .. } => {
             for (_, value) in fields {
-                if let Some(place) = value.as_place() {
-                    if let Some(local) = place.root_local() {
-                        consumed.push(local);
-                    }
-                }
+                push_consumed_value(value, &mut consumed);
             }
         }
         Rvalue::EnumVariant { payload, .. } => {
             for value in payload {
-                if let Some(place) = value.as_place() {
-                    if let Some(local) = place.root_local() {
-                        consumed.push(local);
-                    }
-                }
+                push_consumed_value(value, &mut consumed);
             }
         }
         Rvalue::ApplyPartial { captures, .. } => {
             for value in captures {
-                if let Some(place) = value.as_place() {
-                    if let Some(local) = place.root_local() {
-                        consumed.push(local);
-                    }
-                }
+                push_consumed_value(value, &mut consumed);
+            }
+        }
+        Rvalue::Op1 { arg, .. } => push_moved_value(arg, &mut consumed),
+        Rvalue::Op2 { lhs, rhs, .. } => {
+            push_moved_value(lhs, &mut consumed);
+            push_moved_value(rhs, &mut consumed);
+        }
+        Rvalue::Op3 { a, b, c, .. } => {
+            push_moved_value(a, &mut consumed);
+            push_moved_value(b, &mut consumed);
+            push_moved_value(c, &mut consumed);
+        }
+        Rvalue::Tuple(values) | Rvalue::ArrayLiteral { values, .. } => {
+            for value in values {
+                push_moved_value(value, &mut consumed);
             }
         }
         _ => {}
     }
     consumed
+}
+
+fn push_consumed_value(value: &Value, consumed: &mut Vec<LocalId>) {
+    if let Some(place) = value.as_place() {
+        push_consumed_place(place, consumed);
+    }
+}
+
+fn push_moved_value(value: &Value, consumed: &mut Vec<LocalId>) {
+    if let Value::Move(place) = value {
+        push_consumed_place(place, consumed);
+    }
+}
+
+fn push_consumed_place(place: &Place, consumed: &mut Vec<LocalId>) {
+    if let Some(local) = place.root_local() {
+        consumed.push(local);
+    }
 }
 
 /// Insert Deinit/DeinitIf at all exit points based on scope and init-state.

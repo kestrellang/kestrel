@@ -344,6 +344,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
+    /// Build a consuming call operand: affine values move, copyable values
+    /// remain ordinary copies.
+    fn consuming_arg_for_value(&self, value: Value, ty: &MirTy) -> Value {
+        if ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
+            value.into_move()
+        } else {
+            value.into_copy()
+        }
+    }
+
     /// Build an [`Rvalue`] from a [`Value`] for use as the RHS of an
     /// `Assign` statement, picking Move (for affine types) or Copy.
     ///
@@ -3131,7 +3141,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Build args: receiver classified by copy_behavior; then explicit args.
-        let receiver_arg = self.arg_for_value(receiver_val, &receiver_ty);
+        // `tryExtract` semantically splits the receiver into ControlFlow and
+        // must consume affine Result/Optional-like values so their original
+        // payload is not dropped after extraction.
+        let receiver_arg = if self.is_try_extract_protocol_call(protocol, method_name) {
+            self.consuming_arg_for_value(receiver_val, &receiver_ty)
+        } else {
+            self.arg_for_value(receiver_val, &receiver_ty)
+        };
         let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args));
 
@@ -3146,6 +3163,19 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let method_key = self.witness_method_key_from_call(method_name, args);
         let callee = Callee::witness(protocol, method_key, receiver_ty, method_type_args);
         self.emit_call(callee, call_args, result_ty)
+    }
+
+    fn is_try_extract_protocol_call(&self, protocol: Entity, method_name: &str) -> bool {
+        if method_name != "tryExtract" {
+            return false;
+        }
+        self.ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::TryableProtocol,
+                root: self.ctx.root,
+            })
+            == Some(protocol)
     }
 
     /// Check if an entity is an Initializer in the MIR and return its parent struct entity.
@@ -5136,9 +5166,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let mir_local = self.map_local(binding.local_id);
             let source = apply_access_path(scrutinee.clone(), &binding.path);
             let local_ty = self.body.locals[mir_local.index()].ty.clone();
+            let value = if local_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
+                Value::Move(source)
+            } else {
+                Value::Copy(source)
+            };
             self.emit_value_transfer(
                 Place::local(mir_local),
-                Value::Copy(source),
+                value,
                 &local_ty,
             );
         }
@@ -5189,10 +5224,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Transfer a value into `dest`, choosing Move, Copy, or Clone:
     ///
+    /// - **Explicit affine Move** → `Rvalue::Move` (used for pattern payloads)
     /// - **Bare temp local** → `Rvalue::Move` (source is dead after transfer)
     /// - **User local + Cloneable** → witness call to `Cloneable.clone()`
     /// - **Everything else** → `Rvalue::Copy` (bitwise copy, source stays valid)
     fn emit_value_transfer(&mut self, dest: Place, value: Value, ty: &MirTy) {
+        let explicit_affine_move =
+            matches!(value, Value::Move(_)) && ty.copy_behavior(&self.ctx.module) == CopyBehavior::None;
+
         // Const → no ownership transfer
         let Some(place) = value.as_place().cloned() else {
             let Value::Const(imm) = value else { unreachable!() };
@@ -5202,6 +5241,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             }));
             return;
         };
+
+        if explicit_affine_move {
+            self.emit_stmt(Statement::new(StatementKind::Assign {
+                dest,
+                rvalue: Rvalue::Move(place),
+            }));
+            return;
+        }
 
         let is_user_local = self.is_user_local(&place);
 
