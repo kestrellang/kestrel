@@ -43,3 +43,25 @@ public enum MiddlewareResult: Cloneable {
         }
     }
 }
+
+/// A type that can process requests in the middleware pipeline.
+///
+/// Implement this protocol to create reusable middleware with named
+/// types and configurable state.
+///
+/// # Examples
+///
+/// ```
+/// struct AuthCheck[T]: Middleware[T] {
+///     func handle(request: Request, ctx: T) -> MiddlewareResult {
+///         match request.header("Authorization") {
+///             .Some(_) => .Continue(request),
+///             .None => .Respond(Response.unauthorized())
+///         }
+///     }
+///     func clone() -> AuthCheck[T] { AuthCheck[T]() }
+/// }
+/// ```
+public protocol Middleware[T]: Cloneable {
+    func handle(request: Request, ctx: T) -> MiddlewareResult
+}

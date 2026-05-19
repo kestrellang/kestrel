@@ -7,7 +7,8 @@ module wordle.main
 import perch.app.(App)
 import perch.request.(Request)
 import perch.response.(Response)
-import perch.middleware.(logger)
+import perch.middleware.(Logger)
+import http.content.(Html)
 import wordle.words.(wordList, pickWord, isValidWord)
 import wordle.game.(MAX_GUESSES, WORD_LEN, outcome, Outcome)
 import wordle.ui.(pageHtml)
@@ -74,7 +75,7 @@ func handleRoot(req: Request, ctx: Ctx) -> Response {
         }
     };
 
-    Response.ok(html: pageHtml(seed, guesses, answer, errFromUrl))
+    Response.ok(Html(pageHtml(seed, guesses, answer, errFromUrl)))
 }
 
 // ============================================================================
@@ -148,9 +149,9 @@ func decodeError(code: String) -> String {
 func main() {
     let ctx = Ctx(words: wordList());
     var app = App[Ctx](ctx);
-    app.use(logger[Ctx]());
+    app.use(Logger[Ctx]());
 
-    app.onGet("/", { (req: Request, ctx: Ctx) in
+    app.route(get: "/", { (req: Request, ctx: Ctx) in
         handleRoot(req, ctx)
     });
 

@@ -5,12 +5,13 @@ module perch.response
 import http.status.(StatusCode)
 import http.headers.(Headers)
 import http.cookie.(Cookie)
+import http.content.(Content)
 
 /// An HTTP response with status code, headers, and body.
 ///
-/// Use the static factory methods for common responses — `Response.ok(text:)`,
+/// Use the static factory methods for common responses — `Response.ok(content:)`,
 /// `Response.notFound()`, `Response.redirect(to:)`, etc. For custom status
-/// codes, use `Response.withStatus(code:, message:)`.
+/// codes, use `Response.withStatus(code:, content:)`.
 ///
 /// Responses are value types. The `withHeader` and `withCookie` methods
 /// return new copies — the original is unchanged.
@@ -18,18 +19,10 @@ import http.cookie.(Cookie)
 /// # Examples
 ///
 /// ```
-/// // Plain text
-/// Response.ok(text: "Hello, world!")
-///
-/// // HTML
-/// Response.ok(html: "<h1>Hello</h1>")
-///
-/// // JSON
-/// Response.ok(json: "{\"status\": \"ok\"}")
-///
-/// // With a cookie
-/// let cookie = Cookie("session", "abc123");
-/// Response.ok(text: "logged in").withCookie(cookie)
+/// Response.ok(Text("Hello, world!"))
+/// Response.ok(JsonBody(payload))
+/// Response.created(JsonBody(user))
+///     .withCookie(Cookie("session", "abc123"))
 /// ```
 public struct Response: Cloneable {
     public var status: StatusCode
@@ -50,48 +43,85 @@ public struct Response: Cloneable {
 }
 
 // ============================================================================
-// STATIC FACTORIES
+// CONTENT-BASED FACTORIES
 // ============================================================================
 
 extend Response {
-    /// Creates a 200 OK response with a plain text body.
-    public static func ok(text content: String) -> Response {
+    /// Creates a 200 OK response with the given content.
+    public static func ok[C](content: C) -> Response where C: Content {
         var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.ok(), hdrs, content)
+        if let .Some(ct) = content.contentType() {
+            hdrs.setValue("Content-Type", ct)
+        }
+        let bytes = content.toBytes();
+        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        Response(StatusCode.ok(), hdrs, body)
     }
 
-    /// Creates a 200 OK response with an HTML body.
-    public static func ok(html content: String) -> Response {
+    /// Creates a 201 Created response with the given content.
+    public static func created[C](content: C) -> Response where C: Content {
         var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/html; charset=utf-8");
-        Response(StatusCode.ok(), hdrs, content)
+        if let .Some(ct) = content.contentType() {
+            hdrs.setValue("Content-Type", ct)
+        }
+        let bytes = content.toBytes();
+        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        Response(StatusCode.created(), hdrs, body)
     }
 
-    /// Creates a 200 OK response with JSON body (pre-serialized string).
-    public static func ok(json content: String) -> Response {
+    /// Creates a 400 Bad Request response with the given content.
+    public static func badRequest[C](content: C) -> Response where C: Content {
         var hdrs = Headers();
-        hdrs.setValue("Content-Type", "application/json");
-        Response(StatusCode.ok(), hdrs, content)
+        if let .Some(ct) = content.contentType() {
+            hdrs.setValue("Content-Type", ct)
+        }
+        let bytes = content.toBytes();
+        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        Response(StatusCode.badRequest(), hdrs, body)
     }
 
-    /// Creates a 201 Created response with JSON body.
-    public static func created(json content: String) -> Response {
+    /// Creates a 409 Conflict response with the given content.
+    public static func conflict[C](content: C) -> Response where C: Content {
         var hdrs = Headers();
-        hdrs.setValue("Content-Type", "application/json");
-        Response(StatusCode.created(), hdrs, content)
+        if let .Some(ct) = content.contentType() {
+            hdrs.setValue("Content-Type", ct)
+        }
+        let bytes = content.toBytes();
+        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        Response(StatusCode.conflict(), hdrs, body)
     }
 
+    /// Creates a 422 Unprocessable Entity response with the given content.
+    public static func unprocessableEntity[C](content: C) -> Response where C: Content {
+        var hdrs = Headers();
+        if let .Some(ct) = content.contentType() {
+            hdrs.setValue("Content-Type", ct)
+        }
+        let bytes = content.toBytes();
+        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        Response(StatusCode.unprocessableEntity(), hdrs, body)
+    }
+
+    /// Creates a response with a custom status code and content.
+    public static func withStatus[C](code: Int64, content: C) -> Response where C: Content {
+        var hdrs = Headers();
+        if let .Some(ct) = content.contentType() {
+            hdrs.setValue("Content-Type", ct)
+        }
+        let bytes = content.toBytes();
+        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        Response(StatusCode(code), hdrs, body)
+    }
+}
+
+// ============================================================================
+// NO-BODY FACTORIES
+// ============================================================================
+
+extend Response {
     /// Creates a 204 No Content response.
     public static func noContent() -> Response {
         Response(StatusCode.noContent(), Headers(), String())
-    }
-
-    /// Creates a 400 Bad Request response with a message.
-    public static func badRequest(message: String) -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.badRequest(), hdrs, message)
     }
 
     /// Creates a 401 Unauthorized response.
@@ -122,20 +152,6 @@ extend Response {
         Response(StatusCode.methodNotAllowed(), hdrs, "Method Not Allowed")
     }
 
-    /// Creates a 409 Conflict response with a message.
-    public static func conflict(message: String) -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.conflict(), hdrs, message)
-    }
-
-    /// Creates a 422 Unprocessable Entity response with a message.
-    public static func unprocessableEntity(message: String) -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.unprocessableEntity(), hdrs, message)
-    }
-
     /// Creates a 429 Too Many Requests response.
     public static func tooManyRequests() -> Response {
         var hdrs = Headers();
@@ -151,12 +167,6 @@ extend Response {
     }
 
     /// Creates a redirect response (302 Found by default).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Response.redirect(to: "/login")
-    /// ```
     public static func redirect(to url: String) -> Response {
         var hdrs = Headers();
         hdrs.setValue("Location", url);
@@ -164,45 +174,19 @@ extend Response {
     }
 
     /// Creates a redirect response with a specific status code.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // 301 Moved Permanently
-    /// Response.redirect(to: "/new-path", 301)
-    /// ```
     public static func redirect(to url: String, code: Int64) -> Response {
         var hdrs = Headers();
         hdrs.setValue("Location", url);
         Response(StatusCode(code), hdrs, String())
     }
-
-    /// Creates a response with a custom status code and plain text body.
-    ///
-    /// Use this when none of the named factories fit.
-    public static func withStatus(code: Int64, message: String) -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode(code), hdrs, message)
-    }
 }
 
 // ============================================================================
-// COOKIE SUPPORT
+// COOKIE & HEADER SUPPORT
 // ============================================================================
 
 extend Response {
     /// Returns a new response with a `Set-Cookie` header appended.
-    ///
-    /// Multiple cookies are supported — each call appends a separate
-    /// `Set-Cookie` header.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let session = Cookie("session", "abc123");
-    /// Response.ok(text: "logged in").withCookie(session)
-    /// ```
     public func withCookie(cookie: Cookie) -> Response {
         var hdrs = self.headers;
         hdrs.add("Set-Cookie", cookie.toHeaderValue());
@@ -210,17 +194,6 @@ extend Response {
     }
 
     /// Returns a new response with an additional header appended.
-    ///
-    /// Does not replace existing headers with the same name — use this
-    /// for headers that can appear multiple times (e.g. `Set-Cookie`,
-    /// `Link`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// Response.ok(text: "hello")
-    ///     .withHeader("X-Request-Id", requestId)
-    /// ```
     public func withHeader(name: String, value: String) -> Response {
         var hdrs = self.headers;
         hdrs.add(name, value);

@@ -13,29 +13,25 @@ import std.io.error.(IoError)
 import swoop.response.(Response)
 import http.wire.(findHeaderEnd, parseDecimal, dechunk, stringToBytes)
 import swoop.url.(ClientUrl)
-import swoop.body.(Body)
+import http.content.(Content)
 
 // ============================================================================
-// SEND REQUEST
+// SEND REQUEST (no content)
 // ============================================================================
 
-/// Sends an HTTP request over a stream and reads the response.
+/// Sends an HTTP request without a body and reads the response.
 public func sendRequest[S](
     stream: S,
     method: HttpMethod,
     url: ClientUrl,
-    headers: Headers,
-    body: Body?
+    headers: Headers
 ) -> Result[Response, SwoopError] where S: Readable, S: Writable {
-    // Build the request string
     var req = String();
 
-    // Request line: METHOD /path HTTP/1.1\r\n
     req.append(method.toString());
     req.append(" ");
     req.append(url.requestPath());
-    req.append(" HTTP/1.1");
-    req.append("\r\n");
+    req.append(" HTTP/1.1\r\n");
 
     req.append("Host: ");
     req.append(url.hostHeader());
@@ -43,50 +39,71 @@ public func sendRequest[S](
 
     req.append(headers.toWireFormat());
 
-    // Body handling
-    var bodyBytes = Array[UInt8]();
-    match body {
-        .Some(b) => {
-            bodyBytes = b.toBytes();
-
-            // Set Content-Type if not already set and body implies one
-            if not headers.has("Content-Type") {
-                match b {
-                    .Form(_) => {
-                        req.append("Content-Type: application/x-www-form-urlencoded");
-                        req.append("\r\n")
-                    },
-                    _ => {}
-                }
-            }
-
-            // Content-Length
-            req.append("Content-Length: \(bodyBytes.count)\r\n")
-        },
-        .None => {}
-    }
-
-    req.append("Connection: close");
+    req.append("Connection: close\r\n");
     req.append("\r\n");
 
-    req.append("\r\n");
-
-    // Send headers
     var sendStream = stream;
     match sendAllString(sendStream, req) {
         .Ok(_) => {},
         .Err(e) => return .Err(SwoopError.connectionFailed("failed to send request"))
     }
 
-    // Send body
-    if bodyBytes.count > 0 {
-        match sendAllBytes(sendStream, bodyBytes) {
+    readResponse(sendStream)
+}
+
+// ============================================================================
+// SEND REQUEST (with content)
+// ============================================================================
+
+/// Sends an HTTP request with a body and reads the response.
+public func sendRequest[S, C](
+    stream: S,
+    method: HttpMethod,
+    url: ClientUrl,
+    headers: Headers,
+    content: C
+) -> Result[Response, SwoopError] where S: Readable, S: Writable, C: Content {
+    var req = String();
+
+    req.append(method.toString());
+    req.append(" ");
+    req.append(url.requestPath());
+    req.append(" HTTP/1.1\r\n");
+
+    req.append("Host: ");
+    req.append(url.hostHeader());
+    req.append("\r\n");
+
+    req.append(headers.toWireFormat());
+
+    let contentBytes = content.toBytes();
+
+    if not headers.has("Content-Type") {
+        if let .Some(ct) = content.contentType() {
+            req.append("Content-Type: ");
+            req.append(ct);
+            req.append("\r\n")
+        }
+    }
+
+    req.append("Content-Length: \(contentBytes.count)\r\n");
+
+    req.append("Connection: close\r\n");
+    req.append("\r\n");
+
+    var sendStream = stream;
+    match sendAllString(sendStream, req) {
+        .Ok(_) => {},
+        .Err(e) => return .Err(SwoopError.connectionFailed("failed to send request"))
+    }
+
+    if contentBytes.count > 0 {
+        match sendAllBytes(sendStream, contentBytes) {
             .Ok(_) => {},
             .Err(e) => return .Err(SwoopError.connectionFailed("failed to send body"))
         }
     }
 
-    // Read and parse response
     readResponse(sendStream)
 }
 
@@ -98,7 +115,6 @@ public func sendRequest[S](
 func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readable {
     var recvStream = stream;
 
-    // Read bytes until we find \r\n\r\n (header end)
     var buf = Array[UInt8]();
     var chunk = Array[UInt8](repeating: 0, count: 4096);
 
@@ -117,9 +133,8 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
             break
         }
 
-        for j in 0..<n {
-            buf.append(chunk(unchecked: j))
-        }
+        let readSlice = chunk.asSlice()(0..<n);
+        buf.append(contentsOf: readSlice);
 
         headerEnd = findHeaderEnd(buf);
         if headerEnd >= 0 {
@@ -160,9 +175,8 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
     let bodyStart = headerEnd + 4;
     var rawBuf = Array[UInt8]();
 
-    for k in bodyStart..<buf.count {
-        rawBuf.append(buf(unchecked: k))
-    }
+    let initialBody = buf.asSlice()(bodyStart..<buf.count);
+    rawBuf.append(contentsOf: initialBody);
 
     let isChunked = match headers.value(forName: "Transfer-Encoding") {
         .Some(te) => te.contains("chunked"),
@@ -186,9 +200,8 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
             if bn <= 0 {
                 break
             }
-            for bj in 0..<bn {
-                rawBuf.append(bodyChunk(unchecked: bj))
-            }
+            let chunkSlice = bodyChunk.asSlice()(0..<bn);
+            rawBuf.append(contentsOf: chunkSlice);
         }
     } else {
         loop {
@@ -201,13 +214,11 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
             if rn <= 0 {
                 break
             }
-            for rj in 0..<rn {
-                rawBuf.append(readChunk(unchecked: rj))
-            }
+            let chunkSlice = readChunk.asSlice()(0..<rn);
+            rawBuf.append(contentsOf: chunkSlice);
         }
     }
 
-    // Dechunk if chunked transfer encoding
     var bodyBuf = if isChunked {
         dechunk(rawBuf)
     } else {

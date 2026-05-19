@@ -5,8 +5,9 @@ module perch.parse
 
 import http.method.(HttpMethod, parseMethod)
 import http.headers.(Headers)
-import http.url.(parseUrl, ParsedUrl)
+import http.url.(parseUrl, ParsedUrl, parseQueryString)
 import http.wire.(findHeaderEnd, parseDecimal)
+import http.cookie.(parseCookieHeader)
 import perch.request.(Request)
 import std.io.error.(IoError)
 
@@ -105,6 +106,12 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
         }
     }
 
+    let parsedQueryParams = parseQueryString(parsed.queryString);
+    let parsedCookies = match headers.value(forName: "Cookie") {
+        .Some(cookieHeader) => parseCookieHeader(cookieHeader),
+        .None => Array[(String, String)]()
+    };
+
     .Ok(Request(
         method: method,
         path: parsed.path,
@@ -113,7 +120,9 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
         headers: headers,
         body: body,
         pathParams: Dictionary[String, String](),
-        store: Dictionary[String, String]()
+        store: Dictionary[String, String](),
+        queryParams: parsedQueryParams,
+        cookies: parsedCookies
     ))
 }
 

@@ -11,6 +11,7 @@ module counter.main
 import perch.app.(App)
 import perch.request.(Request)
 import perch.response.(Response)
+import http.content.(Html)
 import plume.(Template)
 
 struct Ctx: Cloneable {
@@ -67,22 +68,22 @@ func getN(request: Request) -> Int64 {
 func main() {
     var app = App[Ctx](Ctx(x: 0));
 
-    app.onGet("/", { (req: Request, ctx: Ctx) in
-        Response.ok(html: pageHtml(0))
+    app.route(get: "/", { (req: Request, ctx: Ctx) in
+        Response.ok(Html(pageHtml(0)))
     });
 
-    app.onPost("/inc", { (req: Request, ctx: Ctx) in
+    app.route(post: "/inc", { (req: Request, ctx: Ctx) in
         let count = getN(req) + 1;
-        Response.ok(html: counterHtml(count))
+        Response.ok(Html(counterHtml(count)))
     });
 
-    app.onPost("/dec", { (req: Request, ctx: Ctx) in
+    app.route(post: "/dec", { (req: Request, ctx: Ctx) in
         let count = getN(req) - 1;
-        Response.ok(html: counterHtml(count))
+        Response.ok(Html(counterHtml(count)))
     });
 
-    app.onPost("/reset", { (req: Request, ctx: Ctx) in
-        Response.ok(html: counterHtml(0))
+    app.route(post: "/reset", { (req: Request, ctx: Ctx) in
+        Response.ok(Html(counterHtml(0)))
     });
 
     let port: UInt16 = 8080;

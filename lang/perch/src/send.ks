@@ -20,7 +20,7 @@ import std.io.error.(IoError)
 /// # Examples
 ///
 /// ```
-/// let response = Response.ok(text: "hello");
+/// let response = Response.ok(Text("hello"));
 /// let _ = sendResponse(response, to: socketFd);
 /// ```
 public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result[(), IoError] {
