@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{
     HirBlock, HirBody, HirCallArg, HirClosureParam, HirExpr, HirExprId, HirLiteral, HirMatchArm,
-    HirStmt, HirStmtId,
+    HirPat, HirPatId, HirStmt, HirStmtId,
 };
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_hir_lower::LowerBody;
@@ -4319,16 +4319,167 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         Value::Const(Immediate::unit())
     }
 
-    /// Collect MIR local IDs for `let` bindings declared in a HIR block.
+    /// Collect MIR local IDs for all locals declared in a HIR block,
+    /// including match arm bindings nested inside expressions (e.g. from
+    /// try desugaring). Without this, try-in-loop creates function-scoped
+    /// arm bindings whose overwrite-drop on the next iteration closes the
+    /// new iteration's fd before it's assigned.
     fn collect_block_locals(&self, block: &HirBlock) -> Vec<LocalId> {
         let mut locals = Vec::new();
+        self.collect_block_locals_inner(block, &mut locals);
+        locals
+    }
+
+    fn collect_block_locals_inner(&self, block: &HirBlock, locals: &mut Vec<LocalId>) {
         for &stmt_id in &block.stmts {
-            if let HirStmt::Let { local, .. } = &self.hir.stmts[stmt_id] {
-                let mir_local = self.map_local(*local);
-                locals.push(mir_local);
+            match &self.hir.stmts[stmt_id] {
+                HirStmt::Let { local, value, .. } => {
+                    locals.push(self.map_local(*local));
+                    if let Some(v) = value {
+                        self.collect_expr_pattern_locals(*v, locals);
+                    }
+                }
+                HirStmt::Expr { expr, .. } => {
+                    self.collect_expr_pattern_locals(*expr, locals);
+                }
+                _ => {}
             }
         }
-        locals
+        if let Some(tail) = block.tail_expr {
+            self.collect_expr_pattern_locals(tail, locals);
+        }
+    }
+
+    /// Walk a HIR expression recursively, collecting locals from pattern
+    /// bindings in match arms. Skips closures (separate scope) and nested
+    /// loops (they manage their own scope).
+    fn collect_expr_pattern_locals(&self, expr_id: HirExprId, locals: &mut Vec<LocalId>) {
+        match &self.hir.exprs[expr_id] {
+            HirExpr::Match { scrutinee, arms, .. } => {
+                self.collect_expr_pattern_locals(*scrutinee, locals);
+                for arm in arms {
+                    self.collect_pat_locals(arm.pattern, locals);
+                    if let Some(guard) = arm.guard {
+                        self.collect_expr_pattern_locals(guard, locals);
+                    }
+                    self.collect_expr_pattern_locals(arm.body, locals);
+                }
+            }
+            HirExpr::Sugar { inner, .. } => {
+                self.collect_expr_pattern_locals(*inner, locals);
+            }
+            HirExpr::Block { body, .. } => {
+                self.collect_block_locals_inner(body, locals);
+            }
+            HirExpr::If { condition, then_body, else_body, .. } => {
+                self.collect_expr_pattern_locals(*condition, locals);
+                self.collect_block_locals_inner(then_body, locals);
+                if let Some(else_b) = else_body {
+                    self.collect_block_locals_inner(else_b, locals);
+                }
+            }
+            HirExpr::Call { callee, args, .. } => {
+                self.collect_expr_pattern_locals(*callee, locals);
+                for arg in args {
+                    self.collect_expr_pattern_locals(arg.value, locals);
+                }
+            }
+            HirExpr::MethodCall { receiver, args, .. }
+            | HirExpr::ProtocolCall { receiver, args, .. } => {
+                self.collect_expr_pattern_locals(*receiver, locals);
+                for arg in args {
+                    self.collect_expr_pattern_locals(arg.value, locals);
+                }
+            }
+            HirExpr::Assign { target, value, .. } => {
+                self.collect_expr_pattern_locals(*target, locals);
+                self.collect_expr_pattern_locals(*value, locals);
+            }
+            HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
+                for &e in elements {
+                    self.collect_expr_pattern_locals(e, locals);
+                }
+            }
+            HirExpr::Dict { entries, .. } => {
+                for entry in entries {
+                    self.collect_expr_pattern_locals(entry.key, locals);
+                    self.collect_expr_pattern_locals(entry.value, locals);
+                }
+            }
+            HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+                self.collect_expr_pattern_locals(*base, locals);
+            }
+            HirExpr::Return { value, .. } => {
+                if let Some(v) = value {
+                    self.collect_expr_pattern_locals(*v, locals);
+                }
+            }
+            HirExpr::ImplicitMember { args, .. } => {
+                if let Some(call_args) = args {
+                    for arg in call_args {
+                        self.collect_expr_pattern_locals(arg.value, locals);
+                    }
+                }
+            }
+            // Closures have their own function scope; nested loops manage
+            // their own loop-scoped locals. Don't descend.
+            HirExpr::Closure { .. } | HirExpr::Loop { .. } => {}
+            // Leaves — no sub-expressions or patterns.
+            HirExpr::Literal { .. }
+            | HirExpr::Local(..)
+            | HirExpr::Def(..)
+            | HirExpr::OverloadSet { .. }
+            | HirExpr::Break { .. }
+            | HirExpr::Continue { .. }
+            | HirExpr::Error { .. } => {}
+        }
+    }
+
+    /// Walk a HIR pattern recursively, collecting all binding locals.
+    fn collect_pat_locals(&self, pat_id: HirPatId, locals: &mut Vec<LocalId>) {
+        match &self.hir.pats[pat_id] {
+            HirPat::Binding { local, .. } => {
+                locals.push(self.map_local(*local));
+            }
+            HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+                for arg in args {
+                    self.collect_pat_locals(arg.pattern, locals);
+                }
+            }
+            HirPat::Tuple { prefix, suffix, .. } => {
+                for &p in prefix.iter().chain(suffix.iter()) {
+                    self.collect_pat_locals(p, locals);
+                }
+            }
+            HirPat::Struct { fields, .. } => {
+                for field in fields {
+                    if let Some(pat) = field.pattern {
+                        self.collect_pat_locals(pat, locals);
+                    }
+                }
+            }
+            HirPat::Array { prefix, rest, suffix, .. } => {
+                for &p in prefix.iter().chain(suffix.iter()) {
+                    self.collect_pat_locals(p, locals);
+                }
+                if let Some(Some(rest_local)) = rest {
+                    locals.push(self.map_local(*rest_local));
+                }
+            }
+            HirPat::Or { alternatives, .. } => {
+                for &alt in alternatives {
+                    self.collect_pat_locals(alt, locals);
+                }
+            }
+            HirPat::At { binding, subpattern, .. } => {
+                locals.push(self.map_local(*binding));
+                self.collect_pat_locals(*subpattern, locals);
+            }
+            HirPat::Wildcard { .. }
+            | HirPat::Literal { .. }
+            | HirPat::Range { .. }
+            | HirPat::Error { .. } => {}
+        }
     }
 
     /// Find a loop by label (or the innermost loop if no label).

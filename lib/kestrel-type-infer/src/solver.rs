@@ -2320,12 +2320,20 @@ fn solve_member(
             });
         },
         Err(crate::resolve::MemberError::IsStatic { .. }) => {
-            ctx.poison(result);
-            return SolveResult::Error(InferError::MemberIsStatic {
-                receiver,
-                name: name.to_string(),
-                span,
-            });
+            // The member exists but is static — fall back to static resolution.
+            // Only error if static resolution also fails (the instance-on-static
+            // diagnostic is for cases where no static call is possible).
+            match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
+                Ok(res) => res,
+                Err(_) => {
+                    ctx.poison(result);
+                    return SolveResult::Error(InferError::MemberIsStatic {
+                        receiver,
+                        name: name.to_string(),
+                        span,
+                    });
+                },
+            }
         },
     };
 
