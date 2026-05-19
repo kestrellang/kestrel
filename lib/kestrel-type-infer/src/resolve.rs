@@ -89,6 +89,10 @@ pub enum MemberError {
         candidate: Entity,
         visibility: Vis,
     },
+    /// Member exists but is static — cannot be called on an instance.
+    IsStatic {
+        candidate: Entity,
+    },
 }
 
 /// Result of resolving an associated type.
@@ -368,9 +372,17 @@ impl TypeResolver for WorldResolver<'_> {
             .collect();
 
         if instance_candidates.is_empty() {
-            // One final probe: a matching member that was filtered out by
-            // visibility? If so, report NotVisible so diagnostics can say
-            // "is private" rather than "no member".
+            // Check if any candidates were filtered for being static.
+            // all_candidates was consumed by the filter, so re-check the
+            // original type members for a static match.
+            if let Some(static_member) = type_members.iter().find(|tm| {
+                self.ctx.has::<Static>(tm.entity)
+            }) {
+                return Err(MemberError::IsStatic {
+                    candidate: static_member.entity,
+                });
+            }
+            // A matching member that was filtered out by visibility?
             if let Some((candidate, visibility)) =
                 self.find_hidden_member(*entity, name, &extensions)
             {

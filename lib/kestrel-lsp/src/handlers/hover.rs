@@ -11,9 +11,11 @@
 //! decl span (no body to trim). Doc comments are read from the
 //! `Documentation` component attached during AST building.
 
-use kestrel_ast_builder::{CstNode, DeclSpan, Documentation, FileId, FilePath, NodeKind, Valued};
+use kestrel_ast_builder::{
+    CstNode, DeclSpan, Documentation, FileId, FilePath, Name, NodeKind, Valued,
+};
 use kestrel_hecs::{Entity, World};
-use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
+use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_syntax_tree::utils::get_name_span;
@@ -60,8 +62,52 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 // Range is the cursor's expression / identifier span — NOT the
                 // entity's whole DeclSpan, otherwise hovering anywhere on a name
                 // would highlight the entire declaration that defines it.
-                if let Some(md) = entity_hover_at(world, &sources, file_entity, offset, root) {
+                if let Some((mut md, entity)) =
+                    entity_hover_with_entity(world, &sources, file_entity, offset, root)
+                {
                     let range = entity_hover_range(world, file_entity, offset, root, &line_index);
+                    // "Defined in" link for members of a type.
+                    if let Some(parent) = world.parent_of(entity) {
+                        let parent_is_type = matches!(
+                            world.get::<NodeKind>(parent),
+                            Some(
+                                NodeKind::Struct
+                                    | NodeKind::Enum
+                                    | NodeKind::Protocol
+                                    | NodeKind::Extension
+                            )
+                        );
+                        if parent_is_type {
+                            if let Some(link) = entity_link(world, &sources, parent) {
+                                let name = world
+                                    .get::<Name>(parent)
+                                    .map(|n| n.0.clone())
+                                    .unwrap_or_else(|| "?".into());
+                                md.push_str(&format!("\n\nDefined in [{}]({})", name, link));
+                            }
+                        }
+                    }
+                    // Return type links: get the expression's inferred type.
+                    if let Some(body_entity) =
+                        semantic::body_entity_at(world, file_entity, offset)
+                    {
+                        let ctx = world.query_context();
+                        if let Some(hir) = ctx.query(LowerBody {
+                            entity: body_entity,
+                            root,
+                        }) {
+                            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
+                                if let Some(typed) = ctx.query(InferBody {
+                                    entity: body_entity,
+                                    root,
+                                }) {
+                                    if let Some(ty) = typed.expr_types.get(&expr_id) {
+                                        append_type_links(&mut md, world, &sources, ty);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     return Some((md, range));
                 }
 
@@ -72,7 +118,14 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 if let Some((entity, span)) =
                     crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
                 {
-                    if let Some(md) = render_entity(world, &sources, entity) {
+                    if let Some(mut md) = render_entity(world, &sources, entity) {
+                        if let Some(link) = entity_link(world, &sources, entity) {
+                            let name = world
+                                .get::<Name>(entity)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| "?".into());
+                            md.push_str(&format!("\n\n[{}]({})", name, link));
+                        }
                         let range = line_index.range_for(span.start, span.end);
                         return Some((md, range));
                     }
@@ -101,10 +154,46 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                     let kw = if local.is_mut { "var" } else { "let" };
                     let rendered = format_ty(world, &ty);
                     let mut md = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
-                    if let Some(link) = type_decl_link(world, &sources, &ty) {
-                        md.push_str(&format!("\n\n[Go to type definition]({link})"));
-                    }
+                    append_type_links(&mut md, world, &sources, &ty);
                     return Some((md, range));
+                }
+
+                // Pattern hover: cursor on a match pattern or destructuring.
+                if let Some(pat_id) = semantic::hir_pat_at(&hir, offset) {
+                    let pat = &hir.pats[pat_id];
+                    let span = semantic::hir_pat_span(pat);
+                    let range = line_index.range_for(span.start, span.end);
+                    let md = match pat {
+                        HirPat::Variant { entity, .. } => {
+                            let mut md = render_entity(world, &sources, *entity)?;
+                            if let Some(ty) = scrutinee_resolved_ty(&hir, &typed, pat_id) {
+                                let rendered = format_ty(world, &ty);
+                                md.push_str(&format!("\n\nType: `{}`", rendered));
+                                append_type_links(&mut md, world, &sources, &ty);
+                            }
+                            Some(md)
+                        },
+                        HirPat::Binding { local, .. } => {
+                            typed.local_types.get(local).map(|ty| {
+                                let l = &hir.locals[*local];
+                                let kw = if l.is_mut { "var" } else { "let" };
+                                let mut md = format!("```kestrel\n{} {}: {}\n```", kw, l.name, format_ty(world, ty));
+                                append_type_links(&mut md, world, &sources, ty);
+                                md
+                            })
+                        },
+                        _ => {
+                            scrutinee_resolved_ty(&hir, &typed, pat_id).map(|ty| {
+                                let rendered = format_ty(world, &ty);
+                                let mut md = format!("```kestrel\n{}\n```", rendered);
+                                append_type_links(&mut md, world, &sources, &ty);
+                                md
+                            })
+                        },
+                    };
+                    if let Some(md) = md {
+                        return Some((md, range));
+                    }
                 }
 
                 let expr_id = semantic::hir_expr_at(&hir, offset)?;
@@ -115,12 +204,14 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                         let local = &hir.locals[*local_id];
                         let kw = if local.is_mut { "var" } else { "let" };
                         let mut s = format!("```kestrel\n{} {}: {}\n```", kw, local.name, rendered);
-                        if let Some(link) = type_decl_link(world, &sources, ty) {
-                            s.push_str(&format!("\n\n[Go to type definition]({link})"));
-                        }
+                        append_type_links(&mut s, world, &sources, ty);
                         s
                     },
-                    _ => format!("```kestrel\n{}\n```", rendered),
+                    _ => {
+                        let mut s = format!("```kestrel\n{}\n```", rendered);
+                        append_type_links(&mut s, world, &sources, ty);
+                        s
+                    },
                 };
                 let span = semantic::hir_expr_span(&hir.exprs[expr_id]);
                 let range = line_index.range_for(span.start, span.end);
@@ -197,17 +288,18 @@ fn local_at_binding(
 }
 
 /// Locate the entity at the cursor and render its signature + docs as
-/// markdown. Returns `None` when the cursor isn't on a symbol that resolves
-/// to a declaration entity.
-fn entity_hover_at(
+/// markdown. Returns both the markdown and the entity so callers can
+/// append links (defining member, return type, etc).
+fn entity_hover_with_entity(
     world: &World,
     sources: &HashMap<String, String>,
     file_entity: Entity,
     offset: usize,
     root: Entity,
-) -> Option<String> {
+) -> Option<(String, Entity)> {
     let entity = entity_at_cursor(world, file_entity, offset, root)?;
-    render_entity(world, sources, entity)
+    let md = render_entity(world, sources, entity)?;
+    Some((md, entity))
 }
 
 /// Compute the LSP range to highlight for an entity hover. We want the
@@ -278,7 +370,11 @@ fn entity_at_cursor(
                 return entity_from_expr(&hir, body_entity, expr_id, &ctx, root);
             }
         }
+        // Inside a body but no expression at cursor — let the caller
+        // fall through to local_at_binding / inferred-type paths.
+        return None;
     }
+    // Outside any body (e.g. on a declaration signature).
     semantic::enclosing_decl_at(world, file_entity, offset)
 }
 
@@ -401,29 +497,150 @@ fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
     world.get::<FilePath>(fid.0).map(|p| p.0.clone())
 }
 
-/// Build a `file://` URL pointing at the head entity's declaration site for
-/// a Named type. Returns `None` for tuple/function/error/Self/Param types,
-/// or for Named types whose head entity is intrinsic (no `FilePath`,
-/// e.g. `lang.i64`).
-fn type_decl_link(
+/// Build a `file://` URL pointing at an entity's declaration site.
+/// Returns `None` for intrinsic entities with no `FilePath` (e.g. `lang.i64`).
+fn entity_link(
     world: &World,
     sources: &HashMap<String, String>,
-    ty: &ResolvedTy,
+    entity: Entity,
 ) -> Option<String> {
-    let entity = match ty {
-        ResolvedTy::Named { entity, .. } => *entity,
-        _ => return None,
-    };
     let path = entity_file_path(world, entity)?;
     let span = world.get::<DeclSpan>(entity)?.0.clone();
-    // Resolve the line + column for the decl's start so the editor opens
-    // at the right place.
     let source = sources.get(&path)?;
     let li = crate::position::LineIndex::new(source.clone());
     let pos = li.offset_to_position(span.start);
-    // VS Code's hover renders `file://` URIs as clickable links that open
-    // the file at the given line.
     Some(format!("file://{path}#L{}", pos.line + 1))
+}
+
+/// Collect `(display_name, link_url)` for every named type in a `ResolvedTy`,
+/// recursively walking generic arguments. Deduplicates by entity.
+fn collect_type_links(
+    world: &World,
+    sources: &HashMap<String, String>,
+    ty: &ResolvedTy,
+    out: &mut Vec<(Entity, String, String)>,
+) {
+    match ty {
+        ResolvedTy::Named { entity, args } => {
+            if !out.iter().any(|(e, _, _)| e == entity) {
+                if let Some(link) = entity_link(world, sources, *entity) {
+                    let name = world
+                        .get::<Name>(*entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| "?".into());
+                    out.push((*entity, name, link));
+                }
+            }
+            for arg in args {
+                collect_type_links(world, sources, arg, out);
+            }
+        }
+        ResolvedTy::Tuple(elems) => {
+            for elem in elems {
+                collect_type_links(world, sources, elem, out);
+            }
+        }
+        ResolvedTy::Function { params, ret } => {
+            for p in params {
+                collect_type_links(world, sources, p, out);
+            }
+            collect_type_links(world, sources, ret, out);
+        }
+        ResolvedTy::AssocProjection { base, .. } => {
+            collect_type_links(world, sources, base, out);
+        }
+        ResolvedTy::Opaque { bounds, .. } => {
+            for (_, args) in bounds {
+                for arg in args {
+                    collect_type_links(world, sources, arg, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Format collected type links as `[Name1](link) | [Name2](link)`.
+fn format_type_links(links: &[(Entity, String, String)]) -> Option<String> {
+    if links.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = links
+        .iter()
+        .map(|(_, name, url)| format!("[{}]({})", name, url))
+        .collect();
+    Some(parts.join(" | "))
+}
+
+/// Append type navigation links to a hover markdown string.
+fn append_type_links(
+    md: &mut String,
+    world: &World,
+    sources: &HashMap<String, String>,
+    ty: &ResolvedTy,
+) {
+    let mut links = Vec::new();
+    collect_type_links(world, sources, ty, &mut links);
+    if let Some(text) = format_type_links(&links) {
+        md.push_str(&format!("\n\n{}", text));
+    }
+}
+
+/// Find the scrutinee's resolved type for a pattern by locating the enclosing Match.
+fn scrutinee_resolved_ty(
+    hir: &HirBody,
+    typed: &TypedBody,
+    pat_id: kestrel_hir::body::HirPatId,
+) -> Option<ResolvedTy> {
+    for (_id, expr) in hir.exprs.iter() {
+        let HirExpr::Match {
+            scrutinee, arms, ..
+        } = expr
+        else {
+            continue;
+        };
+        let contains = arms.iter().any(|arm| pat_contains(hir, arm.pattern, pat_id));
+        if !contains {
+            continue;
+        }
+        return typed.expr_types.get(scrutinee).cloned();
+    }
+    None
+}
+
+/// Check if `root_pat` is or transitively contains `target`.
+fn pat_contains(
+    hir: &HirBody,
+    root: kestrel_hir::body::HirPatId,
+    target: kestrel_hir::body::HirPatId,
+) -> bool {
+    if root == target {
+        return true;
+    }
+    match &hir.pats[root] {
+        HirPat::Tuple { prefix, suffix, .. } => prefix
+            .iter()
+            .chain(suffix.iter())
+            .any(|&p| pat_contains(hir, p, target)),
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+            args.iter().any(|a| pat_contains(hir, a.pattern, target))
+        },
+        HirPat::Struct { fields, .. } => fields
+            .iter()
+            .filter_map(|f| f.pattern)
+            .any(|p| pat_contains(hir, p, target)),
+        HirPat::Array {
+            prefix, suffix, ..
+        } => prefix
+            .iter()
+            .chain(suffix.iter())
+            .any(|&p| pat_contains(hir, p, target)),
+        HirPat::Or { alternatives, .. } => {
+            alternatives.iter().any(|&p| pat_contains(hir, p, target))
+        },
+        HirPat::At { subpattern, .. } => pat_contains(hir, *subpattern, target),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -440,7 +657,7 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("/tmp/hover_test.ks".to_string(), src.to_string());
         let offset = src.find(needle).expect("needle not in source");
-        entity_hover_at(c.world(), &sources, f, offset, c.root())
+        entity_hover_with_entity(c.world(), &sources, f, offset, c.root()).map(|(md, _)| md)
     }
 
     #[test]
@@ -456,7 +673,7 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("/tmp/hover_test.ks".to_string(), src.to_string());
 
-        let md = entity_hover_at(c.world(), &sources, f, pos, c.root()).expect("entity hover");
+        let md = entity_hover_with_entity(c.world(), &sources, f, pos, c.root()).map(|(md, _)| md).expect("entity hover");
         assert!(md.contains("func bump(x: lang.i64) -> lang.i64"), "{md}");
         assert!(md.contains("Adds one to its argument."), "{md}");
     }
@@ -478,7 +695,7 @@ mod tests {
         // Type-position hovers aren't yet supported (see follow-up note).
         // For now, verify cursor on the struct's declaration name renders.
         let decl_pos = src.find("struct Point").unwrap() + "struct ".len();
-        let md = entity_hover_at(c.world(), &sources, f, decl_pos, c.root()).expect("entity hover");
+        let md = entity_hover_with_entity(c.world(), &sources, f, decl_pos, c.root()).map(|(md, _)| md).expect("entity hover");
         assert!(md.contains("struct Point"), "{md}");
         assert!(md.contains("A 2D point."), "{md}");
         // Struct body should be trimmed.
@@ -486,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn entity_hover_at_decl_identifier() {
+    fn entity_hover_on_decl_identifier() {
         let src = "module Test\n\
                    /// Greets you.\n\
                    func greet() -> lang.i64 { 0 }\n";
@@ -512,12 +729,12 @@ mod tests {
         c.build(f);
         let mut sources = HashMap::new();
         sources.insert("/tmp/hover_local.ks".to_string(), src.to_string());
-        let result = entity_hover_at(c.world(), &sources, f, pos, c.root());
+        let result = entity_hover_with_entity(c.world(), &sources, f, pos, c.root()).map(|(md, _)| md);
         assert!(result.is_none(), "entity hover fired on local: {result:?}");
     }
 
     #[test]
-    fn type_decl_link_returns_file_uri_for_named_type() {
+    fn entity_link_returns_file_uri() {
         let src = "module Test\nstruct Point {}\n";
         let mut c = Compiler::new();
         let f = c.set_source("/tmp/link.ks", src.into());
@@ -525,19 +742,49 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("/tmp/link.ks".to_string(), src.to_string());
 
-        use kestrel_ast_builder::{FileId as F, Name};
+        use kestrel_ast_builder::{FileId as F, Name as N};
         let point = c
             .world()
-            .iter_component::<Name>()
+            .iter_component::<N>()
             .find(|(e, n)| n.0 == "Point" && c.world().get::<F>(*e).map(|f2| f2.0) == Some(f))
             .map(|(e, _)| e)
             .expect("Point entity");
-        let ty = ResolvedTy::Named {
-            entity: point,
-            args: vec![],
-        };
-        let link = type_decl_link(c.world(), &sources, &ty).expect("link");
+        let link = entity_link(c.world(), &sources, point).expect("link");
         assert!(link.starts_with("file:///tmp/link.ks#L"), "{link}");
+    }
+
+    #[test]
+    fn collect_type_links_walks_generic_args() {
+        let src = "module Test\nstruct Box[T] {}\nstruct Inner {}\nfunc f() -> Box[Inner] { Box[Inner]() }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/links.ks", src.into());
+        c.build(f);
+        let mut sources = HashMap::new();
+        sources.insert("/tmp/links.ks".to_string(), src.to_string());
+
+        use kestrel_ast_builder::{FileId as F, Name as N};
+        let world = c.world();
+        let find = |name: &str| {
+            world
+                .iter_component::<N>()
+                .find(|(e, n)| n.0 == name && world.get::<F>(*e).map(|f2| f2.0) == Some(f))
+                .map(|(e, _)| e)
+                .unwrap()
+        };
+        let box_e = find("Box");
+        let inner_e = find("Inner");
+        let ty = ResolvedTy::Named {
+            entity: box_e,
+            args: vec![ResolvedTy::Named {
+                entity: inner_e,
+                args: vec![],
+            }],
+        };
+        let mut links = Vec::new();
+        collect_type_links(world, &sources, &ty, &mut links);
+        assert_eq!(links.len(), 2, "expected Box + Inner");
+        assert_eq!(links[0].1, "Box");
+        assert_eq!(links[1].1, "Inner");
     }
 
     #[test]

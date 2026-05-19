@@ -53,6 +53,13 @@ pub enum InferError {
         span: Span,
     },
 
+    /// Member exists but is static — cannot be accessed on an instance.
+    MemberIsStatic {
+        receiver: TyVar,
+        name: String,
+        span: Span,
+    },
+
     /// No associated type with this name on the container.
     NoAssociatedType {
         container: TyVar,
@@ -185,7 +192,7 @@ pub enum InferError {
     /// Referencing a known primitive method without calling it.
     /// `x.toString` (when the user meant `x.toString()`) — primitive methods
     /// cannot be used as first-class values.
-    PrimitiveMethodNotCalled {
+    MethodNotCalled {
         receiver: TyVar,
         method: String,
         span: Span,
@@ -208,6 +215,7 @@ impl InferError {
             | Self::NoMember { span, .. }
             | Self::AmbiguousMember { span, .. }
             | Self::MemberNotVisible { span, .. }
+            | Self::MemberIsStatic { span, .. }
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
             | Self::FromHir { span }
@@ -227,7 +235,7 @@ impl InferError {
             | Self::TupleIndexOnNonTuple { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. }
             | Self::MemberAccessOnPrimitive { span, .. }
-            | Self::PrimitiveMethodNotCalled { span, .. }
+            | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span } => span,
         }
     }

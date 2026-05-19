@@ -30,8 +30,6 @@ func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Con
     var timer = Timer.start();
     var simAccum: Int64 = 0;
 
-    simAccum.abs();
-
     while state.running {
         while let .Some(event) = i.getEvent() {
             match event {
@@ -64,7 +62,7 @@ func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Con
     r.finish(state, elapsed: timer.elapsed());
 }
 
-func main() -> Int32 {
+func main() {
     let cfg = Config.fromArgs();
     if cfg.headlessIters > 0 {
         var input = HeadlessInputManager(cfg.headlessIters);
@@ -74,5 +72,4 @@ func main() -> Int32 {
         var sdl = SdlGameRenderer(config: cfg);
         gameLoop(input: sdl, renderer: sdl, config: cfg);
     }
-    0
 }

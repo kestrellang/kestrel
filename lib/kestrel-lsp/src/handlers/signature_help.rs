@@ -18,14 +18,15 @@
 //!      character offsets for each parameter so VS Code can highlight by
 //!      label range.
 
-use kestrel_ast_builder::{AstType, Callable, Name, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{AstType, Callable, Computed, Name, NodeKind, Static, TypeAnnotation};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir_lower::LowerBody;
+use kestrel_name_res::TypeMembersByName;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_type_infer::InferBody;
-use kestrel_type_infer::result::TypedBody;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use rowan::TextSize;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
@@ -107,7 +108,7 @@ pub fn signature_help_at(
         entity: body_entity,
         root,
     });
-    let candidates = resolve_callees(&hir, typed.as_ref(), expr_id)?;
+    let candidates = resolve_callees(world, &hir, typed.as_ref(), expr_id, body_entity, root)?;
     if candidates.is_empty() {
         return None;
     }
@@ -215,21 +216,123 @@ fn enclosing_call_hir(body: &HirBody, offset: usize) -> Option<HirExprId> {
 }
 
 fn resolve_callees(
+    world: &World,
     hir: &HirBody,
     typed: Option<&TypedBody>,
     expr_id: HirExprId,
+    body_entity: Entity,
+    root: Entity,
 ) -> Option<Vec<Entity>> {
     match &hir.exprs[expr_id] {
         HirExpr::Call { callee, .. } => match &hir.exprs[*callee] {
             HirExpr::Def(e, _, _) => Some(vec![*e]),
             HirExpr::OverloadSet { candidates, .. } => Some(candidates.clone()),
-            _ => typed
-                .and_then(|t| t.resolutions.get(&expr_id).copied())
-                .map(|e| vec![e]),
+            _ => {
+                if let Some(e) = typed.and_then(|t| t.resolutions.get(&expr_id).copied()) {
+                    if world.get::<Callable>(e).is_some() && !world.has::<Computed>(e) {
+                        return Some(vec![e]);
+                    }
+                    // Computed property or non-callable — look up "subscript"
+                    // on the return type.
+                    if let Some(subs) = subscripts_on_property(world, e, body_entity, root) {
+                        return Some(subs);
+                    }
+                }
+                let type_entity = receiver_type_entity(typed, *callee)?;
+                let ctx = world.query_context();
+                let members = ctx.query(TypeMembersByName {
+                    type_entity,
+                    name: "subscript".to_string(),
+                    context: body_entity,
+                    root,
+                });
+                let candidates: Vec<Entity> = members
+                    .into_iter()
+                    .filter(|m| world.get::<Callable>(m.entity).is_some())
+                    .map(|m| m.entity)
+                    .collect();
+                if candidates.is_empty() { None } else { Some(candidates) }
+            },
         },
-        HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. } => typed
+        HirExpr::MethodCall { receiver, method, .. } => {
+            if let Some(e) = typed.and_then(|t| t.resolutions.get(&expr_id).copied()) {
+                if world.get::<Callable>(e).is_some() && !world.has::<Computed>(e) {
+                    return Some(vec![e]);
+                }
+                // Computed property or non-callable — look up "subscript"
+                // on the property's return type.
+                if let Some(subscripts) =
+                    subscripts_on_property(world, e, body_entity, root)
+                {
+                    return Some(subscripts);
+                }
+            }
+            // Fallback: inference didn't resolve this call. Look up
+            // members by name on the receiver's type.
+            let method_name = method.as_str()?;
+            let type_entity = receiver_type_entity(typed, *receiver)?;
+            let ctx = world.query_context();
+            let members = ctx.query(TypeMembersByName {
+                type_entity,
+                name: method_name.to_string(),
+                context: body_entity,
+                root,
+            });
+            let candidates: Vec<Entity> = members
+                .into_iter()
+                .filter(|m| {
+                    world.get::<Callable>(m.entity).is_some()
+                        && !world.has::<Static>(m.entity)
+                })
+                .map(|m| m.entity)
+                .collect();
+            if candidates.is_empty() { None } else { Some(candidates) }
+        },
+        HirExpr::ProtocolCall { .. } => typed
             .and_then(|t| t.resolutions.get(&expr_id).copied())
             .map(|e| vec![e]),
+        _ => None,
+    }
+}
+
+/// When a resolved entity is a computed property (not callable), read its
+/// return type and look up "subscript" members on that type. Handles the
+/// `"".chars(0)` pattern where `chars` is a property returning a subscriptable type.
+fn subscripts_on_property(
+    world: &World,
+    property_entity: Entity,
+    body_entity: Entity,
+    root: Entity,
+) -> Option<Vec<Entity>> {
+    use kestrel_hir::ty::HirTy;
+    let ctx = world.query_context();
+    let hir_ty = ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: property_entity,
+        root,
+    })?;
+    let type_entity = match hir_ty {
+        HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. } => entity,
+        _ => return None,
+    };
+    let members = ctx.query(TypeMembersByName {
+        type_entity,
+        name: "subscript".to_string(),
+        context: body_entity,
+        root,
+    });
+    let candidates: Vec<Entity> = members
+        .into_iter()
+        .filter(|m| world.get::<Callable>(m.entity).is_some())
+        .map(|m| m.entity)
+        .collect();
+    if candidates.is_empty() { None } else { Some(candidates) }
+}
+
+/// Extract the type entity from the receiver expression's inferred type.
+fn receiver_type_entity(typed: Option<&TypedBody>, receiver: HirExprId) -> Option<Entity> {
+    let resolved = typed?.expr_types.get(&receiver)?;
+    match resolved {
+        ResolvedTy::Named { entity, .. } | ResolvedTy::Param { entity } => Some(*entity),
         _ => None,
     }
 }
@@ -249,7 +352,7 @@ fn render_signature(
     // Initializers carry `init` as their canonical name; for hover-style
     // display, prefer the parent type name (e.g. `Point(x:, y:)`).
     let display_name = match (kind, raw_name.as_deref()) {
-        (Some(NodeKind::Initializer), _) => world
+        (Some(NodeKind::Initializer), _) | (Some(NodeKind::Subscript), _) => world
             .parent_of(entity)
             .and_then(|p| world.get::<Name>(p))
             .map(|n| n.0.clone())
@@ -487,5 +590,72 @@ mod tests {
                 sig.label
             );
         }
+    }
+
+    #[test]
+    fn method_call_shows_signature() {
+        let src = "module T\n\
+                   struct Foo { var x: lang.i64 }\n\
+                   extend Foo {\n\
+                       func bar(y: lang.i64) -> lang.i64 { self.x }\n\
+                   }\n\
+                   func main() {\n\
+                       var f = Foo(x: 1);\n\
+                       f.bar(2);\n\
+                   }\n";
+        let off = src.find("f.bar(").unwrap() + "f.bar(".len();
+        let sh = at_offset(src, off).expect("signature help for method call");
+        assert!(
+            sh.signatures[0].label.contains("bar("),
+            "{}",
+            sh.signatures[0].label
+        );
+    }
+
+    #[test]
+    fn method_call_fallback_with_errors() {
+        // Trailing incomplete expression causes inference errors, but
+        // signature help for bar() should still work via the fallback.
+        let src = "module T\n\
+                   struct Foo { var x: lang.i64 }\n\
+                   extend Foo {\n\
+                       func bar(y: lang.i64) -> lang.i64 { self.x }\n\
+                   }\n\
+                   func main() {\n\
+                       var f = Foo(x: 1);\n\
+                       f.bar(2);\n\
+                       var z = f.\n\
+                   }\n";
+        let off = src.find("f.bar(").unwrap() + "f.bar(".len();
+        let sh = at_offset(src, off).expect("signature help via fallback");
+        assert!(
+            sh.signatures[0].label.contains("bar("),
+            "{}",
+            sh.signatures[0].label
+        );
+    }
+
+    #[test]
+    fn subscript_shows_signature() {
+        let src = "module T\n\
+                   struct Grid { var w: lang.i64 }\n\
+                   extend Grid {\n\
+                       subscript(x: lang.i64, y: lang.i64) -> lang.i64 {\n\
+                           get { self.w }\n\
+                       }\n\
+                   }\n\
+                   func main() {\n\
+                       var g = Grid(w: 10);\n\
+                       g(1, 2);\n\
+                   }\n";
+        let off = src.find("g(1").unwrap() + "g(".len();
+        let sh = at_offset(src, off);
+        assert!(sh.is_some(), "subscript call should produce signature help");
+        let sh = sh.unwrap();
+        assert!(
+            sh.signatures[0].label.contains("x: lang.i64"),
+            "{}",
+            sh.signatures[0].label
+        );
     }
 }

@@ -118,6 +118,15 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
             },
 
+            InferError::MemberIsStatic { name, .. } => Diagnostic::error()
+                .with_message(format!(
+                    "'{name}' is a static member and cannot be used on an instance"
+                ))
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message(format!("use the type name to call '{name}'")),
+                ]),
+
             InferError::NoAssociatedType { name, .. } => Diagnostic::error()
                 .with_message(format!("no associated type '{name}'"))
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
@@ -258,7 +267,7 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                         .with_message(format!("'{name}' not available")),
                 ]),
 
-            InferError::PrimitiveMethodNotCalled { method, .. } => Diagnostic::error()
+            InferError::MethodNotCalled { method, .. } => Diagnostic::error()
                 .with_message(detail.to_string())
                 .with_labels(vec![
                     Label::primary(file_id, range)

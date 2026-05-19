@@ -5,7 +5,7 @@
 
 use kestrel_ast_builder::{Body, DeclSpan, FileId, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
-use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
+use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat, HirPatId};
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
 use rowan::TextSize;
@@ -80,6 +80,38 @@ pub fn hir_expr_at(body: &HirBody, offset: usize) -> Option<HirExprId> {
     let mut best: Option<(HirExprId, usize)> = None;
     for (id, expr) in body.exprs.iter() {
         let span = hir_expr_span(expr);
+        if span.start <= offset && offset <= span.end {
+            let len = span.end - span.start;
+            if best.map(|(_, l)| len < l).unwrap_or(true) {
+                best = Some((id, len));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+pub fn hir_pat_span(pat: &HirPat) -> Span {
+    match pat {
+        HirPat::Wildcard { span }
+        | HirPat::Binding { span, .. }
+        | HirPat::Tuple { span, .. }
+        | HirPat::Literal { span, .. }
+        | HirPat::Range { span, .. }
+        | HirPat::Variant { span, .. }
+        | HirPat::ImplicitVariant { span, .. }
+        | HirPat::Struct { span, .. }
+        | HirPat::Array { span, .. }
+        | HirPat::Or { span, .. }
+        | HirPat::At { span, .. }
+        | HirPat::Error { span } => span.clone(),
+    }
+}
+
+/// Find the smallest HIR pattern whose span contains `offset`.
+pub fn hir_pat_at(body: &HirBody, offset: usize) -> Option<HirPatId> {
+    let mut best: Option<(HirPatId, usize)> = None;
+    for (id, pat) in body.pats.iter() {
+        let span = hir_pat_span(pat);
         if span.start <= offset && offset <= span.end {
             let len = span.end - span.start;
             if best.map(|(_, l)| len < l).unwrap_or(true) {

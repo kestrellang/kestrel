@@ -404,6 +404,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             // method calls, field/property access) say "no member 'X' on
             // type 'T'". The init wording is special-cased because lib1's
             // `resolve_delegating_init` path produced its own diagnostic.
+            if name == "subscript" {
+                return format!(
+                    "no matching subscript on type '{}'",
+                    describe_tyvar(ctx, *receiver)
+                );
+            }
             let kind = if *is_call && name == "init" {
                 "method"
             } else {
@@ -421,6 +427,13 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         },
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
+        },
+        InferError::MemberIsStatic { receiver, name, .. } => {
+            format!(
+                "'{}' is a static member of '{}' and cannot be used on an instance",
+                name,
+                describe_tyvar(ctx, *receiver)
+            )
         },
         InferError::NoAssociatedType {
             container, name, ..
@@ -519,10 +532,10 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             name,
             describe_tyvar(ctx, *receiver)
         ),
-        InferError::PrimitiveMethodNotCalled {
+        InferError::MethodNotCalled {
             receiver, method, ..
         } => format!(
-            "primitive method '{}' on '{}' must be called",
+            "method '{}' on '{}' must be called",
             method,
             describe_tyvar(ctx, *receiver)
         ),

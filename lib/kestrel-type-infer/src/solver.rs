@@ -908,7 +908,7 @@ fn member_not_found_error(
 ) -> InferError {
     if let Some(family) = primitive_family(ctx, recv_kind) {
         if !is_call && is_known_primitive_method(family, name) {
-            return InferError::PrimitiveMethodNotCalled {
+            return InferError::MethodNotCalled {
                 receiver,
                 method: name.to_string(),
                 span,
@@ -920,6 +920,32 @@ fn member_not_found_error(
                 name: name.to_string(),
                 span,
             };
+        }
+    }
+    // When accessed without `()`, check if there's a method with this name.
+    if !is_call {
+        if let TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } = recv_kind {
+            let has_callable = |parent: Entity| -> bool {
+                ctx.query_ctx.children_of(parent).iter().any(|&child| {
+                    ctx.query_ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
+                        && ctx.query_ctx.get::<Callable>(child).is_some()
+                })
+            };
+            let mut found = has_callable(*entity);
+            if !found {
+                let extensions = ctx.query_ctx.query(kestrel_name_res::ExtensionsFor {
+                    target: *entity,
+                    root: ctx.root,
+                });
+                found = extensions.iter().any(|&ext| has_callable(ext));
+            }
+            if found {
+                return InferError::MethodNotCalled {
+                    receiver,
+                    method: name.to_string(),
+                    span,
+                };
+            }
         }
     }
     InferError::NoMember {
@@ -2285,14 +2311,19 @@ fn solve_member(
             }
         },
         Err(crate::resolve::MemberError::NotVisible { visibility, .. }) => {
-            // Poison the call's result TyVar so downstream constraints (e.g.
-            // the implicit block-type unification for a void function body)
-            // absorb silently instead of cascading into "could not infer type".
             ctx.poison(result);
             return SolveResult::Error(InferError::MemberNotVisible {
                 receiver,
                 name: name.to_string(),
                 visibility,
+                span,
+            });
+        },
+        Err(crate::resolve::MemberError::IsStatic { .. }) => {
+            ctx.poison(result);
+            return SolveResult::Error(InferError::MemberIsStatic {
+                receiver,
+                name: name.to_string(),
                 span,
             });
         },

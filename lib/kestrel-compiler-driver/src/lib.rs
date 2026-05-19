@@ -234,6 +234,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
         InferError::FromHir { .. } => "FromHir",
@@ -253,7 +254,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::TupleIndexOnNonTuple { .. } => "TupleIndexOnNonTuple",
         InferError::TupleIndexOutOfBounds { .. } => "TupleIndexOutOfBounds",
         InferError::MemberAccessOnPrimitive { .. } => "MemberAccessOnPrimitive",
-        InferError::PrimitiveMethodNotCalled { .. } => "PrimitiveMethodNotCalled",
+        InferError::MethodNotCalled { .. } => "MethodNotCalled",
         InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
     }
 }
@@ -280,6 +281,12 @@ fn format_error(err: &InferError) -> String {
         InferError::MemberNotVisible { name, .. } => {
             format!(
                 "MemberNotVisible '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
+        InferError::MemberIsStatic { name, .. } => {
+            format!(
+                "MemberIsStatic '{}' at {}:{}",
                 name, span.file_id, span.start
             )
         },
@@ -382,7 +389,7 @@ fn format_error(err: &InferError) -> String {
             "MemberAccessOnPrimitive '{}' at {}:{}",
             name, span.file_id, span.start
         ),
-        InferError::PrimitiveMethodNotCalled { method, .. } => format!(
+        InferError::MethodNotCalled { method, .. } => format!(
             "PrimitiveMethodNotCalled '{}' at {}:{}",
             method, span.file_id, span.start
         ),
