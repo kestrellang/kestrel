@@ -184,6 +184,9 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     // Install the VS Code / Cursor extension if an editor is available.
     installEditorExtension(channel: channel, platform: platform);
 
+    // Install Claude Code / Codex plugins if the CLIs are available.
+    installAgentPlugins();
+
     .Ok(toolchainName)
 }
 
@@ -716,6 +719,23 @@ public func installEditorExtension(channel channel: String, platform platform: P
     rmVsix.append("rm -f ");
     rmVsix.append(tmpVsix);
     let _ = spawn(rmVsix);
+}
+
+// ============================================================================
+// AGENT PLUGINS
+// ============================================================================
+
+/// Installs the Kestrel plugin for Claude Code and Codex if either CLI
+/// is detected. Silently skips if neither is available.
+func installAgentPlugins() {
+    if spawn("which claude > /dev/null 2>&1") == 0 {
+        let _ = println("Installing Kestrel plugin for Claude Code...");
+        let _ = spawn("claude plugin add kestrellang/kestrel-plugin 2>/dev/null");
+    }
+    if spawn("which codex > /dev/null 2>&1") == 0 {
+        let _ = println("Installing Kestrel plugin for Codex...");
+        let _ = spawn("codex plugin add kestrellang/kestrel-plugin 2>/dev/null");
+    }
 }
 
 // ============================================================================
