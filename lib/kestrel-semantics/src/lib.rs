@@ -603,15 +603,12 @@ fn nominal_copy_semantics_impl(
         };
     }
 
-    // Stdlib-less fallback: the Copyable builtin isn't resolvable when the
-    // test input doesn't import std.core, but `: not Copyable` is still
-    // meaningful syntactically. Match the last path segment by name so a
-    // minimal `protocol Copyable {}` + `: not Copyable` still classifies
-    // as NotCopyable. Mirrors the same fallback the legacy HIR
-    // move-tracker used; without it `stdlib: false` test fixtures lose
-    // their non-copyable semantics under Stage 7.
-    if copyable.is_none()
-        && let Some(conf) = ctx.get::<Conformances>(entity)
+    // Fallback: `: not Copyable` is meaningful syntactically even when the
+    // protocol path did not resolve to the builtin (for example, fixtures or
+    // modules that did not import std.core.Copyable). Match the last segment by
+    // name so the semantic copy classifier still agrees with the parser-level
+    // negative conformance.
+    if let Some(conf) = ctx.get::<Conformances>(entity)
         && conf.0.iter().any(|item| {
             matches!(
                 item,

@@ -50,7 +50,7 @@ func run() -> Result[Int64, Int64] {
 
 func main() -> lang.i64 {
     match run() {
-        .Ok(_) => 0,
+        .Ok(_) => if deinit_count == 1 { 0 } else { 2 },
         .Err(_) => 1
     }
 }
