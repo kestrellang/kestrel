@@ -79,11 +79,11 @@ func main() {
     });
 
     let port: UInt16 = 8095;
-    let _ = println("Starting APOD viewer on http://localhost:8095");
+    println("Starting APOD viewer on http://localhost:8095");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = println("Error: " + e.description());
+            println("Error: " + e.description());
         }
     }
 }

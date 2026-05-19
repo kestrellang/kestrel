@@ -203,7 +203,7 @@ public func errorPageHtml(msg: String, selectedDate: String) -> String {
     h.append("<a class=\"brand\" style=\"position:static;display:inline-flex;margin-bottom:32px\" href=\"/\"><span class=\"brand-mark\">&#x2726;</span><span>Kestrel APOD</span></a>");
     t.put("msg", msg);
     h.append(t.render("<div class=\"error\">{msg}</div>"));
-    let _ = selectedDate;
+     selectedDate;
     h.append("</div></div></body></html>");
     h
 }

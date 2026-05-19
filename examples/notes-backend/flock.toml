@@ -1,0 +1,15 @@
+[package]
+name = "notes-backend"
+version = "0.1.0"
+description = "REST JSON API for notes"
+author = ""
+license = ""
+repository = ""
+website = ""
+documentation = ""
+
+[dependencies]
+perch = { path = "../../lang/perch" }
+talon-sqlite = { path = "../../lang/talon-sqlite" }
+quill = { path = "../../lang/quill" }
+quill-json = { path = "../../lang/quill-json" }

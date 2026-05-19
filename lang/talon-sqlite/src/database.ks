@@ -12,7 +12,7 @@
 
 module talon.sqlite.database
 
-import talon.sqlite.connection.(Connection, execRawOnDb)
+import talon.sqlite.connection.(Connection, execRawOnDb, openRawDb)
 import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(FromRow)
@@ -30,15 +30,17 @@ public struct Database: SqliteExecutor {
     ///
     /// Use `":memory:"` for a transient in-memory database.
     public init(path: String) throws SqliteError {
-        self.conn = try Connection.open(path);
+        self.conn = Connection(db: RawPointer.nullPointer());
+        // openRawDb returns RawPointer (no deinit), safe to extract via try
+        self.conn = Connection(db: try openRawDb(path));
     }
 
     public func execute(sql: SQL) -> () throws SqliteError {
-        try self.conn.execute(sql);
+        self.conn.execute(sql)
     }
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
-        try self.conn.query[R](sql)
+        self.conn.query[R](sql)
     }
 
     /// Runs `body` inside a BEGIN/COMMIT transaction.
@@ -56,7 +58,7 @@ public struct Database: SqliteExecutor {
         try execRawOnDb(self.conn.db, "BEGIN");
         let tx = Transaction(db: self.conn.db);
         match body(tx) {
-            .Ok(_) => try execRawOnDb(self.conn.db, "COMMIT"),
+            .Ok(_) => execRawOnDb(self.conn.db, "COMMIT"),
             .Err(e) => {
                 let _ = execRawOnDb(self.conn.db, "ROLLBACK");
                 throw e;

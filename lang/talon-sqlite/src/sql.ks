@@ -41,11 +41,15 @@ public struct SqlAccumulator: Interpolatable, Cloneable {
         self.template.append("?");
         self.bindings.append(value.toSqliteValue());
     }
+
+    public mutating func build() -> SQL {
+        SQL(template: self.template.build(), bindings: self.bindings)
+    }
 }
 
 /// A parameterized SQL query with `?` placeholders and bound values.
 public struct SQL: ExpressibleByStringInterpolation, Cloneable {
-    type Interpolation = SqlAccumulator
+    public type Interpolation = SqlAccumulator
 
     public var template: String
     public var bindings: Array[SqliteValue]
@@ -55,12 +59,12 @@ public struct SQL: ExpressibleByStringInterpolation, Cloneable {
         self.bindings = bindings;
     }
 
-    public init(stringLiteral value: lang.str) {
-        self.template = String(stringLiteral: value);
-        self.bindings = Array[SqliteValue]();
+    public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
+        self.bindings = [];
+        self.template = String(stringLiteral: ptr, length);
     }
 
-    public init(interpolation interpolation: SqlAccumulator) {
+    public init(interpolation: SqlAccumulator) {
         var acc = interpolation;
         self.template = acc.template.build();
         self.bindings = acc.bindings;

@@ -1,0 +1,46 @@
+/auth/create
+  email: string
+  firstName: string
+  lastName: string
+  password: string
+
+/auth/login
+  email: string
+  password: string
+
+returns a jwt
+
+(authenticated routes)
+requires a JWT
+
+GET /notes
+- Lists all notes, paginated, sorted by most recent
+
+PUT /notes
+- Create a new note
+
+POST /notes/[id]
+- Updates a note
+
+DELETE /notes/[id]
+- Deletes a note
+
+Folders
+
+GET /folders
+- Returns folders, paginated, by creation date
+
+PUT /folders
+- Creates a folder
+
+POST /folders/[id]
+- Updates a folder
+
+DELETE /folders/[id]
+- Deletes a folder
+- Doesn't delete notes, unlinks them
+
+And we need a route to update the folder a note is in
+
+
+All pagination can be up to 100 per page, default 25

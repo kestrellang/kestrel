@@ -114,11 +114,11 @@ func main() {
     });
 
     let port: UInt16 = 8080;
-    let _ = println("Starting weather dashboard on http://localhost:8080");
+     println("Starting weather dashboard on http://localhost:8080");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = println("Error: " + e.description());
+             println("Error: " + e.description());
         }
     }
 }

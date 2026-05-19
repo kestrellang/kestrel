@@ -156,11 +156,11 @@ func main() {
     });
 
     let port: UInt16 = 8090;
-    let _ = println("Wordle running on http://localhost:8090");
+     println("Wordle running on http://localhost:8090");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = println("Error: " + e.description());
+             println("Error: " + e.description());
         }
     }
 }

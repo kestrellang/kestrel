@@ -31,7 +31,7 @@ public struct Row: Cloneable {
         guard index < self.columns.count else {
             throw SqliteError.Error("column index \(index) out of bounds (row has \(self.columns.count) columns)");
         }
-        try T.fromSqliteValue(self.columns(index))
+        T.fromSqliteValue(self.columns(index))
     }
 
     /// Returns the raw SqliteValue at `index`.

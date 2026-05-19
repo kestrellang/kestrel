@@ -19,7 +19,7 @@ func SQLITE_TRANSIENT() -> RawPointer {
 // Helper: read the error message from a sqlite3 db handle
 func errorMessage(db: RawPointer) -> String {
     let msgPtr = ffi.sqlite3_errmsg(db);
-    guard not msgPtr.isNull else { return "unknown error" };
+    guard not msgPtr.isNull else { return "unknown error" }
     let cstr = CString(raw: msgPtr.cast[UInt8]());
     String(from: cstr)
 }
@@ -46,6 +46,7 @@ func bindParams(stmt: RawPointer, bindings: Array[SqliteValue]) -> () throws Sql
         }
         i = i + 1;
     }
+    .Ok(())
 }
 
 // Helper: prepare+bind+step with no result rows
@@ -127,6 +128,7 @@ func execRawOnDb(db: RawPointer, sql: String) -> () throws SqliteError {
     if result != ffi.SQLITE_OK() {
         throw SqliteError.Error(errorMessage(db));
     }
+    .Ok(())
 }
 
 // Helper: read all columns from the current row into an owned Row
@@ -157,35 +159,37 @@ func readRow(stmt: RawPointer) -> Row {
     Row(columns: columns)
 }
 
+// Opens a sqlite3 database and returns the raw handle.
+// Separated from Connection to avoid try-from-Result with a deinit type.
+func openRawDb(path: String) -> RawPointer throws SqliteError {
+    var dbRaw = RawPointer.nullPointer();
+    let cpath = path.toCString();
+    let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
+    cpath.free();
+
+    if result != ffi.SQLITE_OK() {
+        if not dbRaw.isNull {
+            let _ = ffi.sqlite3_close(dbRaw);
+        }
+        throw SqliteError.Error("failed to open database: " + path);
+    }
+    .Ok(dbRaw)
+}
+
 /// Internal connection wrapping a sqlite3 handle.
 struct Connection {
     var db: RawPointer
 
-    static func open(path: String) -> Connection throws SqliteError {
-        var dbRaw = RawPointer.nullPointer();
-        let cpath = path.toCString();
-        let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
-        cpath.free();
-
-        if result != ffi.SQLITE_OK() {
-            if not dbRaw.isNull {
-                let _ = ffi.sqlite3_close(dbRaw);
-            }
-            throw SqliteError.Error("failed to open database: " + path);
-        }
-        Connection(db: dbRaw)
-    }
-
     func execute(sql: SQL) -> () throws SqliteError {
-        try executeOnDb(self.db, sql);
+        executeOnDb(self.db, sql)
     }
 
     func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
-        try queryOnDb[R](self.db, sql)
+        queryOnDb[R](self.db, sql)
     }
 
     func execRaw(sql: String) -> () throws SqliteError {
-        try execRawOnDb(self.db, sql);
+        execRawOnDb(self.db, sql)
     }
 
     deinit {

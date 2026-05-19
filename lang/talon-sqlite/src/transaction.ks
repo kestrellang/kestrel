@@ -21,10 +21,10 @@ public struct Transaction: SqliteExecutor {
     }
 
     public func execute(sql: SQL) -> () throws SqliteError {
-        try executeOnDb(self.db, sql);
+        executeOnDb(self.db, sql)
     }
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
-        try queryOnDb[R](self.db, sql)
+        queryOnDb[R](self.db, sql)
     }
 }

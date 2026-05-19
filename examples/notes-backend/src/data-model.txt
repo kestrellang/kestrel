@@ -1,0 +1,32 @@
+Note {
+  id: int;
+  title: text;
+  body: text;
+
+  folder: int?;
+  user: int;
+
+  createdAt: text;
+  updatedAt: text;
+}
+
+Folder {
+  id: int;
+  name: int;
+
+  user: int;
+
+  createdAt: text;
+  updatedAt: text;
+}
+
+User {
+  id: int;
+  firstName: text;
+  lastName: text;
+  email: text;
+  salt: text;
+  passwordHash: text;
+
+  createdAt: text;
+}

@@ -141,16 +141,16 @@ public struct Renderer {
     var raw: lang.ptr[lang.i8]
 
     public func clear(color: Color) {
-        let _ = sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
-        let _ = sdlRenderClear(self.raw);
+         sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
+         sdlRenderClear(self.raw);
     }
 
     public func setColor(color: Color) {
-        let _ = sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
+         sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
     }
 
     public func fill(rect: Rectangle, color: Color) {
-        let _ = sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
+         sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
         sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
     }
 

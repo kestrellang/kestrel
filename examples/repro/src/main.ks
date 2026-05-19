@@ -17,7 +17,7 @@ func serve(port: UInt16) -> Result[(), IoError] {
         let bytesRead = recv(fd, slice.pointer, slice.count, 0);
         println("recv=\(bytesRead)");
         let resp = stringToBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK");
-        let _ = send(fd, resp.asPointer(), resp.count, 0);
+         send(fd, resp.asPointer(), resp.count, 0);
         println("sent response");
     }
 }

@@ -3269,6 +3269,23 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, force_all: bool) -> bool {
         std::collections::HashSet::new()
     } else {
         let mut set = std::collections::HashSet::new();
+
+        // Block StringInterpolation accumulators that have a pending
+        // InterpolationLink — the calling context (e.g. a function parameter
+        // typed as SQL) may still drive the result type and resolve the
+        // accumulator via associated-type lookup, so don't default yet.
+        for constraint in &ctx.constraints {
+            if let Constraint::InterpolationLink { acc_tv, .. } = constraint {
+                let acc_resolved = ctx.resolve(*acc_tv);
+                if matches!(
+                    &ctx.types[acc_resolved.0 as usize],
+                    TySlot::Unresolved { literal: Some(LiteralKind::StringInterpolation) }
+                ) {
+                    set.insert(acc_resolved);
+                }
+            }
+        }
+
         for constraint in &ctx.constraints {
             let (receiver, args) = match constraint {
                 Constraint::Member { receiver, args, .. } => (*receiver, args),
