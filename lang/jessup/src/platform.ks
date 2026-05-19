@@ -35,6 +35,34 @@ public struct Platform: Cloneable {
         s.append(self.os);
         s
     }
+
+    /// Returns the VS Code extension target name for this platform.
+    /// e.g., "darwin-arm64" or "linux-x64"
+    public func vsceTarget() -> String {
+        var vsOs = "";
+        if self.os == "apple-darwin" {
+            vsOs = "darwin"
+        } else if self.os == "unknown-linux" {
+            vsOs = "linux"
+        } else {
+            vsOs = self.os
+        };
+
+        var vsArch = "";
+        if self.arch == "aarch64" {
+            vsArch = "arm64"
+        } else if self.arch == "x86_64" {
+            vsArch = "x64"
+        } else {
+            vsArch = self.arch
+        };
+
+        var s = String();
+        s.append(vsOs);
+        s.append("-");
+        s.append(vsArch);
+        s
+    }
 }
 
 // ============================================================================

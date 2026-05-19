@@ -274,8 +274,9 @@ public func fetchVsixRelease(channel channel: String, platform platform: Platfor
 }
 
 /// Finds the .vsix asset in a release for the given platform.
+/// VSIX files use VS Code target names (e.g. darwin-arm64, linux-x64).
 func findVsixAsset(json json: Value, platform platform: Platform) -> Result[String, JessupError] {
-    let target = platform.assetTarget();
+    let target = platform.vsceTarget();
 
     match json.value(forKey: "assets") {
         .None => return .Err(JessupError.ParseError("missing assets in release")),

@@ -192,8 +192,14 @@ impl LanguageServer for Backend {
                 .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from);
             let mut state = self.state.lock().await;
-            state.stdlib_path = stdlib;
+            // Auto-discover stdlib if not explicitly configured:
+            //   1. KESTREL_STD env var
+            //   2. <exe>/../lib/std (jessup toolchain layout)
+            state.stdlib_path = stdlib.or_else(default_std_path);
             state.flock_cache_path = cache;
+        } else {
+            let mut state = self.state.lock().await;
+            state.stdlib_path = default_std_path();
         }
 
         if let Some(folders) = params.workspace_folders {
@@ -527,4 +533,48 @@ impl LanguageServer for Backend {
 
         self.refresh().await;
     }
+}
+
+/// Auto-discover the stdlib directory, in priority order:
+///   1. `KESTREL_STD` env var
+///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
+///   3. `~/.jessup/bin/kestrel` symlink → resolve to toolchain's lib/std
+fn default_std_path() -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os("KESTREL_STD") {
+        let p = std::path::PathBuf::from(p);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(p) = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("lib/std"))
+        {
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    // Follow the jessup kestrel symlink to find the active toolchain's stdlib.
+    // Covers the case where a bundled VSIX LSP binary can't use exe-relative.
+    if let Some(home) = std::env::var_os("HOME") {
+        let kestrel_link = std::path::PathBuf::from(home).join(".jessup/bin/kestrel");
+        if let Ok(resolved) = std::fs::read_link(&kestrel_link) {
+            let std_path = resolved
+                .parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("lib/std"));
+            if let Some(p) = std_path {
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    None
 }
