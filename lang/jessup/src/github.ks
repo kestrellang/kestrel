@@ -37,15 +37,33 @@ func repoApi() -> String {
     "https://api.github.com/repos/kestrellang/kestrel/releases"
 }
 
+/// Builds a Swoop client with GitHub API headers and optional auth.
+/// Reads GITHUB_TOKEN from the environment for private repo access.
+func githubClient() -> Swoop {
+    var client = Swoop();
+    client = client.header("Accept", "application/vnd.github+json");
+    client = client.header("User-Agent", "jessup/0.1.0");
+    match getenv("GITHUB_TOKEN") {
+        .Some(token) => {
+            if token.byteCount > 0 {
+                var auth = String();
+                auth.append("Bearer ");
+                auth.append(token);
+                client = client.header("Authorization", auth);
+            }
+        },
+        .None => {}
+    }
+    client
+}
+
 /// Fetches the latest release matching the given channel and platform.
 ///
 /// For "stable": finds the latest non-prerelease release.
 /// For "nightly": finds the latest release tagged "nightly".
 /// For a specific version like "1.0.0": finds that exact tag.
 public func fetchRelease(channel channel: String, platform platform: Platform) -> Result[Release, JessupError] {
-    var client = Swoop();
-    client = client.header("Accept", "application/vnd.github+json");
-    client = client.header("User-Agent", "jessup/0.1.0");
+    let client = githubClient();
 
     if channel == "nightly" {
         // Fetch nightly release by tag
@@ -99,9 +117,7 @@ public func fetchRelease(channel channel: String, platform platform: Platform) -
 
 /// Fetches all available release tags from GitHub.
 public func fetchAllReleases() -> Result[Array[String], JessupError] {
-    var client = Swoop();
-    client = client.header("Accept", "application/vnd.github+json");
-    client = client.header("User-Agent", "jessup/0.1.0");
+    let client = githubClient();
 
     match client.fetch(repoApi()) {
         .Err(_) => .Err(JessupError.NetworkError("failed to fetch releases")),
@@ -119,9 +135,7 @@ public func fetchAllReleases() -> Result[Array[String], JessupError] {
 
 /// Fetches the latest jessup binary URL for self-update.
 public func fetchJessupRelease(platform platform: Platform) -> Result[String, JessupError] {
-    var client = Swoop();
-    client = client.header("Accept", "application/vnd.github+json");
-    client = client.header("User-Agent", "jessup/0.1.0");
+    let client = githubClient();
 
     let url = repoApi() + "/latest";
     match client.fetch(url) {
@@ -252,9 +266,7 @@ func vsixRepoApi() -> String {
 
 /// Fetches the VS Code extension (.vsix) URL for the given platform from the latest release.
 public func fetchVsixRelease(channel channel: String, platform platform: Platform) -> Result[String, JessupError] {
-    var client = Swoop();
-    client = client.header("Accept", "application/vnd.github+json");
-    client = client.header("User-Agent", "jessup/0.1.0");
+    let client = githubClient();
 
     // The VSIX is published on the kestrel-vscode repo.
     var url = vsixRepoApi() + "/latest";

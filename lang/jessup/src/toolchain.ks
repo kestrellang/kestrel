@@ -90,7 +90,18 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
 
     // Download using curl (handles GitHub redirects)
     var curlCmd = String();
-    curlCmd.append("curl -sL -o ");
+    curlCmd.append("curl -sL ");
+    match getenv("GITHUB_TOKEN") {
+        .Some(token) => {
+            if token.byteCount > 0 {
+                curlCmd.append("-H 'Authorization: Bearer ");
+                curlCmd.append(token);
+                curlCmd.append("' -H 'Accept: application/octet-stream' ");
+            }
+        },
+        .None => {}
+    }
+    curlCmd.append("-o ");
     curlCmd.append(archivePath);
     curlCmd.append(" ");
     curlCmd.append(release.assetUrl);
@@ -575,7 +586,18 @@ public func selfUpdate() -> Result[(), JessupError] {
     archivePath.append("/jessup.tar.gz");
 
     var curlCmd = String();
-    curlCmd.append("curl -sL -o ");
+    curlCmd.append("curl -sL ");
+    match getenv("GITHUB_TOKEN") {
+        .Some(selfToken) => {
+            if selfToken.byteCount > 0 {
+                curlCmd.append("-H 'Authorization: Bearer ");
+                curlCmd.append(selfToken);
+                curlCmd.append("' -H 'Accept: application/octet-stream' ");
+            }
+        },
+        .None => {}
+    }
+    curlCmd.append("-o ");
     curlCmd.append(archivePath);
     curlCmd.append(" ");
     curlCmd.append(downloadUrl);
@@ -651,7 +673,18 @@ public func installEditorExtension(channel channel: String, platform platform: P
     // Download the VSIX to a temp file.
     let tmpVsix = "/tmp/jessup-kestrel-extension.vsix";
     var dlCmd = String();
-    dlCmd.append("curl -sL -o ");
+    dlCmd.append("curl -sL ");
+    match getenv("GITHUB_TOKEN") {
+        .Some(vsixToken) => {
+            if vsixToken.byteCount > 0 {
+                dlCmd.append("-H 'Authorization: Bearer ");
+                dlCmd.append(vsixToken);
+                dlCmd.append("' -H 'Accept: application/octet-stream' ");
+            }
+        },
+        .None => {}
+    }
+    dlCmd.append("-o ");
     dlCmd.append(tmpVsix);
     dlCmd.append(" ");
     dlCmd.append(vsixUrl);
