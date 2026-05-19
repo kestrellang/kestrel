@@ -177,9 +177,10 @@ fn entity_contains(
                 };
                 for param in &callable.params {
                     if let Some(ref ty) = param.ty
-                        && type_contains(cx, target_enum, ty, entity, visited) {
-                            return true;
-                        }
+                        && type_contains(cx, target_enum, ty, entity, visited)
+                    {
+                        return true;
+                    }
                 }
             }
         },

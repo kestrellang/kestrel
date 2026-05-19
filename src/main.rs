@@ -400,12 +400,12 @@ fn default_std_path() -> Result<PathBuf, StdLookupError> {
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("lib/std"))
-        {
-            if p.exists() {
-                return Ok(p);
-            }
-            tried.push(("exe-relative", p));
+    {
+        if p.exists() {
+            return Ok(p);
         }
+        tried.push(("exe-relative", p));
+    }
 
     let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
     if baked.exists() {
@@ -436,10 +436,7 @@ fn has_errors(compiler: &Compiler) -> bool {
 }
 
 /// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
-fn emit_analyze_errors(
-    compiler: &Compiler,
-    summary: &kestrel_compiler_driver::AnalyzeSummary,
-) {
+fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::AnalyzeSummary) {
     use codespan_reporting::diagnostic::{Diagnostic, Label};
     use kestrel_compiler::diagnostic::WorldFiles;
 

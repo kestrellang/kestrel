@@ -589,11 +589,8 @@ fn substitute_type_inner(
                 for candidate in &candidates {
                     let sub_val = rec(candidate);
                     if is_concrete(&sub_val)
-                        && let Some(resolved) = module.resolve_associated_type(
-                            alt_proto.entity,
-                            &sub_val,
-                            name,
-                        )
+                        && let Some(resolved) =
+                            module.resolve_associated_type(alt_proto.entity, &sub_val, name)
                     {
                         let fully = rec(&resolved);
                         if is_concrete(&fully) {

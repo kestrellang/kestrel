@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use kestrel_ast_builder::{Name, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::MirTy;
-use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::InferBody;
+use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::LowerCtx;
 use crate::ty::lower_named_type_from_entity;
@@ -126,7 +126,10 @@ fn substitute_resolved_ty(
             }
             ty.clone()
         },
-        ResolvedTy::Named { entity, args: ty_args } => ResolvedTy::Named {
+        ResolvedTy::Named {
+            entity,
+            args: ty_args,
+        } => ResolvedTy::Named {
             entity: *entity,
             args: ty_args
                 .iter()

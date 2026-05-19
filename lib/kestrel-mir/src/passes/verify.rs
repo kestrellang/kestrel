@@ -11,13 +11,13 @@ use std::fmt;
 
 use kestrel_hecs::Entity;
 
+use super::drop_elaboration;
+use crate::body::ScopeId;
+use crate::item::FunctionKind;
 use crate::{
     BasicBlock, Callee, CopyBehavior, FunctionDef, FunctionId, ImmediateKind, LocalId, MirBody,
     MirTy, Place, Rvalue, StatementKind, TerminatorKind, Value,
 };
-use crate::body::ScopeId;
-use crate::item::FunctionKind;
-use super::drop_elaboration;
 
 /// A single verification diagnostic.
 #[derive(Debug)]
@@ -86,12 +86,13 @@ impl VerifyResult {
 
         // Write full details to temp file for analysis
         if !self.errors.is_empty()
-            && let Ok(mut f) = std::fs::File::create("/tmp/mir_verify.txt") {
-                use std::io::Write;
-                for e in &self.errors {
-                    let _ = writeln!(f, "{}", e);
-                }
+            && let Ok(mut f) = std::fs::File::create("/tmp/mir_verify.txt")
+        {
+            use std::io::Write;
+            for e in &self.errors {
+                let _ = writeln!(f, "{}", e);
             }
+        }
     }
 }
 
@@ -516,7 +517,8 @@ impl<'a> VerifyCtx<'a> {
         func: &FunctionDef,
     ) {
         if let Some(ty) = place_type(self.module, body, func, place) {
-            let behavior = ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
+            let behavior =
+                ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
             if !matches!(behavior, CopyBehavior::None) {
                 self.err(
                     func_name,
@@ -626,21 +628,22 @@ impl<'a> VerifyCtx<'a> {
     ) {
         // For Direct calls, check arg count matches the target function's param count
         if let Callee::Direct { func: target, .. } = callee
-            && let Some(&func_id) = self.entity_to_func.get(target) {
-                let target_def = &self.module.functions[func_id.index()];
-                let expected = target_def.params.len();
-                let got = args.len();
-                if got != expected {
-                    self.err(
-                        func_name,
-                        Some(bi),
-                        format!(
-                            "call arg count: calling '{}' with {} args, expected {} params",
-                            target_def.name, got, expected
-                        ),
-                    );
-                }
+            && let Some(&func_id) = self.entity_to_func.get(target)
+        {
+            let target_def = &self.module.functions[func_id.index()];
+            let expected = target_def.params.len();
+            let got = args.len();
+            if got != expected {
+                self.err(
+                    func_name,
+                    Some(bi),
+                    format!(
+                        "call arg count: calling '{}' with {} args, expected {} params",
+                        target_def.name, got, expected
+                    ),
+                );
             }
+        }
     }
 
     fn verify_immediate(&mut self, func: &str, bi: usize, kind: &ImmediateKind) {
@@ -666,13 +669,19 @@ impl<'a> VerifyCtx<'a> {
     fn verify_ownership(&mut self) {
         let types_with_deinit = drop_elaboration::collect_types_with_deinit(self.module);
         let structs_with_droppable = drop_elaboration::collect_structs_with_droppable_fields(
-            self.module, &types_with_deinit,
+            self.module,
+            &types_with_deinit,
         );
         let types_needing_drop = drop_elaboration::compute_types_needing_drop(
-            self.module, &types_with_deinit, &structs_with_droppable,
+            self.module,
+            &types_with_deinit,
+            &structs_with_droppable,
         );
 
-        let deinit_func_set: HashSet<Entity> = self.module.functions.iter()
+        let deinit_func_set: HashSet<Entity> = self
+            .module
+            .functions
+            .iter()
             .filter_map(|f| match &f.kind {
                 FunctionKind::Deinit { .. } => Some(f.entity),
                 _ => None,
@@ -682,7 +691,12 @@ impl<'a> VerifyCtx<'a> {
         for func in &self.module.functions {
             let Some(body) = &func.body else { continue };
             self.verify_function_ownership(
-                &func.name, body, func, &types_needing_drop, &structs_with_droppable, &deinit_func_set,
+                &func.name,
+                body,
+                func,
+                &types_needing_drop,
+                &structs_with_droppable,
+                &deinit_func_set,
             );
         }
     }
@@ -697,45 +711,67 @@ impl<'a> VerifyCtx<'a> {
         deinit_func_set: &HashSet<Entity>,
     ) {
         // Find droppable locals: Construct targets + loop-scoped + consuming params
-        let droppable = self.find_droppable_locals(body, func, types_needing_drop, structs_with_droppable);
+        let droppable =
+            self.find_droppable_locals(body, func, types_needing_drop, structs_with_droppable);
         if droppable.is_empty() {
             return;
         }
 
         let num_locals = droppable.len();
-        let local_to_idx: HashMap<LocalId, usize> = droppable.iter()
+        let local_to_idx: HashMap<LocalId, usize> = droppable
+            .iter()
             .enumerate()
             .map(|(i, &(id, _, _))| (id, i))
             .collect();
 
         let num_blocks = body.blocks.len();
-        let init_state: Vec<OwnState> = droppable.iter()
-            .map(|&(_, _, is_param)| if is_param { OwnState::Live } else { OwnState::Uninit })
+        let init_state: Vec<OwnState> = droppable
+            .iter()
+            .map(|&(_, _, is_param)| {
+                if is_param {
+                    OwnState::Live
+                } else {
+                    OwnState::Uninit
+                }
+            })
             .collect();
 
-        let mut block_entry: Vec<Vec<OwnState>> = vec![vec![OwnState::Uninit; num_locals]; num_blocks];
+        let mut block_entry: Vec<Vec<OwnState>> =
+            vec![vec![OwnState::Uninit; num_locals]; num_blocks];
         block_entry[body.entry.index()] = init_state;
 
-        let mut block_exit: Vec<Vec<OwnState>> = vec![vec![OwnState::Uninit; num_locals]; num_blocks];
+        let mut block_exit: Vec<Vec<OwnState>> =
+            vec![vec![OwnState::Uninit; num_locals]; num_blocks];
 
         // Compute RPO
         let rpo = {
             let mut visited = vec![false; num_blocks];
             let mut postorder = Vec::new();
             fn dfs(bi: usize, blocks: &[BasicBlock], visited: &mut Vec<bool>, po: &mut Vec<usize>) {
-                if visited[bi] { return; }
+                if visited[bi] {
+                    return;
+                }
                 visited[bi] = true;
-                for succ in blocks[bi].successors() { dfs(succ.index(), blocks, visited, po); }
+                for succ in blocks[bi].successors() {
+                    dfs(succ.index(), blocks, visited, po);
+                }
                 po.push(bi);
             }
-            dfs(body.entry.index(), &body.blocks, &mut visited, &mut postorder);
+            dfs(
+                body.entry.index(),
+                &body.blocks,
+                &mut visited,
+                &mut postorder,
+            );
             postorder.reverse();
             postorder
         };
 
         let _rpo_order: Vec<usize> = {
             let mut order = vec![0; num_blocks];
-            for (pos, &b) in rpo.iter().enumerate() { order[b] = pos; }
+            for (pos, &b) in rpo.iter().enumerate() {
+                order[b] = pos;
+            }
             order
         };
 
@@ -756,14 +792,18 @@ impl<'a> VerifyCtx<'a> {
         while let Some(bi) = worklist.pop() {
             in_wl[bi] = false;
             iter_count += 1;
-            if iter_count > max_iter { break; }
+            if iter_count > max_iter {
+                break;
+            }
 
             let entry = body.entry.index();
             let preds = &predecessors[bi];
             if !preds.is_empty() && bi != entry {
                 let mut merged = block_exit[preds[0]].clone();
                 for &p in &preds[1..] {
-                    for i in 0..num_locals { merged[i] = merged[i].meet(block_exit[p][i]); }
+                    for i in 0..num_locals {
+                        merged[i] = merged[i].meet(block_exit[p][i]);
+                    }
                 }
                 block_entry[bi] = merged;
             }
@@ -788,7 +828,10 @@ impl<'a> VerifyCtx<'a> {
                 block_exit[bi] = state;
                 for succ in body.blocks[bi].successors() {
                     let si = succ.index();
-                    if !in_wl[si] { in_wl[si] = true; worklist.push(si); }
+                    if !in_wl[si] {
+                        in_wl[si] = true;
+                        worklist.push(si);
+                    }
                 }
             }
         }
@@ -803,15 +846,20 @@ impl<'a> VerifyCtx<'a> {
                 let local_name = &body.locals[local_id.index()].name;
                 match state[i] {
                     OwnState::Live => {
-                        self.err(name, Some(bi), format!(
-                            "ownership: local %{} is live at return (potential leak)", local_name
-                        ));
-                    }
+                        self.err(
+                            name,
+                            Some(bi),
+                            format!(
+                                "ownership: local %{} is live at return (potential leak)",
+                                local_name
+                            ),
+                        );
+                    },
                     OwnState::Mixed => {
                         // Mixed means some paths deinit, some don't — a DeinitIf should handle this.
                         // Only flag if there's no DeinitIf/Branch pattern.
-                    }
-                    OwnState::Uninit | OwnState::Dead => {} // OK
+                    },
+                    OwnState::Uninit | OwnState::Dead => {}, // OK
                 }
             }
         }
@@ -844,7 +892,7 @@ impl<'a> VerifyCtx<'a> {
                                 }
                             }
                         }
-                    }
+                    },
                     Rvalue::EnumVariant { payload, .. } => {
                         for v in payload {
                             if let Some(p) = v.as_place() {
@@ -855,7 +903,7 @@ impl<'a> VerifyCtx<'a> {
                                 }
                             }
                         }
-                    }
+                    },
                     Rvalue::ApplyPartial { captures, .. } => {
                         for v in captures {
                             if let Some(p) = v.as_place() {
@@ -866,10 +914,10 @@ impl<'a> VerifyCtx<'a> {
                                 }
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
-            }
+            },
             StatementKind::Call { callee, args, .. } => {
                 // Check if this is a deinit call
                 if let Callee::Direct { func, .. } = callee {
@@ -896,13 +944,13 @@ impl<'a> VerifyCtx<'a> {
                         }
                     }
                 }
-            }
+            },
             StatementKind::ScopeLive(local) => {
                 if let Some(&idx) = local_to_idx.get(local) {
                     state[idx] = OwnState::Uninit;
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -919,25 +967,40 @@ impl<'a> VerifyCtx<'a> {
         for block in &body.blocks {
             for stmt in &block.stmts {
                 match &stmt.kind {
-                    StatementKind::Assign { dest, rvalue: Rvalue::Construct { ty, .. } } => {
+                    StatementKind::Assign {
+                        dest,
+                        rvalue: Rvalue::Construct { ty, .. },
+                    } => {
                         if let MirTy::Named { entity, .. } = ty {
-                            if types_needing_drop.contains(entity) || structs_with_droppable.contains(entity) {
-                                if let Some(id) = dest.root_local() { construct_targets.insert(id); }
+                            if types_needing_drop.contains(entity)
+                                || structs_with_droppable.contains(entity)
+                            {
+                                if let Some(id) = dest.root_local() {
+                                    construct_targets.insert(id);
+                                }
                             }
                         }
-                    }
-                    StatementKind::Assign { dest, rvalue: Rvalue::EnumVariant { enum_ty, .. } } => {
+                    },
+                    StatementKind::Assign {
+                        dest,
+                        rvalue: Rvalue::EnumVariant { enum_ty, .. },
+                    } => {
                         if let MirTy::Named { entity, type_args } = enum_ty {
                             let droppable_arg = type_args.iter().any(|a| match a {
-                                MirTy::Named { entity, .. } => types_needing_drop.contains(entity) || structs_with_droppable.contains(entity),
+                                MirTy::Named { entity, .. } => {
+                                    types_needing_drop.contains(entity)
+                                        || structs_with_droppable.contains(entity)
+                                },
                                 _ => false,
                             });
                             if types_needing_drop.contains(entity) || droppable_arg {
-                                if let Some(id) = dest.root_local() { construct_targets.insert(id); }
+                                if let Some(id) = dest.root_local() {
+                                    construct_targets.insert(id);
+                                }
                             }
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -948,8 +1011,14 @@ impl<'a> VerifyCtx<'a> {
         for block in &body.blocks {
             for stmt in &block.stmts {
                 let (dest, src) = match &stmt.kind {
-                    StatementKind::Assign { dest, rvalue: Rvalue::Copy(src) }
-                    | StatementKind::Assign { dest, rvalue: Rvalue::Move(src) } => (dest, src),
+                    StatementKind::Assign {
+                        dest,
+                        rvalue: Rvalue::Copy(src),
+                    }
+                    | StatementKind::Assign {
+                        dest,
+                        rvalue: Rvalue::Move(src),
+                    } => (dest, src),
                     _ => continue,
                 };
                 if let (Some(d), Some(s)) = (dest.root_local(), src.root_local()) {
@@ -963,13 +1032,17 @@ impl<'a> VerifyCtx<'a> {
 
         let mut result_set: HashSet<LocalId> = owners;
         for &id in &construct_targets {
-            if !copied_from.contains(&id) { result_set.insert(id); }
+            if !copied_from.contains(&id) {
+                result_set.insert(id);
+            }
         }
 
         // Add loop-scoped droppable locals
         for (&local_id, _) in &body.local_scopes {
             if drop_elaboration::is_type_droppable(
-                &body.locals[local_id.index()].ty, types_needing_drop, structs_with_droppable,
+                &body.locals[local_id.index()].ty,
+                types_needing_drop,
+                structs_with_droppable,
             ) {
                 result_set.insert(local_id);
             }
@@ -979,7 +1052,9 @@ impl<'a> VerifyCtx<'a> {
         for param in &func.params {
             if is_consuming_param(&param.ty) {
                 if drop_elaboration::is_type_droppable(
-                    &body.locals[param.local.index()].ty, types_needing_drop, structs_with_droppable,
+                    &body.locals[param.local.index()].ty,
+                    types_needing_drop,
+                    structs_with_droppable,
                 ) {
                     result_set.insert(param.local);
                 }
@@ -987,16 +1062,25 @@ impl<'a> VerifyCtx<'a> {
         }
 
         // Filter non-consuming params
-        let mut result: Vec<(LocalId, ScopeId, bool)> = result_set.into_iter()
+        let mut result: Vec<(LocalId, ScopeId, bool)> = result_set
+            .into_iter()
             .filter(|id| {
                 let is_param = id.index() < body.param_count;
                 if is_param {
-                    func.params.iter().any(|p| p.local == *id && is_consuming_param(&p.ty))
-                } else { true }
+                    func.params
+                        .iter()
+                        .any(|p| p.local == *id && is_consuming_param(&p.ty))
+                } else {
+                    true
+                }
             })
             .map(|id| {
                 let is_param = id.index() < body.param_count;
-                let scope = body.local_scopes.get(&id).copied().unwrap_or(ScopeId::Function);
+                let scope = body
+                    .local_scopes
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(ScopeId::Function);
                 (id, scope, is_param)
             })
             .collect();
@@ -1035,16 +1119,17 @@ impl<'a> VerifyCtx<'a> {
                     // Guard against display_name leakage on enum variants —
                     // case_by_name keys on short names, not display form.
                     if let crate::SwitchCase::Variant(name) = case
-                        && (name.contains('(') || name.contains(')')) {
-                            self.err(
-                                func_name,
-                                Some(bi),
-                                format!(
-                                    "switch: case name '{}' contains parens (likely display_name leak)",
-                                    name
-                                ),
-                            );
-                        }
+                        && (name.contains('(') || name.contains(')'))
+                    {
+                        self.err(
+                            func_name,
+                            Some(bi),
+                            format!(
+                                "switch: case name '{}' contains parens (likely display_name leak)",
+                                name
+                            ),
+                        );
+                    }
                 }
             },
             TerminatorKind::Return(val) => {
@@ -1189,11 +1274,17 @@ fn substitute_type_locally(ty: &MirTy, subst: &std::collections::HashMap<Entity,
                 .collect(),
         },
         MirTy::FuncThin { params, ret } => MirTy::FuncThin {
-            params: params.iter().map(|p| substitute_type_locally(p, subst)).collect(),
+            params: params
+                .iter()
+                .map(|p| substitute_type_locally(p, subst))
+                .collect(),
             ret: Box::new(substitute_type_locally(ret, subst)),
         },
         MirTy::FuncThick { params, ret } => MirTy::FuncThick {
-            params: params.iter().map(|p| substitute_type_locally(p, subst)).collect(),
+            params: params
+                .iter()
+                .map(|p| substitute_type_locally(p, subst))
+                .collect(),
             ret: Box::new(substitute_type_locally(ret, subst)),
         },
         _ => ty.clone(),

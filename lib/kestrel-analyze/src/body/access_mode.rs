@@ -128,18 +128,21 @@ fn check_call_args(
     // call chain, so mutating it is fine. Only reject when the receiver is a
     // *named* immutable place (let binding or let field).
     if let (Some(recv_id), Some(recv_kind)) = (receiver, &callable.receiver)
-        && matches!(recv_kind, ReceiverKind::Mutating) {
-            check_mutating_receiver(cx, recv_id, diags);
-        }
+        && matches!(recv_kind, ReceiverKind::Mutating)
+    {
+        check_mutating_receiver(cx, recv_id, diags);
+    }
 
     // Check each argument against its corresponding parameter.
     // Only check mutating params (is_mut && !is_consuming).
     // Consuming params accept any argument (they take ownership).
     for (i, arg) in args.iter().enumerate() {
         if let Some(param) = callable.params.get(i)
-            && param.is_mut && !param.is_consuming {
-                check_mutating_arg(cx, arg.value, diags);
-            }
+            && param.is_mut
+            && !param.is_consuming
+        {
+            check_mutating_arg(cx, arg.value, diags);
+        }
     }
 }
 
@@ -258,9 +261,10 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         HirExpr::Field { base, name, .. } => {
             // Check if the field entity itself is immutable (let field)
             if let Some(&field_entity) = cx.typed.resolutions.get(&expr_id)
-                && !cx.query.has::<Settable>(field_entity) {
-                    return MutClass::ImmutableField(name.as_str_or_empty().to_string());
-                }
+                && !cx.query.has::<Settable>(field_entity)
+            {
+                return MutClass::ImmutableField(name.as_str_or_empty().to_string());
+            }
             // Field is settable — check the base
             classify_mutability(cx, *base)
         },

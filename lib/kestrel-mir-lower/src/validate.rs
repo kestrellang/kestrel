@@ -148,14 +148,15 @@ fn scan_stmt(
                     );
                 }
                 if let Some(t) = self_type
-                    && t.contains_error() {
-                        emit(
-                            ctx,
-                            n,
-                            owner,
-                            format!("direct-call self_type (bb{bi}[{si}] of '{fn_name}')"),
-                        );
-                    }
+                    && t.contains_error()
+                {
+                    emit(
+                        ctx,
+                        n,
+                        owner,
+                        format!("direct-call self_type (bb{bi}[{si}] of '{fn_name}')"),
+                    );
+                }
             },
             Callee::Witness {
                 self_type,

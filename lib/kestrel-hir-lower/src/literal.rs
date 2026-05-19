@@ -82,10 +82,7 @@ pub fn decode_string(
                 '(' => {
                     let paren_len = '('.len_utf8();
                     errors.push(EscapeError {
-                        span: Span::new(
-                            file_id,
-                            escape_start..content_start + j + paren_len,
-                        ),
+                        span: Span::new(file_id, escape_start..content_start + j + paren_len),
                         kind: EscapeErrorKind::InvalidEscape {
                             sequence: "\\(".to_string(),
                         },
@@ -301,11 +298,8 @@ pub fn decode_string_literal_token(
     let body_offset_in_token = form.body_start;
 
     if form.is_multiline {
-        let processed = string_token::process_multiline_body(
-            body,
-            body_offset_in_token,
-            literal_start,
-        );
+        let processed =
+            string_token::process_multiline_body(body, body_offset_in_token, literal_start);
         let mut errors: Vec<EscapeError> = processed
             .errors
             .into_iter()
@@ -318,8 +312,11 @@ pub fn decode_string_literal_token(
         // Note: error spans within the decoded body don't map back to the
         // original source positions byte-for-byte (indent strip changes
         // offsets), but they at least point to the same token region.
-        let (value, escape_errs) =
-            decode_string(&processed.value, file_id, literal_start + body_offset_in_token + 1);
+        let (value, escape_errs) = decode_string(
+            &processed.value,
+            file_id,
+            literal_start + body_offset_in_token + 1,
+        );
         errors.extend(escape_errs);
         return (value, errors);
     }

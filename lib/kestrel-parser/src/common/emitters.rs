@@ -304,11 +304,11 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
         match eff {
             InitEffect::Failable(q_span) => {
                 sink.add_token(SyntaxKind::Question, q_span);
-            }
+            },
             InitEffect::Throwing(throws_span, err_ty) => {
                 sink.add_token(SyntaxKind::Throws, throws_span);
                 emit_ty_variant(sink, &err_ty);
-            }
+            },
         }
         sink.finish_node();
     }

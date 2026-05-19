@@ -159,16 +159,17 @@ fn check_duplicates(
             continue;
         };
         if *child_kind == NodeKind::TypeAlias
-            && let Some(cst) = cx.query.get::<CstNode>(child) {
-                use kestrel_syntax_tree::SyntaxKind;
-                if cst
-                    .0
-                    .children()
-                    .any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)
-                {
-                    continue;
-                }
+            && let Some(cst) = cx.query.get::<CstNode>(child)
+        {
+            use kestrel_syntax_tree::SyntaxKind;
+            if cst
+                .0
+                .children()
+                .any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)
+            {
+                continue;
             }
+        }
         let name = name_comp.0.clone();
         let span = util::entity_span(cx.query, child);
 

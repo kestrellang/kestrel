@@ -616,7 +616,9 @@ mod tests {
             let ctx = world.query_context();
             ctx.query(GetHealth { entity: e });
         }
-        INV_EXEC.with(|c| { c.replace(0); });
+        INV_EXEC.with(|c| {
+            c.replace(0);
+        });
 
         // Mutate the entity in a new revision — it's now in the changed set
         world.begin_revision();

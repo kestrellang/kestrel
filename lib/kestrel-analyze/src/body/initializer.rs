@@ -313,9 +313,10 @@ fn analyze_block(
     }
 
     if !state.diverged
-        && let Some(tail) = tail {
-            state = analyze_expr(cx, tail, state, false, vctx);
-        }
+        && let Some(tail) = tail
+    {
+        state = analyze_expr(cx, tail, state, false, vctx);
+    }
 
     state
 }
@@ -394,29 +395,27 @@ fn analyze_expr(
             };
 
             if let Some(name) = assigned_field
-                && vctx.all_fields.contains(&name) {
-                    // Check double-assign to let field
-                    if vctx.let_fields.contains(&name) && state.let_assigned.contains(&name) {
-                        vctx.diags.push(AnalyzeDiagnostic {
-                            descriptor_id: DESCRIPTORS[1].id,
-                            severity: DESCRIPTORS[1].default_severity,
-                            message: format!(
-                                "cannot assign to 'let' field '{}' more than once",
-                                name
-                            ),
-                            labels: vec![DiagLabel {
-                                span: util::expr_span(cx.hir, *target),
-                                message: "second assignment here".into(),
-                                is_primary: true,
-                            }],
-                            notes: vec![],
-                        });
-                    }
-                    state.assigned.insert(name.clone());
-                    if vctx.let_fields.contains(&name) {
-                        state.let_assigned.insert(name);
-                    }
+                && vctx.all_fields.contains(&name)
+            {
+                // Check double-assign to let field
+                if vctx.let_fields.contains(&name) && state.let_assigned.contains(&name) {
+                    vctx.diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[1].id,
+                        severity: DESCRIPTORS[1].default_severity,
+                        message: format!("cannot assign to 'let' field '{}' more than once", name),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, *target),
+                            message: "second assignment here".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
                 }
+                state.assigned.insert(name.clone());
+                if vctx.let_fields.contains(&name) {
+                    state.let_assigned.insert(name);
+                }
+            }
 
             state = analyze_expr(cx, *target, state, true, vctx);
         },
@@ -527,9 +526,10 @@ fn analyze_expr(
                 then_state = analyze_stmt(cx, stmt_id, then_state, vctx);
             }
             if !then_state.diverged
-                && let Some(tail) = then_body.tail_expr {
-                    then_state = analyze_expr(cx, tail, then_state, false, vctx);
-                }
+                && let Some(tail) = then_body.tail_expr
+            {
+                then_state = analyze_expr(cx, tail, then_state, false, vctx);
+            }
 
             let else_state = if let Some(else_block) = else_body {
                 let mut es = pre.clone();
@@ -540,9 +540,10 @@ fn analyze_expr(
                     es = analyze_stmt(cx, stmt_id, es, vctx);
                 }
                 if !es.diverged
-                    && let Some(tail) = else_block.tail_expr {
-                        es = analyze_expr(cx, tail, es, false, vctx);
-                    }
+                    && let Some(tail) = else_block.tail_expr
+                {
+                    es = analyze_expr(cx, tail, es, false, vctx);
+                }
                 es
             } else {
                 pre
@@ -591,9 +592,10 @@ fn analyze_expr(
                 body_state = analyze_stmt(cx, stmt_id, body_state, vctx);
             }
             if !body_state.diverged
-                && let Some(tail) = body.tail_expr {
-                    let _ = analyze_expr(cx, tail, body_state, false, vctx);
-                }
+                && let Some(tail) = body.tail_expr
+            {
+                let _ = analyze_expr(cx, tail, body_state, false, vctx);
+            }
 
             let break_states = vctx.loop_break_stack.pop().unwrap();
             if break_states.is_empty() {
@@ -632,9 +634,10 @@ fn analyze_expr(
                 state = analyze_stmt(cx, stmt_id, state, vctx);
             }
             if !state.diverged
-                && let Some(tail) = body.tail_expr {
-                    state = analyze_expr(cx, tail, state, false, vctx);
-                }
+                && let Some(tail) = body.tail_expr
+            {
+                state = analyze_expr(cx, tail, state, false, vctx);
+            }
         },
 
         // Closures: analyze body separately, don't affect init state

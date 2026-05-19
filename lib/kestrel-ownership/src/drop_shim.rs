@@ -107,8 +107,7 @@ pub fn run(module: &mut MirModule) -> ShimMap {
     let next_entity_seed = module.functions.len() as u32;
     let mut nominal_to_shim: HashMap<Entity, Entity> = HashMap::new();
     for (i, nominal) in needed.iter().enumerate() {
-        let shim_entity =
-            Entity::from_raw(u32::MAX / 2 + 0x40000 + next_entity_seed + i as u32);
+        let shim_entity = Entity::from_raw(u32::MAX / 2 + 0x40000 + next_entity_seed + i as u32);
         let name = format!("__drop${}", lookup_nominal_name(*nominal, module));
         module.register_name(shim_entity, &name);
         nominal_to_shim.insert(*nominal, shim_entity);
@@ -516,7 +515,14 @@ fn build_enum_shim(
                 parent: Box::new(downcast.clone()),
                 name: field.name.clone(),
             };
-            emit_drop_for(&mut block, &mut body, field_place, &field_ty, module, shim_map);
+            emit_drop_for(
+                &mut block,
+                &mut body,
+                field_place,
+                &field_ty,
+                module,
+                shim_map,
+            );
         }
         block.terminator = Terminator::jump(return_id);
         let block_id = body.add_block(block);

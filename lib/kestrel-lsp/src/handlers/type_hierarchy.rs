@@ -79,12 +79,7 @@ pub async fn supertypes(
     let (handle, stdlib, user, sources) = {
         let s = state.lock().await;
         let (stdlib, user) = s.partition_sources();
-        (
-            s.compiler_handle.clone(),
-            stdlib,
-            user,
-            s.sources.clone(),
-        )
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone())
     };
     let item_path = url_to_path(&item_uri);
 
@@ -110,11 +105,7 @@ pub async fn supertypes(
                         items.push(item);
                     }
                 }
-                if items.is_empty() {
-                    None
-                } else {
-                    Some(items)
-                }
+                if items.is_empty() { None } else { Some(items) }
             },
         )
         .await
@@ -133,12 +124,7 @@ pub async fn subtypes(
     let (handle, stdlib, user, sources) = {
         let s = state.lock().await;
         let (stdlib, user) = s.partition_sources();
-        (
-            s.compiler_handle.clone(),
-            stdlib,
-            user,
-            s.sources.clone(),
-        )
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone())
     };
     let item_path = url_to_path(&item_uri);
 
@@ -182,11 +168,7 @@ pub async fn subtypes(
                     }
                 }
 
-                if items.is_empty() {
-                    None
-                } else {
-                    Some(items)
-                }
+                if items.is_empty() { None } else { Some(items) }
             },
         )
         .await
@@ -224,9 +206,7 @@ fn resolve_type_at(
                     HirExpr::Def(entity, _, _) if is_type_entity(world, *entity) => {
                         return Some(*entity);
                     },
-                    HirExpr::MethodCall { .. }
-                    | HirExpr::Field { .. }
-                    | HirExpr::Call { .. } => {
+                    HirExpr::MethodCall { .. } | HirExpr::Field { .. } | HirExpr::Call { .. } => {
                         let typed = ctx.query(InferBody {
                             entity: body_entity,
                             root,

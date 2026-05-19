@@ -88,10 +88,7 @@ fn main() -> ExitCode {
         if cli.bundle {
             let bundled = BundledDocs {
                 index: index.clone(),
-                modules: pages
-                    .iter()
-                    .map(|p| (p.path.clone(), p.clone()))
-                    .collect(),
+                modules: pages.iter().map(|p| (p.path.clone(), p.clone())).collect(),
             };
             let bundle_path = cli.out.join("docs.json");
             if let Err(e) = write_json(&bundle_path, &bundled) {

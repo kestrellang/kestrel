@@ -41,9 +41,10 @@ pub fn run_thunk_pass(module: &mut MirModule) {
                     rvalue: Rvalue::ApplyPartial { func: target, .. },
                     ..
                 } = &stmt.kind
-                    && seen.insert(*target) {
-                        thunk_targets.push(*target);
-                    }
+                    && seen.insert(*target)
+                {
+                    thunk_targets.push(*target);
+                }
             }
         }
     }

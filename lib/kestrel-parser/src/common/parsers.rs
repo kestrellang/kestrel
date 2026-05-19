@@ -455,8 +455,8 @@ pub fn block_body_parser<'tokens>()
 // =============================================================================
 
 /// Parser for an init effect modifier: `?` or `throws Type`
-fn init_effect_parser<'tokens>(
-) -> impl Parser<'tokens, ParserInput<'tokens>, Option<InitEffect>, ParserExtra<'tokens>> + Clone {
+fn init_effect_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<InitEffect>, ParserExtra<'tokens>> + Clone {
     skip_trivia()
         .ignore_then(
             just(Token::Question)

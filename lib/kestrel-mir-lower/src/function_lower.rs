@@ -5,8 +5,8 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams,
-    WhereClause as AstWhereClause, WhereConstraint as AstWhereConstraint,
+    Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams, WhereClause as AstWhereClause,
+    WhereConstraint as AstWhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_mir::{
@@ -67,10 +67,8 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     if let Some(callable) = ctx.world.get::<Callable>(entity) {
         // Self parameter for methods
         if let Some(receiver) = &callable.receiver {
-            let is_user_deinit = matches!(
-                ctx.world.get::<NodeKind>(entity),
-                Some(NodeKind::Deinit)
-            );
+            let is_user_deinit =
+                matches!(ctx.world.get::<NodeKind>(entity), Some(NodeKind::Deinit));
             let self_ty = if is_user_deinit {
                 // User `deinit { ... }` always lowers with `&var Self`.
                 // The AST builder defaults its receiver to Consuming
@@ -88,9 +86,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
                     kestrel_ast_builder::ReceiverKind::Mutating => {
                         kestrel_mir::MirTy::RefMut(Box::new(kestrel_mir::MirTy::SelfType))
                     },
-                    kestrel_ast_builder::ReceiverKind::Consuming => {
-                        kestrel_mir::MirTy::SelfType
-                    },
+                    kestrel_ast_builder::ReceiverKind::Consuming => kestrel_mir::MirTy::SelfType,
                 }
             };
 
@@ -138,9 +134,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) -> FunctionId {
     }
 
     // Check for @extern attribute → set extern_info
-    if is_extern
-        && let Some(attrs) = ctx.world.get::<Attributes>(entity)
-    {
+    if is_extern && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
         for attr in &attrs.0 {
             if attr.name == "extern" {
                 let symbol_name = attr
@@ -330,22 +324,23 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
     // after the target type's params so the order is target-then-extension
     // and dedupe against the target's set.
     if matches!(parent_kind, Some(NodeKind::Extension))
-        && let Some(ext_params) = ctx.world.get::<TypeParams>(parent) {
-            let already_added: std::collections::HashSet<Entity> =
-                def.type_params.iter().map(|tp| tp.entity).collect();
-            for &tp_entity in &ext_params.0 {
-                if already_added.contains(&tp_entity) {
-                    continue;
-                }
-                ctx.register_name(tp_entity);
-                let tp_name = ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(tp_entity)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
+        && let Some(ext_params) = ctx.world.get::<TypeParams>(parent)
+    {
+        let already_added: std::collections::HashSet<Entity> =
+            def.type_params.iter().map(|tp| tp.entity).collect();
+        for &tp_entity in &ext_params.0 {
+            if already_added.contains(&tp_entity) {
+                continue;
             }
+            ctx.register_name(tp_entity);
+            let tp_name = ctx
+                .world
+                .get::<kestrel_ast_builder::Name>(tp_entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
         }
+    }
 
     // A Setter under a generic Subscript inherits the subscript's own type
     // params (e.g., `subscript[I](...) { set { ... } }`). Without this, the
@@ -358,17 +353,18 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
             .parent_of(entity)
             .filter(|p| matches!(ctx.world.get::<NodeKind>(*p), Some(NodeKind::Subscript)));
         if let Some(parent_subscript) = parent_subscript
-            && let Some(type_params) = ctx.world.get::<TypeParams>(parent_subscript) {
-                for &tp_entity in &type_params.0 {
-                    ctx.register_name(tp_entity);
-                    let tp_name = ctx
-                        .world
-                        .get::<kestrel_ast_builder::Name>(tp_entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_default();
-                    def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
-                }
+            && let Some(type_params) = ctx.world.get::<TypeParams>(parent_subscript)
+        {
+            for &tp_entity in &type_params.0 {
+                ctx.register_name(tp_entity);
+                let tp_name = ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(tp_entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
             }
+        }
     }
 }
 
@@ -471,11 +467,7 @@ fn lower_where_constraint(
 /// parameter, struct, enum, protocol, alias …) via the name-res
 /// `ResolveTypePath` query. Non-named or unresolvable types return
 /// `None`.
-fn resolve_ast_type_to_entity(
-    ctx: &LowerCtx,
-    ast_ty: &AstType,
-    context: Entity,
-) -> Option<Entity> {
+fn resolve_ast_type_to_entity(ctx: &LowerCtx, ast_ty: &AstType, context: Entity) -> Option<Entity> {
     let AstType::Named { segments, .. } = ast_ty else {
         return None;
     };

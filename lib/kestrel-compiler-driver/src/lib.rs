@@ -70,12 +70,13 @@ impl<'a> CompilerDriver<'a> {
                                 .or_insert(0) += 1;
                         }
                         if let InferError::TypeMismatch { .. } = err
-                            && let Some(detail) = typed.error_details.get(i) {
-                                *summary
-                                    .type_mismatch_breakdown
-                                    .entry(detail.clone())
-                                    .or_insert(0) += 1;
-                            }
+                            && let Some(detail) = typed.error_details.get(i)
+                        {
+                            *summary
+                                .type_mismatch_breakdown
+                                .entry(detail.clone())
+                                .or_insert(0) += 1;
+                        }
                     }
 
                     if summary.error_samples.len() < 50 {
@@ -393,10 +394,9 @@ fn format_error(err: &InferError) -> String {
             "PrimitiveMethodNotCalled '{}' at {}:{}",
             method, span.file_id, span.start
         ),
-        InferError::CircularOpaqueReturn { .. } => format!(
-            "CircularOpaqueReturn at {}:{}",
-            span.file_id, span.start
-        ),
+        InferError::CircularOpaqueReturn { .. } => {
+            format!("CircularOpaqueReturn at {}:{}", span.file_id, span.start)
+        },
     }
 }
 

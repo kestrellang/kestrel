@@ -218,8 +218,6 @@ fn site_to_location(
     Some((url, li.range_for(clipped.start, clipped.end)))
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

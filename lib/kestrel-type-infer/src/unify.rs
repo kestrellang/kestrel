@@ -63,9 +63,10 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         // (e.g., integer literal vs string literal in if/else branches).
         (TySlot::Unresolved { literal: lit_a }, TySlot::Unresolved { literal: lit_b }) => {
             if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b)
-                && a_kind != b_kind {
-                    return Err(UnifyError::Mismatch);
-                }
+                && a_kind != b_kind
+            {
+                return Err(UnifyError::Mismatch);
+            }
             // Propagate wildcard status: if either side is a wildcard, the root
             // (b, since a redirects to b) must also be a wildcard so that
             // report_unresolved_slots skips it.
@@ -372,7 +373,9 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
         },
         TySlot::Resolved(TyKind::AssocProjection { base, .. }) => occurs_check(ctx, tv, *base),
         TySlot::Resolved(TyKind::Opaque {
-            bounds, origin_args, ..
+            bounds,
+            origin_args,
+            ..
         }) => {
             for (_, args) in bounds {
                 for &arg in args {
@@ -661,7 +664,9 @@ mod tests {
         ctx.loop_break_tys.pop();
 
         assert!(ctx.is_concrete(break_tv));
-        assert!(matches!(ctx.slot(break_tv), TySlot::Resolved(TyKind::Tuple(elems)) if elems.is_empty()));
+        assert!(
+            matches!(ctx.slot(break_tv), TySlot::Resolved(TyKind::Tuple(elems)) if elems.is_empty())
+        );
     }
 
     #[test]

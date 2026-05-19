@@ -60,9 +60,9 @@ pub fn build_type_alias(
             .children()
             .find(|c| is_type_kind(c.kind()))
             .and_then(|c| ast_type_from_cst(&c, file_id))
-        {
-            world.set(entity, QualifiedTarget(proto_ty));
-        }
+    {
+        world.set(entity, QualifiedTarget(proto_ty));
+    }
 
     // Target type from AliasedType child
     if let Some(aliased) = find_child(node, SyntaxKind::AliasedType)
@@ -70,9 +70,9 @@ pub fn build_type_alias(
             .children()
             .find(|c| is_type_kind(c.kind()))
             .and_then(|c| ast_type_from_cst(&c, file_id))
-        {
-            world.set(entity, TypeAnnotation(ty));
-        }
+    {
+        world.set(entity, TypeAnnotation(ty));
+    }
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);

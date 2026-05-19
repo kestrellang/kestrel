@@ -540,8 +540,6 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             method,
             describe_tyvar(ctx, *receiver)
         ),
-        InferError::CircularOpaqueReturn { .. } => {
-            "circular opaque return type".into()
-        },
+        InferError::CircularOpaqueReturn { .. } => "circular opaque return type".into(),
     }
 }

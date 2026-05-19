@@ -260,9 +260,10 @@ impl<'a> CollectionContext<'a> {
                     return;
                 }
                 if let Some(ref st) = concrete_self
-                    && has_type_param(st) {
-                        return;
-                    }
+                    && has_type_param(st)
+                {
+                    return;
+                }
                 if concrete_type_args.len() < callee_func.type_params.len() {
                     return;
                 }
@@ -292,8 +293,7 @@ impl<'a> CollectionContext<'a> {
                 //   1. Named { entity: <assoc-type-alias>, type_args: [] }
                 //   2. TypeParam(<assoc-type-alias>)
                 //   3. AssociatedProjection { base, protocol, name }
-                concrete_self =
-                    self.resolve_assoc_self(concrete_self, subst, parent_self.as_ref());
+                concrete_self = self.resolve_assoc_self(concrete_self, subst, parent_self.as_ref());
                 let concrete_method_args: Vec<MirTy> = method_type_args
                     .iter()
                     .map(|a| substitute_type_with_self(a, subst, parent_self.as_ref(), self.module))
@@ -383,24 +383,25 @@ impl<'a> CollectionContext<'a> {
             // Const with FunctionRef introduces the referenced function
             Rvalue::Const(imm) => {
                 if let kestrel_mir::ImmediateKind::FunctionRef { func, type_args } = &imm.kind
-                    && let Some(&func_id) = self.entity_to_func.get(func) {
-                        let concrete_type_args = common::substitute_type_args(
-                            type_args,
-                            subst,
-                            parent_self.as_ref(),
-                            self.module,
-                        );
+                    && let Some(&func_id) = self.entity_to_func.get(func)
+                {
+                    let concrete_type_args = common::substitute_type_args(
+                        type_args,
+                        subst,
+                        parent_self.as_ref(),
+                        self.module,
+                    );
 
-                        let inst = FunctionInstantiation {
-                            func_id,
-                            type_args: concrete_type_args,
-                            self_type: parent_self.clone(),
-                        };
+                    let inst = FunctionInstantiation {
+                        func_id,
+                        type_args: concrete_type_args,
+                        self_type: parent_self.clone(),
+                    };
 
-                        if self.result.functions.insert(inst.clone()) {
-                            self.queue.push_back(inst);
-                        }
+                    if self.result.functions.insert(inst.clone()) {
+                        self.queue.push_back(inst);
                     }
+                }
             },
 
             _ => {},
@@ -444,17 +445,12 @@ impl<'a> CollectionContext<'a> {
         parent_self: Option<&MirTy>,
     ) -> MirTy {
         match &ty {
-            MirTy::Named {
-                entity,
-                type_args,
-            } if type_args.is_empty() => {
-                self.try_resolve_assoc_entity(*entity, subst, parent_self)
-                    .unwrap_or(ty)
-            },
-            MirTy::TypeParam(entity) => {
-                self.try_resolve_assoc_entity(*entity, subst, parent_self)
-                    .unwrap_or(ty)
-            },
+            MirTy::Named { entity, type_args } if type_args.is_empty() => self
+                .try_resolve_assoc_entity(*entity, subst, parent_self)
+                .unwrap_or(ty),
+            MirTy::TypeParam(entity) => self
+                .try_resolve_assoc_entity(*entity, subst, parent_self)
+                .unwrap_or(ty),
             MirTy::AssociatedProjection {
                 base,
                 protocol,
@@ -483,12 +479,9 @@ impl<'a> CollectionContext<'a> {
                     let mut sorted_entries: Vec<_> = subst.iter().collect();
                     sorted_entries.sort_by_key(|(e, _)| e.index());
                     for (_, value) in &sorted_entries {
-                        if let Ok(resolved) = witness::resolve_associated_type(
-                            self.module,
-                            *protocol,
-                            value,
-                            name,
-                        ) {
+                        if let Ok(resolved) =
+                            witness::resolve_associated_type(self.module, *protocol, value, name)
+                        {
                             return resolved;
                         }
                     }

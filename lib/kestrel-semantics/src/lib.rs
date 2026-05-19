@@ -318,9 +318,9 @@ impl QueryFn for TypeParamCopyRequirement {
                         if let Some(copyable) = copyable
                             && resolve_type_entity(ctx, protocol, context, self.root)
                                 == Some(copyable)
-                            {
-                                return CopyRequirement::MayBeNonCopyable;
-                            }
+                        {
+                            return CopyRequirement::MayBeNonCopyable;
+                        }
                     },
                     WhereConstraint::Bound {
                         subject, protocols, ..
@@ -595,12 +595,13 @@ fn nominal_copy_semantics_impl(
             entity,
             protocol: copyable,
             root,
-        }) {
-            return CopySemanticsInfo {
-                semantics: CopySemantics::NotCopyable,
-                reason: CopySemanticsReason::ExplicitNotCopyable,
-            };
-        }
+        })
+    {
+        return CopySemanticsInfo {
+            semantics: CopySemantics::NotCopyable,
+            reason: CopySemanticsReason::ExplicitNotCopyable,
+        };
+    }
 
     // Stdlib-less fallback: the Copyable builtin isn't resolvable when the
     // test input doesn't import std.core, but `: not Copyable` is still
@@ -611,10 +612,12 @@ fn nominal_copy_semantics_impl(
     // their non-copyable semantics under Stage 7.
     if copyable.is_none()
         && let Some(conf) = ctx.get::<Conformances>(entity)
-        && conf.0.iter().any(|item| matches!(
-            item,
-            ConformanceItem::Negative(ast_ty, _) if ast_type_last_segment_is(ast_ty, "Copyable")
-        ))
+        && conf.0.iter().any(|item| {
+            matches!(
+                item,
+                ConformanceItem::Negative(ast_ty, _) if ast_type_last_segment_is(ast_ty, "Copyable")
+            )
+        })
     {
         return CopySemanticsInfo {
             semantics: CopySemantics::NotCopyable,
@@ -637,12 +640,13 @@ fn nominal_copy_semantics_impl(
             entity,
             protocol: cloneable,
             root,
-        }) {
-            return CopySemanticsInfo {
-                semantics: CopySemantics::Cloneable,
-                reason: CopySemanticsReason::ExplicitCloneable,
-            };
-        }
+        })
+    {
+        return CopySemanticsInfo {
+            semantics: CopySemantics::Cloneable,
+            reason: CopySemanticsReason::ExplicitCloneable,
+        };
+    }
 
     for (child, ty) in &child_types {
         if hir_type_copy_semantics(ctx, ty, entity, root) == CopySemantics::Cloneable {

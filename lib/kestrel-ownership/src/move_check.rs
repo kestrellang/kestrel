@@ -183,9 +183,7 @@ fn check_terminator_reads(
         TerminatorKind::Switch { discriminant, .. } => {
             check_place_read(body, discriminant, site, state, paths, reported, diags);
         },
-        TerminatorKind::Jump(_)
-        | TerminatorKind::Panic(_)
-        | TerminatorKind::Unreachable => {},
+        TerminatorKind::Jump(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {},
     }
 }
 

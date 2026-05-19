@@ -11,13 +11,13 @@ pub mod conformances;
 pub mod extensions;
 pub mod helpers;
 pub mod protocol_members;
-pub mod type_members;
 pub mod resolve_builtin;
 pub mod resolve_module;
 pub mod resolve_name;
 pub mod resolve_type;
 pub mod resolve_value;
 pub mod scope;
+pub mod type_members;
 pub mod visibility;
 
 // Re-export primary query types
@@ -29,11 +29,11 @@ pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarg
 pub use protocol_members::{
     ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers, ProtocolMembersByName,
 };
-pub use type_members::{TypeMember, TypeMemberSource, TypeMembers, TypeMembersByName};
 pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};
 pub use resolve_type::{ResolveTypePath, TypeResolution};
 pub use resolve_value::{ResolveValuePath, ValueResolution};
 pub use scope::{Scope, ScopeFor};
+pub use type_members::{TypeMember, TypeMemberSource, TypeMembers, TypeMembersByName};
 pub use visibility::{IsVisibleFrom, VisibleChildrenByName};

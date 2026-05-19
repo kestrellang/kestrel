@@ -251,19 +251,23 @@ fn resolve_callees(
                     .filter(|m| world.get::<Callable>(m.entity).is_some())
                     .map(|m| m.entity)
                     .collect();
-                if candidates.is_empty() { None } else { Some(candidates) }
+                if candidates.is_empty() {
+                    None
+                } else {
+                    Some(candidates)
+                }
             },
         },
-        HirExpr::MethodCall { receiver, method, .. } => {
+        HirExpr::MethodCall {
+            receiver, method, ..
+        } => {
             if let Some(e) = typed.and_then(|t| t.resolutions.get(&expr_id).copied()) {
                 if world.get::<Callable>(e).is_some() && !world.has::<Computed>(e) {
                     return Some(vec![e]);
                 }
                 // Computed property or non-callable — look up "subscript"
                 // on the property's return type.
-                if let Some(subscripts) =
-                    subscripts_on_property(world, e, body_entity, root)
-                {
+                if let Some(subscripts) = subscripts_on_property(world, e, body_entity, root) {
                     return Some(subscripts);
                 }
             }
@@ -281,12 +285,15 @@ fn resolve_callees(
             let candidates: Vec<Entity> = members
                 .into_iter()
                 .filter(|m| {
-                    world.get::<Callable>(m.entity).is_some()
-                        && !world.has::<Static>(m.entity)
+                    world.get::<Callable>(m.entity).is_some() && !world.has::<Static>(m.entity)
                 })
                 .map(|m| m.entity)
                 .collect();
-            if candidates.is_empty() { None } else { Some(candidates) }
+            if candidates.is_empty() {
+                None
+            } else {
+                Some(candidates)
+            }
         },
         HirExpr::ProtocolCall { .. } => typed
             .and_then(|t| t.resolutions.get(&expr_id).copied())
@@ -325,7 +332,11 @@ fn subscripts_on_property(
         .filter(|m| world.get::<Callable>(m.entity).is_some())
         .map(|m| m.entity)
         .collect();
-    if candidates.is_empty() { None } else { Some(candidates) }
+    if candidates.is_empty() {
+        None
+    } else {
+        Some(candidates)
+    }
 }
 
 /// Extract the type entity from the receiver expression's inferred type.
@@ -468,7 +479,6 @@ fn ast_type_span(ty: &AstType) -> Span {
         AstType::Some { span, .. } => span.clone(),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

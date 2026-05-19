@@ -201,9 +201,7 @@ pub enum InferError {
     /// Circular opaque type inference: the concrete type behind `some P`
     /// is itself another `some P` from a mutually recursive call, so no
     /// concrete type can be determined.
-    CircularOpaqueReturn {
-        span: Span,
-    },
+    CircularOpaqueReturn { span: Span },
 }
 
 impl InferError {

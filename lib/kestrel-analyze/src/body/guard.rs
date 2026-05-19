@@ -71,9 +71,8 @@ impl BodyCheck for GuardDivergenceAnalyzer {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
-                    message:
-                        "guard else block must diverge (return, break, continue, or throw)"
-                            .into(),
+                    message: "guard else block must diverge (return, break, continue, or throw)"
+                        .into(),
                     labels: vec![DiagLabel {
                         span,
                         message: "else block does not diverge".into(),
@@ -97,9 +96,10 @@ fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span::S
         return Some(util::expr_span(hir, tail));
     }
     if let Some(&last_stmt) = block.stmts.last()
-        && let HirStmt::Expr { expr, .. } = &hir.stmts[last_stmt] {
-            return Some(util::expr_span(hir, *expr));
-        }
+        && let HirStmt::Expr { expr, .. } = &hir.stmts[last_stmt]
+    {
+        return Some(util::expr_span(hir, *expr));
+    }
     None
 }
 

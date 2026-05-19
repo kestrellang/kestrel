@@ -321,7 +321,10 @@ fn named_copy_behavior(
         if matches!(s.copy_behavior, CopyBehavior::None) {
             return CopyBehavior::None;
         }
-        let subst = build_type_param_subst(&s.type_params.iter().map(|p| p.entity).collect::<Vec<_>>(), type_args);
+        let subst = build_type_param_subst(
+            &s.type_params.iter().map(|p| p.entity).collect::<Vec<_>>(),
+            type_args,
+        );
         return fold_field_copy_behavior(
             s.copy_behavior.clone(),
             s.fields.iter().map(|f| &f.ty),
@@ -335,7 +338,10 @@ fn named_copy_behavior(
         if matches!(e.copy_behavior, CopyBehavior::None) {
             return CopyBehavior::None;
         }
-        let subst = build_type_param_subst(&e.type_params.iter().map(|p| p.entity).collect::<Vec<_>>(), type_args);
+        let subst = build_type_param_subst(
+            &e.type_params.iter().map(|p| p.entity).collect::<Vec<_>>(),
+            type_args,
+        );
         let mut payload_tys: Vec<MirTy> = Vec::new();
         for case in &e.cases {
             let idx = case.payload_struct.index();
@@ -366,18 +372,30 @@ fn substitute_type_params(ty: &MirTy, subst: &HashMap<Entity, MirTy>) -> MirTy {
         MirTy::Ref(inner) => MirTy::Ref(Box::new(substitute_type_params(inner, subst))),
         MirTy::RefMut(inner) => MirTy::RefMut(Box::new(substitute_type_params(inner, subst))),
         MirTy::Tuple(elems) => MirTy::Tuple(
-            elems.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            elems
+                .iter()
+                .map(|t| substitute_type_params(t, subst))
+                .collect(),
         ),
         MirTy::Named { entity, type_args } => MirTy::Named {
             entity: *entity,
-            type_args: type_args.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            type_args: type_args
+                .iter()
+                .map(|t| substitute_type_params(t, subst))
+                .collect(),
         },
         MirTy::FuncThin { params, ret } => MirTy::FuncThin {
-            params: params.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            params: params
+                .iter()
+                .map(|t| substitute_type_params(t, subst))
+                .collect(),
             ret: Box::new(substitute_type_params(ret, subst)),
         },
         MirTy::FuncThick { params, ret } => MirTy::FuncThick {
-            params: params.iter().map(|t| substitute_type_params(t, subst)).collect(),
+            params: params
+                .iter()
+                .map(|t| substitute_type_params(t, subst))
+                .collect(),
             ret: Box::new(substitute_type_params(ret, subst)),
         },
         _ => ty.clone(),

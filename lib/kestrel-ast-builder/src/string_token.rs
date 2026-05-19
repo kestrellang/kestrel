@@ -79,9 +79,7 @@ fn find_close_offset(
         return total;
     }
     // Trailing pounds.
-    let trail_pounds = bytes[total - pound_count..total]
-        .iter()
-        .all(|&b| b == b'#');
+    let trail_pounds = bytes[total - pound_count..total].iter().all(|&b| b == b'#');
     if !trail_pounds {
         return total;
     }

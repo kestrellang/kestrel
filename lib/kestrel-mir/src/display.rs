@@ -493,11 +493,7 @@ impl fmt::Display for CalleeDisplay<'_> {
 
 /// Write call arguments. Each `Value` displays its own mode
 /// (`copy`/`move`/`ref`/`ref var`/literal).
-fn write_call_args(
-    f: &mut fmt::Formatter<'_>,
-    args: &[Value],
-    module: &MirModule,
-) -> fmt::Result {
+fn write_call_args(f: &mut fmt::Formatter<'_>, args: &[Value], module: &MirModule) -> fmt::Result {
     for (i, arg) in args.iter().enumerate() {
         if i > 0 {
             write!(f, ", ")?;

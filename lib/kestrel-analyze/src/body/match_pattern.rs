@@ -622,35 +622,36 @@ fn check_or_consistency(
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     if let HirPat::Or { alternatives, .. } = &cx.hir.pats[pat_id]
-        && alternatives.len() >= 2 {
-            let first = collect_bindings(cx, alternatives[0]);
-            for &alt in &alternatives[1..] {
-                let other = collect_bindings(cx, alt);
-                let missing: Vec<&str> = first
-                    .difference(&other)
-                    .chain(other.difference(&first))
-                    .map(|s| s.as_str())
-                    .collect();
-                if let Some(first_missing) = missing.first() {
-                    let d = descriptor("E315");
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: d.id,
-                        severity: d.default_severity,
-                        message: "inconsistent bindings across or-pattern alternatives".into(),
-                        labels: vec![DiagLabel {
-                            span: util::pat_span(cx.hir, pat_id),
-                            message: format!(
-                                "variable '{}' is not bound in all alternatives",
-                                first_missing
-                            ),
-                            is_primary: true,
-                        }],
-                        notes: vec![],
-                    });
-                    break;
-                }
+        && alternatives.len() >= 2
+    {
+        let first = collect_bindings(cx, alternatives[0]);
+        for &alt in &alternatives[1..] {
+            let other = collect_bindings(cx, alt);
+            let missing: Vec<&str> = first
+                .difference(&other)
+                .chain(other.difference(&first))
+                .map(|s| s.as_str())
+                .collect();
+            if let Some(first_missing) = missing.first() {
+                let d = descriptor("E315");
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: d.id,
+                    severity: d.default_severity,
+                    message: "inconsistent bindings across or-pattern alternatives".into(),
+                    labels: vec![DiagLabel {
+                        span: util::pat_span(cx.hir, pat_id),
+                        message: format!(
+                            "variable '{}' is not bound in all alternatives",
+                            first_missing
+                        ),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+                break;
             }
         }
+    }
     // Recurse into sub-patterns to catch nested or-patterns.
     for child in pat_children(&cx.hir.pats[pat_id]) {
         check_or_consistency(cx, child, diags);

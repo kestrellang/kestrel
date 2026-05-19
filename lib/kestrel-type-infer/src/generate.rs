@@ -152,28 +152,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // type aliases are already dereferenced by name resolution, so
             // `type C = Counter; C(42)` reaches here with Def(Counter).
             if let HirExpr::Def(entity, explicit_type_args, _) = &hir.exprs[*callee]
-                && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct) {
-                    let arg_tvs = gen_call_args(ctx, hir, args);
-                    return gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
-                }
+                && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct)
+            {
+                let arg_tvs = gen_call_args(ctx, hir, args);
+                return gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
+            }
 
             // Enum case construction: route through OverloadedCall for label checking
             if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee]
                 && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::EnumCase)
-                    && ctx.query_ctx.get::<Callable>(*entity).is_some()
-                {
-                    let arg_tvs = gen_call_args(ctx, hir, args);
-                    let result_tv = ctx.fresh();
-                    ctx.overloaded_call(
-                        vec![*entity],
-                        vec![],
-                        arg_tvs,
-                        result_tv,
-                        id,
-                        span.clone(),
-                    );
-                    return result_tv;
-                }
+                && ctx.query_ctx.get::<Callable>(*entity).is_some()
+            {
+                let arg_tvs = gen_call_args(ctx, hir, args);
+                let result_tv = ctx.fresh();
+                ctx.overloaded_call(vec![*entity], vec![], arg_tvs, result_tv, id, span.clone());
+                return result_tv;
+            }
 
             // Free-function call with a single Def callee: pre-check labels +
             // arity so mismatches surface as NoMatchingOverload (richer phrasing
@@ -183,21 +177,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // substitution for path-qualified callees (e.g., Pointer[UInt8].nullPointer()).
             if let HirExpr::Def(entity, _, _) = &hir.exprs[*callee]
                 && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Function)
-                    && let Some(callable) = ctx.query_ctx.get::<Callable>(*entity) {
-                        let arg_labels: Vec<Option<&str>> =
-                            args.iter().map(|a| a.label.as_deref()).collect();
-                        if !labels_match(&callable.params, &arg_labels) {
-                            let name = ctx
-                                .query_ctx
-                                .get::<Name>(*entity)
-                                .map(|n| n.0.clone())
-                                .unwrap_or_else(|| "<fn>".into());
-                            let span = span.clone();
-                            ctx.type_param_defs.remove(callee);
-                            let _ = gen_call_args(ctx, hir, args);
-                            return ctx.report_error(InferError::NoMatchingOverload { name, span });
-                        }
-                    }
+                && let Some(callable) = ctx.query_ctx.get::<Callable>(*entity)
+            {
+                let arg_labels: Vec<Option<&str>> =
+                    args.iter().map(|a| a.label.as_deref()).collect();
+                if !labels_match(&callable.params, &arg_labels) {
+                    let name = ctx
+                        .query_ctx
+                        .get::<Name>(*entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| "<fn>".into());
+                    let span = span.clone();
+                    ctx.type_param_defs.remove(callee);
+                    let _ = gen_call_args(ctx, hir, args);
+                    return ctx.report_error(InferError::NoMatchingOverload { name, span });
+                }
+            }
 
             // Emit Call constraint — solver dispatches based on callee type:
             // Function → unify params/return, Named → subscript resolution
@@ -513,7 +508,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let unit_tv = ctx.tuple(vec![]);
             if let Some((_lbl, break_tv)) = label
                 .as_ref()
-                .and_then(|l| ctx.loop_break_tys.iter().rev().find(|(k, _)| k.as_deref() == Some(l)))
+                .and_then(|l| {
+                    ctx.loop_break_tys
+                        .iter()
+                        .rev()
+                        .find(|(k, _)| k.as_deref() == Some(l))
+                })
                 .or_else(|| ctx.loop_break_tys.last())
                 .cloned()
             {
@@ -1231,7 +1231,7 @@ fn wrap_init_result(
                 wrapped_args.push(lower_hir_ty_with_subs(ctx, arg, struct_subs));
             }
             ctx.named(*entity, wrapped_args)
-        }
+        },
         _ => inner_tv,
     }
 }
@@ -1378,12 +1378,10 @@ fn is_enclosing_self_protocol(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
         match qctx.get::<NodeKind>(entity) {
             Some(&NodeKind::Protocol) if entity == protocol => return true,
             Some(&NodeKind::Extension) => {
-                if qctx
-                    .query(kestrel_name_res::ExtensionTargetEntity {
-                        extension: entity,
-                        root: ctx.root,
-                    })
-                    == Some(protocol)
+                if qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: entity,
+                    root: ctx.root,
+                }) == Some(protocol)
                 {
                     return true;
                 }
@@ -1473,60 +1471,64 @@ fn instantiate_entity_inner(
     // If explicit type args don't match this entity's params (e.g., Pointer[UInt8].nullPointer
     // where [UInt8] is for Pointer's T, not nullPointer's params), check the parent entity.
     // Also handles extension methods: Box[i64].wrap where [i64] maps to Box's T.
-    if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len()
-        && let Some(parent) = qctx.parent_of(entity) {
-            let parent_type_params: Vec<Entity> = qctx
-                .get::<TypeParams>(parent)
-                .map(|tp| tp.0.clone())
-                .unwrap_or_default();
-            if explicit_type_args.len() == parent_type_params.len() {
-                for (i, &param) in parent_type_params.iter().enumerate() {
-                    let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
-                    subs.push((param, tv));
-                }
-            } else if qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
-                // Extension method: map explicit type args to the extension target's type params
-                if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: parent,
-                    root,
-                }) {
-                    let target_type_params: Vec<Entity> = qctx
-                        .get::<TypeParams>(target)
-                        .map(|tp| tp.0.clone())
-                        .unwrap_or_default();
-                    if explicit_type_args.len() == target_type_params.len() {
-                        for (i, &param) in target_type_params.iter().enumerate() {
-                            let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
-                            subs.push((param, tv));
-                        }
+    if !explicit_type_args.is_empty()
+        && explicit_type_args.len() != type_param_entities.len()
+        && let Some(parent) = qctx.parent_of(entity)
+    {
+        let parent_type_params: Vec<Entity> = qctx
+            .get::<TypeParams>(parent)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        if explicit_type_args.len() == parent_type_params.len() {
+            for (i, &param) in parent_type_params.iter().enumerate() {
+                let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
+                subs.push((param, tv));
+            }
+        } else if qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
+            // Extension method: map explicit type args to the extension target's type params
+            if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: parent,
+                root,
+            }) {
+                let target_type_params: Vec<Entity> = qctx
+                    .get::<TypeParams>(target)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                if explicit_type_args.len() == target_type_params.len() {
+                    for (i, &param) in target_type_params.iter().enumerate() {
+                        let tv = lower_hir_ty(ctx, &explicit_type_args[i]);
+                        subs.push((param, tv));
                     }
                 }
             }
         }
+    }
 
     // For methods/functions inside extensions, the extension target's type params
     // need fresh TyVars even without explicit type args. Without this, return types
     // like `Box[T]` stay unresolved when calling `Box.wrap(42)` directly.
-    if explicit_type_args.is_empty() && type_param_entities.is_empty()
+    if explicit_type_args.is_empty()
+        && type_param_entities.is_empty()
         && let Some(parent) = qctx.parent_of(entity)
-            && qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension) {
-                // Get the extension target's type params (e.g., Box's T)
-                if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: parent,
-                    root,
-                }) {
-                    let target_type_params: Vec<Entity> = qctx
-                        .get::<TypeParams>(target)
-                        .map(|tp| tp.0.clone())
-                        .unwrap_or_default();
-                    for &param in &target_type_params {
-                        if !subs.iter().any(|(e, _)| *e == param) {
-                            let fresh = ctx.fresh();
-                            subs.push((param, fresh));
-                        }
-                    }
+        && qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension)
+    {
+        // Get the extension target's type params (e.g., Box's T)
+        if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: parent,
+            root,
+        }) {
+            let target_type_params: Vec<Entity> = qctx
+                .get::<TypeParams>(target)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            for &param in &target_type_params {
+                if !subs.iter().any(|(e, _)| *e == param) {
+                    let fresh = ctx.fresh();
+                    subs.push((param, fresh));
                 }
             }
+        }
+    }
 
     emit_where_clause_constraints_with_subs(ctx, entity, &subs, site_span);
 
@@ -1865,13 +1867,12 @@ fn lower_opaque_to_tyvar(
 
     let tv = ctx.fresh();
     let resolved = ctx.resolve(tv);
-    ctx.types[resolved.0 as usize] =
-        crate::ty::TySlot::Resolved(crate::ty::TyKind::Opaque {
-            origin: callee,
-            bounds: opaque_bounds,
-            origin_args,
-            index: 0,
-        });
+    ctx.types[resolved.0 as usize] = crate::ty::TySlot::Resolved(crate::ty::TyKind::Opaque {
+        origin: callee,
+        bounds: opaque_bounds,
+        origin_args,
+        index: 0,
+    });
     tv
 }
 
@@ -2015,9 +2016,10 @@ fn block_value_span(hir: &HirBody, block: &HirBlock) -> Option<Span> {
     }
     // Check if last statement is an expression
     if let Some(&last_id) = block.stmts.last()
-        && let HirStmt::Expr { expr, .. } = &hir.stmts[last_id] {
-            return Some(expr_span(hir, *expr));
-        }
+        && let HirStmt::Expr { expr, .. } = &hir.stmts[last_id]
+    {
+        return Some(expr_span(hir, *expr));
+    }
     None
 }
 

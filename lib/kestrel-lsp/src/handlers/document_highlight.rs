@@ -10,9 +10,7 @@ use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_type_infer::InferBody;
-use tower_lsp::lsp_types::{
-    DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
-};
+use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams};
 
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite, clip_to_identifier};
@@ -153,9 +151,7 @@ fn collect_sites(
             s.retain(|site| site.file == file_entity);
 
             // Type-position references, filtered to this file.
-            for (file, span) in
-                crate::types::type_references_workspace(world, root, compiler, *e)
-            {
+            for (file, span) in crate::types::type_references_workspace(world, root, compiler, *e) {
                 if file == file_entity {
                     s.push(ReferenceSite {
                         file,

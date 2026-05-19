@@ -265,7 +265,6 @@ fn push_decl_site(world: &World, root: Entity, target: &Target, sites: &mut Vec<
     }
 }
 
-
 // ===== Validation =====
 
 fn validate_identifier(s: &str) -> Result<(), &'static str> {
@@ -410,7 +409,6 @@ fn build_workspace_edit(
         change_annotations: None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

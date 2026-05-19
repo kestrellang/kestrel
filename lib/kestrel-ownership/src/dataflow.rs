@@ -29,9 +29,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use kestrel_mir::{
-    LocalId, MirBody, Rvalue, Statement, StatementKind, TerminatorKind, Value,
-};
+use kestrel_mir::{LocalId, MirBody, Rvalue, Statement, StatementKind, TerminatorKind, Value};
 use kestrel_span::Span;
 
 use crate::move_path::{MovePathId, MovePathSet};
@@ -103,7 +101,11 @@ impl InitState {
     pub fn join(&mut self, other: &InitState) -> bool {
         let mut changed = false;
         // Intersect def_init
-        let new_def: HashSet<MovePathId> = self.def_init.intersection(&other.def_init).copied().collect();
+        let new_def: HashSet<MovePathId> = self
+            .def_init
+            .intersection(&other.def_init)
+            .copied()
+            .collect();
         if new_def != self.def_init {
             self.def_init = new_def;
             changed = true;
@@ -354,11 +356,7 @@ fn gen_value_refmuts(state: &mut InitState, v: &Value, paths: &MovePathSet) {
 /// Terminators can move (`Return(Value)`, `Branch.condition`). Span-less
 /// convenience wrapper for callers (like drop-elab's recompute) that
 /// don't carry the terminator's span around.
-pub fn apply_terminator(
-    state: &mut InitState,
-    term: &TerminatorKind,
-    paths: &MovePathSet,
-) {
+pub fn apply_terminator(state: &mut InitState, term: &TerminatorKind, paths: &MovePathSet) {
     apply_terminator_with_span(state, term, None, paths);
 }
 

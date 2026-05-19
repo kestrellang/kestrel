@@ -114,7 +114,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             )
         },
         InferError::MemberIsStatic { name, .. } => (
-            format!("'{}' is a static member and cannot be used on an instance", name),
+            format!(
+                "'{}' is a static member and cannot be used on an instance",
+                name
+            ),
             format!("use the type name to call '{}'", name),
         ),
         InferError::NoAssociatedType { name, .. } => (
@@ -226,9 +229,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         InferError::MethodNotCalled { method, .. } => {
             (detail.to_string(), format!("add () to call '{}'", method))
         },
-        InferError::CircularOpaqueReturn { .. } => {
-            ("circular opaque return type".into(), "concrete type cannot be determined".into())
-        },
+        InferError::CircularOpaqueReturn { .. } => (
+            "circular opaque return type".into(),
+            "concrete type cannot be determined".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

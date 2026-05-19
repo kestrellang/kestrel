@@ -100,7 +100,11 @@ impl ErasedStore {
         Self {
             data: Box::new(value),
             clone_fn: |any| {
-                Box::new(any.downcast_ref::<T>().expect("type mismatch in ErasedStore clone").clone())
+                Box::new(
+                    any.downcast_ref::<T>()
+                        .expect("type mismatch in ErasedStore clone")
+                        .clone(),
+                )
             },
         }
     }
@@ -150,7 +154,9 @@ impl QueryStorage {
 
     fn update_verified<Q: QueryFn>(&mut self, key: &Q, revision: Revision) {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
-            && let Some(map) = store.data.downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
+            && let Some(map) = store
+                .data
+                .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;

@@ -669,9 +669,7 @@ pub fn compile_function(
     })
     .map_err(|e| CodegenError::FunctionCompilation {
         name: mangled_name.to_string(),
-        source: Box::new(std::io::Error::other(
-            format!("{e:?}"),
-        )),
+        source: Box::new(std::io::Error::other(format!("{e:?}"))),
     })?;
 
     ctx.cl_module

@@ -9,13 +9,9 @@ use crate::types;
 use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Value as CrValue};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen::{
-    LayoutCache, TargetConfig, substitute_type, substitute_type_with_self,
-};
+use kestrel_codegen::{LayoutCache, TargetConfig, substitute_type, substitute_type_with_self};
 use kestrel_hecs::Entity;
-use kestrel_mir::{
-    EnumId, MirBody, MirModule, MirTy, Place, StructId,
-};
+use kestrel_mir::{EnumId, MirBody, MirModule, MirTy, Place, StructId};
 use std::collections::HashMap;
 
 /// Apply `substitute_type` to every element of a type-argument list.

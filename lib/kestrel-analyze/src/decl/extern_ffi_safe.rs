@@ -200,23 +200,21 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
         if let Some(ret_ty) = cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
             entity: cx.entity,
             root: cx.root,
-        })
-            && !matches!(&ret_ty, HirTy::Tuple(elems, _) if elems.is_empty())
-                && !is_ffi_safe(cx, &ret_ty, ffi_safe_entity) {
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: "E605",
-                        severity: Severity::Error,
-                        message: "return type does not conform to FFISafe".into(),
-                        labels: vec![DiagLabel {
-                            span,
-                            message: "type is not FFI-safe".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![
-                            "only types conforming to FFISafe can cross FFI boundaries".into(),
-                        ],
-                    });
-                }
+        }) && !matches!(&ret_ty, HirTy::Tuple(elems, _) if elems.is_empty())
+            && !is_ffi_safe(cx, &ret_ty, ffi_safe_entity)
+        {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: "E605",
+                severity: Severity::Error,
+                message: "return type does not conform to FFISafe".into(),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "type is not FFI-safe".into(),
+                    is_primary: true,
+                }],
+                notes: vec!["only types conforming to FFISafe can cross FFI boundaries".into()],
+            });
+        }
 
         diags
     }

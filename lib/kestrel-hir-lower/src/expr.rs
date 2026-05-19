@@ -317,20 +317,18 @@ impl LowerCtx<'_> {
         // Check for empty type argument brackets (e.g., `identity[]`)
         for seg in segments {
             if let Some(args) = &seg.type_args
-                && args.is_empty() {
-                    self.ctx.accumulate(
-                        kestrel_reporting::Diagnostic::error()
-                            .with_message("empty type argument list")
-                            .with_labels(vec![
-                                kestrel_reporting::Label::primary(
-                                    seg.span.file_id,
-                                    seg.span.range(),
-                                )
+                && args.is_empty()
+            {
+                self.ctx.accumulate(
+                    kestrel_reporting::Diagnostic::error()
+                        .with_message("empty type argument list")
+                        .with_labels(vec![
+                            kestrel_reporting::Label::primary(seg.span.file_id, seg.span.range())
                                 .with_message("expected at least one type argument"),
-                            ]),
-                    );
-                    return self.alloc_expr(HirExpr::Error { span: span.clone() });
-                }
+                        ]),
+                );
+                return self.alloc_expr(HirExpr::Error { span: span.clone() });
+            }
         }
 
         // Collect explicit type args from all path segments (e.g., Pointer[UInt8])
@@ -592,27 +590,26 @@ impl LowerCtx<'_> {
                     return self.emit_init_outside_initializer(span);
                 }
                 let first = &segments[0];
-                if first.type_args.is_none()
-                    && self.lookup_local(&first.name).is_some() {
-                        // Lower all segments except the last as nested Field accesses
-                        let last = &segments[segments.len() - 1];
-                        let method = last.name.clone();
-                        let type_args = last.type_args.clone();
+                if first.type_args.is_none() && self.lookup_local(&first.name).is_some() {
+                    // Lower all segments except the last as nested Field accesses
+                    let last = &segments[segments.len() - 1];
+                    let method = last.name.clone();
+                    let type_args = last.type_args.clone();
 
-                        // Build receiver from first N-1 segments
-                        let current = self.lower_path_prefix(segments);
+                    // Build receiver from first N-1 segments
+                    let current = self.lower_path_prefix(segments);
 
-                        let lowered_type_args =
-                            type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                    let lowered_type_args =
+                        type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
 
-                        return self.alloc_expr(HirExpr::MethodCall {
-                            receiver: current,
-                            method: name_from_ast(method),
-                            type_args: lowered_type_args,
-                            args: lowered_args,
-                            span: span.clone(),
-                        });
-                    }
+                    return self.alloc_expr(HirExpr::MethodCall {
+                        receiver: current,
+                        method: name_from_ast(method),
+                        type_args: lowered_type_args,
+                        args: lowered_args,
+                        span: span.clone(),
+                    });
+                }
 
                 // Not a local-based path — check for static method call.
                 // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
@@ -823,9 +820,10 @@ impl LowerCtx<'_> {
                             );
                             let receiver = self.lower_path(body, prefix_slice, &prefix_span);
                             let last = &segments[segments.len() - 1];
-                            let lowered_type_args = last.type_args.as_ref().map(|args| {
-                                args.iter().map(|t| self.lower_type(t)).collect()
-                            });
+                            let lowered_type_args = last
+                                .type_args
+                                .as_ref()
+                                .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
                             return self.alloc_expr(HirExpr::MethodCall {
                                 receiver,
                                 method: name_from_ast(last.name.clone()),
@@ -1406,18 +1404,16 @@ impl LowerCtx<'_> {
             return;
         }
         if let Some(lbl) = label
-            && !self.has_loop_label(lbl) {
-                self.ctx.accumulate(
-                    kestrel_reporting::Diagnostic::error()
-                        .with_message(format!("undeclared label '{}'", lbl))
-                        .with_labels(vec![
-                            kestrel_reporting::Label::primary(span.file_id, span.range())
-                                .with_message(format!(
-                                    "label '{}' not found in enclosing loops",
-                                    lbl
-                                )),
-                        ]),
-                );
-            }
+            && !self.has_loop_label(lbl)
+        {
+            self.ctx.accumulate(
+                kestrel_reporting::Diagnostic::error()
+                    .with_message(format!("undeclared label '{}'", lbl))
+                    .with_labels(vec![
+                        kestrel_reporting::Label::primary(span.file_id, span.range())
+                            .with_message(format!("label '{}' not found in enclosing loops", lbl)),
+                    ]),
+            );
+        }
     }
 }

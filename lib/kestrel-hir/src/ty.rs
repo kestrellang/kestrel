@@ -68,10 +68,7 @@ pub enum HirTy {
     },
     /// Opaque type: `some P`, `some P and Q`. Bounds are protocol types.
     /// Lowered from `AstType::Some`. Carries resolved protocol bounds.
-    Opaque {
-        bounds: Vec<HirTy>,
-        span: Span,
-    },
+    Opaque { bounds: Vec<HirTy>, span: Span },
     /// Never type (diverging expressions, e.g. `panic()`)
     Never(Span),
     /// Inferred type (user wrote `_` or omitted)

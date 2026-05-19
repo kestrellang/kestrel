@@ -372,9 +372,10 @@ fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
         HirExpr::Local(local_id, _) => cx.hir.locals[*local_id].is_mut,
         HirExpr::Field { base, .. } => {
             if let Some(&field_entity) = cx.typed.resolutions.get(&expr_id)
-                && cx.query.get::<Settable>(field_entity).is_none() {
-                    return false;
-                }
+                && cx.query.get::<Settable>(field_entity).is_none()
+            {
+                return false;
+            }
             is_mutable_base(cx, *base)
         },
         HirExpr::TupleIndex { base, .. } => is_mutable_base(cx, *base),

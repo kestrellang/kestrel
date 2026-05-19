@@ -14,8 +14,8 @@ use kestrel_hir_lower::LowerBody;
 use kestrel_type_infer::InferBody;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
-    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams,
-    CallHierarchyPrepareParams, Range, SymbolKind,
+    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams, Range,
+    SymbolKind,
 };
 
 use crate::handlers::document_symbols::node_kind_to_symbol_kind;
@@ -79,12 +79,7 @@ pub async fn incoming(
     let (handle, stdlib, user, sources) = {
         let s = state.lock().await;
         let (stdlib, user) = s.partition_sources();
-        (
-            s.compiler_handle.clone(),
-            stdlib,
-            user,
-            s.sources.clone(),
-        )
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone())
     };
     let item_path = url_to_path(&item_uri);
 
@@ -113,8 +108,7 @@ pub async fn incoming(
                         continue;
                     };
                     let site_li = LineIndex::new(source.clone());
-                    let clipped =
-                        references::clip_to_identifier(&source, &site.span, site.kind);
+                    let clipped = references::clip_to_identifier(&source, &site.span, site.kind);
                     let range = site_li.range_for(clipped.start, clipped.end);
                     by_caller.entry(body).or_default().push(range);
                 }
@@ -151,12 +145,7 @@ pub async fn outgoing(
     let (handle, stdlib, user, sources) = {
         let s = state.lock().await;
         let (stdlib, user) = s.partition_sources();
-        (
-            s.compiler_handle.clone(),
-            stdlib,
-            user,
-            s.sources.clone(),
-        )
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone())
     };
     let item_path = url_to_path(&item_uri);
 
@@ -205,15 +194,18 @@ pub async fn outgoing(
                         },
                         HirExpr::Call { .. }
                         | HirExpr::MethodCall { .. }
-                        | HirExpr::ProtocolCall { .. } => typed
-                            .as_ref()
-                            .and_then(|t| t.resolutions.get(&id).copied()),
+                        | HirExpr::ProtocolCall { .. } => {
+                            typed.as_ref().and_then(|t| t.resolutions.get(&id).copied())
+                        },
                         _ => None,
                     };
                     if let Some(callee_entity) = callee {
                         let span = semantic::hir_expr_span(expr);
-                        let clipped_span =
-                            references::clip_to_identifier(source, &span, references::RefKind::MemberAccess);
+                        let clipped_span = references::clip_to_identifier(
+                            source,
+                            &span,
+                            references::RefKind::MemberAccess,
+                        );
                         let range = li.range_for(clipped_span.start, clipped_span.end);
                         by_callee.entry(callee_entity).or_default().push(range);
                     }
@@ -294,12 +286,7 @@ fn resolve_callable_at(
 fn is_callable(world: &World, entity: Entity) -> bool {
     matches!(
         world.get::<NodeKind>(entity),
-        Some(
-            NodeKind::Function
-                | NodeKind::Initializer
-                | NodeKind::Subscript
-                | NodeKind::Deinit
-        )
+        Some(NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit)
     ) || world.get::<Callable>(entity).is_some()
 }
 

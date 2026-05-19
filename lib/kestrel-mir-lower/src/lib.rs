@@ -450,7 +450,8 @@ extend S: P { }
             .filter(|s| {
                 matches!(
                     s.kind,
-                    kestrel_mir::StatementKind::Drop { .. } | kestrel_mir::StatementKind::DropIf { .. }
+                    kestrel_mir::StatementKind::Drop { .. }
+                        | kestrel_mir::StatementKind::DropIf { .. }
                 )
             })
             .count();

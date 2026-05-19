@@ -101,9 +101,11 @@ impl QueryFn for InferBody {
             if let ty::TySlot::Resolved(ty::TyKind::Opaque { .. }) =
                 &infer_ctx.types[resolved.0 as usize]
             {
-                infer_ctx.errors.push(error::InferError::CircularOpaqueReturn {
-                    span: info.span.clone(),
-                });
+                infer_ctx
+                    .errors
+                    .push(error::InferError::CircularOpaqueReturn {
+                        span: info.span.clone(),
+                    });
             }
         }
 
@@ -355,9 +357,7 @@ fn create_return_type(
     });
 
     match hir_ty {
-        Some(ref hir) if contains_hir_opaque(hir) => {
-            create_return_type_with_opaque(ctx, hir)
-        },
+        Some(ref hir) if contains_hir_opaque(hir) => create_return_type_with_opaque(ctx, hir),
         Some(hir_ty) => generate::lower_hir_ty(ctx, &hir_ty),
         None => ctx.fresh(),
     }
@@ -398,7 +398,10 @@ fn create_return_type_with_opaque(
                 let bound_tv = generate::lower_hir_ty(ctx, bound);
                 let resolved = ctx.resolve(bound_tv);
                 match &ctx.types[resolved.0 as usize] {
-                    ty::TySlot::Resolved(ty::TyKind::Protocol { entity: proto, args }) => {
+                    ty::TySlot::Resolved(ty::TyKind::Protocol {
+                        entity: proto,
+                        args,
+                    }) => {
                         opaque_bounds.push((*proto, args.clone()));
                         ctx.conforms(concrete_ret, *proto, span.clone());
                     },
@@ -721,9 +724,10 @@ fn get_or_create_subject_tv(
 ) -> ty::TyVar {
     // Check if param is a type parameter of the target type
     if let Some(idx) = target_type_params.iter().position(|&p| p == param)
-        && idx < fresh_args.len() {
-            return fresh_args[idx];
-        }
+        && idx < fresh_args.len()
+    {
+        return fresh_args[idx];
+    }
 
     // Check if param is an associated type (TypeAlias) — create via associated constraint
     if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeAlias) {

@@ -107,10 +107,12 @@ impl LspClient {
         std::thread::sleep(Duration::from_secs(2));
         let id = self.next_id;
         self.next_id += 1;
-        self.send(&json!({"jsonrpc":"2.0","id":id,"method":"textDocument/hover","params":{
-            "textDocument":{"uri":"file:///tmp/__flush__.ks"},
-            "position":{"line":0,"character":0}
-        }}));
+        self.send(
+            &json!({"jsonrpc":"2.0","id":id,"method":"textDocument/hover","params":{
+                "textDocument":{"uri":"file:///tmp/__flush__.ks"},
+                "position":{"line":0,"character":0}
+            }}),
+        );
         let mut notifications = Vec::new();
         let mut got_barrier = false;
         loop {
@@ -138,26 +140,35 @@ impl LspClient {
     }
 
     fn initialize(&mut self) -> Value {
-        let resp = self.request("initialize", json!({
-            "processId": std::process::id(),
-            "capabilities": {},
-            "rootUri": null,
-        }));
+        let resp = self.request(
+            "initialize",
+            json!({
+                "processId": std::process::id(),
+                "capabilities": {},
+                "rootUri": null,
+            }),
+        );
         self.notify("initialized", json!({}));
         resp
     }
 
     fn open(&mut self, uri: &str, text: &str) {
-        self.notify("textDocument/didOpen", json!({
-            "textDocument": {"uri": uri, "languageId": "kestrel", "version": 1, "text": text}
-        }));
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {"uri": uri, "languageId": "kestrel", "version": 1, "text": text}
+            }),
+        );
     }
 
     fn change(&mut self, uri: &str, version: i32, text: &str) {
-        self.notify("textDocument/didChange", json!({
-            "textDocument": {"uri": uri, "version": version},
-            "contentChanges": [{"text": text}]
-        }));
+        self.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": {"uri": uri, "version": version},
+                "contentChanges": [{"text": text}]
+            }),
+        );
     }
 
     fn shutdown(mut self) {
@@ -236,7 +247,8 @@ fn initialize_and_shutdown() {
     let mut c = LspClient::spawn();
     let resp = c.initialize();
     assert_eq!(
-        resp.pointer("/result/serverInfo/name").and_then(|v| v.as_str()),
+        resp.pointer("/result/serverInfo/name")
+            .and_then(|v| v.as_str()),
         Some("kestrel-lsp"),
     );
     assert!(resp.pointer("/result/capabilities").is_some());
@@ -250,10 +262,16 @@ fn open_invalid_file_does_not_crash() {
     c.open("file:///tmp/test_diag.ks", "module Bad\nstruct Foo {");
     let _ = c.flush_notifications();
     // Server must survive opening a file with syntax errors.
-    let resp = c.request("textDocument/documentSymbol", json!({
-        "textDocument": {"uri": "file:///tmp/test_diag.ks"}
-    }));
-    assert!(resp.get("result").is_some(), "server should respond after opening invalid file");
+    let resp = c.request(
+        "textDocument/documentSymbol",
+        json!({
+            "textDocument": {"uri": "file:///tmp/test_diag.ks"}
+        }),
+    );
+    assert!(
+        resp.get("result").is_some(),
+        "server should respond after opening invalid file"
+    );
     c.shutdown();
 }
 
@@ -262,10 +280,16 @@ fn document_symbols() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_sym.ks";
-    c.open(uri, "module Sym\nstruct Point { var x: Int64 }\nfunc greet() {}");
+    c.open(
+        uri,
+        "module Sym\nstruct Point { var x: Int64 }\nfunc greet() {}",
+    );
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/documentSymbol", json!({"textDocument":{"uri":uri}}));
+    let resp = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
     let syms = resp.pointer("/result").and_then(|v| v.as_array());
     assert!(syms.is_some(), "should return symbol array");
     let names: Vec<&str> = syms
@@ -286,10 +310,13 @@ fn hover_responds() {
     c.open(uri, "module Hov\nstruct Foo {}");
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/hover", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 1, "character": 7}
-    }));
+    let resp = c.request(
+        "textDocument/hover",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 1, "character": 7}
+        }),
+    );
     assert!(resp.get("result").is_some());
     c.shutdown();
 }
@@ -299,13 +326,19 @@ fn completion_responds() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_comp.ks";
-    c.open(uri, "module Comp\nstruct Foo { var x: Int64 }\nfunc f() { let a = Foo(x: 1); a. }");
+    c.open(
+        uri,
+        "module Comp\nstruct Foo { var x: Int64 }\nfunc f() { let a = Foo(x: 1); a. }",
+    );
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/completion", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 2, "character": 32}
-    }));
+    let resp = c.request(
+        "textDocument/completion",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 2, "character": 32}
+        }),
+    );
     assert!(resp.get("result").is_some());
     c.shutdown();
 }
@@ -323,8 +356,14 @@ fn rapid_edits_survive() {
 
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/documentSymbol", json!({"textDocument":{"uri":uri}}));
-    assert!(resp.get("result").is_some(), "server alive after rapid edits");
+    let resp = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert!(
+        resp.get("result").is_some(),
+        "server alive after rapid edits"
+    );
     c.shutdown();
 }
 
@@ -333,13 +372,19 @@ fn goto_definition_responds() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_goto.ks";
-    c.open(uri, "module Goto\nstruct Foo {}\nfunc bar() -> Foo { Foo() }");
+    c.open(
+        uri,
+        "module Goto\nstruct Foo {}\nfunc bar() -> Foo { Foo() }",
+    );
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/definition", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 2, "character": 14}
-    }));
+    let resp = c.request(
+        "textDocument/definition",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 2, "character": 14}
+        }),
+    );
     assert!(resp.get("result").is_some());
     c.shutdown();
 }
@@ -355,10 +400,13 @@ fn document_highlight_returns_highlights() {
     );
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/documentHighlight", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 1, "character": 5}
-    }));
+    let resp = c.request(
+        "textDocument/documentHighlight",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 1, "character": 5}
+        }),
+    );
     let result = resp.pointer("/result").and_then(|v| v.as_array());
     assert!(result.is_some(), "expected highlights array");
     assert!(
@@ -374,7 +422,10 @@ fn workspace_symbol_search() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_ws.ks";
-    c.open(uri, "module Ws\nstruct Alpha {}\nfunc beta() -> lang.i64 { 1 }");
+    c.open(
+        uri,
+        "module Ws\nstruct Alpha {}\nfunc beta() -> lang.i64 { 1 }",
+    );
     let _ = c.flush_notifications();
 
     let resp = c.request("workspace/symbol", json!({"query": "Alpha"}));
@@ -386,7 +437,10 @@ fn workspace_symbol_search() {
         .filter_map(|s| s.get("name").and_then(|n| n.as_str()))
         .collect();
     assert!(names.contains(&"Alpha"), "expected Alpha in {names:?}");
-    assert!(!names.contains(&"beta"), "beta should be filtered out by query");
+    assert!(
+        !names.contains(&"beta"),
+        "beta should be filtered out by query"
+    );
     c.shutdown();
 }
 
@@ -395,19 +449,31 @@ fn hover_content_includes_signature() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_hov2.ks";
-    c.open(uri, "module Hov2\n/// Adds numbers.\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { a }");
+    c.open(
+        uri,
+        "module Hov2\n/// Adds numbers.\nfunc add(a: lang.i64, b: lang.i64) -> lang.i64 { a }",
+    );
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/hover", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 2, "character": 5}
-    }));
+    let resp = c.request(
+        "textDocument/hover",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 2, "character": 5}
+        }),
+    );
     let content = resp
         .pointer("/result/contents/value")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    assert!(content.contains("func add"), "hover should include signature: {content}");
-    assert!(content.contains("Adds numbers"), "hover should include doc: {content}");
+    assert!(
+        content.contains("func add"),
+        "hover should include signature: {content}"
+    );
+    assert!(
+        content.contains("Adds numbers"),
+        "hover should include doc: {content}"
+    );
     c.shutdown();
 }
 
@@ -416,18 +482,28 @@ fn goto_definition_points_to_decl() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_goto2.ks";
-    c.open(uri, "module Goto2\nfunc target() -> lang.i64 { 1 }\nfunc caller() -> lang.i64 { target() }");
+    c.open(
+        uri,
+        "module Goto2\nfunc target() -> lang.i64 { 1 }\nfunc caller() -> lang.i64 { target() }",
+    );
     let _ = c.flush_notifications();
 
     // Cursor on `target()` call on line 2.
-    let resp = c.request("textDocument/definition", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 2, "character": 28}
-    }));
+    let resp = c.request(
+        "textDocument/definition",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 2, "character": 28}
+        }),
+    );
     let target_line = resp
         .pointer("/result/range/start/line")
         .and_then(|v| v.as_u64());
-    assert_eq!(target_line, Some(1), "definition should point to line 1 (the decl)");
+    assert_eq!(
+        target_line,
+        Some(1),
+        "definition should point to line 1 (the decl)"
+    );
     c.shutdown();
 }
 
@@ -436,13 +512,19 @@ fn call_hierarchy_prepare_responds() {
     let mut c = LspClient::spawn();
     c.initialize();
     let uri = "file:///tmp/test_ch.ks";
-    c.open(uri, "module Ch\nfunc foo() -> lang.i64 { 1 }\nfunc bar() -> lang.i64 { foo() }");
+    c.open(
+        uri,
+        "module Ch\nfunc foo() -> lang.i64 { 1 }\nfunc bar() -> lang.i64 { foo() }",
+    );
     let _ = c.flush_notifications();
 
-    let resp = c.request("textDocument/prepareCallHierarchy", json!({
-        "textDocument": {"uri": uri},
-        "position": {"line": 1, "character": 5}
-    }));
+    let resp = c.request(
+        "textDocument/prepareCallHierarchy",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 1, "character": 5}
+        }),
+    );
     let items = resp.pointer("/result").and_then(|v| v.as_array());
     assert!(items.is_some(), "expected call hierarchy items");
     let name = items

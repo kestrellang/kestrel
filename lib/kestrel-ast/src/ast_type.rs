@@ -52,8 +52,5 @@ pub enum AstType {
     /// Inferred type `_`
     Inferred(Span),
     /// Opaque type, e.g. `some P`, `some P and Q`
-    Some {
-        bounds: Vec<AstType>,
-        span: Span,
-    },
+    Some { bounds: Vec<AstType>, span: Span },
 }

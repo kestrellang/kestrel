@@ -101,11 +101,7 @@ impl QueryFn for ResolveValuePath {
 /// `Self()` is just a name for the type. For protocols, `Self()` is
 /// polymorphic — callers route it through witness dispatch in type-infer,
 /// the same way `T()` works when `T: SomeProtocol`.
-fn try_resolve_self_value(
-    ctx: &QueryContext<'_>,
-    context: Entity,
-    root: Entity,
-) -> Option<Entity> {
+fn try_resolve_self_value(ctx: &QueryContext<'_>, context: Entity, root: Entity) -> Option<Entity> {
     let mut current = Some(context);
     while let Some(entity) = current {
         match ctx.get::<NodeKind>(entity) {
@@ -157,12 +153,13 @@ fn resolve_single_segment(
                     Some(&NodeKind::TypeAlias) => {
                         // If inside a protocol, this is an associated type
                         if let Some(parent) = ctx.parent_of(e)
-                            && ctx.get::<NodeKind>(parent) == Some(&NodeKind::Protocol) {
-                                return ValueResolution::AssociatedType {
-                                    entity: e,
-                                    container: None,
-                                };
-                            }
+                            && ctx.get::<NodeKind>(parent) == Some(&NodeKind::Protocol)
+                        {
+                            return ValueResolution::AssociatedType {
+                                entity: e,
+                                container: None,
+                            };
+                        }
                         // Free-standing alias — dereference to the underlying
                         // entity so downstream (HIR, inference, call dispatch)
                         // sees the concrete type. Mirrors what
@@ -281,28 +278,29 @@ fn walk_path_from(
 
         // Check if current is a type alias → resolve through
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
-            && let Some(resolved) = resolve_type_alias_target(ctx, current, context, root) {
-                current = resolved;
-            }
+            && let Some(resolved) = resolve_type_alias_target(ctx, current, context, root)
+        {
+            current = resolved;
+        }
 
         // If current is a TypeParameter, look up the segment in its protocol
         // bounds' associated types. Handles `T.Item`, `T.Next`, etc.
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter)
             && let Some(found) =
                 crate::resolve_type::resolve_type_param_assoc(ctx, current, segment, context, root)
-            {
-                if is_last {
-                    // Associated type referenced as a value (e.g. `T.Item` as
-                    // the receiver of a method call). Handled downstream as a
-                    // type reference that dispatches on the associated type.
-                    return ValueResolution::AssociatedType {
-                        entity: found,
-                        container: Some(current),
-                    };
-                }
-                current = found;
-                continue;
+        {
+            if is_last {
+                // Associated type referenced as a value (e.g. `T.Item` as
+                // the receiver of a method call). Handled downstream as a
+                // type reference that dispatches on the associated type.
+                return ValueResolution::AssociatedType {
+                    entity: found,
+                    container: Some(current),
+                };
             }
+            current = found;
+            continue;
+        }
 
         // If current is an abstract associated type (TypeAlias inside a
         // protocol) with its own protocol bounds, walk through to a nested
@@ -310,16 +308,16 @@ fn walk_path_from(
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
             && let Some(found) =
                 crate::resolve_type::resolve_assoc_type_nested(ctx, current, segment, context, root)
-            {
-                if is_last {
-                    return ValueResolution::AssociatedType {
-                        entity: found,
-                        container: Some(current),
-                    };
-                }
-                current = found;
-                continue;
+        {
+            if is_last {
+                return ValueResolution::AssociatedType {
+                    entity: found,
+                    container: Some(current),
+                };
             }
+            current = found;
+            continue;
+        }
 
         // Try direct children first
         let children = ctx.query(VisibleChildrenByName {
@@ -359,9 +357,7 @@ fn walk_path_from(
                     .filter(|&e| {
                         ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
                             && (ctx.has::<Static>(e)
-                                || ctx
-                                    .get::<Callable>(e)
-                                    .is_some_and(|c| c.receiver.is_none()))
+                                || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
                     })
                     .collect();
                 if !static_methods.is_empty() {
@@ -395,9 +391,7 @@ fn walk_path_from(
                         .filter(|&e| {
                             ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
                                 && (ctx.has::<Static>(e)
-                                    || ctx
-                                        .get::<Callable>(e)
-                                        .is_some_and(|c| c.receiver.is_none()))
+                                    || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
                         })
                         .collect();
                     if !static_methods.is_empty() {
@@ -414,16 +408,16 @@ fn walk_path_from(
         if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
             && let Some(found) =
                 resolve_assoc_type_static_member(ctx, current, segment, context, root)
-            {
-                if is_last {
-                    return ValueResolution::AssociatedTypeStaticMember {
-                        entity: found,
-                        assoc_type: current,
-                    };
-                }
-                current = found;
-                continue;
+        {
+            if is_last {
+                return ValueResolution::AssociatedTypeStaticMember {
+                    entity: found,
+                    assoc_type: current,
+                };
             }
+            current = found;
+            continue;
+        }
 
         // Check for enum case or field/getter used as intermediate value
         // (e.g. MyEnum.caseA where caseA has no children to walk into)

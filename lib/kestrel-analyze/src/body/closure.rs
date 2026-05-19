@@ -337,20 +337,21 @@ fn check_expr_for_param_assign(
         HirExpr::Assign { target, value, .. } => {
             // Check if target is a closure parameter
             if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target]
-                && param_locals.contains(local_id) {
-                    let name = cx.hir.locals[*local_id].name.clone();
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[4].id,
-                        severity: DESCRIPTORS[4].default_severity,
-                        message: format!("cannot assign to closure parameter '{}'", name),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, *target),
-                            message: "closure parameters are immutable".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![],
-                    });
-                }
+                && param_locals.contains(local_id)
+            {
+                let name = cx.hir.locals[*local_id].name.clone();
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[4].id,
+                    severity: DESCRIPTORS[4].default_severity,
+                    message: format!("cannot assign to closure parameter '{}'", name),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, *target),
+                        message: "closure parameters are immutable".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+            }
             check_expr_for_param_assign(cx, *value, param_locals, diags);
         },
 
@@ -397,7 +398,9 @@ fn check_expr_for_param_assign(
                 check_expr_for_param_assign(cx, arg.value, param_locals, diags);
             }
         },
-        HirExpr::Return { value: Some(val), .. } => {
+        HirExpr::Return {
+            value: Some(val), ..
+        } => {
             check_expr_for_param_assign(cx, *val, param_locals, diags);
         },
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
@@ -469,20 +472,21 @@ fn walk_for_capture_assign(
     match &cx.hir.exprs[id] {
         HirExpr::Assign { target, value, .. } => {
             if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target]
-                && capture_set.contains(local_id) {
-                    let name = cx.hir.locals[*local_id].name.clone();
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[3].id,
-                        severity: DESCRIPTORS[3].default_severity,
-                        message: format!("cannot assign to captured variable '{}'", name),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, *target),
-                            message: "captured variables are immutable in closures".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![],
-                    });
-                }
+                && capture_set.contains(local_id)
+            {
+                let name = cx.hir.locals[*local_id].name.clone();
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[3].id,
+                    severity: DESCRIPTORS[3].default_severity,
+                    message: format!("cannot assign to captured variable '{}'", name),
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, *target),
+                        message: "captured variables are immutable in closures".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![],
+                });
+            }
             walk_for_capture_assign(cx, *value, capture_set, diags);
         },
         HirExpr::If {

@@ -56,7 +56,9 @@ pub fn run(module: &mut MirModule) {
 
     for (i, func) in module.functions.iter_mut().enumerate() {
         let Some(body) = &mut func.body else { continue };
-        let Some(prepared) = pre[i].take() else { continue };
+        let Some(prepared) = pre[i].take() else {
+            continue;
+        };
         elaborate(body, prepared);
     }
 }
@@ -351,7 +353,10 @@ fn emit_return_drops(
     flags: &HashMap<LocalId, LocalId>,
 ) {
     for block_idx in 0..body.blocks.len() {
-        if !matches!(body.blocks[block_idx].terminator.kind, TerminatorKind::Return(_)) {
+        if !matches!(
+            body.blocks[block_idx].terminator.kind,
+            TerminatorKind::Return(_)
+        ) {
             continue;
         }
         let exit_state = compute_exit_state(body, paths, result, block_idx);
@@ -362,7 +367,9 @@ fn emit_return_drops(
             // If the dataflow proves this path is entirely uninit at the
             // terminator, skip emitting a drop. This trims dead drops on
             // locals declared in branches that all moved them out.
-            let touched = path.map(|p| exit_state.may_init.contains(&p)).unwrap_or(true);
+            let touched = path
+                .map(|p| exit_state.may_init.contains(&p))
+                .unwrap_or(true);
             if !touched {
                 continue;
             }

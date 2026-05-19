@@ -167,7 +167,9 @@ impl MovePathSet {
     /// root local — `s.f.0` and `s` both resolve to `s`'s path. Stage 7
     /// will return distinct paths for distinct projections.
     pub fn lookup_place(&self, place: &Place) -> Option<MovePathId> {
-        place.root_local().and_then(|l| self.by_local.get(&l).copied())
+        place
+            .root_local()
+            .and_then(|l| self.by_local.get(&l).copied())
     }
 
     /// Look up by local ID directly.

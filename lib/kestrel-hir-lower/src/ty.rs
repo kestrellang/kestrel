@@ -128,12 +128,22 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         AstType::Optional(inner, span) => {
             lower_sugar_type(ctx, owner, root, "Optional", &[inner.as_ref()], span)
         },
-        AstType::Dictionary(key, val, span) => {
-            lower_sugar_type(ctx, owner, root, "Dictionary", &[key.as_ref(), val.as_ref()], span)
-        },
-        AstType::Result { ok, err, span } => {
-            lower_sugar_type(ctx, owner, root, "Result", &[ok.as_ref(), err.as_ref()], span)
-        },
+        AstType::Dictionary(key, val, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            "Dictionary",
+            &[key.as_ref(), val.as_ref()],
+            span,
+        ),
+        AstType::Result { ok, err, span } => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            "Result",
+            &[ok.as_ref(), err.as_ref()],
+            span,
+        ),
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
@@ -209,10 +219,12 @@ fn build_hir_ty_for_entity(
             // Trivial (non-generic, bound-free) aliases with a concrete
             // TypeAnnotation are eagerly expanded — avoids constraint bloat
             // for `type Fd = Int32` style declarations.
-            if is_trivial_alias(ctx, entity) && args.is_empty()
-                && let Some(ann) = ctx.get::<TypeAnnotation>(entity) {
-                    return lower_ast_type(ctx, owner, root, &ann.0);
-                }
+            if is_trivial_alias(ctx, entity)
+                && args.is_empty()
+                && let Some(ann) = ctx.get::<TypeAnnotation>(entity)
+            {
+                return lower_ast_type(ctx, owner, root, &ann.0);
+            }
             // Non-associated aliases (parameterized or constrained) flow as
             // AliasUse. The solver reduces concrete ones via Reduce.
             HirTy::AliasUse {

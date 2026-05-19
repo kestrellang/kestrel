@@ -306,18 +306,20 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// Get the MIR type for a HIR local from type inference results.
     fn resolve_local_type(&mut self, hir_id: HirLocalId) -> MirTy {
         if let Some(typed) = self.typed
-            && let Some(resolved) = typed.local_types.get(&hir_id) {
-                return lower_resolved_ty(self.ctx, resolved);
-            }
+            && let Some(resolved) = typed.local_types.get(&hir_id)
+        {
+            return lower_resolved_ty(self.ctx, resolved);
+        }
         MirTy::Error
     }
 
     /// Get the MIR type for a HIR expression from type inference results.
     fn resolve_expr_type(&mut self, expr_id: HirExprId) -> MirTy {
         if let Some(typed) = self.typed
-            && let Some(resolved) = typed.expr_types.get(&expr_id) {
-                return lower_resolved_ty(self.ctx, resolved);
-            }
+            && let Some(resolved) = typed.expr_types.get(&expr_id)
+        {
+            return lower_resolved_ty(self.ctx, resolved);
+        }
         MirTy::Error
     }
 
@@ -541,12 +543,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     if let Some(protocol) = self.find_protocol_for_method(setter) {
                         self.ctx.register_name(protocol);
                         let method_key = self.witness_method_key_of(setter);
-                        let callee =
-                            Callee::witness(protocol, method_key, receiver_ty, type_args);
+                        let callee = Callee::witness(protocol, method_key, receiver_ty, type_args);
                         self.emit_call(callee, call_args, MirTy::unit());
                     } else {
-                        let type_args =
-                            self.prepend_receiver_type_args(&receiver_ty, type_args);
+                        let type_args = self.prepend_receiver_type_args(&receiver_ty, type_args);
                         let callee = Callee::method(setter, type_args, receiver_ty);
                         self.emit_call(callee, call_args, MirTy::unit());
                     }
@@ -644,12 +644,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 if let Some(protocol) = self.find_protocol_for_method(setter) {
                     self.ctx.register_name(protocol);
                     let method_key = self.witness_method_key_of(setter);
-                    let callee =
-                        Callee::witness(protocol, method_key, field_ty, type_args);
+                    let callee = Callee::witness(protocol, method_key, field_ty, type_args);
                     self.emit_call(callee, call_args, MirTy::unit());
                 } else {
-                    let type_args =
-                        self.prepend_receiver_type_args(&field_ty, type_args);
+                    let type_args = self.prepend_receiver_type_args(&field_ty, type_args);
                     let callee = Callee::method(setter, type_args, field_ty);
                     self.emit_call(callee, call_args, MirTy::unit());
                 }
@@ -737,7 +735,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // Lower for side effects, discard result
                 let _ = self.lower_expr(*expr);
             },
-            HirStmt::Deinit { local: Some(hir_local), .. } => {
+            HirStmt::Deinit {
+                local: Some(hir_local),
+                ..
+            } => {
                 // `deinit x;` consumes `x`. Emit a move out to a fresh
                 // temp so the dataflow sees the kill — this is what makes
                 // `deinit x; use(x)` flag E500. The deinit body itself is
@@ -920,17 +921,16 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     let receiver_arg = (base_val).into_ref();
                     let method_type_args = self.resolve_type_args(expr_id);
 
-                    let callee = if let Some(protocol) =
-                        self.find_protocol_for_method(getter_entity)
-                    {
-                        self.ctx.register_name(protocol);
-                        let method_key = self.witness_method_key_of(getter_entity);
-                        Callee::witness(protocol, method_key, receiver_ty, method_type_args)
-                    } else {
-                        let type_args =
-                            self.prepend_receiver_type_args(&receiver_ty, method_type_args);
-                        Callee::method(getter_entity, type_args, receiver_ty)
-                    };
+                    let callee =
+                        if let Some(protocol) = self.find_protocol_for_method(getter_entity) {
+                            self.ctx.register_name(protocol);
+                            let method_key = self.witness_method_key_of(getter_entity);
+                            Callee::witness(protocol, method_key, receiver_ty, method_type_args)
+                        } else {
+                            let type_args =
+                                self.prepend_receiver_type_args(&receiver_ty, method_type_args);
+                            Callee::method(getter_entity, type_args, receiver_ty)
+                        };
                     self.emit_call(callee, vec![receiver_arg], result_ty)
                 } else {
                     // Stored field: direct place access
@@ -1013,7 +1013,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let lhs = self.lower_expr(*target);
                 if let Some(dest) = lhs.as_place().cloned() {
                     let rvalue = self.read_value_for_assign(rhs, &rhs_ty);
-                    self.emit_stmt(Statement::new(StatementKind::Assign { dest: dest.clone(), rvalue }));
+                    self.emit_stmt(Statement::new(StatementKind::Assign {
+                        dest: dest.clone(),
+                        rvalue,
+                    }));
                     self.maybe_emit_init_field_flag(&dest);
                 }
                 Value::Const(Immediate::unit())
@@ -1313,13 +1316,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// Resolve inferred type arguments for a generic call/reference.
     fn resolve_type_args(&mut self, expr_id: HirExprId) -> Vec<MirTy> {
         if let Some(typed) = self.typed
-            && let Some(resolved_args) = typed.type_args.get(&expr_id) {
-                let args: Vec<MirTy> = resolved_args
-                    .iter()
-                    .map(|ty| lower_resolved_ty(self.ctx, ty))
-                    .collect();
-                return args;
-            }
+            && let Some(resolved_args) = typed.type_args.get(&expr_id)
+        {
+            let args: Vec<MirTy> = resolved_args
+                .iter()
+                .map(|ty| lower_resolved_ty(self.ctx, ty))
+                .collect();
+            return args;
+        }
         Vec::new()
     }
 
@@ -1354,11 +1358,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         method_args: Vec<MirTy>,
     ) -> Vec<MirTy> {
         if let MirTy::Named { type_args, .. } = receiver_ty
-            && !type_args.is_empty() {
-                let mut full_args = type_args.clone();
-                full_args.extend(method_args);
-                return full_args;
-            }
+            && !type_args.is_empty()
+        {
+            let mut full_args = type_args.clone();
+            full_args.extend(method_args);
+            return full_args;
+        }
         method_args
     }
 
@@ -1372,9 +1377,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let mut args = self.resolve_type_args(expr_id);
         if args.iter().any(|a| matches!(a, MirTy::Error))
             && let Some(hir_args) = hir_type_args
-                && !hir_args.is_empty() {
-                    args = hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
-                }
+            && !hir_args.is_empty()
+        {
+            args = hir_args.iter().map(|ty| lower_type(self.ctx, ty)).collect();
+        }
         args
     }
 
@@ -1444,8 +1450,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let method_key = WitnessMethodKey::new("matches".to_string(), vec![None]);
         let callee = Callee::witness(proto, method_key, string_ty.clone(), vec![]);
 
-        let receiver_arg =
-            self.arg_for_value(Value::Copy(scrutinee_place.clone()), &string_ty);
+        let receiver_arg = self.arg_for_value(Value::Copy(scrutinee_place.clone()), &string_ty);
         let lit_arg = self.arg_for_value(lit_value, &string_ty);
 
         self.emit_call(callee, vec![receiver_arg, lit_arg], bool_ty)
@@ -2175,9 +2180,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             .world
                             .get::<kestrel_ast_builder::Callable>(ext_child)
                             .is_some()
-                        {
-                            return Some(ext_child);
-                        }
+                    {
+                        return Some(ext_child);
+                    }
                 }
             }
         }
@@ -2203,7 +2208,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Setters (identified by EnclosingContainer) use `<accessor>.set`
         // with the *subscript's* param labels (not the setter's, which
         // includes newValue) to match the witness table.
-        if self.ctx.world.get::<kestrel_ast_builder::EnclosingContainer>(entity).is_some() {
+        if self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::EnclosingContainer>(entity)
+            .is_some()
+        {
             if let Some(parent) = self.ctx.world.parent_of(entity) {
                 let parent_name = self.method_name_of(parent);
                 let parent_labels = self
@@ -2212,10 +2222,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     .get::<kestrel_ast_builder::Callable>(parent)
                     .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
                     .unwrap_or_default();
-                return WitnessMethodKey::new(
-                    format!("{parent_name}.set"),
-                    parent_labels,
-                );
+                return WitnessMethodKey::new(format!("{parent_name}.set"), parent_labels);
             }
         }
         let name = self.method_name_of(entity);
@@ -2243,10 +2250,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     #[allow(dead_code)]
     fn is_protocol_type(&self, ty: &MirTy) -> bool {
         if let MirTy::Named { entity, type_args } = ty
-            && type_args.is_empty() {
-                return self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
-                    == Some(&kestrel_ast_builder::NodeKind::Protocol);
-            }
+            && type_args.is_empty()
+        {
+            return self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                == Some(&kestrel_ast_builder::NodeKind::Protocol);
+        }
         false
     }
 
@@ -2262,13 +2270,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 continue;
             }
             if let Some(callable) = self.ctx.world.get::<Callable>(child) {
-                let child_labels: Vec<Option<&str>> = callable
-                    .params
-                    .iter()
-                    .map(|p| p.label.as_deref())
-                    .collect();
-                let match_labels: Vec<Option<&str>> =
-                    labels.iter().map(|l| l.as_deref()).collect();
+                let child_labels: Vec<Option<&str>> =
+                    callable.params.iter().map(|p| p.label.as_deref()).collect();
+                let match_labels: Vec<Option<&str>> = labels.iter().map(|l| l.as_deref()).collect();
                 if child_labels == match_labels {
                     return self.ctx.world.get::<InitEffect>(child).cloned();
                 }
@@ -2404,12 +2408,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             };
             for &eid in candidates {
                 if let Some(resolved_args) = typed.type_args.get(&eid)
-                    && resolved_args.len() >= parent_tp_count {
-                        return resolved_args
-                            .iter()
-                            .map(|ty| lower_resolved_ty(self.ctx, ty))
-                            .collect();
-                    }
+                    && resolved_args.len() >= parent_tp_count
+                {
+                    return resolved_args
+                        .iter()
+                        .map(|ty| lower_resolved_ty(self.ctx, ty))
+                        .collect();
+                }
             }
         }
 
@@ -2417,19 +2422,22 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // containing the parent (e.g., nullPointer() -> Pointer[Int32])
         let result_ty = self.resolve_expr_type(expr_id);
         if let MirTy::Named { entity, type_args } = &result_ty
-            && *entity == parent && type_args.len() == parent_tp_count {
-                return type_args.clone();
-            }
+            && *entity == parent
+            && type_args.len() == parent_tp_count
+        {
+            return type_args.clone();
+        }
 
         // Strategy 3: Check explicit HIR type args on the Def expression
         // For paths like Pointer[Int32].nullPointer, the Def might carry [Int32]
         if let HirExpr::Def(_, hir_args, _) = &self.hir.exprs[callee_expr]
-            && hir_args.len() == parent_tp_count {
-                return hir_args
-                    .iter()
-                    .map(|hir_ty| crate::ty::lower_type(self.ctx, hir_ty))
-                    .collect();
-            }
+            && hir_args.len() == parent_tp_count
+        {
+            return hir_args
+                .iter()
+                .map(|hir_ty| crate::ty::lower_type(self.ctx, hir_ty))
+                .collect();
+        }
 
         Vec::new()
     }
@@ -2634,11 +2642,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     ) -> Value {
         // Intercept lang.panic / lang.panic_unwind — emit as Panic terminator, not a call
         if let HirExpr::Def(entity, _, _) = &self.hir.exprs[callee_expr]
-            && self.is_panic_intrinsic(*entity) {
-                let msg = "panic".to_string();
-                self.set_terminator(Terminator::panic(msg));
-                return Value::Const(Immediate::unit());
-            }
+            && self.is_panic_intrinsic(*entity)
+        {
+            let msg = "panic".to_string();
+            self.set_terminator(Terminator::panic(msg));
+            return Value::Const(Immediate::unit());
+        }
 
         // Intercept lang intrinsics — emit as MIR Ops, not function calls
         if let Some(val) = self.try_lower_intrinsic_call(expr_id, callee_expr, args) {
@@ -2661,10 +2670,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 // explicit type arguments when the enum is generic.
                 let inferred = self.resolve_expr_type(expr_id);
                 let result_ty = match &inferred {
-                    MirTy::Named { entity: e, type_args } if type_args.is_empty() => {
+                    MirTy::Named {
+                        entity: e,
+                        type_args,
+                    } if type_args.is_empty() => {
                         // Only supplement for genuinely generic enums (have TypeParams)
                         let parent_entity = self.ctx.world.parent_of(entity).unwrap_or(entity);
-                        let is_generic = self.ctx.world
+                        let is_generic = self
+                            .ctx
+                            .world
                             .get::<kestrel_ast_builder::TypeParams>(parent_entity)
                             .map_or(false, |tp| !tp.0.is_empty());
                         if is_generic {
@@ -2672,18 +2686,22 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             let args = if !explicit.is_empty() {
                                 explicit
                             } else {
-                                self.extract_explicit_type_args(callee_expr).unwrap_or_default()
+                                self.extract_explicit_type_args(callee_expr)
+                                    .unwrap_or_default()
                             };
                             if !args.is_empty() {
                                 self.ctx.register_name(*e);
-                                MirTy::Named { entity: *e, type_args: args }
+                                MirTy::Named {
+                                    entity: *e,
+                                    type_args: args,
+                                }
                             } else {
                                 inferred
                             }
                         } else {
                             inferred
                         }
-                    }
+                    },
                     MirTy::Error => {
                         if let Some(parent) = self.ctx.world.parent_of(entity) {
                             self.ctx.register_name(parent);
@@ -2691,13 +2709,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             let args = if !type_args.is_empty() {
                                 type_args
                             } else {
-                                self.extract_explicit_type_args(callee_expr).unwrap_or_default()
+                                self.extract_explicit_type_args(callee_expr)
+                                    .unwrap_or_default()
                             };
-                            MirTy::Named { entity: parent, type_args: args }
+                            MirTy::Named {
+                                entity: parent,
+                                type_args: args,
+                            }
                         } else {
                             inferred
                         }
-                    }
+                    },
                     _ => inferred,
                 };
                 let case_name = self
@@ -2940,11 +2962,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if self.in_protocol_extension {
             if let MirTy::Named { entity, type_args } = &receiver_ty
                 && type_args.is_empty()
-                    && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
-                        == Some(&kestrel_ast_builder::NodeKind::Protocol)
-                    {
-                        receiver_ty = MirTy::SelfType;
-                    }
+                && self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::Protocol)
+            {
+                receiver_ty = MirTy::SelfType;
+            }
         }
 
         // Check for function-typed field calls BEFORE lowering receiver into call_args,
@@ -3047,14 +3069,12 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                         let receiver_val = self.lower_expr(receiver_expr);
                         let field_place = match receiver_val {
-                            Value::Copy(p)
-                            | Value::Move(p)
-                            | Value::Ref(p)
-                            | Value::RefMut(p) => p.field(method_name.to_string()),
+                            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                                p.field(method_name.to_string())
+                            },
                             _ => {
                                 let temp = self.fresh_temp(receiver_ty.clone());
-                                let rvalue =
-                                    self.read_value_for_assign(receiver_val, &receiver_ty);
+                                let rvalue = self.read_value_for_assign(receiver_val, &receiver_ty);
                                 self.emit_stmt(Statement::new(StatementKind::Assign {
                                     dest: Place::local(temp),
                                     rvalue,
@@ -3169,13 +3189,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if method_name != "tryExtract" {
             return false;
         }
-        self.ctx
-            .query
-            .query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::TryableProtocol,
-                root: self.ctx.root,
-            })
-            == Some(protocol)
+        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::TryableProtocol,
+            root: self.ctx.root,
+        }) == Some(protocol)
     }
 
     /// Check if an entity is an Initializer in the MIR and return its parent struct entity.
@@ -3204,9 +3221,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Detect if this function is an effectful init and create field-init tracking flags.
     fn setup_init_field_flags(&mut self) {
-        use kestrel_ast_builder::{
-            Body, Computed, InitEffect, NodeKind,
-        };
+        use kestrel_ast_builder::{Body, Computed, InitEffect, NodeKind};
 
         let func_def = &self.ctx.module.functions[self.func_id.index()];
         let FunctionKind::Initializer { parent } = func_def.kind else {
@@ -3252,12 +3267,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 .find(|s| s.entity == parent)
                 .and_then(|s| s.field_by_name(&name))
                 .map(|fid| {
-                    self.ctx.module.structs.iter()
+                    self.ctx
+                        .module
+                        .structs
+                        .iter()
                         .find(|s| s.entity == parent)
                         .unwrap()
                         .fields[fid.index()]
-                        .ty
-                        .clone()
+                    .ty
+                    .clone()
                 });
 
             let needs_cleanup = field_ty
@@ -3266,10 +3284,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 .unwrap_or(true); // conservative: unknown type → assume needs deinit
 
             if needs_cleanup {
-                let flag_local = self.body.add_local(LocalDef::new(
-                    format!("_init_{}", name),
-                    MirTy::Bool,
-                ));
+                let flag_local = self
+                    .body
+                    .add_local(LocalDef::new(format!("_init_{}", name), MirTy::Bool));
                 self.init_field_flags.insert(name, flag_local);
             }
         }
@@ -3303,7 +3320,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::ImplicitMember { name, .. } => {
                 let n = name.as_str_or_empty();
                 n == "Err" || n == "None"
-            }
+            },
             _ => false,
         }
     }
@@ -3336,7 +3353,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     protocol, method, ..
                 } if method.name == "init" => {
                     self.find_protocol_init_effect(*protocol, &method.labels)
-                }
+                },
                 _ => None,
             };
 
@@ -3402,9 +3419,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             .unwrap_or_else(|| format!("_{i}"));
                         let value = match (&arg, field_tys.get(i)) {
                             (Value::Ref(p) | Value::RefMut(p), Some(field_ty)) => {
-                                if field_ty.copy_behavior(&self.ctx.module)
-                                    == CopyBehavior::None
-                                {
+                                if field_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
                                     Value::Move(p.clone())
                                 } else {
                                     Value::Copy(p.clone())
@@ -3450,22 +3465,18 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let (inner_ty, success_variant, failure_variant) = match &effect {
             kestrel_ast_builder::InitEffect::Failable => {
                 let inner = match &result_ty {
-                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
-                        type_args[0].clone()
-                    }
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => type_args[0].clone(),
                     _ => result_ty.clone(),
                 };
                 (inner, "Some", "None")
-            }
+            },
             kestrel_ast_builder::InitEffect::Throwing => {
                 let inner = match &result_ty {
-                    MirTy::Named { type_args, .. } if !type_args.is_empty() => {
-                        type_args[0].clone()
-                    }
+                    MirTy::Named { type_args, .. } if !type_args.is_empty() => type_args[0].clone(),
                     _ => result_ty.clone(),
                 };
                 (inner, "Ok", "Err")
-            }
+            },
         };
 
         // 1. Allocate self_local of the inner struct type
@@ -3510,7 +3521,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 } else {
                     MirTy::Tuple(vec![])
                 }
-            }
+            },
             kestrel_ast_builder::InitEffect::Throwing => {
                 // Result[(), E]
                 if let MirTy::Named {
@@ -3525,7 +3536,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 } else {
                     MirTy::Tuple(vec![])
                 }
-            }
+            },
         };
 
         let init_ret_local = self.fresh_temp(init_ret_ty.clone());
@@ -3585,15 +3596,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             let err_ty = match &result_ty {
                 MirTy::Named { type_args, .. } => {
                     type_args.get(1).cloned().unwrap_or(MirTy::Tuple(vec![]))
-                }
+                },
                 _ => MirTy::Tuple(vec![]),
             };
             let err_local = self.fresh_temp(err_ty.clone());
-            self.emit_value_transfer(
-                Place::local(err_local),
-                Value::Move(err_place),
-                &err_ty,
-            );
+            self.emit_value_transfer(Place::local(err_local), Value::Move(err_place), &err_ty);
             self.emit_stmt(Statement::new(StatementKind::Assign {
                 dest: Place::local(final_local),
                 rvalue: Rvalue::EnumVariant {
@@ -4075,8 +4082,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     },
                 }));
 
-                let offset_ptr_local =
-                    self.fresh_temp(MirTy::Pointer(Box::new(pair_ty.clone())));
+                let offset_ptr_local = self.fresh_temp(MirTy::Pointer(Box::new(pair_ty.clone())));
                 self.emit_stmt(Statement::new(StatementKind::Assign {
                     dest: Place::local(offset_ptr_local),
                     rvalue: Rvalue::Op2 {
@@ -4208,13 +4214,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if self.ctx.world.get::<NodeKind>(init_parent) != Some(&NodeKind::Extension) {
             return false;
         }
-        let Some(target) = self
-            .ctx
-            .query
-            .query(kestrel_name_res::extensions::ExtensionTargetEntity {
-                extension: init_parent,
-                root: self.ctx.root,
-            })
+        let Some(target) =
+            self.ctx
+                .query
+                .query(kestrel_name_res::extensions::ExtensionTargetEntity {
+                    extension: init_parent,
+                    root: self.ctx.root,
+                })
         else {
             return false;
         };
@@ -4291,7 +4297,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Register loop-scoped locals for the drop elaboration pass
         let raw_locals = self.collect_block_locals(body);
         for &local in &raw_locals {
-            self.body.local_scopes.insert(local, ScopeId::Loop { header: header_block, exit: exit_block });
+            self.body.local_scopes.insert(
+                local,
+                ScopeId::Loop {
+                    header: header_block,
+                    exit: exit_block,
+                },
+            );
         }
 
         // Jump into the loop header
@@ -4368,11 +4380,11 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     if let Some(v) = value {
                         self.collect_expr_pattern_locals(*v, locals);
                     }
-                }
+                },
                 HirStmt::Expr { expr, .. } => {
                     self.collect_expr_pattern_locals(*expr, locals);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         if let Some(tail) = block.tail_expr {
@@ -4385,7 +4397,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// loops (they manage their own scope).
     fn collect_expr_pattern_locals(&self, expr_id: HirExprId, locals: &mut Vec<LocalId>) {
         match &self.hir.exprs[expr_id] {
-            HirExpr::Match { scrutinee, arms, .. } => {
+            HirExpr::Match {
+                scrutinee, arms, ..
+            } => {
                 self.collect_expr_pattern_locals(*scrutinee, locals);
                 for arm in arms {
                     self.collect_pat_locals(arm.pattern, locals);
@@ -4394,66 +4408,71 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     }
                     self.collect_expr_pattern_locals(arm.body, locals);
                 }
-            }
+            },
             HirExpr::Sugar { inner, .. } => {
                 self.collect_expr_pattern_locals(*inner, locals);
-            }
+            },
             HirExpr::Block { body, .. } => {
                 self.collect_block_locals_inner(body, locals);
-            }
-            HirExpr::If { condition, then_body, else_body, .. } => {
+            },
+            HirExpr::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
                 self.collect_expr_pattern_locals(*condition, locals);
                 self.collect_block_locals_inner(then_body, locals);
                 if let Some(else_b) = else_body {
                     self.collect_block_locals_inner(else_b, locals);
                 }
-            }
+            },
             HirExpr::Call { callee, args, .. } => {
                 self.collect_expr_pattern_locals(*callee, locals);
                 for arg in args {
                     self.collect_expr_pattern_locals(arg.value, locals);
                 }
-            }
+            },
             HirExpr::MethodCall { receiver, args, .. }
             | HirExpr::ProtocolCall { receiver, args, .. } => {
                 self.collect_expr_pattern_locals(*receiver, locals);
                 for arg in args {
                     self.collect_expr_pattern_locals(arg.value, locals);
                 }
-            }
+            },
             HirExpr::Assign { target, value, .. } => {
                 self.collect_expr_pattern_locals(*target, locals);
                 self.collect_expr_pattern_locals(*value, locals);
-            }
+            },
             HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
                 for &e in elements {
                     self.collect_expr_pattern_locals(e, locals);
                 }
-            }
+            },
             HirExpr::Dict { entries, .. } => {
                 for entry in entries {
                     self.collect_expr_pattern_locals(entry.key, locals);
                     self.collect_expr_pattern_locals(entry.value, locals);
                 }
-            }
+            },
             HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
                 self.collect_expr_pattern_locals(*base, locals);
-            }
+            },
             HirExpr::Return { value, .. } => {
                 if let Some(v) = value {
                     self.collect_expr_pattern_locals(*v, locals);
                 }
-            }
+            },
             HirExpr::ImplicitMember { args, .. } => {
                 if let Some(call_args) = args {
                     for arg in call_args {
                         self.collect_expr_pattern_locals(arg.value, locals);
                     }
                 }
-            }
+            },
             // Closures have their own function scope; nested loops manage
             // their own loop-scoped locals. Don't descend.
-            HirExpr::Closure { .. } | HirExpr::Loop { .. } => {}
+            HirExpr::Closure { .. } | HirExpr::Loop { .. } => {},
             // Leaves — no sub-expressions or patterns.
             HirExpr::Literal { .. }
             | HirExpr::Local(..)
@@ -4461,7 +4480,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             | HirExpr::OverloadSet { .. }
             | HirExpr::Break { .. }
             | HirExpr::Continue { .. }
-            | HirExpr::Error { .. } => {}
+            | HirExpr::Error { .. } => {},
         }
     }
 
@@ -4470,45 +4489,54 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         match &self.hir.pats[pat_id] {
             HirPat::Binding { local, .. } => {
                 locals.push(self.map_local(*local));
-            }
+            },
             HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
                 for arg in args {
                     self.collect_pat_locals(arg.pattern, locals);
                 }
-            }
+            },
             HirPat::Tuple { prefix, suffix, .. } => {
                 for &p in prefix.iter().chain(suffix.iter()) {
                     self.collect_pat_locals(p, locals);
                 }
-            }
+            },
             HirPat::Struct { fields, .. } => {
                 for field in fields {
                     if let Some(pat) = field.pattern {
                         self.collect_pat_locals(pat, locals);
                     }
                 }
-            }
-            HirPat::Array { prefix, rest, suffix, .. } => {
+            },
+            HirPat::Array {
+                prefix,
+                rest,
+                suffix,
+                ..
+            } => {
                 for &p in prefix.iter().chain(suffix.iter()) {
                     self.collect_pat_locals(p, locals);
                 }
                 if let Some(Some(rest_local)) = rest {
                     locals.push(self.map_local(*rest_local));
                 }
-            }
+            },
             HirPat::Or { alternatives, .. } => {
                 for &alt in alternatives {
                     self.collect_pat_locals(alt, locals);
                 }
-            }
-            HirPat::At { binding, subpattern, .. } => {
+            },
+            HirPat::At {
+                binding,
+                subpattern,
+                ..
+            } => {
                 locals.push(self.map_local(*binding));
                 self.collect_pat_locals(*subpattern, locals);
-            }
+            },
             HirPat::Wildcard { .. }
             | HirPat::Literal { .. }
             | HirPat::Range { .. }
-            | HirPat::Error { .. } => {}
+            | HirPat::Error { .. } => {},
         }
     }
 
@@ -5020,23 +5048,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                             // same type together); skip defensively.
                             continue;
                         };
-                        let cmp = self.emit_string_literal_match_test(
-                            &test_place,
-                            test_ty.clone(),
-                            lit,
-                        );
+                        let cmp =
+                            self.emit_string_literal_match_test(&test_place, test_ty.clone(), lit);
                         let hit_block = self.new_block();
                         let miss_block = self.new_block();
                         self.set_terminator(Terminator::branch(cmp, hit_block, miss_block));
 
                         self.switch_to_block(hit_block);
-                        self.emit_decision_tree(
-                            subtree,
-                            scrutinee,
-                            arms,
-                            result_local,
-                            join_block,
-                        );
+                        self.emit_decision_tree(subtree, scrutinee, arms, result_local, join_block);
 
                         self.switch_to_block(miss_block);
                     }
@@ -5171,11 +5190,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             } else {
                 Value::Copy(source)
             };
-            self.emit_value_transfer(
-                Place::local(mir_local),
-                value,
-                &local_ty,
-            );
+            self.emit_value_transfer(Place::local(mir_local), value, &local_ty);
         }
     }
 
@@ -5185,9 +5200,10 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         expr_id: HirExprId,
     ) -> kestrel_type_infer::result::ResolvedTy {
         if let Some(typed) = self.typed
-            && let Some(resolved) = typed.expr_types.get(&expr_id) {
-                return resolved.clone();
-            }
+            && let Some(resolved) = typed.expr_types.get(&expr_id)
+        {
+            return resolved.clone();
+        }
         kestrel_type_infer::result::ResolvedTy::Error
     }
 
@@ -5215,10 +5231,13 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             MirTy::Named { entity, .. } => *entity,
             _ => return false,
         };
-        let semantics = self.ctx.query.query(kestrel_semantics::NominalCopySemantics {
-            entity,
-            root: self.ctx.root,
-        });
+        let semantics = self
+            .ctx
+            .query
+            .query(kestrel_semantics::NominalCopySemantics {
+                entity,
+                root: self.ctx.root,
+            });
         semantics.semantics == kestrel_semantics::CopySemantics::Cloneable
     }
 
@@ -5229,12 +5248,14 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     /// - **User local + Cloneable** → witness call to `Cloneable.clone()`
     /// - **Everything else** → `Rvalue::Copy` (bitwise copy, source stays valid)
     fn emit_value_transfer(&mut self, dest: Place, value: Value, ty: &MirTy) {
-        let explicit_affine_move =
-            matches!(value, Value::Move(_)) && ty.copy_behavior(&self.ctx.module) == CopyBehavior::None;
+        let explicit_affine_move = matches!(value, Value::Move(_))
+            && ty.copy_behavior(&self.ctx.module) == CopyBehavior::None;
 
         // Const → no ownership transfer
         let Some(place) = value.as_place().cloned() else {
-            let Value::Const(imm) = value else { unreachable!() };
+            let Value::Const(imm) = value else {
+                unreachable!()
+            };
             self.emit_stmt(Statement::new(StatementKind::Assign {
                 dest,
                 rvalue: Rvalue::Const(imm),
@@ -5310,7 +5331,6 @@ fn needs_field_deinit(ty: &MirTy) -> bool {
         _ => true,
     }
 }
-
 
 /// Apply an access path to a place to reach a sub-value.
 /// e.g., scrutinee + [Downcast("Some"), Index(0)] → scrutinee.Some.0

@@ -20,9 +20,7 @@ use kestrel_codegen::{
     LayoutCache, Mangler, TargetConfig, mangle_function_with_self, substitute_type_with_self,
 };
 use kestrel_hecs::Entity;
-use kestrel_mir::{
-    FunctionDef, MirModule, MirTy, StaticDef,
-};
+use kestrel_mir::{FunctionDef, MirModule, MirTy, StaticDef};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -149,9 +147,7 @@ impl<'a> CodegenContext<'a> {
             // that's the intended contract since the bytes are baked into the
             // object file and there's no other opportunity to embed them.
             let data_name = format!("{mangled}_data");
-            let base_path = file_const
-                .base_path.clone()
-                .unwrap_or_default();
+            let base_path = file_const.base_path.clone().unwrap_or_default();
             let file_path = base_path.join(&file_const.relative_path);
 
             let bytes = std::fs::read(&file_path).map_err(|e| {

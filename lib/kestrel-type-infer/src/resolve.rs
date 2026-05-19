@@ -375,9 +375,10 @@ impl TypeResolver for WorldResolver<'_> {
             // Check if any candidates were filtered for being static.
             // all_candidates was consumed by the filter, so re-check the
             // original type members for a static match.
-            if let Some(static_member) = type_members.iter().find(|tm| {
-                self.ctx.has::<Static>(tm.entity)
-            }) {
+            if let Some(static_member) = type_members
+                .iter()
+                .find(|tm| self.ctx.has::<Static>(tm.entity))
+            {
                 return Err(MemberError::IsStatic {
                     candidate: static_member.entity,
                 });
@@ -1042,13 +1043,14 @@ impl WorldResolver<'_> {
             .unwrap_or_default();
         if let Some(parent) = self.ctx.parent_of(member)
             && matches!(self.ctx.get::<NodeKind>(parent), Some(NodeKind::Extension))
-                && let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent) {
-                    for &tp in &ext_params.0 {
-                        if !type_params.contains(&tp) {
-                            type_params.push(tp);
-                        }
-                    }
+            && let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent)
+        {
+            for &tp in &ext_params.0 {
+                if !type_params.contains(&tp) {
+                    type_params.push(tp);
                 }
+            }
+        }
 
         // Build parameter types from Callable component + lowered types
         let lowered_param_tys = self.ctx.query(LowerCallableTypes {
@@ -1419,9 +1421,10 @@ impl WorldResolver<'_> {
         for item in &conformances.0 {
             if let ConformanceItem::Positive(ast_ty, _) = item
                 && let Some(resolved) = self.resolve_type_entity(ast_ty)
-                    && resolved == protocol {
-                        return true;
-                    }
+                && resolved == protocol
+            {
+                return true;
+            }
         }
 
         false
@@ -1538,9 +1541,11 @@ impl WorldResolver<'_> {
                 protocol_type_args,
                 ..
             } = clause
-                && *param == param_entity && *protocol == protocol_entity {
-                    return protocol_type_args.clone();
-                }
+                && *param == param_entity
+                && *protocol == protocol_entity
+            {
+                return protocol_type_args.clone();
+            }
         }
 
         // Inherited match: where clause says T: ParentProtocol, and
@@ -1551,11 +1556,11 @@ impl WorldResolver<'_> {
                 param, protocol, ..
             } = clause
                 && *param == param_entity
-                    && let Some(args) =
-                        self.find_inherited_protocol_type_args(*protocol, protocol_entity)
-                    {
-                        return args;
-                    }
+                && let Some(args) =
+                    self.find_inherited_protocol_type_args(*protocol, protocol_entity)
+            {
+                return args;
+            }
         }
 
         Vec::new()
@@ -1589,9 +1594,9 @@ impl WorldResolver<'_> {
             if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
                 && let Some(args) =
                     self.find_inherited_protocol_type_args(resolved, target_protocol)
-                {
-                    return Some(args);
-                }
+            {
+                return Some(args);
+            }
         }
         None
     }
@@ -1826,10 +1831,11 @@ impl WorldResolver<'_> {
             for item in &conformances.0 {
                 if let ConformanceItem::Positive(ast_ty, _) = item
                     && let Some(proto) = self.resolve_type_entity(ast_ty)
-                        && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
-                            && visited.insert(proto) {
-                                protocols.push(proto);
-                            }
+                    && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
+                    && visited.insert(proto)
+                {
+                    protocols.push(proto);
+                }
             }
         }
 
@@ -1987,14 +1993,16 @@ impl WorldResolver<'_> {
                 ..
             } = constraint
                 && let Some(resolved_subj) = self.resolve_type_entity(subject)
-                    && resolved_subj == param_entity {
-                        for proto_ty in proto_types {
-                            if let Some(proto) = self.resolve_type_entity(proto_ty)
-                                && visited.insert(proto) {
-                                    protocols.push(proto);
-                                }
-                        }
+                && resolved_subj == param_entity
+            {
+                for proto_ty in proto_types {
+                    if let Some(proto) = self.resolve_type_entity(proto_ty)
+                        && visited.insert(proto)
+                    {
+                        protocols.push(proto);
                     }
+                }
+            }
         }
     }
 

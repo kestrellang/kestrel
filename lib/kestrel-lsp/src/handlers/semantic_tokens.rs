@@ -223,7 +223,12 @@ fn build_entity_overrides(
     overrides
 }
 
-fn classify(token: Token, lexeme: &str, span_start: usize, overrides: &HashMap<usize, u32>) -> Option<u32> {
+fn classify(
+    token: Token,
+    lexeme: &str,
+    span_start: usize,
+    overrides: &HashMap<usize, u32>,
+) -> Option<u32> {
     use Token::*;
     // `Option::Some` because `use Token::*` brings `Token::Some` into scope.
     Option::Some(match token {

@@ -26,12 +26,7 @@ pub async fn handle(
     let (handle, stdlib, user, sources) = {
         let s = state.lock().await;
         let (stdlib, user) = s.partition_sources();
-        (
-            s.compiler_handle.clone(),
-            stdlib,
-            user,
-            s.sources.clone(),
-        )
+        (s.compiler_handle.clone(), stdlib, user, s.sources.clone())
     };
 
     handle
@@ -92,10 +87,7 @@ pub async fn handle(
                         kind: symbol_kind,
                         tags: None,
                         deprecated: None,
-                        location: Location {
-                            uri: url,
-                            range,
-                        },
+                        location: Location { uri: url, range },
                         container_name,
                     });
                 }
@@ -204,9 +196,18 @@ mod tests {
         let src = "module Test\nstruct Alpha {}\nstruct Beta {}\nfunc gamma() -> lang.i64 { 1 }\n";
         let syms = symbols_for(src, "alpha");
         let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"Alpha"), "case-insensitive match: {names:?}");
-        assert!(!names.contains(&"Beta"), "Beta should be filtered: {names:?}");
-        assert!(!names.contains(&"gamma"), "gamma should be filtered: {names:?}");
+        assert!(
+            names.contains(&"Alpha"),
+            "case-insensitive match: {names:?}"
+        );
+        assert!(
+            !names.contains(&"Beta"),
+            "Beta should be filtered: {names:?}"
+        );
+        assert!(
+            !names.contains(&"gamma"),
+            "gamma should be filtered: {names:?}"
+        );
     }
 
     #[test]

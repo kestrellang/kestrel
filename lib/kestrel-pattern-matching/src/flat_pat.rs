@@ -499,10 +499,11 @@ fn resolve_implicit_variant(
     if let ResolvedTy::Named { entity, .. } = scrutinee_ty {
         for &child in query.children_of(*entity) {
             if matches!(query.get::<NodeKind>(child), Some(NodeKind::EnumCase))
-                && query.get::<Name>(child).is_some_and(|n| n.0 == name) {
-                    let field_types = resolve_variant_field_types(query, child, scrutinee_ty);
-                    return (child, field_types);
-                }
+                && query.get::<Name>(child).is_some_and(|n| n.0 == name)
+            {
+                let field_types = resolve_variant_field_types(query, child, scrutinee_ty);
+                return (child, field_types);
+            }
         }
     }
     // Not found — use a synthetic entity (shouldn't happen after type inference)

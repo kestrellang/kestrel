@@ -145,19 +145,20 @@ pub fn check_match(
                     prior_int_ranges.push((i, s, e));
                 }
             } else if let Some((s, e)) = extract_char_range(flat_pat)
-                && s <= e {
-                    let has_overlap = prior_char_ranges
-                        .iter()
-                        .any(|&(_, ps, pe)| s <= pe && ps <= e);
-                    let covered = range_covered_by_union_u32(s, e, &prior_char_ranges);
-                    if covered {
-                        is_redundant = true;
-                    } else if has_overlap {
-                        is_redundant = false;
-                        overlapping_arms.push(i);
-                    }
-                    prior_char_ranges.push((i, s, e));
+                && s <= e
+            {
+                let has_overlap = prior_char_ranges
+                    .iter()
+                    .any(|&(_, ps, pe)| s <= pe && ps <= e);
+                let covered = range_covered_by_union_u32(s, e, &prior_char_ranges);
+                if covered {
+                    is_redundant = true;
+                } else if has_overlap {
+                    is_redundant = false;
+                    overlapping_arms.push(i);
                 }
+                prior_char_ranges.push((i, s, e));
+            }
         }
 
         if is_redundant {
@@ -291,13 +292,15 @@ fn is_wildcard_useful(
             // through to the default matrix and report a false non-exhaustive.
             // Handle that here before asking `Constructor::missing`.
             if let Some(ranges) = collect_int_ranges(&covered)
-                && range_covered_by_union_i64(i64::MIN, i64::MAX, &ranges) {
-                    return UsefulnessResult::not_useful();
-                }
+                && range_covered_by_union_i64(i64::MIN, i64::MAX, &ranges)
+            {
+                return UsefulnessResult::not_useful();
+            }
             if let Some(ranges) = collect_char_ranges(&covered)
-                && range_covered_by_union_u32(0, char::MAX as u32, &ranges) {
-                    return UsefulnessResult::not_useful();
-                }
+                && range_covered_by_union_u32(0, char::MAX as u32, &ranges)
+            {
+                return UsefulnessResult::not_useful();
+            }
 
             // Infinite constructor set — check missing_constructors for special cases
             if let Some(missing) = Constructor::missing(ctx, root, col_type, &covered) {

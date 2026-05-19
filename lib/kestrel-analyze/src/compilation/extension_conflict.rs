@@ -174,9 +174,10 @@ fn collect_extensions(
         && let Some(target) = cx.query.query(ExtensionTargetEntity {
             extension: entity,
             root: cx.root,
-        }) {
-            out.entry(target).or_default().push(entity);
-        }
+        })
+    {
+        out.entry(target).or_default().push(entity);
+    }
     for &child in cx.query.children_of(entity) {
         collect_extensions(cx, child, out);
     }

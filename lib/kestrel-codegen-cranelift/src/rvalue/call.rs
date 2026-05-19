@@ -506,11 +506,13 @@ fn compile_call_arg(
                     let addr = place::compile_place_addr(ctx, state, builder, place)?;
                     // For `Ref(scalar)`, the callee expects the inner scalar
                     // type, not the pointer — translate the unwrapped type.
-                    let cl_ty =
-                        types::translate_type(common::param_inner_ty(expected), ctx.target);
-                    return Ok(builder
-                        .ins()
-                        .load(cl_ty, ir::MemFlags::new(), addr, Offset32::new(0)));
+                    let cl_ty = types::translate_type(common::param_inner_ty(expected), ctx.target);
+                    return Ok(builder.ins().load(
+                        cl_ty,
+                        ir::MemFlags::new(),
+                        addr,
+                        Offset32::new(0),
+                    ));
                 }
                 return place::compile_place_read(ctx, state, builder, place);
             }
@@ -553,12 +555,9 @@ fn compile_call_arg(
                     .ins()
                     .store(MemFlags::new(), func_addr, addr, Offset32::new(0));
                 let null = builder.ins().iconst(ptr_ty, 0);
-                builder.ins().store(
-                    MemFlags::new(),
-                    null,
-                    addr,
-                    Offset32::new(ptr_size as i32),
-                );
+                builder
+                    .ins()
+                    .store(MemFlags::new(), null, addr, Offset32::new(ptr_size as i32));
                 return Ok(addr);
             }
 
@@ -719,9 +718,9 @@ fn resolve_associated_self_type(
     if let Some(base) = state.self_type.as_ref()
         && let Ok(resolved) =
             witness::resolve_associated_type(ctx.module, proto_def.entity, base, short)
-        {
-            return resolved;
-        }
+    {
+        return resolved;
+    }
 
     self_type.clone()
 }

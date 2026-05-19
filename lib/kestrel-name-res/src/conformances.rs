@@ -347,16 +347,18 @@ where
     };
 
     if declares_protocol(target)
-        && let Some(init) = matching_init_in(target) {
-            return Some(init);
-        }
+        && let Some(init) = matching_init_in(target)
+    {
+        return Some(init);
+    }
 
     let extensions = ctx.query(ExtensionsFor { target, root });
     for ext in extensions {
         if declares_protocol(ext)
-            && let Some(init) = matching_init_in(ext) {
-                return Some(init);
-            }
+            && let Some(init) = matching_init_in(ext)
+        {
+            return Some(init);
+        }
     }
 
     None

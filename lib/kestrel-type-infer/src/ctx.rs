@@ -672,7 +672,10 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
-        self.constraints
-            .push(Constraint::InterpolationLink { result_tv, acc_tv, span });
+        self.constraints.push(Constraint::InterpolationLink {
+            result_tv,
+            acc_tv,
+            span,
+        });
     }
 }

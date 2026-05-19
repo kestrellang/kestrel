@@ -4,7 +4,9 @@
 
 use kestrel_ast_builder::{Callable, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
-use kestrel_mir::{DeinitBehavior, EnumCaseDef, EnumDef, EnumId, FieldDef, StructDef, TypeParamDef};
+use kestrel_mir::{
+    DeinitBehavior, EnumCaseDef, EnumDef, EnumId, FieldDef, StructDef, TypeParamDef,
+};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_callable_types;

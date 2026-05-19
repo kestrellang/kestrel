@@ -198,8 +198,7 @@ async fn handle_let_to_var(
 
                 let mut actions = Vec::new();
                 for (diag, offset) in diags_owned.iter().zip(offsets.iter()) {
-                    let Some(body_entity) =
-                        semantic::body_entity_at(world, file_entity, *offset)
+                    let Some(body_entity) = semantic::body_entity_at(world, file_entity, *offset)
                     else {
                         continue;
                     };

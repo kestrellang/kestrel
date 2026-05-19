@@ -418,9 +418,7 @@ fn move_diag_to_analyze(
     diag: &kestrel_ownership::move_check::MoveDiag,
 ) -> kestrel_analyze::AnalyzeDiagnostic {
     use kestrel_analyze::{AnalyzeDiagnostic, Severity};
-    use kestrel_ownership::move_check::{
-        E500_USE_AFTER_MOVE, E501_MAYBE_MOVED, MoveDiagKind,
-    };
+    use kestrel_ownership::move_check::{E500_USE_AFTER_MOVE, E501_MAYBE_MOVED, MoveDiagKind};
     match diag.kind {
         MoveDiagKind::UseAfterMove => AnalyzeDiagnostic {
             descriptor_id: E500_USE_AFTER_MOVE,
@@ -469,4 +467,3 @@ fn build_move_labels(
     }
     labels
 }
-

@@ -87,7 +87,14 @@ fn expand_body(
 
     let block_count = body.blocks.len();
     for bi in 0..block_count {
-        expand_block(bi, body, snapshot_body, func_snapshot, module_snapshot, shim_map);
+        expand_block(
+            bi,
+            body,
+            snapshot_body,
+            func_snapshot,
+            module_snapshot,
+            shim_map,
+        );
     }
 }
 
@@ -111,12 +118,8 @@ fn expand_block(
         match &stmt.kind {
             StatementKind::Drop { place } => {
                 let place = place.clone();
-                let Some(ty) = place_type(
-                    module_snapshot,
-                    snapshot_body,
-                    func_snapshot,
-                    &place,
-                ) else {
+                let Some(ty) = place_type(module_snapshot, snapshot_body, func_snapshot, &place)
+                else {
                     // Can't resolve type — skip (verifier elsewhere
                     // would have flagged the real issue).
                     continue;
@@ -131,21 +134,15 @@ fn expand_block(
                 // continuation block.
                 let place = place.clone();
                 let flag = *flag;
-                let Some(ty) = place_type(
-                    module_snapshot,
-                    snapshot_body,
-                    func_snapshot,
-                    &place,
-                ) else {
+                let Some(ty) = place_type(module_snapshot, snapshot_body, func_snapshot, &place)
+                else {
                     continue;
                 };
                 // Stash everything after this point into a continuation
                 // block; we'll wire the branch to it below.
                 let after_stmts: Vec<Statement> = iter.by_ref().map(|(_, s)| s).collect();
-                let old_term = std::mem::replace(
-                    &mut body.blocks[bi].terminator,
-                    Terminator::unreachable(),
-                );
+                let old_term =
+                    std::mem::replace(&mut body.blocks[bi].terminator, Terminator::unreachable());
 
                 // bb_cont takes the remaining stmts + original term.
                 let mut cont_block = BasicBlock::new();
@@ -156,7 +153,14 @@ fn expand_block(
                 // bb_then: emit the drop sequence, then jump to cont.
                 let mut then_block = BasicBlock::new();
                 let mut then_stmts: Vec<Statement> = Vec::new();
-                emit_drop(&mut then_stmts, body, &place, &ty, module_snapshot, shim_map);
+                emit_drop(
+                    &mut then_stmts,
+                    body,
+                    &place,
+                    &ty,
+                    module_snapshot,
+                    shim_map,
+                );
                 then_block.stmts = then_stmts;
                 then_block.terminator = Terminator::jump(cont_id);
                 let then_id = body.add_block(then_block);
@@ -164,11 +168,8 @@ fn expand_block(
                 // Original block: take the stmts accumulated so far,
                 // append the branch on flag.
                 body.blocks[bi].stmts = std::mem::take(&mut new_stmts);
-                body.blocks[bi].terminator = Terminator::branch(
-                    Value::Copy(Place::local(flag)),
-                    then_id,
-                    cont_id,
-                );
+                body.blocks[bi].terminator =
+                    Terminator::branch(Value::Copy(Place::local(flag)), then_id, cont_id);
                 // No more processing for this block; the rest of the
                 // statements are in cont_block, which will be visited
                 // by the outer block_count loop only if its index is

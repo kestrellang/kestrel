@@ -70,12 +70,11 @@ fn walk_entity(
         !is_protocol
     };
 
-    if should_check
-        && let Some(ann) = cx.query.get::<TypeAnnotation>(entity) {
-            // Resolve context: use the entity itself so its own type params are in scope.
-            // ResolveName walks up the hierarchy, so parent/ancestor names are also found.
-            check_ast_type(cx, &ann.0, entity, diags);
-        }
+    if should_check && let Some(ann) = cx.query.get::<TypeAnnotation>(entity) {
+        // Resolve context: use the entity itself so its own type params are in scope.
+        // ResolveName walks up the hierarchy, so parent/ancestor names are also found.
+        check_ast_type(cx, &ann.0, entity, diags);
+    }
 
     for &child in cx.query.children_of(entity) {
         walk_entity(cx, child, in_protocol || is_protocol, diags);

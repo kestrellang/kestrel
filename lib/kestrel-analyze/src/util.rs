@@ -102,13 +102,14 @@ pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<S
         .unwrap_or(0);
     for elem in node.children_with_tokens() {
         if let SyntaxElement::Token(tok) = elem
-            && tok.kind() == SyntaxKind::RBrace {
-                let r = tok.text_range();
-                return Some(Span::new(
-                    file_id,
-                    usize::from(r.start())..usize::from(r.end()),
-                ));
-            }
+            && tok.kind() == SyntaxKind::RBrace
+        {
+            let r = tok.text_range();
+            return Some(Span::new(
+                file_id,
+                usize::from(r.start())..usize::from(r.end()),
+            ));
+        }
     }
     None
 }
