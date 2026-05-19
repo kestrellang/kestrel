@@ -405,6 +405,9 @@ pub fn conforms_to_literal_protocol(ctx: &InferCtx<'_>, ty: &TyKind, lit: Litera
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
+        // Accumulator type — InterpolationLink validates the type through
+        // associated type resolution, so accept any concrete type here.
+        LiteralKind::StringInterpolation => return true,
     };
     let Some(protocol) = ctx.resolver.builtin(feature) else {
         return false;

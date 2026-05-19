@@ -126,6 +126,17 @@ pub struct InferCtx<'a> {
     /// or the `[K: V]` type operator has already lowered to Dictionary.
     pub(crate) expected_dict_entry: Option<(TyVar, TyVar)>,
 
+    /// Expression ID of the accumulator init call inside a Sugar::StringInterpolation.
+    /// Set by `mark_sugar_primary`, consumed by `gen_expr` for Call. Replaces the
+    /// concrete DefaultStringInterpolation init with a deferred type variable so
+    /// the accumulator type can be resolved from context.
+    pub(crate) interpolation_init_expr: Option<kestrel_hir::body::HirExprId>,
+
+    /// The accumulator type variable for the current string interpolation.
+    /// Set during the init interception, consumed by the Sugar handler to
+    /// emit the InterpolationLink constraint.
+    pub(crate) interpolation_acc_tv: Option<TyVar>,
+
     /// TyVars created from an explicit `_` (HirTy::Infer) in a type-argument
     /// position. These intentionally stay unresolved when the caller doesn't
     /// care about the value (e.g. `lang.cast_ptr[_, T](p)`). They must not
@@ -210,6 +221,8 @@ impl<'a> InferCtx<'a> {
             never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
             expected_dict_entry: None,
+            interpolation_init_expr: None,
+            interpolation_acc_tv: None,
             wildcard_tvars: HashSet::new(),
             witness_protocol_args: HashMap::new(),
             loop_break_tys: Vec::new(),
@@ -656,5 +669,10 @@ impl<'a> InferCtx<'a> {
             expr,
             span,
         });
+    }
+
+    pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
+        self.constraints
+            .push(Constraint::InterpolationLink { result_tv, acc_tv, span });
     }
 }

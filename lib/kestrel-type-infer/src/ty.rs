@@ -142,4 +142,6 @@ pub enum LiteralKind {
     Array,
     /// Dictionary literal — default: `@builtin(.DefaultDictionaryLiteralType)[_, _]`
     Dictionary,
+    /// String interpolation accumulator — default: `@builtin(.DefaultStringInterpolation)`
+    StringInterpolation,
 }

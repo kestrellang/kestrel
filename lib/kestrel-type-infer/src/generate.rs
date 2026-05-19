@@ -133,6 +133,21 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 return result_tv;
             }
 
+            // String interpolation accumulator init: replace the concrete
+            // DefaultStringInterpolation struct init with a deferred Implicit
+            // constraint. The literal kind defaults to DefaultStringInterpolation
+            // if nothing else constrains it. solve_implicit handles init
+            // resolution on the concrete type once resolved.
+            if Some(id) == ctx.interpolation_init_expr.take() {
+                let acc_tv = ctx.fresh_literal(LiteralKind::StringInterpolation);
+                ctx.interpolation_acc_tv = Some(acc_tv);
+                let arg_tvs = gen_call_args(ctx, hir, args);
+                let result_tv = ctx.fresh();
+                ctx.implicit(acc_tv, "init", arg_tvs, result_tv, id, span.clone());
+                ctx.expr_types.insert(id, result_tv);
+                return result_tv;
+            }
+
             // Struct construction: Def(struct) used as callee. Free-standing
             // type aliases are already dereferenced by name resolution, so
             // `type C = Counter; C(42)` reaches here with Def(Counter).
@@ -623,9 +638,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         // `poison_protocol_call_recv_on_failure` BEFORE recursing, so when
         // `gen_expr` reaches that ProtocolCall it emits a poisoning Conforms.
         // Type-of(Sugar) == type-of(inner) (structurally transparent).
-        HirExpr::Sugar { kind, inner, .. } => {
+        HirExpr::Sugar { kind, inner, span } => {
             mark_sugar_primary(ctx, hir, *kind, *inner);
-            gen_expr(ctx, hir, *inner)
+            let result_tv = gen_expr(ctx, hir, *inner);
+
+            // Link the interpolation's result type to its accumulator so that
+            // an expected type (from a let annotation or function parameter)
+            // can drive which accumulator is used.
+            if matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation) {
+                if let Some(acc_tv) = ctx.interpolation_acc_tv.take() {
+                    ctx.interpolation_link(result_tv, acc_tv, span.clone());
+                }
+            }
+
+            result_tv
         },
     };
 
@@ -691,6 +717,9 @@ fn mark_sugar_primary(
                 } = &hir.stmts[*first_stmt]
             {
                 ctx.poison_protocol_call_recv_on_failure.insert(*init_call);
+                // Tag the init call so gen_expr replaces the concrete DSI struct
+                // init with a deferred type variable (like a type parameter call).
+                ctx.interpolation_init_expr = Some(*init_call);
             }
         },
     }
@@ -1755,6 +1784,8 @@ fn literal_protocol(ctx: &InferCtx<'_>, literal: LiteralKind) -> Option<Entity> 
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
+        // Accumulator type — resolved by InterpolationLink, no literal protocol
+        LiteralKind::StringInterpolation => return None,
     };
     ctx.resolver.builtin(builtin)
 }

@@ -150,6 +150,15 @@ pub enum Constraint {
         result: TyVar,
         span: Span,
     },
+
+    /// Links a string interpolation's result type to its accumulator type.
+    /// Deferred until result_tv is concrete, then resolves the accumulator
+    /// via `ExpressibleByStringInterpolation::Interpolation`.
+    InterpolationLink {
+        result_tv: TyVar,
+        acc_tv: TyVar,
+        span: Span,
+    },
 }
 
 /// Argument in a call: optional label + type variable + source expression.

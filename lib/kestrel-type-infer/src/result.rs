@@ -292,6 +292,7 @@ fn literal_kind_name(lit: LiteralKind) -> &'static str {
         LiteralKind::Null => "null literal",
         LiteralKind::Array => "array literal",
         LiteralKind::Dictionary => "dictionary literal",
+        LiteralKind::StringInterpolation => "string interpolation",
     }
 }
 

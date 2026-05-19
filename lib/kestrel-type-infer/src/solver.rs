@@ -598,6 +598,9 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 ctx.poison(result);
                 continue;
             },
+            // Unresolved InterpolationLink: the accumulator was resolved by
+            // literal defaults. Absorb silently.
+            Constraint::InterpolationLink { .. } => continue,
         };
         ctx.report_error(err);
         if let Some(tv) = poison_tv {
@@ -758,7 +761,57 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             }
             r
         },
+
+        Constraint::InterpolationLink {
+            result_tv,
+            acc_tv,
+            span,
+        } => solve_interpolation_link(ctx, result_tv, acc_tv, span),
     }
+}
+
+/// Resolve a string interpolation's accumulator type from the result type.
+/// If the accumulator is already concrete (from literal defaults), this is a
+/// no-op. If the result type is String (the default), also a no-op — literal
+/// defaults handle it. Otherwise, delegates to `solve_associated` to resolve
+/// `ResultType.Interpolation` and unify with the accumulator type variable.
+fn solve_interpolation_link(
+    ctx: &mut InferCtx<'_>,
+    result_tv: TyVar,
+    acc_tv: TyVar,
+    span: Span,
+) -> SolveResult {
+    // Accumulator already resolved (from literal defaults) — nothing to do.
+    if ctx.is_concrete(ctx.resolve(acc_tv)) || ctx.is_error(ctx.resolve(acc_tv)) {
+        return SolveResult::Solved;
+    }
+
+    // Wait until the result type is concrete.
+    let result_resolved = ctx.resolve(result_tv);
+    if !ctx.is_concrete(result_resolved) {
+        return SolveResult::Deferred(Constraint::InterpolationLink {
+            result_tv,
+            acc_tv,
+            span,
+        });
+    }
+
+    if ctx.is_error(result_resolved) {
+        ctx.poison(acc_tv);
+        return SolveResult::Solved;
+    }
+
+    // If the result type is String (the default path), let literal defaults
+    // handle the accumulator — String's conformance to
+    // ExpressibleByStringInterpolation is compiler-synthesized.
+    if let TySlot::Resolved(TyKind::Struct { entity, .. }) = ctx.slot(result_resolved) {
+        if ctx.resolver.builtin(Builtin::DefaultStringLiteralType) == Some(*entity) {
+            return SolveResult::Solved;
+        }
+    }
+
+    // Delegate: resolve ResultType.Interpolation → accumulator type.
+    solve_associated(ctx, result_tv, "Interpolation", acc_tv, span)
 }
 
 /// Resolve a tuple index access (`t.N`). Defers until `tuple` is concrete,
@@ -1202,6 +1255,8 @@ fn try_literal_mismatch(
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
+        // Accumulator type variable — not directly coerced against user types
+        LiteralKind::StringInterpolation => return None,
     };
     Some(match ctx.resolver.builtin(feature) {
         Some(protocol) => InferError::DoesNotConform {
@@ -3269,6 +3324,7 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, force_all: bool) -> bool {
             LiteralKind::Null => Builtin::DefaultNullLiteralType,
             LiteralKind::Array => Builtin::DefaultArrayLiteralType,
             LiteralKind::Dictionary => Builtin::DefaultDictionaryLiteralType,
+            LiteralKind::StringInterpolation => Builtin::DefaultStringInterpolation,
         };
 
         if let Some(entity) = ctx.resolver.builtin(feature) {

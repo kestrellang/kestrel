@@ -454,12 +454,6 @@ public protocol Interpolatable {
     /// that case.
     mutating func appendLiteral(literal: String)
 
-    /// Appends one formatted interpolation hole.
-    ///
-    /// Receives the runtime `value`, the parsed `options` from the
-    /// trailing spec (or defaults if no spec was given), and a generic
-    /// constraint that the value is `Formattable`.
-    mutating func appendInterpolation(value: some Formattable, options: FormatOptions)
 }
 
 /// Marker protocol for types constructible from a completed string interpolation.
