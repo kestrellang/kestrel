@@ -26,10 +26,12 @@ use crate::place::Place;
 /// the legality rules.
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// `copy <place>` — read the value at `place` without invalidating the
-    /// source. Legal when the type's `CopyBehavior` is `Bitwise` or
-    /// `Clone(_)`.
+    /// `copy <place>` — bitwise read without invalidating the source.
+    /// Legal only when the type's `CopyBehavior` is `Bitwise`.
     Copy(Place),
+    /// `clone <place>` — duplicate via clone call, source remains valid.
+    /// Legal when the type's `CopyBehavior` is `Clone(_)`.
+    Clone(Place),
     /// `move <place>` — take ownership of `place`'s value, invalidating the
     /// source. Legal only when the type's `CopyBehavior` is `None`.
     Move(Place),
@@ -56,7 +58,7 @@ impl Value {
     /// `None` for `Const`.
     pub fn as_place(&self) -> Option<&Place> {
         match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Some(p),
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Some(p),
             Value::Const(_) => None,
         }
     }
@@ -72,7 +74,15 @@ impl Value {
     /// Re-mode a place-reading value as a `Copy`. Constants are unchanged.
     pub fn into_copy(self) -> Value {
         match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Copy(p),
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Copy(p),
+            Value::Const(_) => self,
+        }
+    }
+
+    /// Re-mode a place-reading value as a `Clone`. Constants are unchanged.
+    pub fn into_clone(self) -> Value {
+        match self {
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Clone(p),
             Value::Const(_) => self,
         }
     }
@@ -82,7 +92,7 @@ impl Value {
     /// (Stage 6) will reject Move on non-affine types).
     pub fn into_move(self) -> Value {
         match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Move(p),
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Move(p),
             Value::Const(_) => self,
         }
     }
@@ -90,7 +100,7 @@ impl Value {
     /// Re-mode a place-reading value as a `Ref`. Constants are unchanged.
     pub fn into_ref(self) -> Value {
         match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Ref(p),
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Ref(p),
             Value::Const(_) => self,
         }
     }
@@ -98,7 +108,7 @@ impl Value {
     /// Re-mode a place-reading value as a `RefMut`. Constants are unchanged.
     pub fn into_ref_mut(self) -> Value {
         match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::RefMut(p),
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::RefMut(p),
             Value::Const(_) => self,
         }
     }

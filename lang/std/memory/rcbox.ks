@@ -48,7 +48,7 @@ struct RcBoxStorage[T] {
 ///   how COW types decide whether to copy.
 /// - The refcount is currently **not** atomic, so `RcBox` is not safe to
 ///   share across threads.
-public struct RcBox[T] {
+public struct RcBox[T]: Cloneable {
     private var ptr: Pointer[RcBoxStorage[T]]
 
     /// @name From Value

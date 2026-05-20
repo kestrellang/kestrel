@@ -208,11 +208,7 @@ fn identify_droppable_locals(
             let (dest, src) = match &stmt.kind {
                 StatementKind::Assign {
                     dest,
-                    rvalue: Rvalue::Copy(src),
-                }
-                | StatementKind::Assign {
-                    dest,
-                    rvalue: Rvalue::Move(src),
+                    rvalue: Rvalue::Copy(src) | Rvalue::Clone(src) | Rvalue::Move(src),
                 } => (dest, src),
                 _ => continue,
             };

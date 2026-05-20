@@ -92,7 +92,7 @@ pub fn compile_tuple(
     let elem_types: Vec<MirTy> = values
         .iter()
         .map(|v| match v {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                 common::get_place_type(
                     ctx.module,
                     state.body,

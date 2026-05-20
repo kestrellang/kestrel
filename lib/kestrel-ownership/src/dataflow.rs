@@ -341,7 +341,7 @@ fn gen_rvalue_refmuts(state: &mut InitState, rv: &Rvalue, paths: &MovePathSet) {
                 gen_value_refmuts(state, v, paths);
             }
         },
-        Rvalue::Move(_) | Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::Const(_) => {},
+        Rvalue::Move(_) | Rvalue::Copy(_) | Rvalue::Clone(_) | Rvalue::Ref(_) | Rvalue::Const(_) => {},
     }
 }
 
@@ -389,7 +389,7 @@ fn kill_rvalue(state: &mut InitState, rv: &Rvalue, paths: &MovePathSet, site: Op
                 }
             }
         },
-        Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
+        Rvalue::Copy(_) | Rvalue::Clone(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
         Rvalue::Op1 { arg, .. } => kill_value(state, arg, paths, site),
         Rvalue::Op2 { lhs, rhs, .. } => {
             kill_value(state, lhs, paths, site);

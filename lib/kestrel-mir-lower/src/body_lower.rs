@@ -339,6 +339,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         if matches!(ty, MirTy::Error) && matches!(value, Value::Const(_)) {
             return value;
         }
+        // Call args for aggregates are passed by pointer — no clone needed.
+        // The callee borrows the caller's copy.
         if ty.copy_behavior(&self.ctx.module) != CopyBehavior::None {
             value.into_copy()
         } else {
@@ -347,7 +349,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Build a consuming call operand: affine values move, copyable values
-    /// remain ordinary copies.
+    /// copy (callee borrows via pointer for aggregates).
     fn consuming_arg_for_value(&self, value: Value, ty: &MirTy) -> Value {
         if ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
             value.into_move()
@@ -357,7 +359,8 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Build an [`Rvalue`] from a [`Value`] for use as the RHS of an
-    /// `Assign` statement, picking Move (for affine types) or Copy.
+    /// `Assign` statement, picking Move, Clone, or Copy based on the
+    /// type's `CopyBehavior`.
     ///
     /// This is the *only* helper that constructs an assignment RHS from a
     /// place-reading value — every site in body lowering routes through
@@ -365,8 +368,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn read_value_for_assign(&self, value: Value, source_ty: &MirTy) -> Rvalue {
         match value {
             Value::Const(i) => Rvalue::Const(i),
-            // Any place-reading variant: pick Move (affine) or Copy.
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                 if source_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
                     Rvalue::Move(p)
                 } else {
@@ -621,7 +623,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                 let receiver_val = self.lower_expr(receiver);
                 let field_place = match receiver_val {
-                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         p.field(method_name.to_string())
                     },
                     _ => {
@@ -936,7 +938,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // Stored field: direct place access
                     let base_val = self.lower_expr(*base);
                     match base_val {
-                        Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                        Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                             Value::Copy(p.field(name.as_str_or_empty().to_string()))
                         },
                         _ => {
@@ -958,7 +960,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::TupleIndex { base, index, .. } => {
                 let base_val = self.lower_expr(*base);
                 match base_val {
-                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         Value::Copy(p.index(*index as usize))
                     },
                     _ => {
@@ -2920,7 +2922,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let callee_ty = self.resolve_expr_type(callee_expr);
                 let callee_val = self.lower_expr(callee_expr);
                 match callee_val {
-                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         // Dispatch thin vs thick based on the callee's function type
                         let callee = match &callee_ty {
                             MirTy::FuncThin { .. } => Callee::Thin(p),
@@ -2987,7 +2989,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let receiver_val = self.lower_expr(receiver_expr);
                 // Build field place from receiver
                 let field_place = match receiver_val {
-                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         p.field(field_name)
                     },
                     _ => {
@@ -3069,7 +3071,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                         let receiver_val = self.lower_expr(receiver_expr);
                         let field_place = match receiver_val {
-                            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                                 p.field(method_name.to_string())
                             },
                             _ => {
@@ -4951,7 +4953,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Lower scrutinee to a place (materialize immediates into a temp)
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_place = match scrutinee_val {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => p,
+            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => p,
             Value::Const(imm) => {
                 let s_ty = self.resolve_expr_type(scrutinee_expr);
                 let temp = self.fresh_temp(s_ty);
@@ -5255,22 +5257,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     // === Value transfer (Move / Copy / Clone) ===
 
-    /// Check if a MirTy is Cloneable (needs clone() instead of bitwise copy).
-    fn is_type_cloneable(&self, ty: &MirTy) -> bool {
-        let entity = match ty {
-            MirTy::Named { entity, .. } => *entity,
-            _ => return false,
-        };
-        let semantics = self
-            .ctx
-            .query
-            .query(kestrel_semantics::NominalCopySemantics {
-                entity,
-                root: self.ctx.root,
-            });
-        semantics.semantics == kestrel_semantics::CopySemantics::Cloneable
-    }
-
     /// Transfer a value into `dest`, choosing Move, Copy, or Clone:
     ///
     /// - **Explicit affine Move** → `Rvalue::Move` (used for pattern payloads)
@@ -5312,27 +5298,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             return;
         }
 
-        // User local/field of Cloneable type → clone()
-        if is_user_local && self.is_type_cloneable(ty) {
-            if let Some(proto) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::Cloneable,
-                root: self.ctx.root,
-            }) {
-                self.ctx.register_name(proto);
-                let method_key = WitnessMethodKey::bare("clone");
-                let callee = Callee::witness(proto, method_key, ty.clone(), vec![]);
-                // Borrow the place for the clone receiver
-                let receiver_arg = value.into_ref();
-                self.emit_stmt(Statement::new(StatementKind::Call {
-                    dest: Some(dest),
-                    callee,
-                    args: vec![receiver_arg],
-                }));
-                return;
-            }
-        }
-
-        // Default → bitwise Copy (Copyable types, globals, projected temp places)
+        // Default → bitwise Copy (clone elaboration pass handles Clone types)
         self.emit_stmt(Statement::new(StatementKind::Assign {
             dest,
             rvalue: Rvalue::Copy(place),

@@ -177,12 +177,19 @@ impl<'a> CollectionContext<'a> {
             for stmt in &block.stmts {
                 match &stmt.kind {
                     StatementKind::Call {
-                        callee, args: _, ..
+                        callee, args, ..
                     } => {
                         self.scan_callee(callee, &subst, &inst.self_type);
+                        for arg in args {
+                            self.scan_value_clone(arg, body, func, &subst, &inst.self_type);
+                        }
                     },
                     StatementKind::Assign { rvalue, .. } => {
+                        if let Rvalue::Clone(place) = rvalue {
+                            self.discover_clone(place, body, func, &subst, &inst.self_type);
+                        }
                         self.scan_rvalue(rvalue, &subst, &inst.self_type);
+                        self.scan_rvalue_value_clones(rvalue, body, func, &subst, &inst.self_type);
                     },
                     _ => {},
                 }
@@ -405,6 +412,98 @@ impl<'a> CollectionContext<'a> {
             },
 
             _ => {},
+        }
+    }
+
+    /// If the value is Value::Clone, discover its clone function instantiation.
+    fn scan_value_clone(
+        &mut self,
+        value: &kestrel_mir::Value,
+        body: &kestrel_mir::MirBody,
+        func: &kestrel_mir::FunctionDef,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: &Option<MirTy>,
+    ) {
+        if let kestrel_mir::Value::Clone(place) = value {
+            self.discover_clone(place, body, func, subst, parent_self);
+        }
+    }
+
+    /// Scan all Value operands inside an Rvalue for Value::Clone.
+    fn scan_rvalue_value_clones(
+        &mut self,
+        rvalue: &Rvalue,
+        body: &kestrel_mir::MirBody,
+        func: &kestrel_mir::FunctionDef,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: &Option<MirTy>,
+    ) {
+        let scan = |this: &mut Self, v: &kestrel_mir::Value| {
+            this.scan_value_clone(v, body, func, subst, parent_self);
+        };
+        match rvalue {
+            Rvalue::Op1 { arg, .. } => scan(self, arg),
+            Rvalue::Op2 { lhs, rhs, .. } => { scan(self, lhs); scan(self, rhs); },
+            Rvalue::Op3 { a, b, c, .. } => { scan(self, a); scan(self, b); scan(self, c); },
+            Rvalue::Construct { fields, .. } => { for (_, v) in fields { scan(self, v); } },
+            Rvalue::Tuple(vs) | Rvalue::ArrayLiteral { values: vs, .. } => { for v in vs { scan(self, v); } },
+            Rvalue::EnumVariant { payload, .. } => { for v in payload { scan(self, v); } },
+            Rvalue::ApplyPartial { captures, .. } => { for v in captures { scan(self, v); } },
+            _ => {},
+        }
+    }
+
+    /// Discover the clone function instantiation for a `Rvalue::Clone(place)`.
+    fn discover_clone(
+        &mut self,
+        place: &kestrel_mir::Place,
+        body: &kestrel_mir::MirBody,
+        func: &kestrel_mir::FunctionDef,
+        subst: &HashMap<Entity, MirTy>,
+        parent_self: &Option<MirTy>,
+    ) {
+        use kestrel_mir::item::CopyBehavior;
+        use kestrel_mir::passes::place_type;
+
+        let Some(ty) = place_type(self.module, body, func, place) else {
+            return;
+        };
+        let concrete = substitute_type_with_self(&ty, subst, parent_self.as_ref(), self.module);
+        let MirTy::Named { entity, type_args } = &concrete else {
+            return;
+        };
+
+        // Find clone entity from the type's CopyBehavior
+        let clone_parent = self.module.structs.iter()
+            .find(|s| s.entity == *entity && matches!(s.copy_behavior, CopyBehavior::Clone(_)))
+            .map(|s| s.entity)
+            .or_else(|| self.module.enums.iter()
+                .find(|e| e.entity == *entity && matches!(e.copy_behavior, CopyBehavior::Clone(_)))
+                .map(|e| e.entity));
+        let Some(parent) = clone_parent else { return };
+
+        let clone_func_id = self.module.functions.iter().enumerate().find_map(|(i, f)| {
+            if matches!(&f.kind, kestrel_mir::FunctionKind::Method { parent: p, .. } if *p == parent)
+                && f.name.ends_with(".clone")
+            {
+                Some(FunctionId::new(i))
+            } else {
+                None
+            }
+        });
+        let Some(func_id) = clone_func_id else { return };
+
+        if type_args.iter().any(has_type_param) {
+            return;
+        }
+
+        let inst = FunctionInstantiation {
+            func_id,
+            type_args: type_args.clone(),
+            self_type: Some(concrete.clone()),
+        };
+        if self.result.functions.insert(inst.clone()) {
+            self.queue.push_back(inst);
         }
     }
 

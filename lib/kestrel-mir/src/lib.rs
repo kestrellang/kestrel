@@ -225,9 +225,18 @@ impl MirModule {
         passes::verify(self)
     }
 
+    /// Rewrite Copy of Clone types into explicit clone calls.
+    pub fn with_clone_elaboration(mut self) -> Self {
+        passes::run_clone_elaboration(&mut self);
+        self
+    }
+
     /// Run all post-lowering passes in the recommended order.
     pub fn with_all_passes(self) -> Self {
-        self.with_drop_elaboration().with_thunks().with_layouts()
+        self.with_clone_elaboration()
+            .with_drop_elaboration()
+            .with_thunks()
+            .with_layouts()
     }
 }
 

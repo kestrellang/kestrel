@@ -183,6 +183,11 @@ impl<'a> BlockBuilder<'a> {
         self.assign(dest, Rvalue::Copy(src));
     }
 
+    /// `dest = clone src`
+    pub fn assign_clone(&mut self, dest: Place, src: Place) {
+        self.assign(dest, Rvalue::Clone(src));
+    }
+
     /// `dest = ref src`
     pub fn assign_ref(&mut self, dest: Place, src: Place) {
         self.assign(dest, Rvalue::Ref(src));

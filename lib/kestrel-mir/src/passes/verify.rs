@@ -415,6 +415,10 @@ impl<'a> VerifyCtx<'a> {
                 self.verify_place(func_name, bi, p, body);
                 self.verify_copy_legality(func_name, bi, p, body, func);
             },
+            Value::Clone(p) => {
+                self.verify_place(func_name, bi, p, body);
+                self.verify_clone_legality(func_name, bi, p, body, func);
+            },
             Value::Move(p) => {
                 self.verify_place(func_name, bi, p, body);
                 self.verify_move_legality(func_name, bi, p, body, func);
@@ -438,6 +442,10 @@ impl<'a> VerifyCtx<'a> {
             Rvalue::Copy(p) => {
                 self.verify_place(func_name, bi, p, body);
                 self.verify_copy_legality(func_name, bi, p, body, func);
+            },
+            Rvalue::Clone(p) => {
+                self.verify_place(func_name, bi, p, body);
+                self.verify_clone_legality(func_name, bi, p, body, func);
             },
             Rvalue::Move(p) => {
                 self.verify_place(func_name, bi, p, body);
@@ -503,9 +511,10 @@ impl<'a> VerifyCtx<'a> {
         }
     }
 
-    /// `Value::Move(p)` is only legal when:
-    ///   - `p.ty.copy_behavior_with_constraints == None` (the type is
-    ///     affine), and
+    /// `Value::Move(p)` is legal when:
+    ///   - `p.ty.copy_behavior_with_constraints` is `None` (affine) or
+    ///     `Clone(_)` (consuming transfer without cloning — used by
+    ///     `emit_value_transfer` for single-use temps), and
     ///   - `p` is rooted in an owned local — not a `Deref` of a `&T` or
     ///     `&var T` reference.
     fn verify_move_legality(
@@ -519,14 +528,13 @@ impl<'a> VerifyCtx<'a> {
         if let Some(ty) = place_type(self.module, body, func, place) {
             let behavior =
                 ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
-            if !matches!(behavior, CopyBehavior::None) {
+            if matches!(behavior, CopyBehavior::Bitwise) {
                 self.err(
                     func_name,
                     Some(bi),
                     format!(
-                        "move: Value::Move on copyable type `{}` (CopyBehavior::{:?}); lowering should emit Copy instead",
+                        "move: Value::Move on Bitwise-copyable type `{}`; lowering should emit Copy instead",
                         ty.display(self.module),
-                        copy_behavior_name(&behavior),
                     ),
                 );
             }
@@ -560,6 +568,33 @@ impl<'a> VerifyCtx<'a> {
                 format!(
                     "copy: Value::Copy on non-copyable type `{}`; lowering should emit Move",
                     ty.display(self.module),
+                ),
+            );
+        }
+    }
+
+    /// `Value::Clone(p)` / `Rvalue::Clone(p)` requires the place's type to
+    /// have `CopyBehavior::Clone`.
+    fn verify_clone_legality(
+        &mut self,
+        func_name: &str,
+        bi: usize,
+        place: &Place,
+        body: &MirBody,
+        func: &FunctionDef,
+    ) {
+        let Some(ty) = place_type(self.module, body, func, place) else {
+            return;
+        };
+        let behavior = ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
+        if !matches!(behavior, CopyBehavior::Clone(_)) {
+            self.err(
+                func_name,
+                Some(bi),
+                format!(
+                    "clone: Clone on non-Clone type `{}` (CopyBehavior::{:?})",
+                    ty.display(self.module),
+                    copy_behavior_name(&behavior),
                 ),
             );
         }
@@ -1013,11 +1048,7 @@ impl<'a> VerifyCtx<'a> {
                 let (dest, src) = match &stmt.kind {
                     StatementKind::Assign {
                         dest,
-                        rvalue: Rvalue::Copy(src),
-                    }
-                    | StatementKind::Assign {
-                        dest,
-                        rvalue: Rvalue::Move(src),
+                        rvalue: Rvalue::Copy(src) | Rvalue::Clone(src) | Rvalue::Move(src),
                     } => (dest, src),
                     _ => continue,
                 };
