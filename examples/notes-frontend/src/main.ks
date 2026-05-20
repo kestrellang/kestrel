@@ -10,7 +10,7 @@ import quill.value.(Value)
 
 import notes.api.(
     apiLogin, apiRegister,
-    apiListNotes, apiGetNote, apiCreateNote, apiUpdateNote, apiDeleteNote,
+    apiListNotes, apiGetNote, apiCreateNote, apiUpdateNote, apiDeleteNote, apiMoveNote,
     apiListFolders, apiCreateFolder
 )
 import notes.helpers.(getToken, parseForm, formField)
@@ -52,12 +52,13 @@ func main() {
     app.route(get: "/fragments/note/:id", handleNoteFragment);
     app.route(get: "/fragments/note/:id/edit", handleEditNoteFragment);
     app.route(post: "/fragments/note/:id", handleUpdateNoteFragment);
+    app.route(post: "/fragments/note/:id/folder", handleMoveNoteFragment);
     app.route(delete: "/fragments/note/:id", handleDeleteNoteFragment);
     app.route(post: "/fragments/folders", handleCreateFolderFragment);
     app.route(get: "/fragments/sidebar", handleSidebarFragment);
 
-    let port: UInt16 = 3000;
-    println("Notes frontend on http://localhost:3000");
+    let port: UInt16 = 3001;
+    println("Notes frontend on http://localhost:3001");
     println("(Requires notes-backend running on http://localhost:8080)");
     match app.listen(port) {
         .Ok(_) => {},
@@ -168,8 +169,15 @@ func handleFolder(req: Request, ctx: Ctx) -> Response {
 func handleNewNote(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
     guard token.byteCount > 0 else { return Response.redirect(to: "/login") }
+    let folderId = match req.query("folderId") {
+        .Some(idStr) => match Int64(parsing: idStr) {
+            .Some(n) => n,
+            .None => 0
+        },
+        .None => 0
+    };
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("New Note — Notes", folderSidebar(folders, 0), noteEditorView(.None))))
+    Response.ok(Html(appShell("New Note — Notes", folderSidebar(folders, folderId), noteEditorView(.None, folderId))))
 }
 
 func handleViewNote(req: Request, ctx: Ctx) -> Response {
@@ -189,7 +197,7 @@ func handleViewNote(req: Request, ctx: Ctx) -> Response {
         return Response.redirect(to: "/")
     }
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("Note — Notes", folderSidebar(folders, 0), noteDetailView(note))))
+    Response.ok(Html(appShell("Note — Notes", folderSidebar(folders, 0), noteDetailView(note, folders))))
 }
 
 func handleEditNote(req: Request, ctx: Ctx) -> Response {
@@ -208,8 +216,12 @@ func handleEditNote(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.redirect(to: "/")
     }
+    let noteFolderId = match note.value(forKey: "folderId") {
+        .Some(v) => match v { .Int(n) => n, _ => 0 },
+        .None => 0
+    };
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("Edit Note — Notes", folderSidebar(folders, 0), noteEditorView(.Some(note)))))
+    Response.ok(Html(appShell("Edit Note — Notes", folderSidebar(folders, 0), noteEditorView(.Some(note), noteFolderId))))
 }
 
 // ============================================================================
@@ -251,7 +263,8 @@ func handleNoteFragment(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.internalServerError()
     }
-    Response.ok(Html(noteDetailView(note)))
+    let folders = loadFolders(token);
+    Response.ok(Html(noteDetailView(note, folders)))
 }
 
 func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -270,7 +283,11 @@ func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.internalServerError()
     }
-    Response.ok(Html(noteEditorView(.Some(note))))
+    let noteFolderId = match note.value(forKey: "folderId") {
+        .Some(v) => match v { .Int(n) => n, _ => 0 },
+        .None => 0
+    };
+    Response.ok(Html(noteEditorView(.Some(note), noteFolderId)))
 }
 
 func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -279,13 +296,18 @@ func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
     let fields = parseForm(req.body);
     let title = formField(fields, "title");
     let body = formField(fields, "body");
-    guard let .Ok(apiRes) = apiCreateNote(token, title, body, .None) else {
+    let folderId: Int64? = match Int64(parsing: formField(fields, "folderId")) {
+        .Some(n) => if n > 0 { .Some(n) } else { .None },
+        .None => .None
+    };
+    guard let .Ok(apiRes) = apiCreateNote(token, title, body, folderId) else {
         return Response.internalServerError()
     }
     guard let .Ok(note) = apiRes.json() else {
         return Response.internalServerError()
     }
-    Response.ok(Html(noteDetailView(note)))
+    let folders = loadFolders(token);
+    Response.ok(Html(noteDetailView(note, folders)))
 }
 
 func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -307,7 +329,33 @@ func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.internalServerError()
     }
-    Response.ok(Html(noteDetailView(note)))
+    let folders = loadFolders(token);
+    Response.ok(Html(noteDetailView(note, folders)))
+}
+
+func handleMoveNoteFragment(req: Request, ctx: Ctx) -> Response {
+    let token = getToken(req);
+    guard token.byteCount > 0 else { return Response.unauthorized() }
+    let noteId = match req.param("id") {
+        .Some(idStr) => match Int64(parsing: idStr) {
+            .Some(n) => n,
+            .None => return Response.badRequest(Html("Invalid id"))
+        },
+        .None => return Response.badRequest(Html("Missing id"))
+    };
+    let fields = parseForm(req.body);
+    let folderId: Int64? = match Int64(parsing: formField(fields, "folderId")) {
+        .Some(n) => if n > 0 { .Some(n) } else { .None },
+        .None => .None
+    };
+    guard let .Ok(apiRes) = apiMoveNote(token, noteId, folderId) else {
+        return Response.internalServerError()
+    }
+    guard let .Ok(note) = apiRes.json() else {
+        return Response.internalServerError()
+    }
+    let folders = loadFolders(token);
+    Response.ok(Html(noteDetailView(note, folders)))
 }
 
 func handleDeleteNoteFragment(req: Request, ctx: Ctx) -> Response {

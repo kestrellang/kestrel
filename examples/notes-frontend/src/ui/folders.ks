@@ -2,45 +2,48 @@ module notes.ui
 
 import quill.value.(Value)
 import notes.html.(
-    raw, text, nothing,
+    raw, text, nothing, el,
     div, span, anchor, button, form, input,
     cls, id, href, attr,
-    hxGet, hxPost, hxTarget, hxSwap
+    hxGet, hxPost, hxTarget, hxSwap, hxPushUrl
 )
 
 public func folderSidebar(folders: Array[Value], activeFolderId: Int64) -> String {
-    var s = String(capacity: 2048);
-    s.append("<div class=\"sidebar-section\">");
-    s.append("<div class=\"sidebar-label\">Folders</div>");
-
-    // All Notes
     let allCls = if activeFolderId == 0 { "folder-item active" } else { "folder-item" };
-    s.append("<a class=\"\(allCls)\" href=\"/\" hx-get=\"/fragments/notes\" hx-target=\"#content\" hx-swap=\"innerHTML\" hx-push-url=\"/\">");
-    s.append(iconSized("file-text", 16));
-    s.append("<span class=\"folder-name\">All Notes</span></a>");
 
-    // Folders
+    var items = String();
     var i: Int64 = 0;
     while i < folders.count {
         let folder = folders(unchecked: i);
         let fid = getInt(folder, "id");
         let name = getStr(folder, "name");
         let itemCls = if fid == activeFolderId { "folder-item active" } else { "folder-item" };
-        s.append("<a class=\"\(itemCls)\" href=\"/folder/\(fid)\" hx-get=\"/fragments/notes?folderId=\(fid)\" hx-target=\"#content\" hx-swap=\"innerHTML\" hx-push-url=\"/folder/\(fid)\">");
-        s.append(iconSized("folder", 16));
-        s.append("<span class=\"folder-name\">");
-        s.append(text(name));
-        s.append("</span></a>");
+        items.append(
+            anchor([cls(itemCls), href("/folder/\(fid)"),
+                    hxGet("/fragments/notes?folderId=\(fid)"), hxTarget("#content"),
+                    hxSwap("innerHTML"), hxPushUrl("/folder/\(fid)")]) {
+                iconSized("folder", 16)
+                + span([cls("folder-name")]) { text(name) }
+            }
+        );
         i = i + 1
     };
 
-    // New folder input
-    s.append("<form style=\"padding:8px 10px;margin-top:4px\" hx-post=\"/fragments/folders\" hx-target=\"#sidebar\" hx-swap=\"innerHTML\">");
-    s.append("<input class=\"new-folder-input\" type=\"text\" name=\"name\" placeholder=\"New folder...\">");
-    s.append("</form>");
-
-    s.append("</div>");
-    s
+    div([cls("sidebar-section")]) {
+        div([cls("sidebar-label")]) { "Folders" }
+        + anchor([cls(allCls), href("/"),
+                  hxGet("/fragments/notes"), hxTarget("#content"),
+                  hxSwap("innerHTML"), hxPushUrl("/")]) {
+            iconSized("file-text", 16)
+            + span([cls("folder-name")]) { "All Notes" }
+        }
+        + items
+        + form([attr("style", "padding:8px 10px;margin-top:4px"),
+                hxPost("/fragments/folders"), hxTarget("#sidebar"), hxSwap("innerHTML")]) {
+            input([cls("new-folder-input"), attr("type", "text"),
+                   attr("name", "name"), attr("placeholder", "New folder...")])
+        }
+    }
 }
 
 func getStr(v: Value, key: String) -> String {

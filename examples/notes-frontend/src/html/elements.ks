@@ -108,6 +108,10 @@ public func style(content: () -> String) -> String { el("style", content) }
 public func script(content: () -> String) -> String { el("script", content) }
 public func script(attrs: Array[String], content: () -> String) -> String { el("script", attrs, content) }
 
+// --- Utility ---
+
+public func spacer() -> String { "<span class=\"spacer\"></span>" }
+
 // --- Void elements ---
 
 public func input(attrs: Array[String]) -> String { vel("input", attrs) }

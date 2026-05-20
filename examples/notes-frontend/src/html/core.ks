@@ -24,45 +24,19 @@ func joinAttrs(attrs: Array[String]) -> String {
 }
 
 public func el(tag: String, attrs: Array[String], content: () -> String) -> String {
-    var s = String();
-    s.append("<");
-    s.append(tag);
-    s.append(joinAttrs(attrs));
-    s.append(">");
-    s.append(content());
-    s.append("</");
-    s.append(tag);
-    s.append(">");
-    s
+    "<" + tag + joinAttrs(attrs) + ">" + content() + "</" + tag + ">"
 }
 
 public func el(tag: String, content: () -> String) -> String {
-    var s = String();
-    s.append("<");
-    s.append(tag);
-    s.append(">");
-    s.append(content());
-    s.append("</");
-    s.append(tag);
-    s.append(">");
-    s
+    "<" + tag + ">" + content() + "</" + tag + ">"
 }
 
 public func vel(tag: String, attrs: Array[String]) -> String {
-    var s = String();
-    s.append("<");
-    s.append(tag);
-    s.append(joinAttrs(attrs));
-    s.append(">");
-    s
+    "<" + tag + joinAttrs(attrs) + ">"
 }
 
 public func vel(tag: String) -> String {
-    var s = String();
-    s.append("<");
-    s.append(tag);
-    s.append(">");
-    s
+    "<" + tag + ">"
 }
 
 public func text(s: String) -> String {

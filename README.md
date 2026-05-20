@@ -142,6 +142,7 @@ Available packages:
 | [kestrel/quill-toml](https://kestrel-lang.com/flock/kestrel/quill-toml) | TOML support for Quill |
 | [kestrel/http](https://kestrel-lang.com/flock/kestrel/http) | Shared HTTP types |
 | [kestrel/plume](https://kestrel-lang.com/flock/kestrel/plume) | Template engine |
+| [kestrel/talon-sqlite](https://kestrel-lang.com/flock/kestrel/talon-sqlite) | SQLite Wrapper |
 
 Also included: **Jessup** (toolchain version manager, like rustup).
 
@@ -149,6 +150,7 @@ Also included: **Jessup** (toolchain version manager, like rustup).
 
 | Example | Description | Complexity |
 | --- | --- | --- |
+| [Notes App](examples/notes-frontend/) | Full-stack web app with htmx, perch backend, and SQLite database | Advanced |
 | [Weather Dashboard](examples/weather) | Full-stack web app with Perch, htmx, and Open-Meteo API | Advanced |
 | [Pokédex](examples/pokedex) | Kanto Pokédex using PokéAPI, Perch, and Plume | Advanced |
 | [Wordle](examples/wordle) | Wordle clone with shareable URL state | Intermediate |

@@ -106,6 +106,9 @@ public func appCss() -> String {
     s.append(##"@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}"##);
     s.append(##".note-list .note-card{animation:fadeIn 0.2s ease both}"##);
 
+    // Folder picker
+    s.append(##".folder-picker{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:6px;color:#a1a1aa;font-size:0.75rem;font-family:inherit;padding:4px 8px;outline:none;cursor:pointer;margin-left:6px}.folder-picker:hover{border-color:rgba(255,255,255,0.15)}.folder-picker:focus{border-color:rgba(59,130,246,0.5)}.folder-picker option{background:#18181b;color:#e4e4e7}"##);
+
     // Responsive
     s.append(##"@media(max-width:768px){.app{grid-template-columns:1fr}.sidebar{display:none}.content{padding:20px 16px}}"##);
 

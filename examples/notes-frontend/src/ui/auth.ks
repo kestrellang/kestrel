@@ -8,87 +8,70 @@ import notes.html.(
 )
 
 public func loginPage(error: String) -> String {
-    var c = String(capacity: 4096);
-    c.append("<div class=\"auth-logo\">");
-    c.append(iconSized("feather", 22));
-    c.append("<span>Notes</span></div>");
-    c.append(h1([cls("auth-title")]) { text("Welcome back") });
-    c.append(p([cls("auth-subtitle")]) { text("Sign in to continue") });
-    c.append(errorAlert(error));
-    c.append(loginForm());
+    let c = div([cls("auth-logo")]) { iconSized("feather", 22) + span { "Notes" } }
+        + h1([cls("auth-title")]) { text("Welcome back") }
+        + p([cls("auth-subtitle")]) { text("Sign in to continue") }
+        + errorAlert(error)
+        + loginForm();
     authPage("Login — Notes", c)
 }
 
 func loginForm() -> String {
-    var f = String(capacity: 2048);
-    f.append("<form action=\"/login\" method=\"POST\">");
-    f.append(fieldGroup("Email", "email", "email", "you@example.com"));
-    f.append(fieldGroup("Password", "password", "password", "Your password"));
-    f.append("<button class=\"btn btn-primary auth-submit\" type=\"submit\">");
-    f.append(iconSized("arrow-right", 14));
-    f.append("<span>Sign In</span></button>");
-    f.append(authLink("Don't have an account? ", "/register", "Sign up"));
-    f.append("</form>");
-    f
+    form([attr("action", "/login"), attr("method", "POST")]) {
+        fieldGroup("Email", "email", "email", "you@example.com")
+        + fieldGroup("Password", "password", "password", "Your password")
+        + button([cls("btn btn-primary auth-submit"), attr("type", "submit")]) {
+            iconSized("arrow-right", 14) + span { "Sign In" }
+        }
+        + authLink("Don't have an account? ", "/register", "Sign up")
+    }
 }
 
 public func registerPage(error: String) -> String {
-    var c = String(capacity: 4096);
-    c.append("<div class=\"auth-logo\">");
-    c.append(iconSized("feather", 22));
-    c.append("<span>Notes</span></div>");
-    c.append(h1([cls("auth-title")]) { text("Create an account") });
-    c.append(p([cls("auth-subtitle")]) { text("Start organizing your thoughts") });
-    c.append(errorAlert(error));
-    c.append(registerForm());
+    let c = div([cls("auth-logo")]) { iconSized("feather", 22) + span { "Notes" } }
+        + h1([cls("auth-title")]) { text("Create an account") }
+        + p([cls("auth-subtitle")]) { text("Start organizing your thoughts") }
+        + errorAlert(error)
+        + registerForm();
     authPage("Register — Notes", c)
 }
 
 func registerForm() -> String {
-    var f = String(capacity: 2048);
-    f.append("<form action=\"/register\" method=\"POST\">");
-    f.append("<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:10px\">");
-    f.append(fieldGroup("First Name", "text", "firstName", "Ada"));
-    f.append(fieldGroup("Last Name", "text", "lastName", "Lovelace"));
-    f.append("</div>");
-    f.append(fieldGroup("Email", "email", "email", "you@example.com"));
-    f.append(fieldGroup("Password", "password", "password", "Choose a password"));
-    f.append("<button class=\"btn btn-primary auth-submit\" type=\"submit\">");
-    f.append(iconSized("arrow-right", 14));
-    f.append("<span>Create Account</span></button>");
-    f.append(authLink("Already have an account? ", "/login", "Sign in"));
-    f.append("</form>");
-    f
+    form([attr("action", "/register"), attr("method", "POST")]) {
+        div([attr("style", "display:grid;grid-template-columns:1fr 1fr;gap:10px")]) {
+            fieldGroup("First Name", "text", "firstName", "Ada")
+            + fieldGroup("Last Name", "text", "lastName", "Lovelace")
+        }
+        + fieldGroup("Email", "email", "email", "you@example.com")
+        + fieldGroup("Password", "password", "password", "Choose a password")
+        + button([cls("btn btn-primary auth-submit"), attr("type", "submit")]) {
+            iconSized("arrow-right", 14) + span { "Create Account" }
+        }
+        + authLink("Already have an account? ", "/login", "Sign in")
+    }
 }
 
 func fieldGroup(labelText: String, inputType: String, name: String, placeholder: String) -> String {
-    var s = String(capacity: 512);
-    s.append("<div class=\"field\">");
-    s.append(label([cls("field-label"), attr("for", name)]) { text(labelText) });
-    s.append(input([cls("field-input"), attr("type", inputType), attr("name", name), attr("id", name), attr("placeholder", placeholder), boolAttr("required")]));
-    s.append("</div>");
-    s
+    div([cls("field")]) {
+        label([cls("field-label"), attr("for", name)]) { text(labelText) }
+        + input([cls("field-input"), attr("type", inputType), attr("name", name),
+                 attr("id", name), attr("placeholder", placeholder), boolAttr("required")])
+    }
 }
 
 func authLink(message: String, url: String, linkText: String) -> String {
-    var s = String(capacity: 256);
-    s.append("<p class=\"auth-link\">");
-    s.append(message);
-    s.append(anchor([href(url)]) { text(linkText) });
-    s.append("</p>");
-    s
+    p([cls("auth-link")]) {
+        message + anchor([href(url)]) { text(linkText) }
+    }
 }
 
 func errorAlert(message: String) -> String {
     if message.byteCount == 0 {
         ""
     } else {
-        var s = String(capacity: 256);
-        s.append("<div class=\"alert alert-error\">");
-        s.append(iconSized("alert-circle", 14));
-        s.append("<span>");
-        s.append(text(message));
-        s.append("</span></div>");
-        s
+        div([cls("alert alert-error")]) {
+            iconSized("alert-circle", 14)
+            + span { text(message) }
+        }
     }
 }
