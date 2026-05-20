@@ -98,7 +98,7 @@ public enum Result[T, E]: Tryable {
     /// Drives `try` — `Continue(value)` for `.Ok`, `Break(error)` for
     /// `.Err`. Defined inline because `Tryable` is declared in the enum's
     /// conformance list above.
-    public func tryExtract() -> ControlFlow[T, E] {
+    public consuming func tryExtract() -> ControlFlow[T, E] {
         match self {
             .Ok(value) => .Continue(value),
             .Err(error) => .Break(error)

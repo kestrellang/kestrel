@@ -1,13 +1,16 @@
 //! Clone elaboration pass — rewrites `Rvalue::Copy` of Clone types into
 //! explicit `Callee::Witness` clone calls.
 //!
-//! Scope:
+//! Scope (all ownership-creating positions):
 //! - Assignment copies (`%dest = copy %src`)
 //! - Closure captures (`apply_partial(captures: [copy %x])`)
+//! - Composite rvalue fields (`construct { f: copy %x }`, `tuple(copy %x)`,
+//!   `enum Variant(copy %x)`, `array[T] [copy %x]`)
+//! - Return values (`return copy %x`)
 //!
-//! Call args, construct fields, tuple elements, etc. are left as-is —
-//! those positions use Copy as a lightweight alias whose ownership is
-//! managed by the callee or container.
+//! Call args are NOT rewritten — the lowering applies correct param modes
+//! (Ref/Move/RefMut) via `apply_callee_param_modes` / `apply_witness_param_modes`,
+//! so Clone-type call args never appear as Copy.
 //!
 //! Must run **before** drop elaboration: drop elab's `copied_from` tracking
 //! assumes Copy destinations alias the source. Clone destinations are
@@ -176,6 +179,14 @@ fn elaborate_block(
         if !capture_rewrites.is_empty() {
             apply_capture_rewrites(body, info, bi, si, &capture_rewrites);
             si += capture_rewrites.len();
+            continue;
+        }
+
+        // Rewrite Value::Copy in composite rvalues (Construct, Tuple, EnumVariant, ArrayLiteral)
+        let composite_rewrites = collect_composite_rewrites(body, params, info, bi, si);
+        if !composite_rewrites.is_empty() {
+            apply_composite_rewrites(body, info, bi, si, &composite_rewrites);
+            si += composite_rewrites.len();
         }
     }
 
@@ -267,6 +278,93 @@ fn apply_capture_rewrites(
         for (i, (cap_idx, _place, _ty)) in rewrites.iter().enumerate() {
             captures[*cap_idx] = Value::Move(Place::local(tmp_locals[i]));
         }
+    }
+}
+
+/// Collect positions in composite rvalues (Construct, Tuple, EnumVariant,
+/// ArrayLiteral) where a Value::Copy of a Clone type needs cloning.
+fn collect_composite_rewrites(
+    body: &MirBody,
+    params: &HashSet<LocalId>,
+    info: &CloneInfo,
+    bi: usize,
+    si: usize,
+) -> Vec<(usize, Place, MirTy)> {
+    let stmt = &body.blocks[bi].stmts[si];
+    let values: &[Value] = match &stmt.kind {
+        StatementKind::Assign { rvalue: Rvalue::Construct { fields, .. }, .. } => {
+            // Safety: (String, Value) has the same Value offsets — but we
+            // can't get &[Value] from &[(String, Value)]. Collect below instead.
+            return collect_construct_rewrites(body, params, info, fields);
+        }
+        StatementKind::Assign { rvalue: Rvalue::Tuple(values), .. } => values,
+        StatementKind::Assign { rvalue: Rvalue::EnumVariant { payload, .. }, .. } => payload,
+        StatementKind::Assign { rvalue: Rvalue::ArrayLiteral { values, .. }, .. } => values,
+        _ => return Vec::new(),
+    };
+    let mut rewrites = Vec::new();
+    for (i, val) in values.iter().enumerate() {
+        if let Value::Copy(place) = val {
+            if let Some(ty) = needs_clone(body, params, info, place) {
+                rewrites.push((i, place.clone(), ty));
+            }
+        }
+    }
+    rewrites
+}
+
+fn collect_construct_rewrites(
+    body: &MirBody,
+    params: &HashSet<LocalId>,
+    info: &CloneInfo,
+    fields: &[(String, Value)],
+) -> Vec<(usize, Place, MirTy)> {
+    let mut rewrites = Vec::new();
+    for (i, (_name, val)) in fields.iter().enumerate() {
+        if let Value::Copy(place) = val {
+            if let Some(ty) = needs_clone(body, params, info, place) {
+                rewrites.push((i, place.clone(), ty));
+            }
+        }
+    }
+    rewrites
+}
+
+/// Insert clone calls before the composite rvalue and patch the values.
+fn apply_composite_rewrites(
+    body: &mut MirBody,
+    info: &CloneInfo,
+    bi: usize,
+    si: usize,
+    rewrites: &[(usize, Place, MirTy)],
+) {
+    let mut tmp_locals = Vec::new();
+    for (idx, (_val_idx, place, ty)) in rewrites.iter().enumerate() {
+        let tmp = body.add_local(LocalDef::new("_clone", ty.clone()));
+        let clone_call = make_clone_call(info.cloneable, ty, Place::local(tmp), place);
+        body.blocks[bi].stmts.insert(si + idx, clone_call);
+        tmp_locals.push(tmp);
+    }
+
+    let stmt_idx = si + rewrites.len();
+    match &mut body.blocks[bi].stmts[stmt_idx].kind {
+        StatementKind::Assign { rvalue: Rvalue::Construct { fields, .. }, .. } => {
+            for (i, (val_idx, _, _)) in rewrites.iter().enumerate() {
+                fields[*val_idx].1 = Value::Move(Place::local(tmp_locals[i]));
+            }
+        }
+        StatementKind::Assign { rvalue: Rvalue::Tuple(values), .. }
+        | StatementKind::Assign { rvalue: Rvalue::ArrayLiteral { values, .. }, .. } => {
+            for (i, (val_idx, _, _)) in rewrites.iter().enumerate() {
+                values[*val_idx] = Value::Move(Place::local(tmp_locals[i]));
+            }
+        }
+        StatementKind::Assign { rvalue: Rvalue::EnumVariant { payload, .. }, .. } => {
+            for (i, (val_idx, _, _)) in rewrites.iter().enumerate() {
+                payload[*val_idx] = Value::Move(Place::local(tmp_locals[i]));
+            }
+        }
+        _ => {}
     }
 }
 

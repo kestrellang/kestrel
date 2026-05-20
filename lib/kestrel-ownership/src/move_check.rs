@@ -207,7 +207,7 @@ fn check_rvalue(
         // to distinguish those, so the heuristic is "RefMut is a read
         // iff `p` is at least maybe-init coming in" — see
         // `check_borrow_read`.
-        Rvalue::Copy(p) | Rvalue::Clone(p) | Rvalue::Move(p) | Rvalue::Ref(p) => {
+        Rvalue::Copy(p) | Rvalue::Move(p) | Rvalue::Ref(p) => {
             check_place_read(body, p, use_span, state, paths, reported, diags);
         },
         Rvalue::RefMut(p) => {
@@ -260,7 +260,7 @@ fn check_value(
 ) {
     match v {
         // See the comment on [`check_rvalue`] for the Ref vs RefMut split.
-        Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) => {
+        Value::Copy(p) | Value::Move(p) | Value::Ref(p) => {
             check_place_read(body, p, use_span, state, paths, reported, diags);
         },
         Value::RefMut(p) => {

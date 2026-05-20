@@ -520,7 +520,6 @@ fn compile_call_arg(
         },
 
         Value::Copy(p) | Value::Move(p) => place::compile_place_read(ctx, state, builder, p),
-        Value::Clone(p) => rvalue::compile_clone(ctx, state, builder, p),
 
         // Pass-by-value with a constant source. May need to spill into a
         // stack slot when the expected param type is an aggregate (thick

@@ -84,11 +84,7 @@ pub enum Rvalue {
     /// `move <place>` — take ownership, invalidate source
     Move(Place),
     /// `copy <place>` — bitwise copy, source remains valid.
-    /// Only for types with `CopyBehavior::Bitwise`.
     Copy(Place),
-    /// `clone <place>` — duplicate via clone call, source remains valid.
-    /// Emitted when the type's `CopyBehavior` is `Clone`.
-    Clone(Place),
     /// `ref <place>` — immutable borrow
     Ref(Place),
     /// `ref var <place>` — mutable borrow

@@ -45,7 +45,7 @@ public protocol Tryable {
 
     /// Splits `self` into the success value or the early-return residual.
     @builtin(.TryExtractMethod)
-    func tryExtract() -> ControlFlow[Output, Residual]
+    consuming func tryExtract() -> ControlFlow[Output, Residual]
 }
 
 /// Protocol that lets a return type absorb a `try`-propagated residual.

@@ -664,7 +664,7 @@ extend Optional[T]: Tryable {
     type Residual = ()
 
     /// Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
-    public func tryExtract() -> ControlFlow[T, ()] {
+    public consuming func tryExtract() -> ControlFlow[T, ()] {
         match self {
             .Some(value) => .Continue(value),
             .None => .Break(())

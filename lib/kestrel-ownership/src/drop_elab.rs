@@ -194,7 +194,7 @@ fn collect_rvalue_moves(rv: &Rvalue, candidates: &HashSet<LocalId>, out: &mut Ha
                 collect_value_move(v, candidates, out);
             }
         },
-        Rvalue::Copy(_) | Rvalue::Clone(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
+        Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
     }
 }
 
@@ -304,7 +304,7 @@ fn for_each_rvalue_move(
                 for_each_value_move(v, paths, flags, f);
             }
         },
-        Rvalue::Copy(_) | Rvalue::Clone(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
+        Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
     }
 }
 
@@ -463,7 +463,7 @@ fn kill_rvalue_for_view(state: &mut dataflow::InitState, rv: &Rvalue, paths: &Mo
                 kill_value_for_view(state, v, paths);
             }
         },
-        Rvalue::Copy(_) | Rvalue::Clone(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
+        Rvalue::Copy(_) | Rvalue::Ref(_) | Rvalue::RefMut(_) | Rvalue::Const(_) => {},
     }
 }
 

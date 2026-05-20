@@ -348,16 +348,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
-    /// Build a consuming call operand: affine values move, copyable values
-    /// copy (callee borrows via pointer for aggregates).
-    fn consuming_arg_for_value(&self, value: Value, ty: &MirTy) -> Value {
-        if ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
-            value.into_move()
-        } else {
-            value.into_copy()
-        }
-    }
-
     /// Build an [`Rvalue`] from a [`Value`] for use as the RHS of an
     /// `Assign` statement, picking Move, Clone, or Copy based on the
     /// type's `CopyBehavior`.
@@ -368,7 +358,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     fn read_value_for_assign(&self, value: Value, source_ty: &MirTy) -> Rvalue {
         match value {
             Value::Const(i) => Rvalue::Const(i),
-            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                 if source_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
                     Rvalue::Move(p)
                 } else {
@@ -623,7 +613,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                 let receiver_val = self.lower_expr(receiver);
                 let field_place = match receiver_val {
-                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         p.field(method_name.to_string())
                     },
                     _ => {
@@ -938,7 +928,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                     // Stored field: direct place access
                     let base_val = self.lower_expr(*base);
                     match base_val {
-                        Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                        Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                             Value::Copy(p.field(name.as_str_or_empty().to_string()))
                         },
                         _ => {
@@ -960,7 +950,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             HirExpr::TupleIndex { base, index, .. } => {
                 let base_val = self.lower_expr(*base);
                 match base_val {
-                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         Value::Copy(p.index(*index as usize))
                     },
                     _ => {
@@ -2635,6 +2625,90 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
+    /// Find the abstract method entity on a protocol, matching by name and
+    /// param labels. Used to read param conventions (borrowing/consuming/mutating)
+    /// for witness calls where the concrete implementation isn't known yet.
+    fn find_protocol_method_entity(
+        &self,
+        protocol: Entity,
+        method: &WitnessMethodKey,
+    ) -> Option<Entity> {
+        use kestrel_ast_builder::{Callable, Name, NodeKind};
+        for &child in self.ctx.world.children_of(protocol) {
+            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
+                continue;
+            };
+            if !matches!(
+                kind,
+                NodeKind::Function | NodeKind::Subscript | NodeKind::Initializer
+            ) {
+                continue;
+            }
+            let Some(name) = self.ctx.world.get::<Name>(child) else {
+                continue;
+            };
+            if name.0 != method.name {
+                continue;
+            }
+            if let Some(callable) = self.ctx.world.get::<Callable>(child) {
+                let child_labels: Vec<Option<&str>> =
+                    callable.params.iter().map(|p| p.label.as_deref()).collect();
+                let key_labels: Vec<Option<&str>> =
+                    method.labels.iter().map(|l| l.as_deref()).collect();
+                if child_labels == key_labels {
+                    return Some(child);
+                }
+            } else if method.labels.is_empty() {
+                return Some(child);
+            }
+        }
+        None
+    }
+
+    /// Override arg passing modes for witness calls based on the protocol
+    /// method's declared parameter conventions. The protocol contract defines
+    /// whether each param is borrowing/consuming/mutating, and all conforming
+    /// implementations must match — so we can apply modes at MIR-emission time
+    /// without knowing the concrete implementation.
+    fn apply_witness_param_modes(
+        &self,
+        call_args: &mut [Value],
+        protocol: Entity,
+        method: &WitnessMethodKey,
+    ) {
+        use kestrel_ast_builder::{Callable, ReceiverKind};
+        let Some(method_entity) = self.find_protocol_method_entity(protocol, method) else {
+            return;
+        };
+        let Some(callable) = self.ctx.world.get::<Callable>(method_entity) else {
+            return;
+        };
+        let skip = if let Some(ref receiver) = callable.receiver {
+            if !call_args.is_empty() {
+                let owned =
+                    std::mem::replace(&mut call_args[0], Value::Const(Immediate::unit()));
+                call_args[0] = match receiver {
+                    ReceiverKind::Borrowing => owned.into_ref(),
+                    ReceiverKind::Mutating => owned.into_ref_mut(),
+                    ReceiverKind::Consuming => owned.into_move(),
+                };
+            }
+            1
+        } else {
+            0
+        };
+        for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
+            let owned = std::mem::replace(arg, Value::Const(Immediate::unit()));
+            *arg = if param.is_consuming {
+                owned.into_move()
+            } else if param.is_mut {
+                owned.into_ref_mut()
+            } else {
+                owned.into_ref()
+            };
+        }
+    }
+
     /// Lower a direct call: `callee(args...)`
     fn lower_call(
         &mut self,
@@ -2922,7 +2996,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let callee_ty = self.resolve_expr_type(callee_expr);
                 let callee_val = self.lower_expr(callee_expr);
                 match callee_val {
-                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         // Dispatch thin vs thick based on the callee's function type
                         let callee = match &callee_ty {
                             MirTy::FuncThin { .. } => Callee::Thin(p),
@@ -2989,7 +3063,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 let receiver_val = self.lower_expr(receiver_expr);
                 // Build field place from receiver
                 let field_place = match receiver_val {
-                    Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                    Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                         p.field(field_name)
                     },
                     _ => {
@@ -3071,7 +3145,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                         let field_ty = self.resolve_field_type(&receiver_ty, method_name);
                         let receiver_val = self.lower_expr(receiver_expr);
                         let field_place = match receiver_val {
-                            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
+                            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => {
                                 p.field(method_name.to_string())
                             },
                             _ => {
@@ -3163,14 +3237,9 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Build args: receiver classified by copy_behavior; then explicit args.
-        // `tryExtract` semantically splits the receiver into ControlFlow and
-        // must consume affine Result/Optional-like values so their original
-        // payload is not dropped after extraction.
-        let receiver_arg = if self.is_try_extract_protocol_call(protocol, method_name) {
-            self.consuming_arg_for_value(receiver_val, &receiver_ty)
-        } else {
-            self.arg_for_value(receiver_val, &receiver_ty)
-        };
+        // Param modes (borrowing/consuming/mutating) are applied later by
+        // apply_witness_param_modes in emit_call.
+        let receiver_arg = self.arg_for_value(receiver_val, &receiver_ty);
         let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args));
 
@@ -3185,16 +3254,6 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         let method_key = self.witness_method_key_from_call(method_name, args);
         let callee = Callee::witness(protocol, method_key, receiver_ty, method_type_args);
         self.emit_call(callee, call_args, result_ty)
-    }
-
-    fn is_try_extract_protocol_call(&self, protocol: Entity, method_name: &str) -> bool {
-        if method_name != "tryExtract" {
-            return false;
-        }
-        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::TryableProtocol,
-            root: self.ctx.root,
-        }) == Some(protocol)
     }
 
     /// Check if an entity is an Initializer in the MIR and return its parent struct entity.
@@ -3696,11 +3755,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
 
     /// Emit a call statement and return the result value.
     fn emit_call(&mut self, callee: Callee, mut args: Vec<Value>, result_ty: MirTy) -> Value {
-        // Override arg passing modes from the callee's `mutating`/`consuming`
-        // param declarations. Only applies to Direct calls — witness/indirect
-        // dispatch can't know the param modes at MIR-emission time.
-        if let Callee::Direct { func, .. } = &callee {
-            self.apply_callee_param_modes(&mut args, *func);
+        // Override arg passing modes from the callee's declared param conventions.
+        match &callee {
+            Callee::Direct { func, .. } => {
+                self.apply_callee_param_modes(&mut args, *func);
+            }
+            Callee::Witness {
+                protocol, method, ..
+            } => {
+                self.apply_witness_param_modes(&mut args, *protocol, method);
+            }
+            _ => {}
         }
         if result_ty.is_unit() || result_ty == MirTy::Never {
             self.emit_stmt(Statement::new(StatementKind::Call {
@@ -4953,7 +5018,7 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         // Lower scrutinee to a place (materialize immediates into a temp)
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_place = match scrutinee_val {
-            Value::Copy(p) | Value::Clone(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => p,
+            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => p,
             Value::Const(imm) => {
                 let s_ty = self.resolve_expr_type(scrutinee_expr);
                 let temp = self.fresh_temp(s_ty);

@@ -196,7 +196,6 @@ impl fmt::Display for ValueDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.value {
             Value::Copy(p) => write!(f, "copy {}", p.display(self.module)),
-            Value::Clone(p) => write!(f, "clone {}", p.display(self.module)),
             Value::Move(p) => write!(f, "move {}", p.display(self.module)),
             Value::Ref(p) => write!(f, "ref {}", p.display(self.module)),
             Value::RefMut(p) => write!(f, "ref var {}", p.display(self.module)),
@@ -347,7 +346,6 @@ impl fmt::Display for RvalueDisplay<'_> {
         match self.rvalue {
             Rvalue::Move(p) => write!(f, "move {}", p.display(self.module)),
             Rvalue::Copy(p) => write!(f, "copy {}", p.display(self.module)),
-            Rvalue::Clone(p) => write!(f, "clone {}", p.display(self.module)),
             Rvalue::Ref(p) => write!(f, "ref {}", p.display(self.module)),
             Rvalue::RefMut(p) => write!(f, "ref var {}", p.display(self.module)),
             Rvalue::Const(imm) => write!(f, "{}", imm.display(self.module)),

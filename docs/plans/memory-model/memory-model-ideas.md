@@ -1,7 +1,7 @@
 # Kestrel Memory Model — as built
 
 This document captures Kestrel's memory model as it stands at the end of the
-lib2 rewrite. It supersedes the original design notes. The user-facing model
+compiler rewrite. It supersedes the original design notes. The user-facing model
 is Copy-by-default with opt-out for owning types; the compiler enforces
 ownership via MIR-level move-paths, init/maybe-init dataflow, and scope-aware
 drop elaboration.

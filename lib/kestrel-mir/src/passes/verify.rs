@@ -415,10 +415,6 @@ impl<'a> VerifyCtx<'a> {
                 self.verify_place(func_name, bi, p, body);
                 self.verify_copy_legality(func_name, bi, p, body, func);
             },
-            Value::Clone(p) => {
-                self.verify_place(func_name, bi, p, body);
-                self.verify_clone_legality(func_name, bi, p, body, func);
-            },
             Value::Move(p) => {
                 self.verify_place(func_name, bi, p, body);
                 self.verify_move_legality(func_name, bi, p, body, func);
@@ -442,10 +438,6 @@ impl<'a> VerifyCtx<'a> {
             Rvalue::Copy(p) => {
                 self.verify_place(func_name, bi, p, body);
                 self.verify_copy_legality(func_name, bi, p, body, func);
-            },
-            Rvalue::Clone(p) => {
-                self.verify_place(func_name, bi, p, body);
-                self.verify_clone_legality(func_name, bi, p, body, func);
             },
             Rvalue::Move(p) => {
                 self.verify_place(func_name, bi, p, body);
@@ -568,33 +560,6 @@ impl<'a> VerifyCtx<'a> {
                 format!(
                     "copy: Value::Copy on non-copyable type `{}`; lowering should emit Move",
                     ty.display(self.module),
-                ),
-            );
-        }
-    }
-
-    /// `Value::Clone(p)` / `Rvalue::Clone(p)` requires the place's type to
-    /// have `CopyBehavior::Clone`.
-    fn verify_clone_legality(
-        &mut self,
-        func_name: &str,
-        bi: usize,
-        place: &Place,
-        body: &MirBody,
-        func: &FunctionDef,
-    ) {
-        let Some(ty) = place_type(self.module, body, func, place) else {
-            return;
-        };
-        let behavior = ty.copy_behavior_with_constraints(self.module, func.where_clause.as_ref());
-        if !matches!(behavior, CopyBehavior::Clone(_)) {
-            self.err(
-                func_name,
-                Some(bi),
-                format!(
-                    "clone: Clone on non-Clone type `{}` (CopyBehavior::{:?})",
-                    ty.display(self.module),
-                    copy_behavior_name(&behavior),
                 ),
             );
         }
@@ -1048,7 +1013,7 @@ impl<'a> VerifyCtx<'a> {
                 let (dest, src) = match &stmt.kind {
                     StatementKind::Assign {
                         dest,
-                        rvalue: Rvalue::Copy(src) | Rvalue::Clone(src) | Rvalue::Move(src),
+                        rvalue: Rvalue::Copy(src) | Rvalue::Move(src),
                     } => (dest, src),
                     _ => continue,
                 };
@@ -1189,16 +1154,6 @@ impl<'a> VerifyCtx<'a> {
 /// (`Ref`/`RefMut`). Owned parameters transfer ownership to the callee.
 fn is_consuming_param(ty: &MirTy) -> bool {
     !matches!(ty, MirTy::Ref(_) | MirTy::RefMut(_))
-}
-
-/// Display name for a [`CopyBehavior`] variant — used in diagnostic
-/// messages.
-fn copy_behavior_name(behavior: &CopyBehavior) -> &'static str {
-    match behavior {
-        CopyBehavior::None => "None",
-        CopyBehavior::Bitwise => "Bitwise",
-        CopyBehavior::Clone(_) => "Clone",
-    }
 }
 
 /// Resolve a [`Place`] to its [`MirTy`] by walking the projection chain.

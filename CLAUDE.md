@@ -30,10 +30,6 @@ Make sure to consider incremental compilation.
 Avoid fragile solutions, use holistic solutions that won't break down the line
 When you fix a mistake, think about how you can avoid the same mistake being made later
 
-# Lib 2 rewrite
-
-We are rewriting it in lib, focus on that
-
 # Directory-scoped guidance (`AGENTS.md`)
 
 Before editing a file, look for an `AGENTS.md` in its directory or any parent
@@ -57,3 +53,7 @@ where the pattern applies). A one-line ask is enough: "Noticed we're doing X
 here — want me to add it to `path/AGENTS.md`?" Don't silently add entries,
 and don't hoard patterns for a session-ending summary — capture them as they
 come up, while the context is fresh.
+
+## Debugging
+
+Any time you have to trace something through compiler internals, use the kestrel-debug crate
