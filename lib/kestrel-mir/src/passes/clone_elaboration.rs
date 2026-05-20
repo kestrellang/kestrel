@@ -16,10 +16,27 @@
 //! assumes Copy destinations alias the source. Clone destinations are
 //! independent owned values (from a Call result), and drop elab needs to see
 //! the Call + Move pattern to insert correct drops.
+//!
+//! ## Decision rule
+//!
+//! Clone is needed when a Copy creates a new owner alongside the source.
+//! Two analyses determine this:
+//!
+//! - **Structural ownership** (for assignments, composites, returns): a
+//!   non-temp, non-param, bare local of a Clone type is assumed to be an
+//!   owner that drop elaboration will drop. Temps (`_t*`, `$`, `_clone*`)
+//!   are excluded — drop elaboration's `find_owned_locals` excludes them
+//!   via `copied_from`/`call_result_targets`, so they won't be dropped.
+//!
+//! - **Liveness** (for closure captures): backward read-liveness replaces
+//!   the old `assigned_locals` heuristic that guarded against stale
+//!   captures leaked by `find_captures`. A dead capture local has no
+//!   future reads and won't be dropped, so cloning is unnecessary.
 
 use std::collections::HashSet;
 
 use crate::item::{CopyBehavior, FunctionKind};
+use crate::passes::liveness::Liveness;
 use crate::statement::{Callee, Rvalue, Statement, StatementKind};
 use crate::terminator::TerminatorKind;
 use crate::value::Value;
@@ -82,8 +99,9 @@ fn should_skip_function(func: &crate::FunctionDef) -> bool {
     func.body.is_none()
 }
 
-/// Check if copying this place requires a clone call. Returns the type
-/// if so. Only rewrites bare locals of Named types with Cloneable conformance.
+/// Structural ownership check: clone if this is a non-temp, non-param,
+/// bare local of a Clone type. Aligned with drop elaboration's
+/// `find_owned_locals` exclusion rules.
 fn needs_clone(
     body: &MirBody,
     params: &HashSet<LocalId>,
@@ -114,40 +132,35 @@ fn needs_clone(
     }
 }
 
-/// Collect the set of locals that receive an assignment anywhere in the body.
-/// Used to distinguish genuinely-alive locals from stale captures leaked
-/// by sibling closures in find_captures.
-fn assigned_locals(body: &MirBody) -> HashSet<LocalId> {
-    let mut set = HashSet::new();
-    for block in &body.blocks {
-        for stmt in &block.stmts {
-            match &stmt.kind {
-                StatementKind::Assign { dest, .. } => {
-                    if let Some(id) = dest.root_local() {
-                        set.insert(id);
-                    }
-                },
-                StatementKind::Call { dest: Some(dest), .. } => {
-                    if let Some(id) = dest.root_local() {
-                        set.insert(id);
-                    }
-                },
-                _ => {},
-            }
-        }
+/// Liveness-based clone check for closure captures. A capture needs
+/// cloning only if the source local is live (has future reads). Dead
+/// locals won't be read or dropped, so the bitwise copy is safe.
+fn needs_clone_capture(
+    body: &MirBody,
+    info: &CloneInfo,
+    live_after: &crate::passes::liveness::BitVec,
+    place: &Place,
+) -> Option<MirTy> {
+    let local_id = place.root_local()?;
+    if !Liveness::is_live_in(live_after, local_id) {
+        return None;
     }
-    set
+    let local = &body.locals[local_id.index()];
+    let MirTy::Named { entity, .. } = &local.ty else {
+        return None;
+    };
+    if info.clone_entities.contains(entity) {
+        Some(local.ty.clone())
+    } else {
+        None
+    }
 }
 
-fn elaborate_function(
-    body: &mut MirBody,
-    params: &HashSet<LocalId>,
-    info: &CloneInfo,
-) {
-    let assigned = assigned_locals(body);
+fn elaborate_function(body: &mut MirBody, params: &HashSet<LocalId>, info: &CloneInfo) {
+    let liveness = Liveness::compute(body);
     let num_blocks = body.blocks.len();
     for bi in 0..num_blocks {
-        elaborate_block(body, params, info, &assigned, bi);
+        elaborate_block(body, params, info, &liveness, bi);
     }
 }
 
@@ -155,14 +168,20 @@ fn elaborate_block(
     body: &mut MirBody,
     params: &HashSet<LocalId>,
     info: &CloneInfo,
-    assigned: &HashSet<LocalId>,
+    liveness: &Liveness,
     bi: usize,
 ) {
+    // Precompute per-statement liveness for capture decisions.
+    let live_after = liveness.block_liveness_after(body, bi);
+
     let mut si = body.blocks[bi].stmts.len();
+    // `offset` tracks insertions so we can map back to original indices
+    // for the precomputed `live_after` array.
+    let mut offset: usize = 0;
     while si > 0 {
         si -= 1;
 
-        // Rewrite Rvalue::Copy in assignments
+        // Rewrite Rvalue::Copy in assignments (structural check)
         let should_rewrite_assign = match &body.blocks[bi].stmts[si].kind {
             StatementKind::Assign { rvalue: Rvalue::Copy(place), .. } => {
                 needs_clone(body, params, info, place).is_some()
@@ -171,29 +190,38 @@ fn elaborate_block(
         };
         if should_rewrite_assign {
             rewrite_assign_copy(body, params, info, bi, si);
+            // Inserts 1 stmt AFTER si — doesn't shift earlier indices.
+            offset += 1;
             continue;
         }
 
-        // Rewrite Value::Copy in ApplyPartial captures
-        let capture_rewrites = collect_capture_rewrites(body, params, info, assigned, bi, si);
+        // Rewrite Value::Copy in ApplyPartial captures (liveness check)
+        let orig_si = si.saturating_sub(offset);
+        let la = live_after.get(orig_si).unwrap_or_else(|| &live_after[0]);
+        let capture_rewrites = collect_capture_rewrites(body, info, la, bi, si);
         if !capture_rewrites.is_empty() {
+            let n = capture_rewrites.len();
             apply_capture_rewrites(body, info, bi, si, &capture_rewrites);
-            si += capture_rewrites.len();
+            offset += n;
+            si += n;
             continue;
         }
 
-        // Rewrite Value::Copy in composite rvalues (Construct, Tuple, EnumVariant, ArrayLiteral)
+        // Rewrite Value::Copy in composite rvalues (structural check)
         let composite_rewrites = collect_composite_rewrites(body, params, info, bi, si);
         if !composite_rewrites.is_empty() {
+            let n = composite_rewrites.len();
             apply_composite_rewrites(body, info, bi, si, &composite_rewrites);
-            si += composite_rewrites.len();
+            offset += n;
+            si += n;
         }
     }
 
     elaborate_terminator(body, params, info, bi);
 }
 
-/// Rewrite `%dest = copy %place` → `%tmp = call clone(&place); %dest = move %tmp`
+// ---- Rewrite helpers ----
+
 fn rewrite_assign_copy(
     body: &mut MirBody,
     params: &HashSet<LocalId>,
@@ -207,32 +235,24 @@ fn rewrite_assign_copy(
         },
         _ => return,
     };
-
     let ty = match needs_clone(body, params, info, &place) {
         Some(ty) => ty,
         None => return,
     };
-
     let tmp = body.add_local(LocalDef::new("_clone", ty.clone()));
     let clone_call = make_clone_call(info.cloneable, &ty, Place::local(tmp), &place);
     let move_stmt = Statement::new(StatementKind::Assign {
         dest,
         rvalue: Rvalue::Move(Place::local(tmp)),
     });
-
     body.blocks[bi].stmts[si] = clone_call;
     body.blocks[bi].stmts.insert(si + 1, move_stmt);
 }
 
-/// Collect capture positions in ApplyPartial that need clone elaboration.
-/// Only clones captures whose source local is assigned somewhere in the
-/// function — this filters out stale locals from sibling closures that
-/// leaked through find_captures.
 fn collect_capture_rewrites(
     body: &MirBody,
-    params: &HashSet<LocalId>,
     info: &CloneInfo,
-    assigned: &HashSet<LocalId>,
+    live_after: &crate::passes::liveness::BitVec,
     bi: usize,
     si: usize,
 ) -> Vec<(usize, Place, MirTy)> {
@@ -241,13 +261,8 @@ fn collect_capture_rewrites(
     if let StatementKind::Assign { rvalue: Rvalue::ApplyPartial { captures, .. }, .. } = &stmt.kind {
         for (i, val) in captures.iter().enumerate() {
             if let Value::Copy(place) = val {
-                if let Some(local_id) = place.root_local() {
-                    // Only clone if this local was assigned in the parent body
-                    if assigned.contains(&local_id) {
-                        if let Some(ty) = needs_clone(body, params, info, place) {
-                            rewrites.push((i, place.clone(), ty));
-                        }
-                    }
+                if let Some(ty) = needs_clone_capture(body, info, live_after, place) {
+                    rewrites.push((i, place.clone(), ty));
                 }
             }
         }
@@ -255,7 +270,6 @@ fn collect_capture_rewrites(
     rewrites
 }
 
-/// Insert clone calls before the ApplyPartial and patch capture values.
 fn apply_capture_rewrites(
     body: &mut MirBody,
     info: &CloneInfo,
@@ -281,8 +295,6 @@ fn apply_capture_rewrites(
     }
 }
 
-/// Collect positions in composite rvalues (Construct, Tuple, EnumVariant,
-/// ArrayLiteral) where a Value::Copy of a Clone type needs cloning.
 fn collect_composite_rewrites(
     body: &MirBody,
     params: &HashSet<LocalId>,
@@ -293,8 +305,6 @@ fn collect_composite_rewrites(
     let stmt = &body.blocks[bi].stmts[si];
     let values: &[Value] = match &stmt.kind {
         StatementKind::Assign { rvalue: Rvalue::Construct { fields, .. }, .. } => {
-            // Safety: (String, Value) has the same Value offsets — but we
-            // can't get &[Value] from &[(String, Value)]. Collect below instead.
             return collect_construct_rewrites(body, params, info, fields);
         }
         StatementKind::Assign { rvalue: Rvalue::Tuple(values), .. } => values,
@@ -330,7 +340,6 @@ fn collect_construct_rewrites(
     rewrites
 }
 
-/// Insert clone calls before the composite rvalue and patch the values.
 fn apply_composite_rewrites(
     body: &mut MirBody,
     info: &CloneInfo,
@@ -368,7 +377,6 @@ fn apply_composite_rewrites(
     }
 }
 
-/// Handle Value::Copy in terminators (primarily Return).
 fn elaborate_terminator(
     body: &mut MirBody,
     params: &HashSet<LocalId>,
@@ -381,7 +389,6 @@ fn elaborate_terminator(
         },
         _ => false,
     };
-
     if !needs_rewrite {
         return;
     }
