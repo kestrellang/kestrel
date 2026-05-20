@@ -1107,7 +1107,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `write`
 
 ```kestrel
-public func write(T)
+public func write(consuming T)
 ```
 
 Writes `value` through the pointer. Same safety preconditions as

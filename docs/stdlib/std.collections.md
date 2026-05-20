@@ -257,7 +257,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(T)
+public mutating func append(consuming T)
 ```
 
 Appends `element` to the end of the array.

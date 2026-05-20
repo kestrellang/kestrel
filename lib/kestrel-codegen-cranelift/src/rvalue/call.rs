@@ -519,7 +519,6 @@ fn compile_call_arg(
             place::compile_place_addr(ctx, state, builder, place)
         },
 
-        // Pass-by-value with a place source: read the place.
         Value::Copy(p) | Value::Move(p) => place::compile_place_read(ctx, state, builder, p),
 
         // Pass-by-value with a constant source. May need to spill into a

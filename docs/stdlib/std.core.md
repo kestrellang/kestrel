@@ -899,6 +899,24 @@ public func readBytesClamped(from: BytesView) -> BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `BytesWrappable`
+
+#### typealias `BytesWrappedYield`
+
+```kestrel
+type BytesWrappedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesWrapped`
+
+```kestrel
+public func readBytesWrapped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `BytesSubstringIndex`
 
 #### function `readBytesSubstring`
@@ -949,6 +967,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsWrappable`
+
+#### typealias `CharsWrappedYield`
+
+```kestrel
+type CharsWrappedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsWrapped`
+
+```kestrel
+public func readCharsWrapped(from: CharsView) -> CharsView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1007,6 +1043,24 @@ public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesWrappable`
+
+#### typealias `GraphemesWrappedYield`
+
+```kestrel
+type GraphemesWrappedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesWrapped`
+
+```kestrel
+public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `GraphemesSubstringIndex`
 
 #### function `readGraphemesSubstring`
@@ -1057,6 +1111,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesWrappable`
+
+#### typealias `LinesWrappedYield`
+
+```kestrel
+type LinesWrappedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesWrapped`
+
+```kestrel
+public func readLinesWrapped(from: LinesView) -> LinesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -2994,6 +3066,24 @@ public func readBytesClamped(from: BytesView) -> BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `BytesWrappable`
+
+#### typealias `BytesWrappedYield`
+
+```kestrel
+type BytesWrappedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesWrapped`
+
+```kestrel
+public func readBytesWrapped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `BytesSubstringIndex`
 
 #### function `readBytesSubstring`
@@ -3044,6 +3134,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsWrappable`
+
+#### typealias `CharsWrappedYield`
+
+```kestrel
+type CharsWrappedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsWrapped`
+
+```kestrel
+public func readCharsWrapped(from: CharsView) -> CharsView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3102,6 +3210,24 @@ public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesWrappable`
+
+#### typealias `GraphemesWrappedYield`
+
+```kestrel
+type GraphemesWrappedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesWrapped`
+
+```kestrel
+public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `GraphemesSubstringIndex`
 
 #### function `readGraphemesSubstring`
@@ -3152,6 +3278,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesWrappable`
+
+#### typealias `LinesWrappedYield`
+
+```kestrel
+type LinesWrappedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesWrapped`
+
+```kestrel
+public func readLinesWrapped(from: LinesView) -> LinesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3408,6 +3552,24 @@ public func readBytesClamped(from: BytesView) -> BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `BytesWrappable`
+
+#### typealias `BytesWrappedYield`
+
+```kestrel
+type BytesWrappedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesWrapped`
+
+```kestrel
+public func readBytesWrapped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `BytesSubstringIndex`
 
 #### function `readBytesSubstring`
@@ -3458,6 +3620,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsWrappable`
+
+#### typealias `CharsWrappedYield`
+
+```kestrel
+type CharsWrappedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsWrapped`
+
+```kestrel
+public func readCharsWrapped(from: CharsView) -> CharsView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3516,6 +3696,24 @@ public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesWrappable`
+
+#### typealias `GraphemesWrappedYield`
+
+```kestrel
+type GraphemesWrappedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesWrapped`
+
+```kestrel
+public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `GraphemesSubstringIndex`
 
 #### function `readGraphemesSubstring`
@@ -3566,6 +3764,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesWrappable`
+
+#### typealias `LinesWrappedYield`
+
+```kestrel
+type LinesWrappedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesWrapped`
+
+```kestrel
+public func readLinesWrapped(from: LinesView) -> LinesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3930,6 +4146,24 @@ public func readBytesClamped(from: BytesView) -> BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `BytesWrappable`
+
+#### typealias `BytesWrappedYield`
+
+```kestrel
+type BytesWrappedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesWrapped`
+
+```kestrel
+public func readBytesWrapped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `BytesSubstringIndex`
 
 #### function `readBytesSubstring`
@@ -3980,6 +4214,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsWrappable`
+
+#### typealias `CharsWrappedYield`
+
+```kestrel
+type CharsWrappedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsWrapped`
+
+```kestrel
+public func readCharsWrapped(from: CharsView) -> CharsView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4038,6 +4290,24 @@ public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesWrappable`
+
+#### typealias `GraphemesWrappedYield`
+
+```kestrel
+type GraphemesWrappedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesWrapped`
+
+```kestrel
+public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `GraphemesSubstringIndex`
 
 #### function `readGraphemesSubstring`
@@ -4088,6 +4358,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesWrappable`
+
+#### typealias `LinesWrappedYield`
+
+```kestrel
+type LinesWrappedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesWrapped`
+
+```kestrel
+public func readLinesWrapped(from: LinesView) -> LinesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4311,6 +4599,24 @@ public func readBytesClamped(from: BytesView) -> BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `BytesWrappable`
+
+#### typealias `BytesWrappedYield`
+
+```kestrel
+type BytesWrappedYield = BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesWrapped`
+
+```kestrel
+public func readBytesWrapped(from: BytesView) -> BytesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `BytesSubstringIndex`
 
 #### function `readBytesSubstring`
@@ -4361,6 +4667,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readCharsClamped(from: CharsView) -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsWrappable`
+
+#### typealias `CharsWrappedYield`
+
+```kestrel
+type CharsWrappedYield = CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsWrapped`
+
+```kestrel
+public func readCharsWrapped(from: CharsView) -> CharsView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4419,6 +4743,24 @@ public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesWrappable`
+
+#### typealias `GraphemesWrappedYield`
+
+```kestrel
+type GraphemesWrappedYield = GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesWrapped`
+
+```kestrel
+public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `GraphemesSubstringIndex`
 
 #### function `readGraphemesSubstring`
@@ -4469,6 +4811,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesClamped(from: LinesView) -> LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesWrappable`
+
+#### typealias `LinesWrappedYield`
+
+```kestrel
+type LinesWrappedYield = LinesView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesWrapped`
+
+```kestrel
+public func readLinesWrapped(from: LinesView) -> LinesView
 ```
 
 _Defined in `lang/std/text/views.ks`._

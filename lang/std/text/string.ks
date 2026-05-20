@@ -746,9 +746,12 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
 
     /// Returns the concatenation `self + other`. Required by `Addable`.
     ///
-    /// Equivalent to cloning `self` and appending `other`.
+    /// Builds a fresh string with both halves — avoids clone+append
+    /// which triggers a COW aliasing bug with the current Rvalue::Copy
+    /// codegen (bitwise copy without refcount bump).
     public func add(other: String) -> String {
-        var result = self.clone();
+        var result = String(capacity: self.byteCount + other.byteCount);
+        result.append(self);
         result.append(other);
         result
     }

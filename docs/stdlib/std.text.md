@@ -416,6 +416,18 @@ sub-view aliases out-of-bounds memory.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.BytesWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.bytes(wrapped: -1)` reads the last byte.
+Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### function `asRaw`
 
 ```kestrel
@@ -1478,6 +1490,18 @@ variable-width. Panics on out-of-bounds.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.CharsWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.chars(wrapped: -1)` reads the last char.
+Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -1736,6 +1760,16 @@ acc.build();  // ""
 
 _Defined in `lang/std/text/format.ks`._
 
+#### function `appendInterpolation`
+
+```kestrel
+public mutating func appendInterpolation[__opaque_0](__opaque_0, FormatOptions) where __opaque_0: Formattable
+```
+
+Formats one interpolation hole directly into the buffer.
+
+_Defined in `lang/std/text/format.ks`._
+
 #### function `build`
 
 ```kestrel
@@ -1768,16 +1802,6 @@ Constructs an empty accumulator with capacity hints derived from the literal at 
 `literalCapacity` is the total byte count of the static segments;
 `interpolationCount` is the number of `\{...}` holes. Implementors
 can use these to preallocate.
-
-_Defined in `lang/std/text/format.ks`._
-
-#### function `appendInterpolation`
-
-```kestrel
-public mutating func appendInterpolation[__opaque_0](__opaque_0, FormatOptions) where __opaque_0: Formattable
-```
-
-Formats one interpolation hole directly into the buffer.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -2703,6 +2727,18 @@ start. Panics on out-of-bounds.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.GraphemesWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.graphemes(wrapped: -1)` reads the last
+grapheme cluster. Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -3029,20 +3065,6 @@ can use these to preallocate.
 
 _Defined in `lang/std/text/format.ks`._
 
-#### function `appendInterpolation`
-
-```kestrel
-mutating func appendInterpolation[__opaque_0](__opaque_0, FormatOptions) where __opaque_0: Formattable
-```
-
-Appends one formatted interpolation hole.
-
-Receives the runtime `value`, the parsed `options` from the
-trailing spec (or defaults if no spec was given), and a generic
-constraint that the value is `Formattable`.
-
-_Defined in `lang/std/text/format.ks`._
-
 #### function `appendLiteral`
 
 ```kestrel
@@ -3304,6 +3326,18 @@ public subscript[I](I) -> I.LinesYield { get }
 `LinesView` sub-view covering those lines (terminators preserved
 in the underlying bytes). **O(n)** — walks the buffer from the
 start. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.LinesWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.lines(wrapped: -1)` reads the last line.
+Returns `None` on an empty view.
 
 _Defined in `lang/std/text/views.ks`._
 

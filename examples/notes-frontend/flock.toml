@@ -1,0 +1,16 @@
+[package]
+name = "notes-frontend"
+version = "0.1.0"
+description = "HTMX frontend for the notes REST API"
+author = ""
+license = ""
+repository = ""
+website = ""
+documentation = ""
+
+[dependencies]
+perch = { path = "../../lang/perch" }
+swoop = { path = "../../lang/swoop" }
+http = { path = "../../lang/http" }
+quill = { path = "../../lang/quill" }
+quill-json = { path = "../../lang/quill-json" }

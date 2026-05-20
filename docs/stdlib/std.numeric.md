@@ -7163,6 +7163,24 @@ public func readBytesClamped(from: BytesView) -> UInt8?
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `BytesWrappable`
+
+#### typealias `BytesWrappedYield`
+
+```kestrel
+type BytesWrappedYield = UInt8?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readBytesWrapped`
+
+```kestrel
+public func readBytesWrapped(from: BytesView) -> UInt8?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `CharsIndex`
 
 #### typealias `CharsYield`
@@ -7203,6 +7221,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readCharsClamped(from: CharsView) -> Char?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `CharsWrappable`
+
+#### typealias `CharsWrappedYield`
+
+```kestrel
+type CharsWrappedYield = Char?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readCharsWrapped`
+
+```kestrel
+public func readCharsWrapped(from: CharsView) -> Char?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -7251,6 +7287,24 @@ public func readGraphemesClamped(from: GraphemesView) -> Grapheme?
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `GraphemesWrappable`
+
+#### typealias `GraphemesWrappedYield`
+
+```kestrel
+type GraphemesWrappedYield = Grapheme?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readGraphemesWrapped`
+
+```kestrel
+public func readGraphemesWrapped(from: GraphemesView) -> Grapheme?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `LinesIndex`
 
 #### typealias `LinesYield`
@@ -7291,6 +7345,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func readLinesClamped(from: LinesView) -> String?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `LinesWrappable`
+
+#### typealias `LinesWrappedYield`
+
+```kestrel
+type LinesWrappedYield = String?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `readLinesWrapped`
+
+```kestrel
+public func readLinesWrapped(from: LinesView) -> String?
 ```
 
 _Defined in `lang/std/text/views.ks`._
