@@ -3,42 +3,37 @@ module notes.handlers
 import perch.request.(Request)
 import perch.response.(Response)
 import perch.json_body.(JsonBody)
+import quill.value.(Value)
 import talon.sqlite.database.(Database)
-import talon.sqlite.sql.(SQL)
 import notes.context.(AppCtx)
-import notes.errors.(errorJson, parseBody)
+import notes.helpers.(errorJson, parseBody, currentTimestamp)
 import notes.requests.(CreateUserRequest, LoginRequest)
 import notes.db.(findUserByEmail, findPasswordByEmail, createUser, createToken)
-import notes.middleware.(hashPassword, generateSalt, generateToken)
+import notes.crypto.(hashPassword, generateSalt, generateToken)
 
 public func handleRegister(req: Request, ctx: AppCtx) -> Response {
     let body = match parseBody[CreateUserRequest](req.body) {
         .Ok(b) => b,
         .Err(resp) => return resp
     };
+    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
 
-    let db = match Database(ctx.dbPath) {
-        .Ok(db) => db,
-        .Err(_) => return Response.internalServerError()
-    };
-
-    match findUserByEmail(db, body.email) {
-        .Ok(.Some(_)) => return Response.conflict(JsonBody(fromRaw: errorJson("Email already registered"))),
-        .Ok(.None) => {},
-        .Err(_) => return Response.internalServerError()
+    guard let .Ok(existingUser) = findUserByEmail(db, body.email) else {
+        return Response.internalServerError()
+    }
+    if let .Some(_) = existingUser {
+        return Response.conflict(JsonBody(fromRaw: errorJson("Email already registered")))
     };
 
     let salt = generateSalt(body.email);
     let passwordHash = hashPassword(body.password, salt);
-    let now = "2026-01-01T00:00:00Z";
+    let now = currentTimestamp();
 
-    match createUser(db, body.firstName, body.lastName, body.email, salt, passwordHash, now) {
-        .Ok(user) => match JsonBody(user) {
-            .Ok(json) => Response.created(json),
-            .Err(_) => Response.internalServerError()
-        },
-        .Err(_) => Response.internalServerError()
+    guard let .Ok(user) = createUser(db, body.firstName, body.lastName, body.email, salt, passwordHash, now) else {
+        return Response.internalServerError()
     }
+    guard let .Ok(json) = JsonBody(user) else { return Response.internalServerError() }
+    Response.created(json)
 }
 
 public func handleLogin(req: Request, ctx: AppCtx) -> Response {
@@ -46,33 +41,25 @@ public func handleLogin(req: Request, ctx: AppCtx) -> Response {
         .Ok(b) => b,
         .Err(resp) => return resp
     };
+    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
 
-    let db = match Database(ctx.dbPath) {
-        .Ok(db) => db,
-        .Err(_) => return Response.internalServerError()
-    };
-
-    let passwordRow = match findPasswordByEmail(db, body.email) {
-        .Ok(.Some(row)) => row,
-        .Ok(.None) => return Response.unauthorized(),
-        .Err(_) => return Response.internalServerError()
-    };
+    guard let .Ok(some passwordRow) = findPasswordByEmail(db, body.email) else {
+        return Response.unauthorized()
+    }
 
     let hash = hashPassword(body.password, passwordRow.salt);
-    if hash != passwordRow.passwordHash {
+    guard hash == passwordRow.passwordHash else {
         return Response.unauthorized()
-    };
+    }
 
     let token = generateToken(passwordRow.id, passwordRow.salt);
-    let now = "2026-01-01T00:00:00Z";
+    let now = currentTimestamp();
 
-    match createToken(db, passwordRow.id, token.clone(), now) {
-        .Ok(_) => {},
-        .Err(_) => return Response.internalServerError()
-    };
+    guard let .Ok(_) = createToken(db, passwordRow.id, token.clone(), now) else {
+        return Response.internalServerError()
+    }
 
-    // Return the token as a JSON object
-    var obj = Dictionary[String, quill.value.Value]();
-    obj.insert("token", quill.value.Value.Str(token));
-    Response.ok(JsonBody(fromRaw: quill.value.Value.Obj(obj)))
+    var obj = Dictionary[String, Value]();
+    obj.insert("token", Value.Str(token));
+    Response.ok(JsonBody(fromRaw: Value.Obj(obj)))
 }

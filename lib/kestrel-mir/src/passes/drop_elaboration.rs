@@ -586,12 +586,17 @@ fn transfer_block(
     for stmt in &block.stmts {
         transfer_statement(&stmt.kind, local_to_idx, state, consuming_receiver_funcs);
     }
-    // Return terminator consumes the returned local
+    // Return terminator consumes the returned local — but only when
+    // the entire local is returned, not a field/projection from it.
+    // `return copy %self.id` reads a field; %self is still alive and
+    // needs its deinit.
     if let TerminatorKind::Return(val) = &block.terminator.kind {
         if let Some(place) = val.as_place() {
-            if let Some(local) = place.root_local() {
-                if let Some(&idx) = local_to_idx.get(&local) {
-                    state[idx] = InitState::Dead;
+            if place.is_local() {
+                if let Some(local) = place.root_local() {
+                    if let Some(&idx) = local_to_idx.get(&local) {
+                        state[idx] = InitState::Dead;
+                    }
                 }
             }
         }
@@ -911,21 +916,30 @@ fn insert_deinits_at_exits(
                     &mut state,
                     consuming_receiver_funcs,
                 );
-                // Return consumes the returned local
-                if let Some(ret_local) = returned_local {
-                    if let Some(&idx) = local_to_idx.get(&ret_local) {
-                        state[idx] = InitState::Dead;
+                // Return consumes the returned local — only when the
+                // whole local is returned, not a field projection from it.
+                let ret_is_bare_local = ret_val.as_place().map(|p| p.is_local()).unwrap_or(false);
+                if ret_is_bare_local {
+                    if let Some(ret_local) = returned_local {
+                        if let Some(&idx) = local_to_idx.get(&ret_local) {
+                            state[idx] = InitState::Dead;
+                        }
                     }
                 }
 
                 let deinit_stmts = build_deinit_stmts(droppable, &state, flags, None);
                 if !deinit_stmts.is_empty() {
-                    // If the return value is not a simple local (e.g., a global or
-                    // field read), capture it into a temp before cleanup so the
-                    // cleanup deinits don't modify it before it's read.
+                    // If the return value reads through a droppable local's
+                    // field (e.g., `return copy %self.id`), capture into a
+                    // temp before cleanup so the deinit doesn't clobber it.
                     let needs_capture = ret_val
                         .as_place()
-                        .map(|p| p.root_local().is_none())
+                        .map(|p| {
+                            p.root_local().is_none()
+                                || (!p.is_local()
+                                    && p.root_local()
+                                        .is_some_and(|r| local_to_idx.contains_key(&r)))
+                        })
                         .unwrap_or(false);
                     if needs_capture {
                         let ret_temp =

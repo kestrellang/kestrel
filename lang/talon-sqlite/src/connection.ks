@@ -72,9 +72,10 @@ func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
     let stepResult = ffi.sqlite3_step(stmtRaw);
     let _ = ffi.sqlite3_finalize(stmtRaw);
 
-    if stepResult != ffi.SQLITE_DONE() and stepResult != ffi.SQLITE_ROW() {
+    if stepResult != ffi.SQLITE_OK() and stepResult != ffi.SQLITE_DONE() and stepResult != ffi.SQLITE_ROW() {
         throw SqliteError.Error(errorMessage(db));
     }
+    .Ok(())
 }
 
 // Helper: prepare+bind+step loop, map rows via FromRow

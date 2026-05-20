@@ -29,17 +29,32 @@ public struct PasswordRow: FromRow, Cloneable {
 }
 
 public func findUserByEmail(db: Database, email: String) -> User? throws SqliteError {
-    let rows = try db.query[User]("SELECT id, first_name, last_name, email, created_at FROM users WHERE email = \(email)");
+    let rows = try db.query[User]("""
+        SELECT id, first_name, last_name, email, created_at
+        FROM users
+        WHERE email = \(email)
+        """);
     if rows.count > 0 { .Ok(.Some(rows(0))) } else { .Ok(.None) }
 }
 
 public func findPasswordByEmail(db: Database, email: String) -> PasswordRow? throws SqliteError {
-    let rows = try db.query[PasswordRow]("SELECT id, salt, password_hash FROM users WHERE email = \(email)");
+    let rows = try db.query[PasswordRow]("""
+        SELECT id, salt, password_hash
+        FROM users
+        WHERE email = \(email)
+        """);
     if rows.count > 0 { .Ok(.Some(rows(0))) } else { .Ok(.None) }
 }
 
 public func createUser(db: Database, firstName: String, lastName: String, email: String, salt: String, passwordHash: String, now: String) -> User throws SqliteError {
-    try db.execute("INSERT INTO users (first_name, last_name, email, salt, password_hash, created_at) VALUES (\(firstName), \(lastName), \(email), \(salt), \(passwordHash), \(now))");
-    let rows = try db.query[User]("SELECT id, first_name, last_name, email, created_at FROM users WHERE rowid = last_insert_rowid()");
+    try db.execute("""
+        INSERT INTO users (first_name, last_name, email, salt, password_hash, created_at)
+        VALUES (\(firstName), \(lastName), \(email), \(salt), \(passwordHash), \(now))
+        """);
+    let rows = try db.query[User]("""
+        SELECT id, first_name, last_name, email, created_at
+        FROM users
+        WHERE rowid = last_insert_rowid()
+        """);
     .Ok(rows(0))
 }

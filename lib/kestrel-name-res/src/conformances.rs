@@ -327,6 +327,9 @@ where
 {
     use kestrel_ast_builder::Callable;
 
+    // Check whether `parent` declares conformance to `protocol` — either
+    // directly or via a refining protocol (e.g. declaring
+    // ExpressibleByStringInterpolation implies ExpressibleByStringLiteral).
     let declares_protocol = |parent: Entity| -> bool {
         let Some(conformances) = ctx.get::<Conformances>(parent) else {
             return false;
@@ -335,7 +338,18 @@ where
             let ConformanceItem::Positive(ast_ty, _) = item else {
                 return false;
             };
-            resolve_conformance_entity(ctx, ast_ty, parent, root) == Some(protocol)
+            let Some(declared) = resolve_conformance_entity(ctx, ast_ty, parent, root) else {
+                return false;
+            };
+            if declared == protocol {
+                return true;
+            }
+            // Check if the declared protocol refines the target protocol
+            let transitive = ctx.query(ConformingProtocols {
+                entity: declared,
+                root,
+            });
+            transitive.contains(&protocol)
         })
     };
 

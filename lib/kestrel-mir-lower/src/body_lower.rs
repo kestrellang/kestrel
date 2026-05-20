@@ -5180,12 +5180,42 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
     }
 
     /// Emit binding assignments: extract values from scrutinee via access paths.
+    ///
+    /// Uses Move for non-Copyable payloads extracted from owned scrutinees,
+    /// so the enum's drop elaboration sees the payload as consumed. Copy is
+    /// used when the scrutinee is a reference (borrowed view, no ownership
+    /// to transfer) or for whole-value at-bindings (empty path — other
+    /// bindings still need the scrutinee alive).
     fn emit_bindings(&mut self, bindings: &[Binding], scrutinee: &Place) {
+        // A scrutinee is "owned" when the root local holds the value by
+        // value — not through a reference. Parameters passed by Ref/RefMut
+        // are borrowed views; moving from them is unsound. The local's
+        // declared MIR type doesn't carry the Ref wrapper (that lives on
+        // the FunctionDef param), so check the param type directly.
+        let scrutinee_is_owned = scrutinee
+            .root_local()
+            .map(|root| {
+                let idx = root.index();
+                if idx < self.body.param_count {
+                    let func = &self.ctx.module.functions[self.func_id.index()];
+                    func.params
+                        .get(idx)
+                        .map(|p| !matches!(p.ty, MirTy::Ref(_) | MirTy::RefMut(_)))
+                        .unwrap_or(true)
+                } else {
+                    true
+                }
+            })
+            .unwrap_or(false);
+
         for binding in bindings {
             let mir_local = self.map_local(binding.local_id);
             let source = apply_access_path(scrutinee.clone(), &binding.path);
             let local_ty = self.body.locals[mir_local.index()].ty.clone();
-            let value = if local_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None {
+            let use_move = local_ty.copy_behavior(&self.ctx.module) == CopyBehavior::None
+                && !binding.path.is_empty()
+                && scrutinee_is_owned;
+            let value = if use_move {
                 Value::Move(source)
             } else {
                 Value::Copy(source)

@@ -1,4 +1,4 @@
-module notes.errors
+module notes.helpers
 
 import quill.value.(Value)
 import quill.deserialize.(Deserialize)
@@ -7,17 +7,17 @@ import quill.json.parser.(parseJson)
 import perch.json_body.(JsonBody)
 import perch.response.(Response)
 
+import notes.time.(getCurrentTimestamp)
+
+// Gets the current UTC timestamp in ISO8601 format using C FFI.
+public func currentTimestamp() -> String {
+    getCurrentTimestamp()
+}
+
 // Wraps an error message in a JSON object: {"error": "..."}
 public func errorJson(message: String) -> Value {
     var obj = Dictionary[String, Value]();
     obj.insert("error", Value.Str(message));
-    Value.Obj(obj)
-}
-
-// Wraps a success message: {"message": "..."}
-public func messageJson(message: String) -> Value {
-    var obj = Dictionary[String, Value]();
-    obj.insert("message", Value.Str(message));
     Value.Obj(obj)
 }
 
@@ -34,25 +34,15 @@ public func parseBody[T](body: String) -> Result[T, Response] where T: Deseriali
 }
 
 // Extracts the authenticated userId from the request store.
-public func requireUserId(store: Dictionary[String, String]) -> Result[Int64, Response] {
-    match store("userId") {
-        .Some(id) => match Int64(parsing: id) {
-            .Some(n) => .Ok(n),
-            .None => .Err(Response.internalServerError())
-        },
-        .None => .Err(Response.unauthorized())
-    }
+public func requireUserId(store: Dictionary[String, String]) -> Int64? {
+    guard let .Some(id) = store("userId") else { return .None }
+    Int64(parsing: id)
 }
 
-// Parses a path parameter as Int64 or returns a 400.
-public func requireIdParam(value: String?, name: String) -> Result[Int64, Response] {
-    match value {
-        .Some(id) => match Int64(parsing: id) {
-            .Some(n) => .Ok(n),
-            .None => .Err(Response.badRequest(JsonBody(fromRaw: errorJson("Invalid " + name))))
-        },
-        .None => .Err(Response.badRequest(JsonBody(fromRaw: errorJson("Missing " + name))))
-    }
+// Parses a path parameter as Int64.
+public func requireIdParam(value: String?) -> Int64? {
+    guard let .Some(id) = value else { return .None }
+    Int64(parsing: id)
 }
 
 // Builds a paginated JSON response envelope.
@@ -83,3 +73,4 @@ public func parsePagination(pageParam: String?, perPageParam: String?) -> (Int64
     };
     (page, perPage)
 }
+
