@@ -46,11 +46,11 @@ struct BracketString: ExpressibleByStringInterpolation, Cloneable {
         self.inner = inner;
     }
 
-    init(stringLiteral value: lang.str) {
-        self.inner = "";
+    init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
+        self.inner = String(stringLiteral: ptr, length);
     }
 
-    init(interpolation interpolation: BracketAccumulator) {
+    init(interpolation: BracketAccumulator) {
         var acc = interpolation;
         self.inner = acc.build().inner;
     }

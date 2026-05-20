@@ -50,11 +50,11 @@ struct SqlQuery: ExpressibleByStringInterpolation, Cloneable {
         self.template = template;
     }
 
-    init(stringLiteral value: lang.str) {
-        self.template = "";
+    init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
+        self.template = String(stringLiteral: ptr, length);
     }
 
-    init(interpolation interpolation: SqlAccumulator) {
+    init(interpolation: SqlAccumulator) {
         var acc = interpolation;
         self.template = acc.build().template;
     }
