@@ -10,6 +10,8 @@ use kestrel_hir::body::HirExprId;
 use kestrel_hir::res::LocalId;
 use kestrel_span::Span;
 
+use kestrel_hir::ty::HirTy;
+
 use crate::constraint::{CallArg, Constraint};
 use crate::error::InferError;
 use crate::resolve::TypeResolver;
@@ -162,6 +164,11 @@ pub struct InferCtx<'a> {
     /// Set in `create_return_type` when the return annotation is `HirTy::Opaque`.
     /// Used by `build_result` to extract the concrete type for `TypedBody`.
     pub(crate) opaque_return: Option<OpaqueReturnInfo>,
+
+    /// Deferred type-parameter defaults (e.g. `H = DefaultHasher`).
+    /// Applied after constraint solving: only type vars still unconstrained
+    /// get their default, so generic bodies like `Set.init()` keep `H` free.
+    pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -227,6 +234,7 @@ impl<'a> InferCtx<'a> {
             witness_protocol_args: HashMap::new(),
             loop_break_tys: Vec::new(),
             opaque_return: None,
+            type_param_defaults: Vec::new(),
         }
     }
 

@@ -51,6 +51,14 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Phase 3: solve again with defaults
     fixpoint(ctx);
 
+    // Phase 3.5: apply deferred type-parameter defaults (e.g. H = DefaultHasher).
+    // Only unconstrained TyVars get their default — inside a generic body
+    // like Set.init(), the TyVar for H is already constrained by `self.dict`'s
+    // field type and stays untouched.
+    if apply_type_param_defaults(ctx) {
+        fixpoint(ctx);
+    }
+
     // Phase 4: report unresolved type parameters at generic call sites.
     // Runs before `report_unsolved` so unresolved TyVars are poisoned
     // and downstream cascade constraints get suppressed silently.
@@ -1976,7 +1984,14 @@ fn emit_resolved_call(
             .unwrap_or_default();
         for &tp in &parent_tps {
             if !subs.iter().any(|(e, _)| *e == tp) {
-                subs.push((tp, ctx.fresh()));
+                let tv = ctx.fresh();
+                // Defer default: apply only if unconstrained after solving
+                if let Some(default_ty) =
+                    qctx.query(LowerTypeAnnotation { entity: tp, root })
+                {
+                    ctx.type_param_defaults.push((tv, default_ty));
+                }
+                subs.push((tp, tv));
             }
         }
     }
@@ -3218,6 +3233,22 @@ fn extension_where_clauses_satisfied(
 }
 
 // ===== Literal defaults =====
+
+/// Apply deferred type-parameter defaults for TyVars that are still
+/// unconstrained. Returns true if any default was applied.
+fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
+    let mut progress = false;
+    let defaults = std::mem::take(&mut ctx.type_param_defaults);
+    for (tv, hir_ty) in &defaults {
+        let resolved = ctx.resolve(*tv);
+        if matches!(ctx.types[resolved.0 as usize], TySlot::Unresolved { literal: None }) {
+            let default_tv = crate::generate::lower_hir_ty(ctx, hir_ty);
+            ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
+            progress = true;
+        }
+    }
+    progress
+}
 
 /// Apply default types for unconstrained literal TyVars.
 ///

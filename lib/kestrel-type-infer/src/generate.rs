@@ -980,21 +980,18 @@ fn gen_struct_init(
         .unwrap_or_default();
     let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
 
-    // Constrain fresh type args with explicit type args (e.g., Array[Int64]())
-    if !explicit_type_args.is_empty() {
-        for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate()
-        {
-            if let Some(hir_ty) = explicit_type_args.get(i) {
-                let explicit_tv = lower_hir_ty(ctx, hir_ty);
-                ctx.equal(fresh_tv, explicit_tv, span.clone());
-            } else if let Some(default_ty) = qctx.query(LowerTypeAnnotation {
-                entity: param_entity,
-                root,
-            }) {
-                // Apply default type param (e.g., Set[Int64]() → H defaults to DefaultHasher)
-                let default_tv = lower_hir_ty(ctx, &default_ty);
-                ctx.equal(fresh_tv, default_tv, span.clone());
-            }
+    // Constrain fresh type args with explicit type args or deferred defaults
+    for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate()
+    {
+        if let Some(hir_ty) = explicit_type_args.get(i) {
+            let explicit_tv = lower_hir_ty(ctx, hir_ty);
+            ctx.equal(fresh_tv, explicit_tv, span.clone());
+        } else if let Some(default_ty) = qctx.query(LowerTypeAnnotation {
+            entity: param_entity,
+            root,
+        }) {
+            // Defer: apply only if this TyVar is still unconstrained after solving
+            ctx.type_param_defaults.push((fresh_tv, default_ty));
         }
     }
 

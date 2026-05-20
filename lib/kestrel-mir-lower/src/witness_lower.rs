@@ -266,8 +266,13 @@ fn lower_witnesses_for_type(ctx: &mut LowerCtx, type_entity: Entity, impl_ty: Mi
             }
         }
 
-        // Bind associated types
-        bind_associated_types(ctx, &mut witness, type_entity, &extensions, *protocol);
+        // Bind associated types — pass `source` and `impl_ty` so blanket-
+        // conformance extensions (e.g. `extend Iterator: Iterable`) are also
+        // searched for bindings like `type TargetIterator = Self`.
+        bind_associated_types(
+            ctx, &mut witness, type_entity, &extensions, *protocol,
+            *source, &impl_ty,
+        );
 
         ctx.module.add_witness(witness);
     }
@@ -520,13 +525,16 @@ fn get_param_labels(ctx: &LowerCtx, method_entity: Entity) -> Option<Vec<Option<
     Some(callable.params.iter().map(|p| p.label.clone()).collect())
 }
 
-/// Bind associated types from the implementing type or its extensions.
+/// Bind associated types from the implementing type, its extensions,
+/// or the conformance source (for blanket conformances).
 fn bind_associated_types(
     ctx: &mut LowerCtx,
     witness: &mut WitnessDef,
     type_entity: Entity,
     extensions: &[Entity],
     protocol: Entity,
+    source: Entity,
+    impl_ty: &MirTy,
 ) {
     // Associated types the protocol (and its parents/extensions) declares.
     let assoc_members = ctx.query.query(ProtocolAssociatedTypes {
@@ -546,12 +554,54 @@ fn bind_associated_types(
             witness.bind_type(&name, ty);
             continue;
         }
+        let mut found = false;
         for &ext in extensions {
             if let Some(ty) = find_associated_type(ctx, ext, &name) {
                 witness.bind_type(&name, ty);
+                found = true;
                 break;
             }
         }
+        if found {
+            continue;
+        }
+        // For blanket conformances (e.g. `extend Iterator: Iterable`),
+        // the associated type binding lives on the source extension, not
+        // on the conforming type or its own extensions. Replace SelfType
+        // with the implementing type so the witness stores a concrete
+        // pattern (e.g. `TargetIterator = SetIterator[T, H]`), not a
+        // bare `Self` that would resolve to the wrong enclosing type
+        // during monomorphization.
+        if source != type_entity {
+            if let Some(ty) = find_associated_type(ctx, source, &name) {
+                let ty = replace_self_type(&ty, impl_ty);
+                witness.bind_type(&name, ty);
+            }
+        }
+    }
+}
+
+/// Replace `MirTy::SelfType` with the implementing type in a witness binding.
+fn replace_self_type(ty: &MirTy, impl_ty: &MirTy) -> MirTy {
+    match ty {
+        MirTy::SelfType => impl_ty.clone(),
+        MirTy::Named { entity, type_args } => MirTy::Named {
+            entity: *entity,
+            type_args: type_args.iter().map(|t| replace_self_type(t, impl_ty)).collect(),
+        },
+        MirTy::Pointer(inner) => MirTy::Pointer(Box::new(replace_self_type(inner, impl_ty))),
+        MirTy::Ref(inner) => MirTy::Ref(Box::new(replace_self_type(inner, impl_ty))),
+        MirTy::RefMut(inner) => MirTy::RefMut(Box::new(replace_self_type(inner, impl_ty))),
+        MirTy::Tuple(elems) => MirTy::Tuple(elems.iter().map(|t| replace_self_type(t, impl_ty)).collect()),
+        MirTy::FuncThin { params, ret } => MirTy::FuncThin {
+            params: params.iter().map(|t| replace_self_type(t, impl_ty)).collect(),
+            ret: Box::new(replace_self_type(ret, impl_ty)),
+        },
+        MirTy::FuncThick { params, ret } => MirTy::FuncThick {
+            params: params.iter().map(|t| replace_self_type(t, impl_ty)).collect(),
+            ret: Box::new(replace_self_type(ret, impl_ty)),
+        },
+        _ => ty.clone(),
     }
 }
 
