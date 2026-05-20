@@ -2625,41 +2625,33 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
         }
     }
 
-    /// Find the abstract method entity on a protocol, matching by name and
-    /// param labels. Used to read param conventions (borrowing/consuming/mutating)
-    /// for witness calls where the concrete implementation isn't known yet.
+    /// Find a protocol method entity matching the witness method key.
+    /// Searches both abstract declarations and extension default impls
+    /// via the `ProtocolMembersByName` query, then disambiguates by
+    /// param labels.
     fn find_protocol_method_entity(
         &self,
         protocol: Entity,
         method: &WitnessMethodKey,
     ) -> Option<Entity> {
-        use kestrel_ast_builder::{Callable, Name, NodeKind};
-        for &child in self.ctx.world.children_of(protocol) {
-            let Some(kind) = self.ctx.world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if !matches!(
-                kind,
-                NodeKind::Function | NodeKind::Subscript | NodeKind::Initializer
-            ) {
-                continue;
-            }
-            let Some(name) = self.ctx.world.get::<Name>(child) else {
-                continue;
-            };
-            if name.0 != method.name {
-                continue;
-            }
-            if let Some(callable) = self.ctx.world.get::<Callable>(child) {
-                let child_labels: Vec<Option<&str>> =
+        use kestrel_ast_builder::Callable;
+        let members = self.ctx.query.query(kestrel_name_res::ProtocolMembersByName {
+            protocol,
+            name: method.name.clone(),
+            context: self.ctx.root,
+            root: self.ctx.root,
+        });
+        for member in &members {
+            if let Some(callable) = self.ctx.world.get::<Callable>(member.entity) {
+                let member_labels: Vec<Option<&str>> =
                     callable.params.iter().map(|p| p.label.as_deref()).collect();
                 let key_labels: Vec<Option<&str>> =
                     method.labels.iter().map(|l| l.as_deref()).collect();
-                if child_labels == key_labels {
-                    return Some(child);
+                if member_labels == key_labels {
+                    return Some(member.entity);
                 }
             } else if method.labels.is_empty() {
-                return Some(child);
+                return Some(member.entity);
             }
         }
         None
@@ -3441,7 +3433,17 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
                 other => other,
             };
 
-            // Init returns Unit — no dest needed
+            // Apply param mode overrides (self at [0] stays RefMut — init
+            // receiver is Mutating; explicit args get correct modes).
+            match &callee {
+                Callee::Direct { func, .. } => {
+                    self.apply_callee_param_modes(&mut call_args, *func);
+                }
+                Callee::Witness { protocol, method, .. } => {
+                    self.apply_witness_param_modes(&mut call_args, *protocol, method);
+                }
+                _ => {}
+            }
             self.emit_stmt(Statement::new(StatementKind::Call {
                 dest: None,
                 callee,
@@ -3600,6 +3602,15 @@ impl<'a, 'b> BodyLowerCtx<'a, 'b> {
             },
         };
 
+        match &callee {
+            Callee::Direct { func, .. } => {
+                self.apply_callee_param_modes(&mut call_args, *func);
+            }
+            Callee::Witness { protocol, method, .. } => {
+                self.apply_witness_param_modes(&mut call_args, *protocol, method);
+            }
+            _ => {}
+        }
         let init_ret_local = self.fresh_temp(init_ret_ty.clone());
         self.emit_stmt(Statement::new(StatementKind::Call {
             dest: Some(Place::local(init_ret_local)),
