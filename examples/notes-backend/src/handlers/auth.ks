@@ -4,7 +4,6 @@ import perch.request.(Request)
 import perch.response.(Response)
 import perch.json_body.(JsonBody)
 import quill.value.(Value)
-import talon.sqlite.database.(Database)
 import notes.context.(AppCtx)
 import notes.helpers.(errorJson, parseBody, currentTimestamp)
 import notes.requests.(CreateUserRequest, LoginRequest)
@@ -16,7 +15,7 @@ public func handleRegister(req: Request, ctx: AppCtx) -> Response {
         .Ok(b) => b,
         .Err(resp) => return resp
     };
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     guard let .Ok(existingUser) = findUserByEmail(db, body.email) else {
         return Response.internalServerError()
@@ -41,7 +40,7 @@ public func handleLogin(req: Request, ctx: AppCtx) -> Response {
         .Ok(b) => b,
         .Err(resp) => return resp
     };
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     guard let .Ok(some passwordRow) = findPasswordByEmail(db, body.email) else {
         return Response.unauthorized()

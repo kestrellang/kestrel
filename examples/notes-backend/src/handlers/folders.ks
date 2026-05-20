@@ -3,7 +3,6 @@ module notes.handlers
 import perch.request.(Request)
 import perch.response.(Response)
 import perch.json_body.(JsonBody)
-import talon.sqlite.database.(Database)
 import notes.context.(AppCtx)
 import notes.helpers.(errorJson, parseBody, requireUserId, requireIdParam, paginatedJson, parsePagination, currentTimestamp)
 import notes.requests.(CreateFolderRequest, UpdateFolderRequest)
@@ -12,7 +11,7 @@ import notes.db.(listFolders, countFolders, findFolderById, createFolder, update
 
 public func handleListFolders(req: Request, ctx: AppCtx) -> Response {
     guard let .Some(userId) = requireUserId(req.store) else { return Response.unauthorized() }
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     let (page, perPage) = parsePagination(req.query("page"), req.query("per_page"));
     let offset = (page - 1) * perPage;
@@ -29,7 +28,7 @@ public func handleCreateFolder(req: Request, ctx: AppCtx) -> Response {
         .Ok(b) => b,
         .Err(resp) => return resp
     };
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     let now = currentTimestamp();
     guard let .Ok(folder) = createFolder(db, body.name, userId, now) else {
@@ -44,7 +43,7 @@ public func handleGetFolder(req: Request, ctx: AppCtx) -> Response {
     guard let .Some(folderId) = requireIdParam(req.param("id")) else {
         return Response.badRequest(JsonBody(fromRaw: errorJson("Invalid folder id")))
     }
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     guard let .Ok(maybeFolder) = findFolderById(db, id: folderId, userId: userId) else {
         return Response.internalServerError()
@@ -63,7 +62,7 @@ public func handleUpdateFolder(req: Request, ctx: AppCtx) -> Response {
         .Ok(b) => b,
         .Err(resp) => return resp
     };
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     let now = currentTimestamp();
     guard let .Ok(maybeFolder) = updateFolder(db, id: folderId, body.name, userId, now) else {
@@ -79,7 +78,7 @@ public func handleDeleteFolder(req: Request, ctx: AppCtx) -> Response {
     guard let .Some(folderId) = requireIdParam(req.param("id")) else {
         return Response.badRequest(JsonBody(fromRaw: errorJson("Invalid folder id")))
     }
-    guard let .Ok(db) = Database(ctx.dbPath) else { return Response.internalServerError() }
+    let db = ctx.db;
 
     guard let .Ok(_) = deleteFolder(db, id: folderId, userId: userId) else {
         return Response.internalServerError()

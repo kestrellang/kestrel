@@ -3,7 +3,6 @@ module notes.middleware
 import perch.request.(Request)
 import perch.response.(Response)
 import perch.context.(MiddlewareResult, Middleware)
-import talon.sqlite.database.(Database)
 import notes.context.(AppCtx)
 import notes.db.(lookupToken)
 
@@ -18,9 +17,7 @@ public struct AuthMiddleware: Middleware[AppCtx], Cloneable {
 
         let token = authHeader.asSlice().subslice(from: 7, to: authHeader.byteCount).toOwned();
 
-        guard let .Ok(db) = Database(ctx.dbPath) else {
-            return .Respond(Response.internalServerError())
-        }
+        let db = ctx.db;
         guard let .Ok(some userId) = lookupToken(db, token) else {
             return .Respond(Response.unauthorized())
         }

@@ -5,6 +5,7 @@ import perch.request.(Request)
 import perch.response.(Response)
 import perch.middleware.(Logger)
 import perch.router.(GroupBuilder)
+import talon.sqlite.shared_database.(SharedDatabase)
 import notes.context.(AppCtx)
 import notes.db.(initSchema)
 import notes.middleware.(AuthMiddleware)
@@ -15,15 +16,22 @@ import notes.handlers.(
 )
 
 func main() {
-    let ctx = AppCtx(dbPath: "notes.db");
-
-    match initSchema(ctx.dbPath) {
+    match initSchema("notes.db") {
         .Ok(_) => {},
         .Err(e) => {
             println("Failed to initialize database: " + e.description());
             return
         }
     };
+
+    let db = match SharedDatabase("notes.db") {
+        .Ok(d) => d,
+        .Err(e) => {
+            println("Failed to open database: " + e.description());
+            return
+        }
+    };
+    let ctx = AppCtx(db: db);
 
     var app = App[AppCtx](ctx);
     app.use(Logger[AppCtx]());

@@ -1,6 +1,6 @@
 module notes.db
 
-import talon.sqlite.database.(Database)
+import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(Row, FromRow)
 import talon.sqlite.error.(SqliteError)
@@ -28,7 +28,7 @@ public struct PasswordRow: FromRow, Cloneable {
     }
 }
 
-public func findUserByEmail(db: Database, email: String) -> User? throws SqliteError {
+public func findUserByEmail(db: some SqliteExecutor, email: String) -> User? throws SqliteError {
     let rows = try db.query[User]("""
         SELECT id, first_name, last_name, email, created_at
         FROM users
@@ -37,7 +37,7 @@ public func findUserByEmail(db: Database, email: String) -> User? throws SqliteE
     if rows.count > 0 { .Ok(.Some(rows(0))) } else { .Ok(.None) }
 }
 
-public func findPasswordByEmail(db: Database, email: String) -> PasswordRow? throws SqliteError {
+public func findPasswordByEmail(db: some SqliteExecutor, email: String) -> PasswordRow? throws SqliteError {
     let rows = try db.query[PasswordRow]("""
         SELECT id, salt, password_hash
         FROM users
@@ -46,7 +46,7 @@ public func findPasswordByEmail(db: Database, email: String) -> PasswordRow? thr
     if rows.count > 0 { .Ok(.Some(rows(0))) } else { .Ok(.None) }
 }
 
-public func createUser(db: Database, firstName: String, lastName: String, email: String, salt: String, passwordHash: String, now: String) -> User throws SqliteError {
+public func createUser(db: some SqliteExecutor, firstName: String, lastName: String, email: String, salt: String, passwordHash: String, now: String) -> User throws SqliteError {
     try db.execute("""
         INSERT INTO users (first_name, last_name, email, salt, password_hash, created_at)
         VALUES (\(firstName), \(lastName), \(email), \(salt), \(passwordHash), \(now))

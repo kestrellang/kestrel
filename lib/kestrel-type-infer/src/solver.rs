@@ -25,22 +25,28 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Phase 1: main solving
     fixpoint(ctx);
 
-    // Phase 2: apply literal defaults — iteratively, so that defaulting a
-    // literal that *unblocks* a deferred dispatch (e.g. an array subscript's
-    // index) lets that dispatch run and bind any *other* literal args of
-    // downstream constraints (like the RHS of `byte == 35`) before they get
-    // a fallback default of `Int64`. See `apply_literal_defaults` for the
-    // blocking-vs-leaf distinction.
+    // Phase 2: literal defaults with graduated blocking relaxation.
+    //
+    // Level 0 (strict): InterpolationLink accumulators and arg-position
+    //   literals in deferred Member/Call constraints are both blocked.
+    // Level 1 (relaxed): InterpolationLink blocking lifted — string
+    //   interpolation literals default to their type, unblocking
+    //   downstream chains (bytes subscript → UInt8 → == context).
+    // Level 2 (force): all blocking removed — genuinely unconstrained
+    //   literals get their fallback default.
+    let mut relax_level = 0u8;
     loop {
-        let progress = apply_literal_defaults(ctx, false);
-        if !progress {
+        let progress = apply_literal_defaults(ctx, relax_level);
+        if progress {
+            fixpoint(ctx);
+            relax_level = 0;
+            continue;
+        }
+        relax_level += 1;
+        if relax_level > 2 {
             break;
         }
-        fixpoint(ctx);
     }
-    // Final pass: default any literals still unconstrained, including ones
-    // that were previously deferred because their dispatch never completed.
-    apply_literal_defaults(ctx, true);
 
     // Phase 3: solve again with defaults
     fixpoint(ctx);
@@ -3220,15 +3226,15 @@ fn extension_where_clauses_satisfied(
 /// to an Int32 field: the negate result is already Int32, so the literal should
 /// adopt Int32 instead of defaulting to Int64.
 ///
-/// When `force_all` is false, literals that sit in the *args* of a deferred
-/// `Member`/`Call` whose receiver/callee is itself unresolved are left alone
-/// — the dispatch may yet bind them to a concrete parameter type once the
-/// receiver resolves. The solver loops `fixpoint` + `apply_literal_defaults`
-/// until no progress, then makes one final call with `force_all = true` to
-/// default any stragglers.
+/// Blocking is controlled by `relax_level`:
+///   0 — strict: InterpolationLink accumulators and arg-position literals
+///       in deferred Member/Call with unresolved receivers are both blocked.
+///   1 — relaxed: InterpolationLink blocking lifted (string interpolation
+///       literals default normally, unblocking downstream chains).
+///   2 — force: all blocking removed.
 ///
 /// Returns `true` when this call made any change.
-fn apply_literal_defaults(ctx: &mut InferCtx<'_>, force_all: bool) -> bool {
+fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
     let mut progress = false;
 
     // First pass: collect context-driven types for literals that have deferred
@@ -3271,32 +3277,31 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, force_all: bool) -> bool {
         }
     }
 
-    // Compute the set of literal TyVars that are "blocked": they sit in the
-    // args of a deferred `Member` / `Call` whose receiver/callee is still
-    // unresolved. Defaulting these now would lock in `Int64` / etc. before
-    // the dispatch (e.g. `Self.equals(self, other: Self)`) ever gets a chance
-    // to bind the arg's type from the method signature. Only meaningful when
-    // `force_all` is false; the final pass overrides this and defaults
-    // everything left.
-    let blocked: std::collections::HashSet<TyVar> = if force_all {
+    // Compute the set of literal TyVars that are "blocked" at this relax
+    // level. Level 2 removes all blocking; levels 0–1 block arg-position
+    // literals whose receiver is still unresolved; level 0 additionally
+    // blocks InterpolationLink accumulators.
+    let blocked: std::collections::HashSet<TyVar> = if relax_level >= 2 {
         std::collections::HashSet::new()
     } else {
         let mut set = std::collections::HashSet::new();
 
-        // Block StringInterpolation accumulators that have a pending
-        // InterpolationLink — the calling context (e.g. a function parameter
-        // typed as SQL) may still drive the result type and resolve the
-        // accumulator via associated-type lookup, so don't default yet.
-        for constraint in &ctx.constraints {
-            if let Constraint::InterpolationLink { acc_tv, .. } = constraint {
-                let acc_resolved = ctx.resolve(*acc_tv);
-                if matches!(
-                    &ctx.types[acc_resolved.0 as usize],
-                    TySlot::Unresolved {
-                        literal: Some(LiteralKind::StringInterpolation)
+        // InterpolationLink blocking — only at level 0. At level 1+,
+        // string interpolation accumulators default normally, unblocking
+        // downstream Member/Call chains that depend on the string type
+        // (e.g. interpolation → bytes subscript → UInt8 → == context).
+        if relax_level == 0 {
+            for constraint in &ctx.constraints {
+                if let Constraint::InterpolationLink { acc_tv, .. } = constraint {
+                    let acc_resolved = ctx.resolve(*acc_tv);
+                    if matches!(
+                        &ctx.types[acc_resolved.0 as usize],
+                        TySlot::Unresolved {
+                            literal: Some(LiteralKind::StringInterpolation)
+                        }
+                    ) {
+                        set.insert(acc_resolved);
                     }
-                ) {
-                    set.insert(acc_resolved);
                 }
             }
         }
