@@ -34,7 +34,10 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift::CodegenOptions::default();
+    let options = kestrel_codegen_cranelift::CodegenOptions {
+        c_sources: stdlib_c_sources(),
+        ..Default::default()
+    };
     compiler
         .compile_and_link(&exe_path, &options)
         .map_err(|e| format!("codegen/link failed: {e}"))?;
@@ -61,4 +64,21 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 fn temp_dir() -> PathBuf {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("kestrel2_test_{}_{}", std::process::id(), id))
+}
+
+/// Collect C shim sources from the stdlib directory.
+fn stdlib_c_sources() -> Vec<PathBuf> {
+    let std_dir = if let Ok(path) = std::env::var("KESTREL_STD") {
+        PathBuf::from(path)
+    } else {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        std::path::Path::new(manifest)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("lang/std")
+    };
+    let shim = std_dir.join("io/libc_shims.c");
+    if shim.exists() { vec![shim] } else { vec![] }
 }

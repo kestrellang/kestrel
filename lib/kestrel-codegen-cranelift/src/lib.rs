@@ -42,6 +42,8 @@ pub struct CodegenOptions {
     pub library_paths: Vec<String>,
     /// macOS frameworks to link against.
     pub frameworks: Vec<String>,
+    /// C source files to compile and link (e.g., shims for variadic libc functions).
+    pub c_sources: Vec<PathBuf>,
     /// Capture per-function CLIF text before Cranelift compiles it.
     /// When true, `CompilationResult::clif_text` is populated.
     pub emit_clif: bool,
@@ -189,15 +191,61 @@ pub fn compile_and_link(
     let output_path = output_path.as_ref();
     let temp_object = TempObjectFile::create_near_output(output_path, &result.object_bytes)?;
 
+    // Compile C shim sources into temporary object files
+    let c_objects: Vec<PathBuf> = options
+        .c_sources
+        .iter()
+        .map(|src| compile_c_source(src))
+        .collect::<Result<_, _>>()?;
+
+    let mut libraries = options.libraries.clone();
+    for obj in &c_objects {
+        libraries.push(format!(":{}", obj.display()));
+    }
+
     // Link
-    link::link_executable(
+    let result = link::link_executable(
         &temp_object.path,
         output_path,
         target,
-        &options.libraries,
+        &libraries,
         &options.library_paths,
         &options.frameworks,
-    )
+    );
+
+    // Clean up C object files
+    for obj in &c_objects {
+        let _ = std::fs::remove_file(obj);
+    }
+
+    result
+}
+
+/// Compile a single C source file to a unique temporary .o file.
+fn compile_c_source(source: &Path) -> Result<PathBuf, CodegenError> {
+    let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+    let pid = std::process::id();
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let thread_id = sanitize_temp_component(&format!("{:?}", std::thread::current().id()));
+    let obj_path = std::env::temp_dir().join(format!(
+        ".{stem}.kestrel-shim-{pid}-{counter}-{thread_id}.o"
+    ));
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".to_string());
+    let output = std::process::Command::new(&cc)
+        .arg("-c")
+        .arg(source)
+        .arg("-o")
+        .arg(&obj_path)
+        .output()
+        .map_err(|e| CodegenError::LinkerError(format!("failed to compile {}: {e}", source.display())))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CodegenError::LinkerError(format!(
+            "C compilation of {} failed:\n{stderr}",
+            source.display()
+        )));
+    }
+    Ok(obj_path)
 }
 
 #[cfg(test)]

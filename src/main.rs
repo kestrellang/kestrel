@@ -155,7 +155,7 @@ fn lower_with_ownership(
 // ============================================================================
 
 fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
-    let compiler = globals.load_compiler(&args.files)?;
+    let (compiler, std_dir) = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
     let analyze_summary = driver.analyze_all();
@@ -179,11 +179,15 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let mir = lower_with_ownership(compiler.world(), compiler.root());
     let target = globals.codegen_target()?;
+
+    let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
+
     let options = CodegenOptions {
         opt_level: args.opt_level,
         libraries: args.libraries,
         library_paths: args.library_paths,
         frameworks: args.frameworks,
+        c_sources,
         ..Default::default()
     };
 
@@ -216,7 +220,7 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
         return dump_syntax(args.kind, &args.files, globals.verbose);
     }
 
-    let compiler = globals.load_compiler(&args.files)?;
+    let (compiler, _std_dir) = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
     driver.analyze_all();
@@ -305,8 +309,10 @@ fn dump_syntax(kind: DumpKind, files: &[String], verbose: bool) -> Result<(), Ex
 
 impl Globals {
     /// Build a Compiler, loading stdlib (unless `--no-std`) and every input file.
-    fn load_compiler(&self, files: &[String]) -> Result<Compiler, ExitCode> {
+    /// Returns the compiler and the stdlib directory (if loaded).
+    fn load_compiler(&self, files: &[String]) -> Result<(Compiler, Option<PathBuf>), ExitCode> {
         let mut compiler = Compiler::new().with_target(self.ast_target());
+        let mut std_dir_out = None;
 
         if !self.no_std {
             let std_dir = match self.std_path.as_deref() {
@@ -324,6 +330,7 @@ impl Globals {
                 eprintln!("  Loading stdlib from {}", std_dir.display());
             }
             compiler.load_dir(&std_dir);
+            std_dir_out = Some(std_dir);
         }
 
         for file in files {
@@ -337,7 +344,7 @@ impl Globals {
             let entity = compiler.set_source(file, source);
             compiler.build(entity);
         }
-        Ok(compiler)
+        Ok((compiler, std_dir_out))
     }
 
     fn codegen_target(&self) -> Result<CodegenTargetConfig, ExitCode> {
@@ -414,6 +421,13 @@ fn default_std_path() -> Result<PathBuf, StdLookupError> {
     tried.push(("CARGO_MANIFEST_DIR", baked));
 
     Err(StdLookupError { tried })
+}
+
+/// Collect .c files from the stdlib directory that need to be compiled and linked.
+fn collect_stdlib_c_sources(std_dir: Option<&Path>) -> Vec<PathBuf> {
+    let Some(std_dir) = std_dir else { return vec![] };
+    let shim = std_dir.join("io/libc_shims.c");
+    if shim.exists() { vec![shim] } else { vec![] }
 }
 
 fn default_output_path(files: &[String]) -> PathBuf {
