@@ -86,6 +86,13 @@ impl TyArena {
         &self.types[id.index()]
     }
 
+    pub fn find(&self, predicate: impl Fn(&MirTy) -> bool) -> Option<TyId> {
+        self.types
+            .iter()
+            .position(predicate)
+            .map(TyId::new)
+    }
+
     pub fn len(&self) -> usize {
         self.types.len()
     }
