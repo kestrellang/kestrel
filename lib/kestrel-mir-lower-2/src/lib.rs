@@ -109,12 +109,10 @@ mod tests {
             with_bodies > 100,
             "expected many functions with bodies, got {with_bodies}"
         );
-        // Each body has at least one block (entry). With stub expression lowering,
-        // total_blocks == with_bodies. Once control flow lowering is implemented
-        // (Phase 5), this will grow.
+        // Control flow (if/else, loops) produces multiple blocks per body
         assert!(
-            total_blocks >= with_bodies,
-            "each body should have at least one block"
+            total_blocks > with_bodies,
+            "expected more blocks than functions (if/else/loop), got {total_blocks} blocks for {with_bodies} bodies"
         );
     }
 }
