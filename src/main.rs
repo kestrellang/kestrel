@@ -125,6 +125,8 @@ enum DumpKind {
     Cst,
     /// MIR module after HIR lowering + all passes.
     Mir,
+    /// MIR-2 module (new representation, pre-switchover).
+    Mir2,
     /// Cranelift IR (CLIF) per function, pre-optimization.
     Cranelift,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
@@ -229,6 +231,10 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
         DumpKind::Mir => {
             let mir = lower_with_ownership(compiler.world(), compiler.root());
             print!("{}", mir.display());
+        },
+        DumpKind::Mir2 => {
+            let mir2 = compiler.lower_to_mir2();
+            print!("{}", mir2.display());
         },
         DumpKind::Cranelift => {
             let mir = lower_with_ownership(compiler.world(), compiler.root());

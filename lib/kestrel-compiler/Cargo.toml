@@ -21,7 +21,9 @@ kestrel-analyze = { path = "../kestrel-analyze" }
 kestrel-debug = { path = "../kestrel-debug" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-mir = { path = "../kestrel-mir" }
+kestrel-mir-2 = { path = "../kestrel-mir-2" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
+kestrel-mir-lower-2 = { path = "../kestrel-mir-lower-2" }
 kestrel-ownership = { path = "../kestrel-ownership" }
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }

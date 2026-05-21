@@ -225,6 +225,16 @@ impl Compiler {
         self.lower_to_mir_with_diagnostics().0
     }
 
+    /// Lower to MIR using the new kestrel-mir-2 representation.
+    ///
+    /// Pass pipeline (clone elab, drop elab, layout) is not yet wired —
+    /// the liveness pass panics on real lowered output (functions without
+    /// bodies, edge cases in block structure). That's a pass bug to fix
+    /// separately.
+    pub fn lower_to_mir2(&self) -> kestrel_mir_2::MirModule {
+        kestrel_mir_lower_2::lower_module(self.world(), self.root())
+    }
+
     /// Same as [`Self::lower_to_mir`] but also returns the
     /// [`kestrel_ownership::Diagnostics`] (E500/E501) accumulated by the
     /// move-check pass. Callers that surface user diagnostics (the CLI,
