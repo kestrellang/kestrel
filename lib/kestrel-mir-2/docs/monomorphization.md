@@ -253,7 +253,7 @@ Phase 3 assigns IDs and rewrites in a single pass.
    concrete field types and TypeInfo
 3. Compute layouts using the shared `StructLayout` arithmetic helpers
    (same code used by the non-generic layout pass — see types.md).
-   Requires `TargetConfig` for pointer width. All types are concrete,
+   Takes `&TargetConfig` as a parameter for pointer width. All types are concrete,
    so layout computation always succeeds — no `layout: None`.
 4. Build MonoStruct/MonoEnum with the computed layouts and TypeInfo
 5. All MirTy::AssociatedProjection were already resolved during Phase 2

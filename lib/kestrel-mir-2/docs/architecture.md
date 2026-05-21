@@ -30,6 +30,9 @@ MonoModule (concrete, monomorphized)
 └── No protocols, witnesses, or type params — resolved away
 ```
 
+See `items.md` for the full definition of each item type (FunctionDef,
+StructDef, EnumDef, ProtocolDef, StaticDef, and their mono equivalents).
+
 ## Layer diagram
 
 ```

@@ -239,8 +239,9 @@ impl StructLayout {
 Uses `u64` (not `usize`) throughout for cross-compilation safety — the
 host and target may have different pointer widths.
 
-A `TargetConfig { pointer_width: u64 }` provides the target's pointer
-size. Both layout computation and codegen must agree on this value.
+A `TargetConfig { pointer_width: u64 }` is passed as a parameter to
+layout computation. The MIR itself is target-agnostic — TargetConfig
+is not stored on the module (see items.md).
 
 ### Copy behavior queries
 

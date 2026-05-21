@@ -230,7 +230,8 @@ at function entry. Gen sites set the flag to true. Kill sites set it to false.
 **Purpose:** Compute struct and enum sizes, offsets, and alignment for
 types with no unresolved type params.
 
-**Reads:** StructDef/EnumDef field types, TargetConfig (pointer width).
+**Reads:** StructDef/EnumDef field types. Takes `&TargetConfig` as a
+parameter (not stored on the module — MIR is target-agnostic).
 
 **Writes:** TypeInfo.layout on each non-generic StructDef/EnumDef.
 
