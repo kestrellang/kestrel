@@ -4,6 +4,7 @@
 //! `MirModule` ready for the kestrel-mir-2 pass pipeline.
 
 mod context;
+mod items;
 mod name;
 pub mod ty;
 
@@ -16,7 +17,14 @@ use kestrel_mir_2::MirModule;
 ///
 /// Takes the ECS world and root module entity. Call after type inference.
 pub fn lower_module(world: &World, root: Entity) -> MirModule {
-    let ctx = LowerCtx::new(world, root, "main");
+    let mut ctx = LowerCtx::new(world, root, "main");
+
+    // Phase 1: item declarations (structs, enums, protocols, functions, statics)
+    items::lower_items(&mut ctx);
+
+    // Phase 2: witness tables (depends on structs/enums being present)
+    items::witness_lower::lower_witnesses(&mut ctx);
+
     ctx.finish()
 }
 
@@ -33,14 +41,42 @@ mod tests {
     }
 
     #[test]
-    fn lower_module_returns_empty_for_now() {
+    fn lower_stdlib_items() {
         let mut c = Compiler::new();
         let path = stdlib_path();
         c.load_dir(&path);
 
         let mir = lower_module(c.world(), c.root());
         assert_eq!(mir.name, "main");
-        // No items lowered yet — just verifying the scaffold works
-        assert!(mir.functions.is_empty());
+        assert!(
+            !mir.structs.is_empty(),
+            "should have lowered structs"
+        );
+        assert!(
+            !mir.enums.is_empty(),
+            "should have lowered enums"
+        );
+        assert!(
+            !mir.protocols.is_empty(),
+            "should have lowered protocols"
+        );
+        assert!(
+            !mir.functions.is_empty(),
+            "should have lowered functions"
+        );
+        assert!(
+            !mir.witnesses.is_empty(),
+            "should have lowered witnesses"
+        );
+
+        eprintln!(
+            "MIR-2 lowering: {} structs, {} enums, {} protocols, {} functions, {} witnesses, {} statics",
+            mir.structs.len(),
+            mir.enums.len(),
+            mir.protocols.len(),
+            mir.functions.len(),
+            mir.witnesses.len(),
+            mir.statics.len(),
+        );
     }
 }
