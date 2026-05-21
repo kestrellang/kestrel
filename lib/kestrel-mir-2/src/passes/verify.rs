@@ -364,6 +364,7 @@ fn verify_statement_ownership(
                 }
 
                 if mode == Some(UseMode::Copy)
+                    && p.projections.is_empty()
                     && copy_behavior(&module.ty_arena, module, body.locals[local.index()].ty, where_clause) == CopyBehavior::None
                 {
                     result.errors.push(err(format!(

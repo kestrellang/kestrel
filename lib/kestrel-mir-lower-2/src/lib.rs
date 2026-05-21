@@ -228,28 +228,13 @@ mod tests {
             }
         }
 
-        // Dump a specific function for debugging
-        for func in &mir.functions {
-            if func.name == "std.iter.CycleIterator.init" || func.name == "std.collections.Array.init" {
-                eprintln!("\n--- {} ---", func.name);
-                if let Some(body) = &func.body {
-                    for (i, local) in body.locals.iter().enumerate() {
-                        let marker = if i < body.param_count { " [param]" } else { "" };
-                        eprintln!("  %{} {}: {:?}{}", i, local.name, mir.ty_arena.get(local.ty), marker);
-                    }
-                    for (bi, block) in body.blocks.iter().enumerate() {
-                        eprintln!("  bb{bi}:");
-                        for (si, stmt) in block.stmts.iter().enumerate() {
-                            eprintln!("    [{si}] {:?}", stmt.kind);
-                        }
-                        eprintln!("    term: {:?}", block.terminator.kind);
-                    }
-                }
-            }
-        }
-
         assert!(func_count > 3000, "expected 3000+ functions, got {func_count}");
         assert!(thunk_count > 100, "expected thunks, got {thunk_count}");
         assert!(shim_count > 5, "expected drop shims, got {shim_count}");
+        assert!(
+            result.errors.is_empty(),
+            "expected 0 verify errors, got {}",
+            result.errors.len()
+        );
     }
 }

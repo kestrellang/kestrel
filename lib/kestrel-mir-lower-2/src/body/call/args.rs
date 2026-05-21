@@ -76,7 +76,13 @@ impl BodyCtx<'_, '_> {
         let skip = if callable.receiver.is_some() { 1 } else { 0 };
         for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
             arg.1 = if param.is_consuming {
-                ArgMode::Move
+                // Default mode from lower_call_args_default encodes copyability:
+                // Copy → type is bitwise-copyable, keep Copy for consuming
+                if matches!(arg.1, ArgMode::Copy) {
+                    ArgMode::Copy
+                } else {
+                    ArgMode::Move
+                }
             } else if param.is_mut {
                 ArgMode::RefMut
             } else {
@@ -103,7 +109,13 @@ impl BodyCtx<'_, '_> {
                 call_args[0].1 = match receiver {
                     kestrel_ast_builder::ReceiverKind::Borrowing => ArgMode::Ref,
                     kestrel_ast_builder::ReceiverKind::Mutating => ArgMode::RefMut,
-                    kestrel_ast_builder::ReceiverKind::Consuming => ArgMode::Move,
+                    kestrel_ast_builder::ReceiverKind::Consuming => {
+                        if matches!(call_args[0].1, ArgMode::Copy) {
+                            ArgMode::Copy
+                        } else {
+                            ArgMode::Move
+                        }
+                    }
                 };
             }
             1
@@ -112,7 +124,11 @@ impl BodyCtx<'_, '_> {
         };
         for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
             arg.1 = if param.is_consuming {
-                ArgMode::Move
+                if matches!(arg.1, ArgMode::Copy) {
+                    ArgMode::Copy
+                } else {
+                    ArgMode::Move
+                }
             } else if param.is_mut {
                 ArgMode::RefMut
             } else {

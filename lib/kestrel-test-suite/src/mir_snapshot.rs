@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use kestrel_mir::MirModule;
+use kestrel_mir_2::MirModule;
 
 /// Check the MIR output against a golden snapshot file.
 ///
@@ -69,18 +69,56 @@ pub fn check_mir_snapshot(
 }
 
 /// Extract the MIR display text for a single function by name.
+///
+/// Renders the full module, then finds the `func @<name>` block and
+/// returns everything from that line through its closing `}`.
 fn extract_function_mir(mir: &MirModule, func_name: &str) -> Result<String, String> {
-    let func = mir
-        .functions
-        .iter()
-        .find(|f| f.name == func_name || f.name.ends_with(&format!(".{}", func_name)))
-        .ok_or_else(|| {
-            let available: Vec<&str> = mir.functions.iter().map(|f| f.name.as_str()).collect();
-            format!(
-                "Function '{}' not found in MIR. Available: {:?}",
-                func_name, available
-            )
-        })?;
+    let full = format!("{}", mir.display());
 
-    Ok(format!("{}", func.display(mir)))
+    // Find the function by matching `func @<name>` or `func @....<name>`
+    let mut result_lines: Vec<&str> = Vec::new();
+    let mut inside = false;
+    let mut brace_depth: i32 = 0;
+
+    for line in full.lines() {
+        if !inside {
+            let trimmed = line.trim();
+            if trimmed.starts_with("func @") {
+                // Extract the function name from `func @<name>(...`
+                let after_at = &trimmed[6..];
+                let name_end = after_at
+                    .find(|c: char| c == '(' || c == '[' || c == ' ')
+                    .unwrap_or(after_at.len());
+                let name = &after_at[..name_end];
+                if name == func_name || name.ends_with(&format!(".{}", func_name)) {
+                    inside = true;
+                    brace_depth = line.chars().filter(|&c| c == '{').count() as i32
+                        - line.chars().filter(|&c| c == '}').count() as i32;
+                    result_lines.push(line);
+                    if brace_depth == 0 {
+                        // Single-line (extern or bodyless) — done
+                        break;
+                    }
+                    continue;
+                }
+            }
+        } else {
+            brace_depth += line.chars().filter(|&c| c == '{').count() as i32;
+            brace_depth -= line.chars().filter(|&c| c == '}').count() as i32;
+            result_lines.push(line);
+            if brace_depth <= 0 {
+                break;
+            }
+        }
+    }
+
+    if result_lines.is_empty() {
+        let available: Vec<&str> = mir.functions.iter().map(|f| f.name.as_str()).collect();
+        Err(format!(
+            "Function '{}' not found in MIR. Available: {:?}",
+            func_name, available
+        ))
+    } else {
+        Ok(result_lines.join("\n"))
+    }
 }

@@ -34,12 +34,12 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift::CodegenOptions {
+    let options = kestrel_codegen_cranelift_2::CodegenOptions {
         c_sources: stdlib_c_sources(),
         ..Default::default()
     };
     compiler
-        .compile_and_link(&exe_path, &options)
+        .compile_and_link2(&exe_path, &options)
         .map_err(|e| format!("codegen/link failed: {e}"))?;
 
     let output = std::process::Command::new(&exe_path)
