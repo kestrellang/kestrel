@@ -5,6 +5,7 @@
 
 mod context;
 mod name;
+pub mod ty;
 
 pub use context::LowerCtx;
 
