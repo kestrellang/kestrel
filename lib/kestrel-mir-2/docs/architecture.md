@@ -77,6 +77,7 @@ mangled names, never computes them.
 kestrel-mir-2/src/
 ├── lib.rs              — MirModule, pub use, pipeline entry point
 ├── ty.rs               — MirTy, TyId, TyArena
+├── ty_query.rs         — copy_behavior(), needs_drop() — shared type queries
 ├── place.rs            — Place, PlaceBase, PlaceElem, FieldIdx, VariantIdx
 ├── operand.rs          — Operand, UseMode, ArgMode
 ├── statement.rs        — StatementKind, Rvalue, Callee, Statement
@@ -94,22 +95,25 @@ kestrel-mir-2/src/
 │   └── static_def.rs   — StaticDef, FileConstantData
 ├── layout.rs           — StructLayout, EnumLayout, layout arithmetic helpers
 ├── substitute.rs       — SubstMap, substitute()
+├── builder.rs          — ModuleBuilder, FunctionBuilder, BlockBuilder (pub)
+├── display.rs          — MIR pretty-printing
 ├── passes/
-│   ├── mod.rs          — with_all_passes() orchestration
-│   ├── clone_elab.rs   — clone elaboration
-│   ├── drop_elab.rs    — drop elaboration + shim synthesis
+│   ├── mod.rs          — pass orchestration
+│   ├── dataflow.rs     — CfgInfo, forward_fixpoint, backward_fixpoint
+│   ├── liveness.rs     — backward liveness (used by clone elab, verifier)
+│   ├── init_state.rs   — forward init tracking (used by drop elab, verifier)
+│   ├── clone_elab.rs   — clone elaboration (transformation)
+│   ├── drop_elab.rs    — drop insertion (transformation)
+│   ├── drop_shim.rs    — __drop$T synthesis from type graph
 │   ├── layout.rs       — non-generic layout pass
-│   ├── liveness.rs     — backward liveness (used by clone elab)
-│   ├── verify.rs       — generic MIR verification
-│   └── dataflow.rs     — CfgInfo, forward_fixpoint, backward_fixpoint
-├── mono/
-│   ├── mod.rs          — monomorphize() entry point, MonoModule
-│   ├── collect.rs      — instantiation discovery (BFS)
-│   ├── witness.rs      — witness resolution
-│   ├── mangle.rs       — name mangling (v0 scheme)
-│   ├── types.rs        — MonoFunction, MonoBody, MonoCallee, MonoRvalue, etc.
-│   └── verify.rs       — mono verification
-└── display.rs          — MIR pretty-printing
+│   └── verify.rs       — generic MIR verification
+└── mono/
+    ├── mod.rs          — monomorphize() entry point, MonoModule
+    ├── collect.rs      — instantiation discovery (BFS)
+    ├── witness.rs      — witness resolution
+    ├── mangle.rs       — name mangling (v0 scheme)
+    ├── types.rs        — MonoFunction, MonoBody, MonoCallee, MonoRvalue, etc.
+    └── verify.rs       — mono verification
 ```
 
 ### Public API

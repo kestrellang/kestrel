@@ -153,10 +153,18 @@ the shim, not iterative CFG surgery. The two-system problem disappears.
 updating all three. The verifier's version missed the `call_result_targets`
 exclusion, so it could disagree with drop elaboration.
 
-**New:** One `droppable_locals()` function called by all consumers.
+**New:** Instead of a precomputed filter, a simple type query
+`needs_drop(arena, module, ty) -> bool` determines at the point of use
+whether a local's type needs cleanup. The init-state dataflow tracks ALL
+locals (not just droppable ones), and the `needs_drop` check happens at
+the insertion/verification point.
 
-**Why:** Single source of truth. The verifier checks the same model that
-drop elaboration built.
+**Why:** The precomputed filter was a correctness surface — if it disagreed
+with reality, drops were silently missed. Moving the check to the point
+of action eliminates that surface. The dataflow tracking all locals is
+also useful for move checking (the verifier needs "is this local
+initialized?" for all locals, not just droppable ones). The cost is a
+wider bitset in the dataflow — negligible for typical function sizes.
 
 ## Partial moves deferred
 

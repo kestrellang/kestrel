@@ -131,17 +131,24 @@ becomes a separate `MonoFunction`.
 
 ## 2. Drop elaboration
 
+Three modules, each with one job:
+
+- `passes/init_state.rs` — forward init-state analysis (shared with verifier)
+- `passes/drop_elab.rs` — reads init-state, inserts Drop/DropIf/SetDropFlag
+- `passes/drop_shim.rs` — synthesizes `__drop$T` functions from type graph
+
 **Purpose:** Insert destructor calls at all exit points for owned values
 that are still live.
 
-**Reads:** MirBody CFG, TypeInfo.drop on types, local_scopes for loop
-boundaries, failure_return_blocks for effectful init cleanup.
+**Reads:** MirBody CFG, `needs_drop()` type query, init-state analysis,
+local_scopes for loop boundaries, failure_return_blocks for effectful
+init cleanup.
 
 **Writes:** Inserts Drop/DropIf/SetDropFlag statements, allocates drop
-flag locals, may insert ScopeLive markers.
+flag locals, synthesizes `__drop$T` shim functions.
 
-**Invariant produced:** Every droppable local is dead or conditionally
-dropped on every path to a Return terminator.
+**Invariant produced:** Every local whose type needs dropping is dead or
+conditionally dropped on every path to a Return terminator.
 
 ### Drop shims
 
@@ -193,49 +200,49 @@ Shim synthesis is recursive (fields may themselves need shims) and uses
 a visited set to break cycles. The fixed-point terminates when no new
 shims are needed.
 
-### Droppable local identification
+### Type query: needs_drop
 
-One canonical function replaces the three independent implementations
-in kestrel-mir-1:
+Instead of a precomputed `droppable_locals()` filter, a simple type query
+determines whether a local needs drop tracking at the point of use:
 
 ```rust
-fn droppable_locals(body: &MirBody, module: &MirModule) -> Vec<DroppableLocal>
+fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool
 ```
 
-A local is droppable if:
-- Its type has `TypeInfo.drop != DropBehavior::None` (or the type contains
-  an unresolved TypeParam, which conservatively needs tracking).
-  Borrowed closure captures have type `Pointer(T)` (Bitwise) and are
-  automatically excluded — no special flag needed.
-- It owns a value — i.e. it is assigned via Construct, EnumVariant, Call
-  result, copy-from-construct chain, or is a consuming parameter. Locals
-  that only hold moved-from temps (single-use intermediaries that are always
-  moved out before any exit) are excluded by construction: their sole use
-  is a Move, so they're always Dead at exits.
-- It's not a drop flag local (allocated by drop elaboration itself)
+Returns true if the type has `TypeInfo.drop != DropBehavior::None`, or
+contains an unresolved TypeParam (conservatively needs tracking). Pointer
+types are always false (Bitwise), so borrowed closure captures with type
+`Pointer(T)` are automatically excluded.
 
-This function is called by drop elaboration, move checking, and the verifier.
+This query lives in `ty_query.rs` alongside `copy_behavior()`. Drop
+elaboration, the verifier, and move checking all call it at the point
+where they need the answer — no separate filtering step that could diverge.
 
-### Dataflow
+The init-state dataflow tracks ALL locals, not just droppable ones. The
+`needs_drop` check happens at the insertion/verification point: "is this
+local Live at Return, and does its type need dropping?"
 
-Forward dataflow with InitState lattice: `{ Dead, Live, Maybe }`.
+### Init-state analysis (shared)
+
+Forward dataflow with InitState lattice: `{ Dead, Live, Maybe }`. Lives
+in `passes/init_state.rs` as shared infrastructure — consumed by both
+drop elaboration and the verifier.
 
 - **Dead:** not initialized, or moved out. No drop needed.
 - **Live:** definitely initialized on all predecessor paths. Unconditional drop.
 - **Maybe:** initialized on some paths, dead on others. Conditional drop
   (DropIf with flag).
 
-Transfer functions:
-- Assign/Call to a droppable local dest → gen (Live). If the dest was already
-  Live, insert a Drop before the assignment (overwrite-drop). If Maybe,
-  insert DropIf.
-- Assign/Call to a droppable projected field dest is allowed only when the
-  root local is definitely Live. Drop elaboration inserts a Drop of the old
-  field value before the overwrite when that field type needs cleanup.
-- Use(place, Move) / ArgMode::Move of a droppable root local → kill (Dead)
-- Return(Operand::Place(p)) of a droppable root local → kill (Dead).
-  The return operand is implicitly moved to the caller.
+Transfer functions (forward, per statement):
+- Assign/Call to dest → gen (Live)
+- Use(place, Move) / ArgMode::Move → kill (Dead)
+- Return(Operand::Place(p)) → kill (Dead). The return operand is
+  implicitly moved to the caller.
 - ScopeLive(local) → kill (Dead) — loop re-entry resets to uninitialized
+
+Drop elaboration reads init-state results and acts:
+- If dest is already Live at an assignment → insert Drop before (overwrite-drop)
+- At Return: insert Drop for Live locals, DropIf for Maybe locals
 
 ### Partial moves are deferred
 
@@ -272,17 +279,23 @@ at function entry. Gen sites set the flag to true. Kill sites set it to false.
 
 ### Phase order within drop elaboration
 
-1. Identify droppable locals
-2. Forward dataflow to fixed point
-3. At each Return/loop-exit/back-edge: insert Drop (for Live) or DropIf (for Maybe).
-   Consuming parameters (including consuming `self` receivers) are handled
-   by the normal droppable-local identification — no special phase needed.
-4. For effectful inits: insert DropIf for partially-initialized fields on
-   failure paths. An effectful init (`init?` or `init throws`) can fail
-   after some fields are initialized. The `failure_return_blocks` on MirBody
-   mark the blocks where the init returns failure. Drop elaboration inserts
-   DropIf for each field that was Live before the failure point, using
-   per-field drop flags set during the init sequence.
+1. Synthesize drop shims (`drop_shim.rs`) — one `__drop$T` per type with cleanup
+2. Run init-state analysis (`init_state.rs`) — forward fixpoint, all locals
+3. Analysis phase (read-only):
+   a. For each local where `needs_drop(ty)` and state is Maybe at any Return,
+      mark it as needing a drop flag
+   b. Collect overwrite-drop locations (assign to already-Live droppable local)
+   c. Collect flag update locations (gen/kill sites for flagged locals)
+   d. Collect return drops per Return block
+4. Mutation phase:
+   a. Allocate drop flag locals (`Bool` type)
+   b. Insert `SetDropFlag(false)` at function entry for all flags
+   c. Insert Drop/DropIf at Return blocks (skip returned local — it's moved to caller)
+   d. Insert overwrite-drops before reassignments
+   e. Insert `SetDropFlag(true/false)` at gen/kill sites
+5. For effectful inits: insert DropIf for partially-initialized fields on
+   failure paths. The `failure_return_blocks` on MirBody mark the blocks
+   where the init returns failure.
 
 ## 3. Layout (non-generic)
 
@@ -335,10 +348,10 @@ size across all variant payloads, at a computed payload offset). The
   Partial moves require projection-aware move paths and are not supported in
   MIR-2 v1.
 
-The verifier calls the same `droppable_locals()` and runs the same
-dataflow as drop elaboration. Because the infrastructure is shared
-(see "Shared dataflow infrastructure" below), the verifier is checking
-the same model, not a re-implementation.
+The verifier uses the same `needs_drop()` query and the same init-state
+analysis (`passes/init_state.rs`) as drop elaboration. Because the
+infrastructure is shared, the verifier checks the same model, not a
+re-implementation.
 
 **Panic paths:** `Terminator::Panic` is an abort — no cleanup runs.
 The verifier does NOT check that droppable locals are dead at Panic
@@ -444,8 +457,16 @@ Forward and backward use separate transfer traits — a forward pass has no
 exit state, a backward pass has no entry state. Splitting makes invalid
 combinations unrepresentable.
 
-Drop elaboration, move checking, and the verifier all parameterize over
-this. No more duplicated RPO computation, predecessor maps, or worklist
+Two concrete instantiations of this framework are shared modules:
+
+- `passes/liveness.rs` — backward liveness (BitVec lattice, used by clone
+  elab). Exposes `Liveness::is_live_after(block, stmt_index, local)` and
+  `block_liveness_after()` for batch queries.
+- `passes/init_state.rs` — forward init tracking (Dead/Live/Maybe lattice,
+  used by drop elab and verifier). Exposes `InitAnalysis::state_at_entry()`
+  and `state_after()`.
+
+No more duplicated RPO computation, predecessor maps, or worklist
 iteration across passes.
 
 ## Future: borrow checking
