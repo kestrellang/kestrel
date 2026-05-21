@@ -148,9 +148,19 @@ fn verify_statement_structure(
             verify_place_in_bounds(dest, body, fi, block, si, result);
             verify_rvalue_structure(rvalue, body, fi, block, si, result);
         }
-        StatementKind::Call { dest, args, .. } => {
+        StatementKind::Call {
+            dest,
+            callee,
+            args,
+        } => {
             if let Some(d) = dest {
                 verify_place_in_bounds(d, body, fi, block, si, result);
+            }
+            // Callee::Resolved is post-mono only
+            if matches!(callee, crate::statement::Callee::Resolved(_)) {
+                result.errors.push(err(
+                    "Callee::Resolved in generic MIR (pre-monomorphization)".into(),
+                ));
             }
             // ArgMode::Ref/RefMut must be on Place, not Const
             for (ai, (operand, mode)) in args.iter().enumerate() {
@@ -225,6 +235,17 @@ fn verify_rvalue_structure(
     for op in rvalue.operands() {
         if let Operand::Place(p) = op {
             verify_place_in_bounds(p, body, fi, block, si, result);
+        }
+        // MonoFunctionRef is post-mono only
+        if let Operand::Const(imm) = op
+            && matches!(imm.kind, crate::ImmediateKind::MonoFunctionRef(_))
+        {
+            result.errors.push(VerifyError {
+                func_idx: fi,
+                block: Some(block),
+                stmt: Some(si),
+                message: "MonoFunctionRef in generic MIR (pre-monomorphization)".into(),
+            });
         }
     }
     for p in rvalue.referenced_places() {

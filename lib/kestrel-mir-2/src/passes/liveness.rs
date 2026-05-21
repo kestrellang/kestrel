@@ -24,11 +24,20 @@ impl BitVec {
     }
 
     pub fn set(&mut self, bit: usize) {
-        self.words[bit / 64] |= 1u64 << (bit % 64);
+        let word = bit / 64;
+        if word >= self.words.len() {
+            self.words.resize(word + 1, 0);
+            self.num_bits = self.num_bits.max(bit + 1);
+        }
+        self.words[word] |= 1u64 << (bit % 64);
     }
 
     pub fn clear(&mut self, bit: usize) {
-        self.words[bit / 64] &= !(1u64 << (bit % 64));
+        let word = bit / 64;
+        if word >= self.words.len() {
+            return;
+        }
+        self.words[word] &= !(1u64 << (bit % 64));
     }
 
     pub fn get(&self, bit: usize) -> bool {

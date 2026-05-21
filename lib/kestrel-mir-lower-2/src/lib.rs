@@ -137,6 +137,18 @@ mod tests {
             "expected many call statements, got {call_count}"
         );
 
+        // Check for degenerate bodies that would trip the pass pipeline
+        let empty_bodies = mir
+            .functions
+            .iter()
+            .filter(|f| {
+                f.body
+                    .as_ref()
+                    .is_some_and(|b| b.locals.is_empty() || b.blocks.is_empty())
+            })
+            .count();
+        eprintln!("Degenerate bodies (0 locals or 0 blocks): {}", empty_bodies);
+
         // Count Op assignments (from intrinsic lowering)
         let op_count: usize = mir
             .functions

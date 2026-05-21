@@ -35,6 +35,11 @@ pub use substitute::{SubstMap, substitute};
 pub use terminator::{SwitchCase, Terminator, TerminatorKind};
 pub use ty::{MirTy, ParamConvention, TyArena};
 
+pub use mono::{
+    InstantiationKey, MonoEnum, MonoEnumCase, MonoField, MonoFunction, MonoModule, MonoParam,
+    MonoStatic, MonoStruct,
+};
+
 use item::enum_def::EnumDef;
 use item::function::FunctionDef;
 use item::protocol::ProtocolDef;

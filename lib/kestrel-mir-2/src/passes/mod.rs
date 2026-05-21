@@ -5,6 +5,7 @@ pub mod drop_shim;
 pub mod init_state;
 pub mod layout;
 pub mod liveness;
+pub mod thunk;
 pub mod verify;
 
 use crate::item::TargetConfig;
