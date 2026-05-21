@@ -1007,6 +1007,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-mir-lower-2"
+version = "0.16.0"
+dependencies = [
+ "indexmap",
+ "kestrel-ast",
+ "kestrel-ast-builder",
+ "kestrel-compiler",
+ "kestrel-compiler-driver",
+ "kestrel-hecs",
+ "kestrel-hir",
+ "kestrel-hir-lower",
+ "kestrel-mir-2",
+ "kestrel-name-res",
+ "kestrel-pattern-matching",
+ "kestrel-reporting",
+ "kestrel-semantics",
+ "kestrel-span",
+ "kestrel-type-infer",
+ "smallvec",
+]
+
+[[package]]
 name = "kestrel-name-res"
 version = "0.16.0"
 dependencies = [

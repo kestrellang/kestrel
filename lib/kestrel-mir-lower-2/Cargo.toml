@@ -1,0 +1,27 @@
+[package]
+name = "kestrel-mir-lower-2"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-mir-2 = { path = "../kestrel-mir-2" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-hir = { path = "../kestrel-hir" }
+kestrel-ast = { path = "../kestrel-ast" }
+kestrel-ast-builder = { path = "../kestrel-ast-builder" }
+kestrel-span = { path = "../kestrel-span" }
+kestrel-hir-lower = { path = "../kestrel-hir-lower" }
+kestrel-name-res = { path = "../kestrel-name-res" }
+kestrel-type-infer = { path = "../kestrel-type-infer" }
+kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-semantics = { path = "../kestrel-semantics" }
+indexmap = { workspace = true }
+smallvec = { workspace = true }
+
+[dev-dependencies]
+kestrel-compiler = { path = "../kestrel-compiler" }
+kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }

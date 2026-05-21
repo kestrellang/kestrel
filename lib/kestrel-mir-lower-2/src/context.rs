@@ -1,0 +1,162 @@
+//! Lowering context — central state during HIR → MIR lowering.
+
+use kestrel_ast_builder::{Callable, EnclosingContainer, Name, NodeKind, Subscript};
+use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
+use kestrel_mir_2::{
+    FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey,
+};
+use kestrel_name_res::ExtensionTargetEntity;
+
+use crate::name::qualified_name;
+
+/// Central state maintained during lowering.
+pub struct LowerCtx<'w> {
+    pub world: &'w World,
+    pub query: QueryContext<'w>,
+    pub root: Entity,
+    pub module: MirModule,
+    pub closure_counter: u32,
+    synthetic_counter: u32,
+}
+
+impl<'w> LowerCtx<'w> {
+    pub fn new(world: &'w World, root: Entity, name: &str) -> Self {
+        let query = world.query_context();
+        Self {
+            world,
+            query,
+            root,
+            module: MirModule::new(name),
+            closure_counter: 0,
+            synthetic_counter: 0,
+        }
+    }
+
+    /// Register an entity's qualified name in the module's name map.
+    pub fn register_name(&mut self, entity: Entity) -> String {
+        let name = qualified_name(self.world, entity);
+        self.module.register_name(entity, name.clone());
+        name
+    }
+
+    /// Intern a MirTy into the arena, returning its TyId.
+    pub fn intern(&mut self, ty: MirTy) -> TyId {
+        self.module.ty_arena.intern(ty)
+    }
+
+    /// Generate a unique synthetic entity for closures, thunks, etc.
+    /// Uses the high end of the u32 range to avoid collisions with real entities.
+    pub fn next_synthetic_entity(&mut self) -> Entity {
+        let id = self.synthetic_counter;
+        self.synthetic_counter += 1;
+        let entity = Entity::from_raw(u32::MAX / 2 - id);
+        debug_assert!(
+            entity.index() > 1_000_000,
+            "synthetic entity space exhausted or colliding with real entities"
+        );
+        entity
+    }
+
+    /// Resolve a stored field name to its FieldIdx within a lowered StructDef.
+    ///
+    /// The struct must already be lowered (items phase completes before bodies).
+    /// Panics if the struct or field is not found — field names are validated
+    /// upstream by name resolution.
+    pub fn resolve_field_idx(&self, struct_entity: Entity, field_name: &str) -> Option<FieldIdx> {
+        let def = self.module.structs.iter().find(|s| s.entity == struct_entity)?;
+        let idx = def.fields.iter().position(|f| f.name == field_name)?;
+        Some(FieldIdx::new(idx))
+    }
+
+    /// Resolve an enum case name to its VariantIdx within a lowered EnumDef.
+    pub fn resolve_variant_idx(
+        &self,
+        enum_entity: Entity,
+        case_name: &str,
+    ) -> Option<VariantIdx> {
+        let def = self.module.enums.iter().find(|e| e.entity == enum_entity)?;
+        let idx = def.cases.iter().position(|c| c.name == case_name)?;
+        Some(VariantIdx::new(idx))
+    }
+
+    // --- hECS query wrappers ---
+
+    /// Check if an entity is a protocol method (direct or extension default).
+    /// Returns the protocol entity if so.
+    pub fn is_protocol_method(&self, entity: Entity) -> Option<Entity> {
+        self.query.query(IsProtocolMethod {
+            entity,
+            root: self.root,
+        })
+    }
+
+    /// Build a WitnessMethodKey for a protocol method entity.
+    ///
+    /// Uses the entity's Name + Callable param labels to construct a key
+    /// that matches the witness table's binding keys.
+    pub fn witness_method_key(&self, entity: Entity) -> WitnessMethodKey {
+        let name = self
+            .world
+            .get::<Name>(entity)
+            .map(|n| n.0.clone())
+            .unwrap_or_else(|| {
+                if self.world.get::<Subscript>(entity).is_some() {
+                    "subscript".to_string()
+                } else {
+                    "init".to_string()
+                }
+            });
+        let labels = self
+            .world
+            .get::<Callable>(entity)
+            .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+            .unwrap_or_default();
+        WitnessMethodKey::new(name, labels)
+    }
+
+    /// Consume the context and return the built MIR module.
+    pub fn finish(self) -> MirModule {
+        self.module
+    }
+}
+
+// === IsProtocolMethod query ===
+
+/// Cached query: does `entity` live on a protocol (as a direct member or
+/// a protocol extension default)?
+///
+/// Returns `Some(protocol_entity)` if so, `None` otherwise. This replaces
+/// 8 scattered parent-chain walks in the old lowerer with a single memoized
+/// query.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct IsProtocolMethod {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for IsProtocolMethod {
+    type Output = Option<Entity>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<Entity> {
+        // EnclosingContainer jumps straight to the container for setters;
+        // everything else uses the direct parent.
+        let parent = ctx
+            .get::<EnclosingContainer>(self.entity)
+            .map(|ec| ec.0)
+            .or_else(|| ctx.parent_of(self.entity))?;
+        match ctx.get::<NodeKind>(parent)? {
+            NodeKind::Protocol => Some(parent),
+            NodeKind::Extension => {
+                let target = ctx.query(ExtensionTargetEntity {
+                    extension: parent,
+                    root: self.root,
+                })?;
+                match ctx.get::<NodeKind>(target)? {
+                    NodeKind::Protocol => Some(target),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
