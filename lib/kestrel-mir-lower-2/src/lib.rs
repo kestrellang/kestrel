@@ -3,6 +3,7 @@
 //! Consumes the typed ECS world (post–type-inference) and produces a
 //! `MirModule` ready for the kestrel-mir-2 pass pipeline.
 
+pub(crate) mod body;
 mod context;
 mod items;
 mod name;
@@ -32,6 +33,7 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 mod tests {
     use super::*;
     use kestrel_compiler::Compiler;
+    use kestrel_compiler_driver::CompilerDriver;
 
     fn stdlib_path() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -77,6 +79,42 @@ mod tests {
             mir.functions.len(),
             mir.witnesses.len(),
             mir.statics.len(),
+        );
+    }
+
+    #[test]
+    fn stdlib_functions_have_bodies() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        CompilerDriver::new(&c).infer_all();
+
+        let mir = lower_module(c.world(), c.root());
+
+        let with_bodies = mir.functions.iter().filter(|f| f.body.is_some()).count();
+        let total = mir.functions.len();
+        let total_blocks: usize = mir
+            .functions
+            .iter()
+            .filter_map(|f| f.body.as_ref())
+            .map(|b| b.blocks.len())
+            .sum();
+
+        eprintln!(
+            "Body lowering: {}/{} functions have bodies, {} total blocks",
+            with_bodies, total, total_blocks,
+        );
+
+        assert!(
+            with_bodies > 100,
+            "expected many functions with bodies, got {with_bodies}"
+        );
+        // Each body has at least one block (entry). With stub expression lowering,
+        // total_blocks == with_bodies. Once control flow lowering is implemented
+        // (Phase 5), this will grow.
+        assert!(
+            total_blocks >= with_bodies,
+            "each body should have at least one block"
         );
     }
 }

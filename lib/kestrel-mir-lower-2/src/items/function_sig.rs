@@ -131,9 +131,12 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
         return;
     }
 
-    ctx.module.add_function(def);
+    let func_id = ctx.module.add_function(def);
 
-    // Body lowering is Phase 3+ — not wired here yet
+    // Lower function body if present
+    if ctx.world.get::<kestrel_ast_builder::Body>(entity).is_some() {
+        crate::body::lower_function_body(ctx, entity, func_id.index());
+    }
 }
 
 fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
