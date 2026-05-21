@@ -8,6 +8,7 @@ mod context;
 mod items;
 mod name;
 pub mod ty;
+mod validate;
 
 pub use context::LowerCtx;
 
@@ -28,6 +29,9 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 
     // Phase 3: static init thunks + master init + inject into main
     items::static_lower::synthesize_static_inits(&mut ctx);
+
+    // Phase 4: validate no MirTy::Error escaped
+    let _error_count = validate::validate_no_error_types(&ctx, &ctx.module);
 
     ctx.finish()
 }
