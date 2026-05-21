@@ -114,5 +114,39 @@ mod tests {
             total_blocks > with_bodies,
             "expected more blocks than functions (if/else/loop), got {total_blocks} blocks for {with_bodies} bodies"
         );
+
+        // Count call statements
+        let call_count: usize = mir
+            .functions
+            .iter()
+            .filter_map(|f| f.body.as_ref())
+            .flat_map(|b| &b.blocks)
+            .flat_map(|b| &b.stmts)
+            .filter(|s| matches!(s.kind, kestrel_mir_2::StatementKind::Call { .. }))
+            .count();
+        eprintln!("Call statements: {}", call_count);
+        assert!(
+            call_count > 100,
+            "expected many call statements, got {call_count}"
+        );
+
+        // Count Op assignments (from intrinsic lowering)
+        let op_count: usize = mir
+            .functions
+            .iter()
+            .filter_map(|f| f.body.as_ref())
+            .flat_map(|b| &b.blocks)
+            .flat_map(|b| &b.stmts)
+            .filter(|s| matches!(
+                s.kind,
+                kestrel_mir_2::StatementKind::Assign {
+                    rvalue: kestrel_mir_2::Rvalue::Op1 { .. }
+                        | kestrel_mir_2::Rvalue::Op2 { .. }
+                        | kestrel_mir_2::Rvalue::Op3 { .. },
+                    ..
+                }
+            ))
+            .count();
+        eprintln!("Op statements (intrinsics): {}", op_count);
     }
 }
