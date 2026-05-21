@@ -162,6 +162,10 @@ impl<'a> FunctionBuilder<'a> {
         self.module.functions[self.func_idx.index()].entity
     }
 
+    pub fn index(&self) -> crate::FunctionIdx {
+        self.func_idx
+    }
+
     fn body_mut(&mut self) -> &mut MirBody {
         self.module.functions[self.func_idx.index()]
             .body
