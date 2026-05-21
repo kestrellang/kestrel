@@ -405,18 +405,37 @@ struct CfgInfo {
 
 fn compute_cfg_info(body: &MirBody) -> CfgInfo;
 
+trait Lattice: Clone + PartialEq {
+    fn bottom() -> Self;
+    fn join(&mut self, other: &Self) -> bool;   // merge, returns true if changed
+}
+
+trait ForwardTransfer<S> {
+    fn entry_state(&self, body: &MirBody) -> S;
+    fn transfer_block(&self, body: &MirBody, block: BlockId, state: &mut S);
+}
+
+trait BackwardTransfer<S> {
+    fn exit_state(&self, body: &MirBody) -> S;
+    fn transfer_block(&self, body: &MirBody, block: BlockId, state: &mut S);
+}
+
 fn forward_fixpoint<S: Lattice>(
     cfg: &CfgInfo,
     body: &MirBody,
-    transfer: &dyn TransferFn<S>,
+    transfer: &impl ForwardTransfer<S>,
 ) -> Vec<S>;
 
 fn backward_fixpoint<S: Lattice>(
     cfg: &CfgInfo,
     body: &MirBody,
-    transfer: &dyn TransferFn<S>,
+    transfer: &impl BackwardTransfer<S>,
 ) -> Vec<S>;
 ```
+
+Forward and backward use separate transfer traits — a forward pass has no
+exit state, a backward pass has no entry state. Splitting makes invalid
+combinations unrepresentable.
 
 Drop elaboration, move checking, and the verifier all parameterize over
 this. No more duplicated RPO computation, predecessor maps, or worklist
