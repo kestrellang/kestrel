@@ -303,6 +303,7 @@ fn write_callee(f: &mut fmt::Formatter<'_>, callee: &Callee, arena: &TyArena) ->
             }
             Ok(())
         }
+        Callee::Resolved(id) => write!(f, "mono_fn{}", id.index()),
         Callee::Thin(place) => write!(f, "thin {}", PlaceDisplay(place)),
         Callee::Thick(place) => write!(f, "thick {}", PlaceDisplay(place)),
         Callee::Witness {

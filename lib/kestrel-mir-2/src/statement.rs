@@ -3,7 +3,9 @@ use kestrel_span::Span;
 
 use smallvec::SmallVec;
 
-use crate::{ArgMode, FieldIdx, LocalId, Op, Operand, Place, TyId, UseMode, VariantIdx};
+use crate::{
+    ArgMode, FieldIdx, LocalId, MonoFuncId, Op, Operand, Place, TyId, UseMode, VariantIdx,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Rvalue {
@@ -213,13 +215,19 @@ impl WitnessMethodKey {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Callee {
+    /// Direct call to a known generic function (pre-monomorphization).
     Direct {
         func: Entity,
         type_args: Vec<TyId>,
         self_type: Option<TyId>,
     },
+    /// Direct call to a resolved monomorphic function (post-monomorphization).
+    /// Generic verifier rejects this; mono verifier requires it.
+    Resolved(MonoFuncId),
     Thin(Place),
     Thick(Place),
+    /// Witness dispatch — resolved to Resolved(MonoFuncId) during monomorphization.
+    /// Mono verifier rejects this.
     Witness {
         protocol: Entity,
         method: WitnessMethodKey,

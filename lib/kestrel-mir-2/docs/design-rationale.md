@@ -223,13 +223,15 @@ computed, all names mangled. The old `kestrel-codegen` crate dissolves:
 
 Codegen (kestrel-codegen-cranelift) becomes a pure emitter: it reads
 `MonoFunction.name` for symbols, `MonoStruct.type_info.layout` for field
-offsets, `MonoCallee::Direct(id)` for call targets. No computation.
+offsets, `Callee::Resolved(id)` for call targets. No computation.
 
 **Why:** Codegen should emit IR for concrete types, not perform generic
 resolution or layout computation. MonoModule enforced at the Rust type
 level — codegen takes `&MonoModule`, cannot accidentally receive generic
-MIR. MonoCallee has no Witness variant, no type_args — three clean match
-arms instead of four with complex fields.
+MIR. Callee/Rvalue/Statement types are shared between generic and mono
+MIR — the verifier enforces which variants are legal at each stage. No
+duplicate IR types to maintain (see monomorphization.md "No separate
+mono IR types").
 
 **Reference:** Rust's monomorphization happens at the MIR level
 (MonoItem collection), producing per-codegen-unit concrete MIR.

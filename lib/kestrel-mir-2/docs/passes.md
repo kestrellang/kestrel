@@ -407,9 +407,11 @@ See `monomorphization.md` for the full design.
 Runs AFTER monomorphization, not before.
 
 - No MirTy::TypeParam, SelfType, or AssociatedProjection in any body or type
-- No Callee::Witness in any body
+- No Callee::Direct or Callee::Witness — only Resolved, Thin, Thick
+- No ImmediateKind::FunctionRef — only MonoFunctionRef
+- No StatementKind::Drop, DropIf, or SetDropFlag — expanded to calls/branches
 - All TypeInfo.layout values are Some (fully computed)
-- All MonoCallee::Direct targets are valid MonoFuncIds
+- All Callee::Resolved targets are valid MonoFuncIds
 - All MonoFunction.body is Some unless extern_info is Some
 
 ## Shared dataflow infrastructure

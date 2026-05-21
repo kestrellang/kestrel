@@ -203,12 +203,15 @@ What's being called. Self-type is always explicit.
 
 ```rust
 enum Callee {
-    /// Direct call to a known function.
+    /// Direct call to a known generic function (pre-monomorphization).
     Direct {
         func: Entity,
         type_args: Vec<TyId>,
         self_type: Option<TyId>,
     },
+
+    /// Direct call to a resolved monomorphic function (post-monomorphization).
+    Resolved(MonoFuncId),
 
     /// Thin function pointer (no environment).
     Thin(Place),
@@ -226,18 +229,11 @@ enum Callee {
 }
 ```
 
-In MonoModule, Callee is replaced by MonoCallee:
-
-```rust
-enum MonoCallee {
-    Direct(MonoFuncId),
-    Thin(Place),
-    Thick(Place),
-}
-```
-
-Three variants. No Witness (resolved), no type_args (substituted), no
-self_type (baked in). Codegen matches three arms.
+Generic MIR uses `Direct`, `Thin`, `Thick`, `Witness`. The generic
+verifier rejects `Resolved`. After monomorphization, `Direct` and
+`Witness` are rewritten to `Resolved(MonoFuncId)`. The mono verifier
+rejects `Direct` and `Witness`. Codegen sees `Resolved`, `Thin`, `Thick`
+— three arms, no type_args, no witness resolution.
 
 ## Terminator
 

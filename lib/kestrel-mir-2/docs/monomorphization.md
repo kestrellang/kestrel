@@ -61,109 +61,62 @@ struct MonoFunction {
 }
 ```
 
-### MonoCallee
+### No separate mono IR types
+
+MonoModule bodies reuse the same `MirBody`, `StatementKind`, `Rvalue`,
+`Place`, `Operand`, and `Terminator` types as generic MIR. There is no
+`MonoBody`, `MonoStatementKind`, or `MonoRvalue`.
+
+Instead, the shared enums have variants for both stages:
 
 ```rust
-enum MonoCallee {
-    Direct(MonoFuncId),    // resolved to a concrete function in this module
-    Thin(Place),           // indirect call through function pointer
-    Thick(Place),          // indirect call through closure
+enum Callee {
+    Direct { func: Entity, type_args: Vec<TyId>, self_type: Option<TyId> },
+    Resolved(MonoFuncId),       // post-mono: direct call by index
+    Thin(Place),
+    Thick(Place),
+    Witness { ... },            // pre-mono only
+}
+
+enum ImmediateKind {
+    FunctionRef { func: Entity, type_args: Vec<TyId>, self_type: Option<TyId> },
+    MonoFunctionRef(MonoFuncId),  // post-mono: function ref by index
+    ...
 }
 ```
 
-Three variants. No Witness (resolved). No type_args (substituted).
-No self_type (baked in). Codegen matches three arms.
+The verifier enforces stage-appropriate variants:
+- **Generic MIR**: `Direct`, `Thin`, `Thick`, `Witness` allowed. `Resolved` rejected.
+- **Mono MIR**: `Resolved`, `Thin`, `Thick` allowed. `Direct`, `Witness` rejected.
 
-### MonoBody
+Same pattern for `ImmediateKind::FunctionRef` (generic) vs `MonoFunctionRef` (mono).
 
-```rust
-struct MonoBody {
-    locals: Vec<LocalDef>,
-    blocks: Vec<MonoBasicBlock>,
-    param_count: usize,
-    entry: BlockId,
-    local_scopes: HashMap<LocalId, ScopeId>,
-    failure_return_blocks: HashSet<BlockId>,
-}
+`Rvalue::ApplyPartial { func: Entity }` keeps its `Entity` field. During
+Phase 3, monomorphization rewrites it by looking up the entity in the
+`(Entity, type_args, self_type) → MonoFuncId` mapping and replacing the
+Call that the thunk wraps. The ApplyPartial itself references the thunk's
+entity, which the monomorphizer resolves.
 
-struct MonoBasicBlock {
-    stmts: Vec<MonoStatement>,
-    terminator: Terminator,     // Terminator is shared (no Entity in callees)
-}
+**Why no duplication:** Every new statement variant or rvalue variant
+exists once. Display, operand traversal, and passes operate on one set
+of types. The mono/generic distinction is enforced by the verifier, not
+the type system. This matches how `ImmediateKind` already works.
 
-struct MonoStatement {
-    kind: MonoStatementKind,
-    span: Option<Span>,
-}
-```
+### Entity references in MonoModule
 
-MonoBody mirrors MirBody but uses MonoStatement/MonoStatementKind. The
-terminator, LocalDef, ScopeId, and block structure are shared types.
-
-### MonoStatementKind
-
-```rust
-enum MonoStatementKind {
-    Assign { dest: Place, rvalue: MonoRvalue },
-    Call { dest: Option<Place>, callee: MonoCallee, args: Vec<(Operand, ArgMode)> },
-    Drop { place: Place },
-    DropIf { place: Place, flag: LocalId },
-    SetDropFlag { flag: LocalId, value: bool },
-    ScopeLive(LocalId),
-}
-```
-
-### MonoRvalue
-
-```rust
-enum MonoRvalue {
-    // Shared with Rvalue — structurally identical variants
-    Use(Operand, UseMode),
-    Ref(Place),
-    RefMut(Place),
-    Op1 { op: Op, arg: Operand },
-    Op2 { op: Op, lhs: Operand, rhs: Operand },
-    Op3 { op: Op, a: Operand, b: Operand, c: Operand },
-    Construct { ty: TyId, fields: Vec<(FieldIdx, Operand, UseMode)> },
-    Tuple(Vec<(Operand, UseMode)>),
-    EnumVariant { enum_ty: TyId, variant: VariantIdx, payload: Vec<(Operand, UseMode)> },
-    ArrayLiteral { element_ty: TyId, values: Vec<(Operand, UseMode)> },
-
-    // Mono-specific: Entity → MonoFuncId
-    ApplyPartial { func: MonoFuncId, captures: Vec<(Operand, UseMode)> },
-}
-```
-
-MonoRvalue replaces `ApplyPartial { func: Entity }` with `func: MonoFuncId`.
-All other variants are structurally identical to Rvalue.
-
-`ImmediateKind` gains one mono-specific variant for function references:
-
-```rust
-ImmediateKind::MonoFunctionRef(MonoFuncId)
-```
-
-This replaces `FunctionRef { func: Entity, type_args, self_type }` after
-monomorphization. The mono verifier checks that no generic `FunctionRef`
-survives.
-
-### Entity references that survive in MonoModule
-
-After the mono-specific types above, the remaining `Entity` references are:
+After monomorphization, `Entity` survives in positions where it serves
+as a type identity key:
 
 - `PlaceBase::Global(Entity)` — statics are module-global; codegen resolves
-  them by entity from `MonoModule.statics`.
-- `ImmediateKind::FunctionRef { func: Entity }` — rewritten to use
-  MonoFuncId during Phase 3.
-- `MirTy::Named { entity, type_args }` — the struct/enum entity + type_args
-  survive for type identity. Codegen looks up MonoStruct/MonoEnum by
-  `(entity, type_args)` pair. Multiple instantiations share the same entity
-  but differ by type_args.
+  by entity from `MonoModule.statics`
+- `MirTy::Named { entity, type_args }` — struct/enum identity; codegen
+  looks up `MonoStruct`/`MonoEnum` by `(entity, type_args)` pair
+- `Rvalue::ApplyPartial { func: Entity }` — thunk entity; codegen resolves
+  via `MonoModule.functions`
 
-The pragmatic approach: `Entity` survives in positions where it serves as
-a type identity key. Direct call targets and function references are
-rewritten to `MonoFuncId`. The mono verifier checks that no unresolved
-generic entities remain.
+Direct call targets (`Callee::Resolved(MonoFuncId)`) and function
+references (`ImmediateKind::MonoFunctionRef(MonoFuncId)`) use indices
+into `MonoModule.functions` — no entity lookup needed for the hot path.
 
 ### MonoStruct / MonoEnum
 
@@ -210,41 +163,103 @@ to avoid processing the same instantiation twice.
 
 For each discovered instantiation:
 
-1. Build a `SubstMap` (type_params + self_type + assoc_types) for this
-   instantiation. Associated types are resolved via witness lookup before
-   body substitution begins.
-2. Clone the generic MirBody
-3. Walk every type reference in the body, applying `substitute(arena, ty, &subst)`
-4. Walk every `Callee::Witness`:
-   a. Substitute self_type and method_type_args using the SubstMap
-   b. Find the matching WitnessDef via pattern matching
-   c. Bind pattern variables and construct the concrete function's type args
-   d. Record the resolved `(func_entity, type_args, self_type)` triple
-      alongside the callee for Phase 3 rewriting
+**Step 1: Build the SubstMap.**
 
-Witness resolution happens here alongside body substitution. Phase 1
-already resolved witnesses for *discovery* (reachability). Phase 2
-re-resolves for *rewriting*. The resolution logic is shared and cached —
-Phase 1's results seed Phase 2 so most resolutions are cache hits.
+```rust
+struct SubstMap {
+    type_params: HashMap<Entity, TyId>,
+    self_type: Option<TyId>,
+    assoc_types: HashMap<(TyId, Entity, Entity), TyId>,
+}
+```
 
-### Phase 3: ID assignment + callee rewriting
+Populate `type_params` from the instantiation key. Set `self_type` for
+methods. Then resolve ALL reachable associated types up front:
 
-After ALL bodies are monomorphized (so every target is known), assign
-MonoFuncIds and rewrite callees:
+For each `(protocol, assoc_type)` pair reachable from the function's
+type params and where-clause constraints:
+1. Substitute the protocol's self_type with the concrete type from
+   the SubstMap
+2. Look up the `WitnessCache` (populated by Phase 1)
+3. Read the `type_bindings` entry for the associated type entity
+4. Substitute the binding's type params using the witness match bindings
+5. Add to `SubstMap.assoc_types`
 
-1. Build the mapping `(Entity, Vec<TyId>, Option<TyId>) → MonoFuncId`
-   from the complete set of discovered instantiations
-2. Walk all monomorphized bodies, replacing resolved callee triples
-   with `MonoCallee::Direct(MonoFuncId)` via the mapping
-3. Rewrite `ImmediateKind::FunctionRef` — replace `Entity` + `type_args`
-   with the looked-up MonoFuncId. This requires a mono-specific Immediate
-   variant: `ImmediateKind::MonoFunctionRef(MonoFuncId)`.
-4. `PlaceBase::Global(Entity)` for statics is NOT rewritten — codegen
-   resolves statics by entity from `MonoModule.statics`. Entity serves
-   as a stable identity for module-global names.
+This pre-resolution means the body walk is a **single pass** — no
+fallback strategies, no re-resolution during the walk. The existing
+code's three-fallback complexity (`subst values → parent_self → all
+protocols`) collapses because everything is pre-resolved.
 
-MonoFuncIds do NOT exist during Phase 2. Phase 2 records resolved triples;
-Phase 3 assigns IDs and rewrites in a single pass.
+**Step 2: Clone and substitute the body.**
+
+Clone the generic `MirBody`. Walk every type reference and apply
+`substitute(arena, ty, &subst)`. This is one pass over all locals,
+statements, rvalues, callees, and terminators.
+
+**Step 3: Resolve witness callees.**
+
+Walk every `Callee::Witness` in the substituted body:
+1. The self_type and method_type_args are already concrete (substituted
+   in step 2)
+2. Look up the `WitnessCache` — cache hit from Phase 1 in most cases
+3. Record the resolved `(func_entity, type_args, self_type)` triple
+   alongside the callee for Phase 3 rewriting
+
+### Witness cache
+
+```rust
+struct WitnessCache {
+    resolved: HashMap<(Entity, TyId), WitnessCacheEntry>,
+}
+
+struct WitnessCacheEntry {
+    witness_idx: usize,
+    bindings: HashMap<Entity, TyId>,   // pattern match bindings
+}
+```
+
+Keyed by `(protocol_entity, concrete_self_type)`. Phase 1 populates
+during BFS. Phase 2 reads. Cache misses (rare — dead code paths) trigger
+fresh witness resolution using the same logic.
+
+### Phase 3: ID assignment + drop expansion + callee rewriting
+
+After ALL bodies are monomorphized, three things happen in one pass:
+
+**Drop expansion.** Every `Drop { place }` where `place` has type `T`
+is rewritten to `Call { callee: Direct(__drop$T), args: [(place, Move)] }`.
+Every `DropIf { place, flag }` is expanded to:
+```
+Branch { flag } → drop_block, skip_block
+drop_block: Call { callee: Direct(__drop$T), args: [(place, Move)] }; Jump continue
+skip_block: Jump continue
+```
+
+This ensures the BFS from Phase 1 (which already ran) doesn't need to
+discover drop shims — instead, drop shim instantiations are collected
+during Phase 3 by scanning the expanded Call targets. For each concrete
+`__drop$T`, monomorphization clones and substitutes the generic shim body
+(same Phase 2 logic, applied to shim bodies). This may discover further
+nested shim calls (`__drop$FieldType`), so shim expansion iterates
+until no new shims are needed.
+
+After expansion, MonoModule contains NO `Drop`/`DropIf`/`SetDropFlag`
+statements — all drops are direct calls and branches. Codegen never
+needs to understand drop semantics.
+
+**ID assignment.** Build the mapping
+`(Entity, Vec<TyId>, Option<TyId>) → MonoFuncId` from the complete set of
+instantiations (including drop shims discovered during expansion).
+
+**Callee rewriting.** Walk all bodies:
+1. Replace `Callee::Direct { func, type_args, self_type }` with
+   `Callee::Resolved(MonoFuncId)` via the mapping
+2. Replace `Callee::Witness` with `Callee::Resolved(MonoFuncId)` using
+   the triples recorded in Phase 2
+3. Replace `ImmediateKind::FunctionRef` with
+   `ImmediateKind::MonoFunctionRef(MonoFuncId)`
+
+MonoFuncIds do NOT exist during Phase 2 — they are assigned here.
 
 ### Phase 4: Type and layout resolution
 
