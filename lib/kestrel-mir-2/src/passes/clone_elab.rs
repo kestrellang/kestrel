@@ -1,121 +1,16 @@
 use kestrel_hecs::Entity;
 
 use crate::body::{LocalDef, MirBody};
-use crate::item::function::{FunctionKind, WhereClause, WhereConstraint};
+use crate::item::function::{FunctionKind, WhereClause};
 use crate::operand::{ArgMode, Operand, UseMode};
 use crate::place::Place;
 use crate::statement::{Callee, Rvalue, Statement, StatementKind, WitnessMethodKey};
 use crate::terminator::TerminatorKind;
-use crate::ty::{MirTy, TyArena};
+use crate::ty::TyArena;
+use crate::ty_query::{copy_behavior, find_cloneable_protocol};
 use crate::{BlockId, CopyBehavior, LocalId, MirModule, TyId};
 
 use super::liveness::Liveness;
-
-// ---- Copy behavior query ----
-
-pub fn copy_behavior(
-    arena: &TyArena,
-    module: &MirModule,
-    ty: TyId,
-    where_clause: Option<&WhereClause>,
-) -> CopyBehavior {
-    match arena.get(ty) {
-        MirTy::I8
-        | MirTy::I16
-        | MirTy::I32
-        | MirTy::I64
-        | MirTy::F16
-        | MirTy::F32
-        | MirTy::F64
-        | MirTy::Bool
-        | MirTy::Never
-        | MirTy::Str
-        | MirTy::Pointer(_)
-        | MirTy::FuncThin { .. }
-        | MirTy::Error => CopyBehavior::Bitwise,
-
-        MirTy::Tuple(elems) => {
-            let elems = elems.clone();
-            for &elem in &elems {
-                match copy_behavior(arena, module, elem, where_clause) {
-                    CopyBehavior::Bitwise => {}
-                    other => return other,
-                }
-            }
-            CopyBehavior::Bitwise
-        }
-
-        MirTy::Named { entity, .. } => {
-            let entity = *entity;
-            for s in &module.structs {
-                if s.entity == entity {
-                    return s.type_info.copy.clone();
-                }
-            }
-            for e in &module.enums {
-                if e.entity == entity {
-                    return e.type_info.copy.clone();
-                }
-            }
-            CopyBehavior::Bitwise
-        }
-
-        MirTy::TypeParam(entity) => {
-            let entity = *entity;
-            if let Some(wc) = where_clause {
-                for constraint in &wc.constraints {
-                    match constraint {
-                        WhereConstraint::Implements {
-                            type_param,
-                            protocol,
-                        } if *type_param == entity => {
-                            if is_cloneable_protocol(module, *protocol) {
-                                return CopyBehavior::Clone(*protocol);
-                            }
-                        }
-                        WhereConstraint::NotImplements {
-                            type_param,
-                            protocol,
-                        } if *type_param == entity => {
-                            if is_copyable_protocol(module, *protocol) {
-                                return CopyBehavior::None;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            // Default: Kestrel is copy-by-default (implicit Copyable)
-            CopyBehavior::Bitwise
-        }
-
-        MirTy::SelfType => CopyBehavior::Bitwise,
-        MirTy::FuncThick { .. } => CopyBehavior::None,
-        MirTy::AssociatedProjection { .. } => CopyBehavior::Bitwise,
-    }
-}
-
-fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module
-        .protocols
-        .iter()
-        .any(|p| p.entity == entity && p.name.ends_with("Cloneable"))
-}
-
-fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module
-        .protocols
-        .iter()
-        .any(|p| p.entity == entity && p.name.ends_with("Copyable"))
-}
-
-fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
-    module
-        .protocols
-        .iter()
-        .find(|p| p.name.ends_with("Cloneable"))
-        .map(|p| p.entity)
-}
 
 // ---- Pass ----
 
@@ -548,81 +443,6 @@ mod tests {
         m.register_name(callee_entity, "consume");
 
         (m, cloneable, mystr_ty, callee_entity)
-    }
-
-    // ---- copy_behavior tests ----
-
-    #[test]
-    fn copy_behavior_primitives_are_bitwise() {
-        let mut m = ModuleBuilder::new("test");
-        let i64_ty = m.i64();
-        let bool_ty = m.bool();
-        let module = m.finish();
-        assert_eq!(
-            copy_behavior(&module.ty_arena, &module, i64_ty, None),
-            CopyBehavior::Bitwise
-        );
-        assert_eq!(
-            copy_behavior(&module.ty_arena, &module, bool_ty, None),
-            CopyBehavior::Bitwise
-        );
-    }
-
-    #[test]
-    fn copy_behavior_clone_struct() {
-        let (m, cloneable, mystr_ty, _) = setup_clone_module();
-        let module = m.finish();
-        assert_eq!(
-            copy_behavior(&module.ty_arena, &module, mystr_ty, None),
-            CopyBehavior::Clone(cloneable)
-        );
-    }
-
-    #[test]
-    fn copy_behavior_type_param_with_cloneable() {
-        let (mut m, cloneable, _, _) = setup_clone_module();
-        let t_entity = m.fresh_entity();
-        let t_ty = m.ty(MirTy::TypeParam(t_entity));
-        let module = m.finish();
-
-        let mut wc = WhereClause::new();
-        wc.add_constraint(WhereConstraint::implements(t_entity, cloneable));
-        assert_eq!(
-            copy_behavior(&module.ty_arena, &module, t_ty, Some(&wc)),
-            CopyBehavior::Clone(cloneable)
-        );
-    }
-
-    #[test]
-    fn copy_behavior_type_param_default_bitwise() {
-        let mut m = ModuleBuilder::new("test");
-        let t_entity = m.fresh_entity();
-        let t_ty = m.ty(MirTy::TypeParam(t_entity));
-        let module = m.finish();
-        assert_eq!(
-            copy_behavior(&module.ty_arena, &module, t_ty, None),
-            CopyBehavior::Bitwise
-        );
-    }
-
-    #[test]
-    fn copy_behavior_type_param_not_copyable() {
-        let (mut m, _, _, _) = setup_clone_module();
-        let copyable = m.fresh_entity();
-        m.register_name(copyable, "std.Copyable");
-        let proto = ProtocolDef::new(copyable, "std.Copyable");
-        m.add_protocol(proto);
-
-        let t_entity = m.fresh_entity();
-        let t_ty = m.ty(MirTy::TypeParam(t_entity));
-        let module = m.finish();
-
-        let mut wc = WhereClause::new();
-        wc.add_constraint(WhereConstraint::not_implements(t_entity, copyable));
-        assert_eq!(
-            copy_behavior(&module.ty_arena, &module, t_ty, Some(&wc)),
-            CopyBehavior::None
-        );
     }
 
     // ---- Clone elaboration: bitwise copies left alone ----

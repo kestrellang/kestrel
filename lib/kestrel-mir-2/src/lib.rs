@@ -14,6 +14,7 @@ pub mod statement;
 pub mod substitute;
 pub mod terminator;
 pub mod ty;
+pub mod ty_query;
 
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;

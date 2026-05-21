@@ -2,14 +2,47 @@
 
 ## Test strategy
 
-- **Reuse existing integration tests** from `kestrel-mir-lower/src/lib.rs` (stdlib smoke,
-  struct/enum/function body lowering, calls, witnesses, string literals, passes).
-  Tighten assertions: specific counts instead of "non-empty."
-- **New unit tests** per module: one test file per `items/` and `body/` module verifying
-  the lowered MIR shape for a minimal input.
-- **Intrinsic cross-reference test**: verify every entry in the intrinsic table corresponds
-  to a `lang` module entity with the `Intrinsic` marker.
-- All tests run via `/triage` — never `cargo test` directly.
+**No kestrel-test-suite.** The test suite runs end-to-end through codegen, which
+depends on `kestrel-mir` (old), `kestrel-ownership`, and `kestrel-codegen-cranelift`.
+None of those consume kestrel-mir-2 output until the full pipeline switchover.
+All tests live within this crate and run via `cargo test -p kestrel-mir-lower-2`.
+
+### Unit tests (`#[cfg(test)]` per module)
+
+- **Type lowering** (`ty.rs`): `lower_type` on specific HirTy variants → assert TyId
+  resolves to expected MirTy
+- **Field index resolution** (`context.rs`): build a struct, call `resolve_field_idx`,
+  assert correct FieldIdx
+- **Intrinsic table** (`call/intrinsic.rs`): cross-reference every table entry against
+  `lang` module entities with the `Intrinsic` marker
+- **Mode helpers** (`body/mod.rs`): `use_mode_for` / `arg_mode_for` on primitives,
+  copyable structs, non-copyable structs
+
+### Integration tests (`src/lib.rs`)
+
+Load real source via `Compiler` + `CompilerDriver::infer_all()`, call `lower_module`,
+assert MIR structure.
+
+**Stdlib smoke tests:**
+- Struct/enum/protocol/function/witness counts are specific numbers (not just "> 0")
+- Zero `MirTy::Error` in struct fields
+- Call statement count > threshold
+- Witness method bindings present
+- Specific functions have bodies with expected block counts
+
+**Small program tests** (inline source):
+- Function with if/else → 4+ blocks, Branch terminator
+- Function with loop + break → loop header/exit blocks
+- Closure → env struct + closure function in module
+- Match on enum → Switch terminator with correct variant count
+- String literal → str.ptr + init call pattern
+- Assignment to computed property → Call statement (setter dispatch)
+- Init call → self allocation + Call with &mut self prepended
+
+### Diff test (development aid, not CI)
+
+Lower stdlib with both old and new crate, compare `module.display()` output
+to catch behavioral divergence. Run manually during development, not automated.
 
 ## Phases
 
@@ -30,7 +63,7 @@ Create the crate skeleton and the one upstream change needed before any lowering
 - [ ] Implement `IsProtocolMethod` query (in `kestrel-name-res` or in the lowerer crate).
       Add `is_protocol_method()` and `witness_method_key()` on `LowerCtx` delegating to it.
 - [ ] Create `src/name.rs` — port `qualified_name()` as-is from existing crate
-- [ ] Verify: `cargo check -p kestrel-mir-lower-2`
+- [ ] Verify: `cargo check -p kestrel-mir-lower-2` compiles
 
 ### Phase 1 — Type lowering (`ty.rs`)
 
@@ -42,7 +75,8 @@ Types are needed by every subsequent phase.
 - [ ] Implement `lower_named_type_from_entity()` — shared by both HirTy and ResolvedTy paths
 - [ ] Handle `AssocProjection`, `Opaque` (resolve via `InferBody`), `SelfType`
 - [ ] Port opaque-type cycle guard (thread-local `HashSet<Entity>`)
-- [ ] Test: lower stdlib types, verify no `MirTy::Error` in struct fields
+- [ ] Unit test: `lower_type` on primitives, Named, Tuple, TypeParam, SelfType
+- [ ] Integration test: lower stdlib types, verify no `MirTy::Error` in struct fields
 
 ### Phase 2 — Item lowering (`items/`)
 
@@ -69,8 +103,8 @@ Structs, enums, protocols must exist before bodies can reference them.
   - [ ] Associated type bindings (including blanket conformances)
   - [ ] Use `kestrel_mir_2::substitute()` instead of local `substitute_type_params`
 - [ ] `items/static_lower.rs` — `StaticDef` + `@fileconstant` extraction
-- [ ] Test: `lower_module` on stdlib produces structs/enums/protocols/witnesses/functions
-      with correct counts and no panics
+- [ ] Integration test: `lower_module` on stdlib produces structs/enums/protocols/witnesses/functions
+      with specific counts and no panics
 
 ### Phase 3 — Body context + emit helpers (`body/mod.rs`)
 
@@ -91,7 +125,8 @@ The infrastructure all body lowering depends on.
 - [ ] `lower_body()` — create locals, entry block, lower statements + tail expr
 - [ ] `finish()` — return detached `MirBody`
 - [ ] Wire `function_sig.rs` to call `lower_function_body()` for entities with `Body`
-- [ ] Test: lower a function with params, verify body has correct local/block count
+- [ ] Unit test: mode helpers on primitive/copyable/non-copyable types
+- [ ] Integration test: lower a function with params, verify body has correct local/block count
 
 ### Phase 4 — Expression and statement lowering
 
@@ -126,7 +161,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 - [ ] `HirExpr::Assign` — setter classification (`try_setter_assign`), then
       stored-place assignment fallback. Setter calls emit through `emit_call()`.
 
-**Test:** lower `abs(x)` function with if/else, verify block count and terminator types
+**Integration test:** lower `abs(x)` with if/else, verify block count and terminator types
 
 ### Phase 5 — Control flow (`body/control.rs`)
 
@@ -138,7 +173,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 - [ ] `lower_hir_block()` — lower statements + tail in a block scope
 - [ ] `collect_block_locals()` — for scope-live tracking
 
-**Test:** lower function with nested loops + break/continue, verify CFG shape
+**Integration test:** lower function with nested loops + break/continue, verify CFG shape
 
 ### Phase 6 — Call dispatch (`body/call/`)
 
@@ -170,7 +205,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 - [ ] `try_enum_construct()` — detect `NodeKind::EnumCase`, emit `Rvalue::EnumVariant`
 - [ ] `try_struct_construct()` — detect memberwise struct init, emit `Rvalue::Construct`
 
-**Test:** lower stdlib, verify call count > 100, witness method calls present, intrinsic ops present
+**Integration test:** lower stdlib, verify call count > 100, witness method calls present, intrinsic ops present
 
 ### Phase 7 — Literals (`body/literal.rs`)
 
@@ -181,7 +216,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 - [ ] `HirExpr::Dict` → find dict init, emit key/value pairs via `insert` calls
 - [ ] Literal promotion: `lower_expr_with_hint()` for type-directed literal lowering
 
-**Test:** lower function with array/dict literals, verify Construct + Call statements
+**Integration test:** lower function with array/dict literals, verify Construct + Call statements
 
 ### Phase 8 — Closures (`body/closure.rs`)
 
@@ -192,7 +227,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
       attach, emit ApplyPartial in parent
 - [ ] Register `ClosureInfo` in module
 
-**Test:** lower function with closure capturing a local, verify env struct + closure function exist
+**Integration test:** lower function with closure capturing a local, verify env struct + closure function exist
 
 ### Phase 9 — Pattern matching (`body/pattern.rs`)
 
@@ -205,7 +240,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 - [ ] `emit_bindings()` — bind pattern variables from scrutinee place via access path
 - [ ] `constructor_to_switch_case()` — map pattern constructors to `SwitchCase` variants
 
-**Test:** lower function with match on enum + int range, verify switch terminator shape
+**Integration test:** lower function with match on enum + int range, verify switch terminator shape
 
 ### Phase 10 — Static init synthesis (`items/static_lower.rs`)
 
@@ -214,7 +249,7 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 - [ ] `inject_init_call_into_main()` — prepend call to main's entry block
 - [ ] Init thunks reuse `lower_function_body()` on the static entity
 
-**Test:** lower module with global variable, verify init thunk + main injection
+**Integration test:** lower module with global variable, verify init thunk + main injection
 
 ### Phase 11 — Validation (`validate.rs`)
 
@@ -224,10 +259,13 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 
 ### Phase 12 — Wire into compiler
 
+This is the switchover. First time the test suite matters for this crate.
+
 - [ ] Add `kestrel-mir-lower-2` to workspace `Cargo.toml`
+- [ ] Manual diff test: compare old vs new lowerer `display()` output on stdlib
 - [ ] Wire `kestrel-compiler` pipeline to call `kestrel_mir_lower_2::lower_module()`
       instead of `kestrel_mir_lower::lower_module()`
-- [ ] Verify: full triage run green
+- [ ] Verify: full `/triage` run green (end-to-end through codegen)
 - [ ] Verify: `cargo fmt` + `cargo clippy -p kestrel-mir-lower-2` clean
 
 ### Phase 13 — Cleanup
@@ -238,8 +276,9 @@ Core expression dispatch. Each file is an `impl BodyCtx` block.
 
 ## Verification
 
-- [ ] Targeted triage run green after each phase
-- [ ] Full triage run green before Phase 12 commit
+- [ ] `cargo test -p kestrel-mir-lower-2` green after each phase
 - [ ] `cargo fmt` + `cargo clippy -p kestrel-mir-lower-2` clean
 - [ ] stdlib lowering: 0 MirTy::Error in struct fields (same bar as current crate)
-- [ ] All existing `kestrel-mir-lower` integration tests ported and passing
+- [ ] All integration tests passing with specific count assertions
+- [ ] Manual diff test against old lowerer output before Phase 12 switchover
+- [ ] Full `/triage` run green only at Phase 12 (switchover to compiler pipeline)
