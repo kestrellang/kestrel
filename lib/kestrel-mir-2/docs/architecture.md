@@ -71,6 +71,204 @@ type substitution all run during monomorphization — before codegen sees
 the module. Codegen is a pure emitter: it reads concrete layouts and
 mangled names, never computes them.
 
+### Module layout
+
+```
+kestrel-mir-2/src/
+├── lib.rs              — MirModule, pub use, pipeline entry point
+├── ty.rs               — MirTy, TyId, TyArena
+├── place.rs            — Place, PlaceBase, PlaceElem, FieldIdx, VariantIdx
+├── operand.rs          — Operand, UseMode, ArgMode
+├── statement.rs        — StatementKind, Rvalue, Callee, Statement
+├── terminator.rs       — TerminatorKind, SwitchCase, Terminator
+├── body.rs             — MirBody, BasicBlock, LocalDef, ScopeId
+├── immediate.rs        — ImmediateKind, Immediate
+├── op.rs               — Op, IntBits, FloatBits, Signedness
+├── item/
+│   ├── mod.rs          — TypeInfo, CopyBehavior, DropBehavior, TypeParamDef
+│   ├── function.rs     — FunctionDef, ParamDef, ExternInfo, FunctionKind
+│   ├── struct_def.rs   — StructDef, FieldDef
+│   ├── enum_def.rs     — EnumDef, EnumCaseDef
+│   ├── protocol.rs     — ProtocolDef, AssociatedTypeDef, ProtocolMethodDef
+│   ├── witness.rs      — WitnessDef, WitnessMethodBinding, WitnessMethodKey
+│   └── static_def.rs   — StaticDef, FileConstantData
+├── layout.rs           — StructLayout, EnumLayout, layout arithmetic helpers
+├── substitute.rs       — SubstMap, substitute()
+├── passes/
+│   ├── mod.rs          — with_all_passes() orchestration
+│   ├── clone_elab.rs   — clone elaboration
+│   ├── drop_elab.rs    — drop elaboration + shim synthesis
+│   ├── layout.rs       — non-generic layout pass
+│   ├── liveness.rs     — backward liveness (used by clone elab)
+│   ├── verify.rs       — generic MIR verification
+│   └── dataflow.rs     — CfgInfo, forward_fixpoint, backward_fixpoint
+├── mono/
+│   ├── mod.rs          — monomorphize() entry point, MonoModule
+│   ├── collect.rs      — instantiation discovery (BFS)
+│   ├── witness.rs      — witness resolution
+│   ├── mangle.rs       — name mangling (v0 scheme)
+│   ├── types.rs        — MonoFunction, MonoBody, MonoCallee, MonoRvalue, etc.
+│   └── verify.rs       — mono verification
+└── display.rs          — MIR pretty-printing
+```
+
+### Public API
+
+The compiler driver calls one entry point:
+
+```rust
+pub fn lower_and_monomorphize(
+    module: MirModule,
+    target: &TargetConfig,
+) -> Result<MonoModule, VerifyResult>
+```
+
+This runs the full pipeline: clone elab → drop elab → layout → verify →
+monomorphize → mono verify. Returns `Err(VerifyResult)` if any
+verification stage fails (ICE). The lowering crate (`kestrel-mir-lower`)
+produces the `MirModule`; this function takes it from there.
+
+Individual passes are also `pub` for testing, but the pipeline entry
+point is the expected interface for production use.
+
+### Pretty-printing
+
+`MirModule` and `MonoModule` implement a text display format for
+debugging, accessed via `.display() -> impl fmt::Display`. The format
+is human-readable pseudocode, not a serialization format. See the
+display format spec below. Entity names are resolved via
+`MirModule.entity_names`. TyIds are resolved via the arena. The display
+implementation lives in `display.rs` and is available from day one.
+
+### Display format
+
+**Types:**
+```
+i8  i16  i32  i64  f16  f32  f64  bool  !  str  <error>
+p[i32]                              — Pointer
+(i32, bool)                         — Tuple
+()                                  — Unit (empty tuple)
+std.Array[i64]                      — Named with type args
+T                                   — TypeParam
+Self                                — SelfType
+(Iterator.Item for T)               — AssociatedProjection
+func(i32, i32) -> bool              — FuncThin
+func escaping(i64) -> ()            — FuncThick
+```
+
+**Places** (flat, with index-based projections):
+```
+%x                                  — Local
+@std.globalVar                      — Global
+%s.0                                — Field (FieldIdx 0)
+%s.1.0                              — Nested field
+%e:2                                — Downcast (VariantIdx 2)
+(deref %p)                          — Deref
+(deref %p).0                        — Deref + field
+```
+
+Field projections use `.N` (numeric index). Downcasts use `:N` to
+distinguish from fields. Display can optionally resolve indices to
+names via StructDef/EnumDef for readability: `%s.name` instead of `%s.0`,
+`%e:Some` instead of `%e:0`.
+
+**Operands:**
+```
+%x                                  — Operand::Place (bare)
+42_i64                              — Operand::Const (int literal)
+true                                — Operand::Const (bool)
+"hello"                             — Operand::Const (string literal)
+()                                  — Operand::Const (unit)
+std.foo[i64]                        — Operand::Const (function ref)
+```
+
+**Rvalues:**
+```
+use copy %x                         — Use(Place, Copy)
+use move %x                         — Use(Place, Move)
+ref %x                              — Ref(Place)
+ref_mut %x                          — RefMut(Place)
+add.i64 %a, %b                     — Op2
+neg.i32 %a                          — Op1
+fma.f64 %a, %b, %c                 — Op3
+construct std.Point { .0: copy %x, .1: copy %y }
+tuple (copy %a, move %b)
+enum Optional[i64]:0 (copy %val)    — EnumVariant (VariantIdx 0)
+array[i64] [copy %a, copy %b]
+apply_partial std.foo (move %cap)
+```
+
+Compound operands show their mode: `copy %x` or `move %x`.
+
+**Statements:**
+```
+%dest = <rvalue>                    — Assign
+%ret = call std.Array.append(%self, %val) [ref, move]
+                                    — Call with ArgMode annotations
+call std.print(%msg) [ref]          — Call without return value
+drop %x                             — Drop
+drop %x if %flag                    — DropIf
+%flag = true                        — SetDropFlag
+scope_live %i                       — ScopeLive
+```
+
+Call args show their ArgMode in brackets after the arg list:
+`[ref, move, copy]`. This makes the calling convention visible at a glance.
+
+**Terminators:**
+```
+return %x                           — Return
+jump bb3                            — Jump
+branch %cond -> bb1, bb2            — Branch
+switch %disc -> [0: bb1, 1: bb2, _: bb3]
+                                    — Switch (VariantIdx or literal)
+panic "index out of bounds"         — Panic
+unreachable                         — Unreachable
+```
+
+**Function signatures:**
+```
+fn std.Array.append[T](&var self: p[Array[T]], value: T) -> () {
+  locals:
+    %self: p[Array[T]]              — param 0 (borrow)
+    %value: T                       — param 1 (consuming)
+    %_t0: i64                       — temp
+  bb0:
+    ...
+  bb1:
+    ...
+}
+
+fn __drop$MyStruct(consuming self: MyStruct) -> () { ... }
+
+extern fn libc.malloc(size: i64) -> p[()] [C, symbol="malloc"]
+```
+
+Parameter convention is shown as `&` (borrow), `&var` (mutborrow), or
+bare (consuming) before `self`/param name. Extern functions show calling
+convention and symbol name in brackets.
+
+**Module-level:**
+```
+module "main"
+
+struct std.Point { x: i64, y: i64 }
+  copy: Bitwise  drop: None  layout: { size: 16, align: 8, offsets: [0, 8] }
+
+enum std.Optional[T] { None(0), Some(1) }
+  copy: <from T>  drop: EnumDrop { variants: [(1, [0])] }
+
+protocol std.Equatable { fn equals(&self, &other) -> bool }
+
+witness std.Array[T]: std.Equatable where T: Equatable
+  equals -> std.Array.equals[T]
+
+static @std.VERSION: str = "1.0"
+
+fn std.main() -> () { ... }
+fn std.Array.append[T](...) -> () { ... }
+```
+
 ## Pass pipeline
 
 ```
@@ -141,3 +339,45 @@ no layout computation, no name mangling.
   the verifier until projection-aware move paths are implemented. Field
   assignment may still overwrite-drop the old field value when the parent is
   definitely initialized.
+
+## Migration from kestrel-mir-1
+
+kestrel-mir-2 is a new crate, not an in-place rewrite. The migration path:
+
+1. **Build kestrel-mir-2 types alongside kestrel-mir.** Both crates exist
+   simultaneously. kestrel-mir-2 defines `MirModule`, `MirBody`, `Operand`,
+   `Rvalue`, `Place`, `MirTy`, `TyArena`, etc. as new types.
+
+2. **Rewrite kestrel-mir-lower to emit kestrel-mir-2 types.** This is the
+   main migration effort. The lowering is already organized by construct
+   (calls, closures, match, literals) — each section migrates independently.
+   Key changes during migration:
+   - `Value::Copy/Move/Ref/RefMut` → `(Operand, UseMode)` or `(Operand, ArgMode)`
+   - `Place::Field { parent: Box<Place>, name }` → `Place { base, projections }`
+     with `PlaceElem::Field(FieldIdx)` — resolve field names to indices
+   - `MirTy` by value → `TyId` via arena interning
+   - `CallArg` eliminated — call args are `Vec<(Operand, ArgMode)>`
+   - Clone insertion for consuming call args removed from lowering (clone
+     elaboration handles it uniformly via liveness)
+
+3. **Port passes.** Clone elaboration, drop elaboration, layout, and
+   verification are rewritten against kestrel-mir-2 types. The shared
+   dataflow infrastructure (`CfgInfo`, `forward_fixpoint`, `backward_fixpoint`)
+   is built first — all passes depend on it.
+
+4. **Build monomorphization.** New pass, absorbing logic from
+   kestrel-codegen-cranelift's `monomorphize/` module and kestrel-codegen's
+   `layout.rs` + `mangle.rs`.
+
+5. **Rewrite kestrel-codegen-cranelift against MonoModule.** Codegen takes
+   `&MonoModule` instead of `&MirModule`. The monomorphize/ directory, type
+   substitution, witness resolution, and layout cache are deleted.
+
+6. **Delete kestrel-mir, kestrel-ownership, kestrel-codegen.** Once
+   kestrel-mir-2 is fully wired and tests pass, the old crates are removed.
+
+Steps 1-3 can proceed without touching codegen. Step 4-5 can be done
+together. The key constraint: both MIR representations cannot be active
+in the same compilation pipeline simultaneously — the switchover from
+kestrel-mir to kestrel-mir-2 happens in one commit that rewires
+`kestrel-compiler`'s pipeline.

@@ -314,7 +314,6 @@ struct MirBody {
 struct LocalDef {
     name: String,
     ty: TyId,
-    borrowed: bool,  // closure-captured borrowed view — don't drop
 }
 
 enum ScopeId {
@@ -323,9 +322,9 @@ enum ScopeId {
 }
 ```
 
-Parameters are `locals[0..param_count]`. The `borrowed` flag marks closure
-captures that are borrowed views of the parent scope — drop elaboration
-skips these.
+Parameters are `locals[0..param_count]`. No `borrowed` flag — borrowed
+closure captures have type `Pointer(T)`, which is Bitwise, so they are
+automatically excluded from drop tracking by the type system.
 
 ## Immediate
 
@@ -365,5 +364,116 @@ hack. After monomorphization, they can be folded to concrete values.
 All operations — arithmetic, comparisons, casts, pointer ops, intrinsics.
 Arity is enforced at the Rvalue level (Op1/Op2/Op3).
 
-The Op enum is unchanged from kestrel-mir. See the kestrel-mir op
-documentation for the full variant list.
+```rust
+enum Op {
+    // === Arithmetic (Op2 unless noted) ===
+    Add(IntBits, Signedness), Sub(IntBits, Signedness),
+    Mul(IntBits, Signedness), Div(IntBits, Signedness),
+    Rem(IntBits, Signedness), Neg(IntBits),          // Op1
+    FAdd(FloatBits), FSub(FloatBits), FMul(FloatBits),
+    FDiv(FloatBits), FNeg(FloatBits),                // Op1
+
+    // === Bitwise (Op2 unless noted) ===
+    And(IntBits), Or(IntBits), Xor(IntBits),
+    Shl(IntBits), Shr(IntBits, Signedness),
+    Not(IntBits),                                    // Op1
+    Popcount(IntBits), Clz(IntBits), Ctz(IntBits),  // Op1
+    Bswap(IntBits),                                  // Op1
+
+    // === Integer comparison (Op2) ===
+    Eq(IntBits), Ne(IntBits),
+    Lt(IntBits, Signedness), Le(IntBits, Signedness),
+    Gt(IntBits, Signedness), Ge(IntBits, Signedness),
+
+    // === Float comparison (Op2) ===
+    FEq(FloatBits), FNe(FloatBits),
+    FLt(FloatBits), FLe(FloatBits),
+    FGt(FloatBits), FGe(FloatBits),
+
+    // === Boolean (Op2 unless noted) ===
+    BoolAnd, BoolOr, BoolNot,                        // BoolNot is Op1
+    BoolEq,
+
+    // === Casts (Op1) ===
+    IntToFloat(IntBits, FloatBits),
+    FloatToInt(FloatBits, IntBits),
+    IntWiden(IntBits, IntBits),                       // signed sign-extend (from, to)
+    IntUnsignedWiden(IntBits, IntBits),               // unsigned zero-extend
+    IntTruncate(IntBits, IntBits),
+    FloatWiden(FloatBits, FloatBits),
+    FloatTruncate(FloatBits, FloatBits),
+    RefToImmut,                                       // &var T → &T
+
+    // === Pointer ===
+    PtrOffset,                                        // Op2: (ptr, byte_offset) → ptr
+    PtrFromAddress(TyId),                             // Op1: int → ptr
+    PtrToAddress,                                     // Op1: ptr → int
+    PtrRead(TyId),                                    // Op1: ptr → value
+    PtrWrite(TyId),                                   // Op2: (ptr, value) → ()
+    PtrIsNull,                                        // Op1: ptr → bool
+    PtrCast(TyId),                                    // Op1: ptr → ptr (different pointee)
+    PtrBitcast(TyId),                                 // Op1: ptr → ptr (reinterpret)
+    RefToPtr,                                         // Op1: &T → p[T]
+
+    // === Memory ===
+    StackAlloc(TyId),                                 // Op1: count → ptr
+
+    // === String ===
+    StrPtr,                                           // Op1: str → ptr
+    StrLen,                                           // Op1: str → i64
+
+    // === Atomic ===
+    AtomicAdd,                                        // Op2: (ptr, delta) → old
+    AtomicSub,                                        // Op2: (ptr, delta) → old
+
+    // === Float intrinsics ===
+    FloatPred(FloatBits, FloatPredicateKind),          // Op1: is_nan / is_infinite
+    FloatMath(FloatBits, FloatMathKind),               // Op1: floor/ceil/round/trunc/sqrt
+    FloatFma(FloatBits),                               // Op3: a * b + c
+    FloatCopysign(FloatBits),                          // Op2: (magnitude, sign) → value
+}
+
+enum IntBits { I8, I16, I32, I64 }
+enum FloatBits { F16, F32, F64 }
+enum Signedness { Signed, Unsigned }
+enum FloatPredicateKind { IsNan, IsInfinite }
+enum FloatMathKind { Floor, Ceil, Round, Trunc, Sqrt }
+```
+
+Changes from kestrel-mir-1:
+- `PtrNull`, `SizeOf`, `AlignOf`, `FloatConst` moved to `ImmediateKind` (constants, not ops)
+- `IntToString` removed (handled via witness call to `CustomStringConvertible`)
+- Type arguments use `TyId` instead of `MirTy` (interned)
+
+## Body construction
+
+Bodies are built imperatively by the lowering pass using a builder pattern:
+
+```rust
+struct BodyBuilder<'a> {
+    arena: &'a TyArena,
+    body: MirBody,
+    current_block: BlockId,
+    temp_counter: u32,
+}
+
+impl BodyBuilder {
+    fn new_block(&mut self) -> BlockId;
+    fn switch_to(&mut self, block: BlockId);
+    fn emit(&mut self, stmt: StatementKind);
+    fn emit_assign(&mut self, dest: Place, rvalue: Rvalue);
+    fn emit_call(&mut self, dest: Option<Place>, callee: Callee, args: Vec<(Operand, ArgMode)>);
+    fn terminate(&mut self, term: TerminatorKind);
+    fn fresh_temp(&mut self, ty: TyId) -> LocalId;
+    fn finish(self) -> MirBody;
+}
+```
+
+The builder owns the `MirBody` under construction. `emit` appends to
+the current block. `terminate` seals the current block. `new_block`
+creates a block and returns its ID (does not switch to it).
+
+Lowering creates one `BodyBuilder` per function body, emits statements
+in HIR traversal order, and calls `finish()` to extract the completed
+body. The builder is internal to kestrel-mir-lower — it is not part of
+the public MIR API.

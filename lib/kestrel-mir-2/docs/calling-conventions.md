@@ -82,14 +82,15 @@ The lowering maps convention + type to ArgMode:
 | Borrow            | (any)               | Ref     |
 | MutBorrow         | (any)               | RefMut  |
 | Consuming         | Bitwise             | Copy    |
-| Consuming         | Clone               | Move *  |
-| Consuming         | None (affine)       | Move    |
+| Consuming         | Clone (source survives) | Copy *  |
+| Consuming         | Clone (last use)        | Move    |
+| Consuming         | None (affine)           | Move    |
 
-\* For consuming Clone args, the **lowering** (not clone elaboration) is
-responsible for inserting the clone. The lowering emits
-`_clone = call Cloneable.clone(ref x); call foo(move _clone)`.
-Clone elaboration does not rewrite call args — it only handles
-assignments, composite rvalue fields, and returns.
+\* Clone elaboration rewrites `ArgMode::Copy` of Clone-typed args: if
+the source is live after the call, inserts a clone and rewrites to Move.
+If dead, rewrites to Move directly. The lowering does not need Clone
+awareness — it emits Copy when the source needs to survive, Move when
+it doesn't.
 
 ### Why ArgMode::Ref instead of materializing a temp
 
@@ -145,13 +146,11 @@ This keeps ApplyPartial captures on UseMode (Copy|Move) rather than
 introducing ArgMode in compound rvalue position. Closures are rare (~1-2
 per function), so the extra temp is acceptable.
 
-**The `borrowed` flag:** Inside the closure's body (not the parent), the
-parameter local that receives the captured reference has `borrowed: true`
-on its LocalDef. This tells drop elaboration: "this local is a borrowed
-view of someone else's value — don't drop it." The flag goes on the
-closure's param local, NOT on the original variable in the parent scope.
-The original variable in the parent scope is still owned and will be
-dropped normally by the parent function's drop elaboration.
+Inside the closure's body, the parameter local that receives a borrowed
+capture has type `Pointer(T)` — Bitwise-copyable, no drop needed. Drop
+elaboration excludes it automatically via the type system. No `borrowed`
+flag on LocalDef is needed. The original variable in the parent scope is
+still owned and dropped normally by the parent function's drop elaboration.
 
 ## ABI mapping
 

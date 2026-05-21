@@ -246,12 +246,23 @@ is not stored on the module (see items.md).
 ### Copy behavior queries
 
 ```rust
-fn copy_behavior(arena: &TyArena, module: &MirModule, ty: TyId) -> CopyBehavior
+fn copy_behavior(
+    arena: &TyArena,
+    module: &MirModule,
+    ty: TyId,
+    where_clause: Option<&WhereClause>,
+) -> CopyBehavior
 ```
 
-Replaces the recursive `MirTy::copy_behavior(&module)` method. With interned
-types, the result can be cached per TyId. For TypeParam, the query checks
-where-clause constraints (same logic, but one call site instead of three).
+The `where_clause` parameter is needed for generic TypeParams. Without it,
+`TypeParam(T)` has no known copy behavior. With `where T: Cloneable`, the
+query returns `Clone(cloneable_entity)`. With `where T: not Copyable`, it
+returns `None` (affine). Without any constraint, Kestrel's default is
+`Bitwise` (implicit Copyable).
+
+Clone elaboration passes the enclosing function's where-clause. For
+concrete types (Named, primitives), the where-clause is ignored — TypeInfo
+on the struct/enum def provides the answer directly.
 
 ## Generic types in MIR
 

@@ -38,7 +38,7 @@ struct WitnessMethodBinding {
 
 struct WitnessMethodKey {
     name: String,
-    // disambiguates overloads within the same protocol
+    labels: Vec<Option<String>>,    // param labels (None = unlabeled)
 }
 ```
 

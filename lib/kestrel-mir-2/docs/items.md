@@ -28,6 +28,7 @@ enum FunctionKind {
     ClosureCall { env_struct: Entity },
     Closure { parent_func: Entity },
     Thunk { original: Entity },
+    DropShim { nominal: Entity },       // __drop$T for struct/enum entity
     ModuleInit,
 }
 
@@ -271,23 +272,35 @@ struct TyArena {
 }
 ```
 
-The backing `Vec<MirTy>` must be index-stable — appending new types must
-not invalidate references to existing types. Implementation options:
+**Implementation decision:** `intern(&mut self)` and `get(&self)` on a
+plain `Vec<MirTy>`. The `&mut` on `intern` prevents concurrent reads
+during insertion — no index-stability issue because `get` can't be
+called while `intern` holds the mutable borrow.
 
-- **`typed_arena::Arena<MirTy>`** — stable references, no invalidation.
-  `get()` returns `&MirTy` safely.
-- **Page-based allocator** — grows by allocating new pages, never moving
-  existing data.
-- **`Vec<MirTy>` with `UnsafeCell`** — acceptable if the invariant "no
-  outstanding `&MirTy` during `intern()`" is enforced by API design (e.g.
-  `intern()` takes `&mut self`, `get()` takes `&self`).
+Passes work with `TyId` values (Copy, u32), not `&MirTy` references.
+The typical pattern is: `let ty = arena.get(id).clone()`, operate on
+the clone, `arena.intern(new_ty)`. No outstanding references across
+interning calls.
 
-The simplest correct approach: `intern(&mut self)` and `get(&self)`. The
-`&mut` prevents concurrent reads during insertion. This means type
-interning cannot happen while a pass holds a `&MirTy` reference from
-`get()` — passes should copy the `TyId` and work with IDs, not hold
-references across interning calls.
+During monomorphization body substitution (which needs to read types
+and intern substituted results in the same pass), the pattern is:
+read the type via `get()`, clone it, drop the reference, substitute
+fields, then `intern()` the result. This is sequential, not concurrent.
 
-If concurrent read+intern is needed (e.g. during body substitution),
-use `typed_arena` or a page-based allocator where appending is safe
-alongside outstanding references.
+```rust
+impl TyArena {
+    fn intern(&mut self, ty: MirTy) -> TyId {
+        if let Some(&id) = self.intern_map.get(&ty) {
+            return id;
+        }
+        let id = TyId(self.types.len() as u32);
+        self.types.push(ty.clone());
+        self.intern_map.insert(ty, id);
+        id
+    }
+
+    fn get(&self, id: TyId) -> &MirTy {
+        &self.types[id.0 as usize]
+    }
+}
+```

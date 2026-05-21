@@ -210,7 +210,8 @@ computed, all names mangled. The old `kestrel-codegen` crate dissolves:
   kestrel-mir-2 shared infrastructure, used by both the non-generic layout
   pass and monomorphization Phase 4
 - **Name mangling** → kestrel-mir-2, called during monomorphization Phase 3
-- **TargetConfig** (pointer width) → kestrel-mir-2, needed by layout
+- **TargetConfig** (pointer width) → passed as a parameter to layout
+  and monomorphization, not stored on MirModule (IR is target-agnostic)
 
 Codegen (kestrel-codegen-cranelift) becomes a pure emitter: it reads
 `MonoFunction.name` for symbols, `MonoStruct.type_info.layout` for field
