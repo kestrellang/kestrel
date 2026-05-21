@@ -88,7 +88,7 @@ impl BodyCtx<'_, '_> {
     }
 
     /// Emit an init call for a literal (allocate self, prepend &mut, call).
-    fn emit_init_literal_call(
+    pub(crate) fn emit_init_literal_call(
         &mut self,
         callee: Callee,
         args: Vec<(Operand, ArgMode)>,
@@ -368,7 +368,7 @@ impl BodyCtx<'_, '_> {
         )
     }
 
-    fn find_string_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
+    pub(crate) fn find_string_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
         self.find_literal_protocol_init(
             struct_entity,
             kestrel_hir::Builtin::ExpressibleByStringLiteral,
