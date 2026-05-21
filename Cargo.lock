@@ -977,6 +977,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-mir-2"
+version = "0.16.0"
+dependencies = [
+ "indexmap",
+ "kestrel-hecs",
+ "kestrel-span",
+ "smallvec",
+]
+
+[[package]]
 name = "kestrel-mir-lower"
 version = "0.16.0"
 dependencies = [

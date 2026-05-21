@@ -38,6 +38,7 @@ tokio = { version = "1.52.1", features = ["full"] }
 toml = "0.8"
 tower-lsp = "0.20"
 unicode-xid = "0.2"
+smallvec = "1"
 walkdir = "2"
 
 
@@ -68,6 +69,7 @@ members = [
     "lib/kestrel-codegen-cranelift",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
+    "lib/kestrel-mir-2",
     "lib/kestrel-test-suite",
     # "external/triage",  # TEMP: excluded during memory-model rewrite; restore before merging
 ]
