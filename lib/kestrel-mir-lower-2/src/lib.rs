@@ -26,6 +26,9 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
     // Phase 2: witness tables (depends on structs/enums being present)
     items::witness_lower::lower_witnesses(&mut ctx);
 
+    // Phase 3: static init thunks + master init + inject into main
+    items::static_lower::synthesize_static_inits(&mut ctx);
+
     ctx.finish()
 }
 
