@@ -366,39 +366,20 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
         }
     }
 
-    /// Check if a type is bitwise-copyable.
-    fn is_copy_type(&self, ty: TyId) -> bool {
-        match self.ctx.module.ty_arena.get(ty) {
-            MirTy::I8
-            | MirTy::I16
-            | MirTy::I32
-            | MirTy::I64
-            | MirTy::F16
-            | MirTy::F32
-            | MirTy::F64
-            | MirTy::Bool
-            | MirTy::Never
-            | MirTy::Error => true,
-            MirTy::Pointer(_) => true,
-            MirTy::Tuple(elems) => elems.iter().all(|e| self.is_copy_type(*e)),
-            MirTy::Named { entity, .. } => {
-                // Check if the struct/enum is Bitwise-copyable
-                if let Some(s) = self.ctx.module.structs.iter().find(|s| s.entity == *entity) {
-                    matches!(s.type_info.copy, CopyBehavior::Bitwise)
-                } else if let Some(e) = self.ctx.module.enums.iter().find(|e| e.entity == *entity) {
-                    matches!(e.type_info.copy, CopyBehavior::Bitwise)
-                } else {
-                    false
-                }
-            }
-            MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedProjection { .. } => {
-                // Generic types default to non-copyable (conservative)
-                false
-            }
-            MirTy::FuncThin { .. } => true,
-            MirTy::FuncThick { .. } => false,
-            MirTy::Str => false,
-        }
+    /// Check if a type is bitwise-copyable (uses ty_query with where-clause context).
+    pub fn is_copy_type(&self, ty: TyId) -> bool {
+        let wc = self.ctx.module.functions[self.func_idx]
+            .where_clause
+            .as_ref();
+        matches!(
+            kestrel_mir_2::ty_query::copy_behavior(
+                &self.ctx.module.ty_arena,
+                &self.ctx.module,
+                ty,
+                wc,
+            ),
+            CopyBehavior::Bitwise
+        )
     }
 
     /// Materialize an operand into a place. If already a place, return it.
