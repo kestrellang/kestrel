@@ -100,6 +100,13 @@ whose type is Clone.
 infrastructure" below). Precomputed once per function, queried per
 statement via `Liveness::is_live_after(block, stmt_index, local)`.
 
+For batch processing (clone elaboration processes every statement in a
+block), `Liveness::block_liveness_after(body, block)` precomputes a
+`Vec<BitVec>` where entry `i` is the liveness state immediately after
+statement `i`. This avoids re-walking the block per query. Must be
+called before the block is modified (inserted clone calls would corrupt
+the index mapping).
+
 ## 1b. Thunk synthesis
 
 **Purpose:** Generate thunk wrapper functions for `ApplyPartial` targets.
