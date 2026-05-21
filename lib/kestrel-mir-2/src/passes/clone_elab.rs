@@ -87,6 +87,11 @@ fn elaborate_block(
                     {
                         let ty = body.local(local).ty;
                         if is_clone_type(&module.ty_arena, module, ty, where_clause) {
+                            if !place.projections.is_empty()
+                                && crate::ty_query::needs_drop(&module.ty_arena, module, ty)
+                            {
+                                continue;
+                            }
                             let is_live = live.get(local.index());
                             stmt_rewrites.push(StmtRewrite::CallArg {
                                 stmt_index: si,
@@ -281,6 +286,15 @@ fn collect_rvalue_rewrites(
         };
         let ty = body.local(local).ty;
         if is_clone_type(arena, module, ty, where_clause) {
+            // TODO: projected copies from droppable aggregates where the field
+            // type is bitwise-copyable should stay as Copy — rewriting to Move
+            // would create a projected move that the verifier rejects. Long-term,
+            // per-field init tracking would handle this properly.
+            if !place.projections.is_empty()
+                && crate::ty_query::needs_drop(arena, module, ty)
+            {
+                continue;
+            }
             let is_live = live.get(local.index());
             out.push(StmtRewrite::RvalueOperand {
                 stmt_index,

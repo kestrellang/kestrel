@@ -133,7 +133,7 @@ fn verify_function(
                         message: "SetDropFlag statement not expanded".into(),
                     });
                 }
-                StatementKind::ScopeLive(_) => {}
+                StatementKind::Uninit { .. } | StatementKind::ScopeLive(_) => {}
             }
         }
 

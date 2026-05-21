@@ -11,7 +11,8 @@ pub mod verify;
 use crate::item::TargetConfig;
 use crate::MirModule;
 
-/// Run the full generic MIR pipeline: clone elab → drop shim → drop elab → layout → verify.
+/// Run the full generic MIR pipeline:
+/// clone elab → thunk → drop shim → drop elab → layout → verify.
 /// Returns the verify result. The module is mutated in place.
 pub fn run_pipeline(
     module: &mut MirModule,
@@ -19,6 +20,7 @@ pub fn run_pipeline(
     next_entity: &mut u32,
 ) -> verify::VerifyResult {
     clone_elab::run_clone_elaboration(module);
+    thunk::run_thunk_pass(module, next_entity);
     drop_shim::synthesize_drop_shims(module, next_entity);
     drop_elab::run_drop_elaboration(module);
     layout::run_layout_pass(module, target);

@@ -1,7 +1,6 @@
 use crate::operand::{ArgMode, Operand, UseMode};
 use crate::statement::{Rvalue, StatementKind};
 use crate::terminator::TerminatorKind;
-use crate::ty::MirTy;
 use crate::ty_query::{copy_behavior, needs_drop};
 use crate::{BlockId, CopyBehavior, LocalId, MirModule};
 
@@ -67,37 +66,19 @@ pub fn verify_structure(module: &MirModule, result: &mut VerifyResult) {
                 });
                 continue;
             }
+            // Local type must match param type — convention is metadata,
+            // not encoded in the type (Option B: logical types throughout).
             let local_ty = body.locals[param.local.index()].ty;
-            match param.convention {
-                crate::ParamConvention::Borrow | crate::ParamConvention::MutBorrow => {
-                    let expected = module.ty_arena.find(|t| {
-                        matches!(t, MirTy::Pointer(inner) if *inner == param.ty)
-                    });
-                    if expected != Some(local_ty) {
-                        result.errors.push(VerifyError {
-                            func_idx: fi,
-                            block: None,
-                            stmt: None,
-                            message: format!(
-                                "param {pi} '{}': borrow convention but local type is not Pointer(param_ty)",
-                                param.name
-                            ),
-                        });
-                    }
-                }
-                crate::ParamConvention::Consuming => {
-                    if local_ty != param.ty {
-                        result.errors.push(VerifyError {
-                            func_idx: fi,
-                            block: None,
-                            stmt: None,
-                            message: format!(
-                                "param {pi} '{}': consuming convention but local type != param type",
-                                param.name
-                            ),
-                        });
-                    }
-                }
+            if local_ty != param.ty {
+                result.errors.push(VerifyError {
+                    func_idx: fi,
+                    block: None,
+                    stmt: None,
+                    message: format!(
+                        "param {pi} '{}': local type != param type",
+                        param.name
+                    ),
+                });
             }
         }
 
@@ -172,6 +153,9 @@ fn verify_statement_structure(
                     )));
                 }
             }
+        }
+        StatementKind::Uninit { dest } => {
+            verify_place_in_bounds(dest, body, fi, block, si, result);
         }
         StatementKind::Drop { place } => {
             verify_place_in_bounds(place, body, fi, block, si, result);

@@ -466,6 +466,8 @@ impl BodyCtx<'_, '_> {
     }
 
     /// Prepend the receiver type's args to method-level type args.
+    /// Skips prepending if method_args already starts with the parent's args
+    /// (the inference engine sometimes includes inherited params).
     pub fn prepend_receiver_type_args(
         &self,
         receiver_ty: TyId,
@@ -476,12 +478,16 @@ impl BodyCtx<'_, '_> {
             _ => Vec::new(),
         };
         if parent_args.is_empty() {
-            method_args
-        } else {
-            let mut result = parent_args;
-            result.extend(method_args);
-            result
+            return method_args;
         }
+        if method_args.len() >= parent_args.len()
+            && method_args[..parent_args.len()] == parent_args[..]
+        {
+            return method_args;
+        }
+        let mut result = parent_args;
+        result.extend(method_args);
+        result
     }
 
     /// Resolve a type-ref expression (Def of a type entity) to its TyId.

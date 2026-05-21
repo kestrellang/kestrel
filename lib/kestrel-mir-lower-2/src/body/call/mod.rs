@@ -9,7 +9,8 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_hir::ty::HirTy;
 use kestrel_mir_2::item::function::FunctionKind;
 use kestrel_mir_2::{
-    ArgMode, Callee, Immediate, MirTy, Operand, Place, Rvalue, TyId, UseMode, WitnessMethodKey,
+    ArgMode, Callee, FieldIdx, Immediate, MirTy, Operand, Place, Rvalue, TyId, UseMode,
+    WitnessMethodKey,
 };
 
 use super::BodyCtx;
@@ -89,6 +90,17 @@ impl BodyCtx<'_, '_> {
             return Operand::Const(Immediate::error());
         };
 
+        // Field-subscript: type inference flagged `self.field(args)` as a call
+        // through a field. Interpose a field projection so the receiver is
+        // the field value, not `self`.
+        let (receiver_ty, mut call_args) =
+            if let Some(&field_entity) = self.typed.and_then(|t| t.field_subscripts.get(&expr_id))
+            {
+                self.rewrite_field_subscript(receiver_ty, call_args, field_entity, method_name)
+            } else {
+                (receiver_ty, call_args)
+            };
+
         // Resolve type args
         let method_type_args = if let Some(hir_args) = hir_type_args {
             let inferred = self.resolve_type_args(expr_id);
@@ -122,6 +134,53 @@ impl BodyCtx<'_, '_> {
         let dest = self.fresh_temp(result_ty);
         self.emit_call(Some(Place::local(dest)), callee, call_args);
         Operand::Place(Place::local(dest))
+    }
+
+    /// Rewrite a field-subscript call: replace the receiver with a field projection.
+    /// Called when type inference flagged this expr via `field_subscripts`.
+    fn rewrite_field_subscript(
+        &mut self,
+        receiver_ty: TyId,
+        mut call_args: Vec<(Operand, ArgMode)>,
+        _field_entity: Entity,
+        field_name: &str,
+    ) -> (TyId, Vec<(Operand, ArgMode)>) {
+        let recv_entity = match self.ctx.module.ty_arena.get(receiver_ty) {
+            MirTy::Named { entity, .. } => *entity,
+            _ => return (receiver_ty, call_args),
+        };
+
+        let Some(field_idx) = self.ctx.resolve_field_idx(recv_entity, field_name) else {
+            return (receiver_ty, call_args);
+        };
+
+        let field_ty = self
+            .ctx
+            .module
+            .structs
+            .iter()
+            .find(|s| s.entity == recv_entity)
+            .and_then(|s| s.fields.get(field_idx.index()))
+            .map(|f| f.ty);
+
+        let Some(field_ty) = field_ty else {
+            return (receiver_ty, call_args);
+        };
+
+        if let Some((old_receiver, _)) = call_args.first() {
+            if let Some(place) = old_receiver.as_place() {
+                let field_place = place.clone().field(field_idx);
+                let field_mode = if self.is_copy_type(field_ty) {
+                    ArgMode::Copy
+                } else {
+                    ArgMode::Ref
+                };
+                call_args[0] = (Operand::Place(field_place), field_mode);
+                return (field_ty, call_args);
+            }
+        }
+
+        (receiver_ty, call_args)
     }
 
     pub fn lower_protocol_call_expr(

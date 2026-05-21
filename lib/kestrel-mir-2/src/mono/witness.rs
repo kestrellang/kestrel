@@ -234,21 +234,24 @@ pub fn resolve_witness_call(
         .find(|m| m.key == *method)
         .unwrap();
 
-    // Build substitution map from pattern match bindings
+    // Build substitution from pattern match bindings.
+    // match_pattern(witness.implementing_type, self_type) gives us
+    // impl-type-param → concrete (e.g., T_array → Int64).
     let mut subst = SubstMap::new();
     for (entity, ty) in &bindings {
         subst.type_params.insert(*entity, *ty);
     }
 
-    // Substitute the binding's type_args to produce concrete type args
+    // Substitute the binding's type_args (protocol type arg expressions)
+    // through the bindings to get concrete type args.
+    // e.g., binding.type_args = [TypeParam(T_array)] → substitute → [Int64]
     let mut type_args: Vec<TyId> = binding
         .type_args
         .iter()
         .map(|&ta| substitute(arena, ta, &subst))
         .collect();
 
-    // Append method-level type args (protocol type params are resolved through bindings,
-    // method-level type args pass through)
+    // Append any method-level type args past the protocol's param count
     let proto_param_count = protocols
         .iter()
         .find(|p| p.entity == protocol)
@@ -257,7 +260,7 @@ pub fn resolve_witness_call(
     let method_level_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
     type_args.extend_from_slice(method_level_args);
 
-    // Cap to concrete function's param count
+    // Cap to the concrete function's param count
     let concrete_func = functions.iter().find(|f| f.entity == binding.func);
     if let Some(func) = concrete_func {
         type_args.truncate(func.type_params.len());

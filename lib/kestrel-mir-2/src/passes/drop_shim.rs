@@ -19,6 +19,20 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
     // Ensure unit type is interned (shims return unit)
     module.ty_arena.unit();
 
+    // Pre-intern Named types for all structs/enums so shim generation can find them
+    for s in &module.structs {
+        module.ty_arena.intern(MirTy::Named {
+            entity: s.entity,
+            type_args: vec![],
+        });
+    }
+    for e in &module.enums {
+        module.ty_arena.intern(MirTy::Named {
+            entity: e.entity,
+            type_args: vec![],
+        });
+    }
+
     // Collect types that need shims
     let mut shim_map: HashMap<Entity, usize> = HashMap::new();
     let mut worklist: Vec<Entity> = Vec::new();

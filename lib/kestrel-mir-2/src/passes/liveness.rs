@@ -122,6 +122,11 @@ fn transfer_statement(live: &mut BitVec, kind: &StatementKind) {
                 _ => {}
             }
         }
+        StatementKind::Uninit { dest } => {
+            if let Some(id) = dest.root_local() {
+                live.clear(id.index());
+            }
+        }
         StatementKind::Drop { place } => {
             gen_place(live, place);
         }

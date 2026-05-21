@@ -168,4 +168,88 @@ mod tests {
             .count();
         eprintln!("Op statements (intrinsics): {}", op_count);
     }
+
+    #[test]
+    fn stdlib_passes_pipeline() {
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        CompilerDriver::new(&c).infer_all();
+
+        let mut mir = lower_module(c.world(), c.root());
+        let target = kestrel_mir_2::TargetConfig::host_64();
+        let mut next_entity = c.world().entity_count() as u32;
+        let result =
+            kestrel_mir_2::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+
+        let func_count = mir.functions.len();
+        let thunk_count = mir
+            .functions
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    kestrel_mir_2::item::function::FunctionKind::Thunk { .. }
+                )
+            })
+            .count();
+        let shim_count = mir
+            .functions
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    kestrel_mir_2::item::function::FunctionKind::DropShim { .. }
+                )
+            })
+            .count();
+
+        eprintln!(
+            "Pipeline: {} functions ({} thunks, {} drop shims), {} verify errors",
+            func_count,
+            thunk_count,
+            shim_count,
+            result.errors.len()
+        );
+
+        // Categorize verify errors by function
+        let mut by_func: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+        for e in &result.errors {
+            by_func.entry(&mir.functions[e.func_idx].name).or_default().push(&e.message);
+        }
+        let mut sorted: Vec<_> = by_func.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        for (func, errors) in sorted.iter().take(15) {
+            let first = errors[0];
+            if errors.len() == 1 {
+                eprintln!("  {func}: {first}");
+            } else {
+                eprintln!("  {func} ({}x): {first}", errors.len());
+            }
+        }
+
+        // Dump a specific function for debugging
+        for func in &mir.functions {
+            if func.name == "std.iter.CycleIterator.init" || func.name == "std.collections.Array.init" {
+                eprintln!("\n--- {} ---", func.name);
+                if let Some(body) = &func.body {
+                    for (i, local) in body.locals.iter().enumerate() {
+                        let marker = if i < body.param_count { " [param]" } else { "" };
+                        eprintln!("  %{} {}: {:?}{}", i, local.name, mir.ty_arena.get(local.ty), marker);
+                    }
+                    for (bi, block) in body.blocks.iter().enumerate() {
+                        eprintln!("  bb{bi}:");
+                        for (si, stmt) in block.stmts.iter().enumerate() {
+                            eprintln!("    [{si}] {:?}", stmt.kind);
+                        }
+                        eprintln!("    term: {:?}", block.terminator.kind);
+                    }
+                }
+            }
+        }
+
+        assert!(func_count > 3000, "expected 3000+ functions, got {func_count}");
+        assert!(thunk_count > 100, "expected thunks, got {thunk_count}");
+        assert!(shim_count > 5, "expected drop shims, got {shim_count}");
+    }
 }

@@ -113,10 +113,16 @@ fn transfer_statement(state: &mut InitMap, kind: &StatementKind) {
             for (operand, mode) in args {
                 if *mode == ArgMode::Move
                     && let Operand::Place(place) = operand
+                    && place.projections.is_empty()
                     && let Some(local) = place.root_local()
                 {
                     state.set(local, InitState::Dead);
                 }
+            }
+        }
+        StatementKind::Uninit { dest } => {
+            if let Some(local) = dest.root_local() {
+                state.set(local, InitState::Live);
             }
         }
         StatementKind::Drop { place } => {
@@ -150,6 +156,7 @@ fn kill_rvalue_moves(state: &mut InitMap, rvalue: &Rvalue) {
     for (op, mode) in rvalue.operands_with_mode() {
         if mode == Some(UseMode::Move)
             && let Operand::Place(place) = op
+            && place.projections.is_empty()
             && let Some(local) = place.root_local()
         {
             state.set(local, InitState::Dead);

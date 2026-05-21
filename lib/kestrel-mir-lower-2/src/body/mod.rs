@@ -253,8 +253,26 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
         &mut self,
         dest: Option<Place>,
         callee: Callee,
-        args: Vec<(Operand, ArgMode)>,
+        mut args: Vec<(Operand, ArgMode)>,
     ) {
+        for (operand, mode) in &mut args {
+            if matches!(mode, ArgMode::Ref | ArgMode::RefMut)
+                && let Operand::Const(imm) = operand
+            {
+                // Ref/RefMut args must be Places — materialize Consts into temps
+                let ty = imm.ty(&mut self.ctx.module.ty_arena);
+                let temp = self.fresh_temp(ty);
+                let imm_clone = imm.clone();
+                self.emit_assign_const(Place::local(temp), imm_clone);
+                *operand = Operand::Place(Place::local(temp));
+            } else if *mode == ArgMode::RefMut
+                && let Operand::Place(place) = operand
+            {
+                // RefMut args are initialized by the callee (e.g. init calls) —
+                // mark them Live for init-state analysis
+                self.push_stmt(StatementKind::Uninit { dest: place.clone() });
+            }
+        }
         self.push_stmt(StatementKind::Call { dest, callee, args });
     }
 
@@ -446,7 +464,16 @@ pub fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_idx: usize) 
     bctx.lower_body();
     let mir_body = bctx.finish();
 
-    ctx.module.functions[func_idx].body = Some(mir_body);
+    // Patch ParamDefs with real local IDs and inference-resolved types
+    let func = &mut ctx.module.functions[func_idx];
+    for (pi, param) in func.params.iter_mut().enumerate() {
+        let local_id = kestrel_mir_2::LocalId::new(pi);
+        param.local = local_id;
+        if pi < mir_body.locals.len() {
+            param.ty = mir_body.locals[pi].ty;
+        }
+    }
+    func.body = Some(mir_body);
 }
 
 /// Extract the span from any HirExpr variant.

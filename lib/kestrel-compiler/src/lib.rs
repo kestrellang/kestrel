@@ -227,12 +227,14 @@ impl Compiler {
 
     /// Lower to MIR using the new kestrel-mir-2 representation.
     ///
-    /// Pass pipeline (clone elab, drop elab, layout) is not yet wired —
-    /// the liveness pass panics on real lowered output (functions without
-    /// bodies, edge cases in block structure). That's a pass bug to fix
-    /// separately.
+    /// Runs the full pass pipeline: clone elab → thunk → drop shim →
+    /// drop elab → layout → verify.
     pub fn lower_to_mir2(&self) -> kestrel_mir_2::MirModule {
-        kestrel_mir_lower_2::lower_module(self.world(), self.root())
+        let mut mir = kestrel_mir_lower_2::lower_module(self.world(), self.root());
+        let target = kestrel_mir_2::TargetConfig::host_64();
+        let mut next_entity = self.world().entity_count() as u32;
+        kestrel_mir_2::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        mir
     }
 
     /// Same as [`Self::lower_to_mir`] but also returns the
@@ -286,6 +288,44 @@ impl Compiler {
         let mir = self.lower_to_mir();
         let target = kestrel_codegen::TargetConfig::host();
         kestrel_codegen_cranelift::compile_and_link(&mir, &target, options, output_path)
+    }
+
+    /// Lower to MIR-2, monomorphize, and compile to native object code.
+    #[allow(clippy::result_large_err)]
+    pub fn compile_to_object2(
+        &self,
+    ) -> Result<Vec<u8>, kestrel_codegen_cranelift_2::CodegenError> {
+        let mir = self.lower_to_mir2();
+        let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
+        let mono = kestrel_mir_2::mono::monomorphize(mir, &target_mir2)
+            .map_err(|errs| {
+                kestrel_codegen_cranelift_2::CodegenError::Unsupported(
+                    format!("monomorphization failed: {} errors", errs.len()),
+                )
+            })?;
+        let target = kestrel_codegen::TargetConfig::host();
+        let options = kestrel_codegen_cranelift_2::CodegenOptions::default();
+        let result = kestrel_codegen_cranelift_2::compile(&mono, &target, &options)?;
+        Ok(result.object_bytes)
+    }
+
+    /// Lower to MIR-2, monomorphize, compile, and link to an executable.
+    #[allow(clippy::result_large_err)]
+    pub fn compile_and_link2(
+        &self,
+        output_path: &Path,
+        options: &kestrel_codegen_cranelift_2::CodegenOptions,
+    ) -> Result<(), kestrel_codegen_cranelift_2::CodegenError> {
+        let mir = self.lower_to_mir2();
+        let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
+        let mono = kestrel_mir_2::mono::monomorphize(mir, &target_mir2)
+            .map_err(|errs| {
+                kestrel_codegen_cranelift_2::CodegenError::Unsupported(
+                    format!("monomorphization failed: {} errors", errs.len()),
+                )
+            })?;
+        let target = kestrel_codegen::TargetConfig::host();
+        kestrel_codegen_cranelift_2::compile_and_link(&mono, &target, options, output_path)
     }
 
     /// Load all .ks files from a directory, parse and build declarations.

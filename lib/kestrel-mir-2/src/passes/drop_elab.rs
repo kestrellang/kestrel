@@ -103,9 +103,17 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         let mut states = current_states;
 
         for si in 0..bb.stmts.len() {
+            // Only whole-local assignments trigger overwrite drops.
+            // Field writes (%x.0 = ...) mutate in place — the aggregate
+            // is still live and must not be dropped.
+            // TODO: field-level drops for overwritten fields that need cleanup
             let dest_local = match &bb.stmts[si].kind {
-                StatementKind::Assign { dest, .. } => dest.root_local(),
-                StatementKind::Call { dest: Some(d), .. } => d.root_local(),
+                StatementKind::Assign { dest, .. } if dest.projections.is_empty() => {
+                    dest.root_local()
+                }
+                StatementKind::Call { dest: Some(d), .. } if d.projections.is_empty() => {
+                    d.root_local()
+                }
                 _ => None,
             };
             if let Some(local) = dest_local

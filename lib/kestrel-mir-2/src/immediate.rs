@@ -1,5 +1,6 @@
 use kestrel_hecs::Entity;
 
+use crate::ty::TyArena;
 use crate::{FloatBits, IntBits, MonoFuncId, TyId};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,6 +115,37 @@ impl Immediate {
 
     pub fn error() -> Self {
         Self::new(ImmediateKind::Error)
+    }
+
+    /// Return the type of this immediate, interning if needed.
+    pub fn ty(&self, arena: &mut TyArena) -> TyId {
+        match &self.kind {
+            ImmediateKind::IntLiteral { bits, .. } => match bits {
+                IntBits::I8 => arena.i8(),
+                IntBits::I16 => arena.i16(),
+                IntBits::I32 => arena.i32(),
+                IntBits::I64 => arena.i64(),
+            },
+            ImmediateKind::FloatLiteral { bits, .. } => match bits {
+                FloatBits::F16 => arena.f16(),
+                FloatBits::F32 => arena.f32(),
+                FloatBits::F64 => arena.f64(),
+            },
+            ImmediateKind::BoolLiteral(_) => arena.bool(),
+            ImmediateKind::StringLiteral(_) | ImmediateKind::StringPointer(_) => arena.str_ty(),
+            ImmediateKind::Unit => arena.unit(),
+            ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => {
+                *ty
+            }
+            ImmediateKind::FloatInfinity(bits) | ImmediateKind::FloatNan(bits) => match bits {
+                FloatBits::F16 => arena.f16(),
+                FloatBits::F32 => arena.f32(),
+                FloatBits::F64 => arena.f64(),
+            },
+            ImmediateKind::FunctionRef { .. }
+            | ImmediateKind::MonoFunctionRef(_)
+            | ImmediateKind::Error => arena.error(),
+        }
     }
 }
 

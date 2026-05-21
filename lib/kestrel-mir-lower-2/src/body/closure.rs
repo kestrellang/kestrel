@@ -206,14 +206,23 @@ impl BodyCtx<'_, '_> {
         func_def.body = Some(completed_body);
         self.ctx.module.add_function(func_def);
 
-        // Emit ApplyPartial in parent scope
-        let captures: Vec<(Operand, UseMode)> = captured_locals
-            .iter()
-            .map(|&hir_local| {
-                let mir_local = self.map_local(hir_local);
-                (Operand::Place(Place::local(mir_local)), UseMode::Copy)
-            })
-            .collect();
+        // Emit ApplyPartial in parent scope.
+        // Copyable captures use Copy directly. Non-copyable captures are
+        // materialized as refs — the pointer is bitwise-copyable (per spec:
+        // "Borrowed captures are materialized as ref temps first").
+        let mut captures: Vec<(Operand, UseMode)> = Vec::new();
+        for &hir_local in &captured_locals {
+            let mir_local = self.map_local(hir_local);
+            let cap_ty = self.resolve_local_type(hir_local);
+            if self.is_copy_type(cap_ty) {
+                captures.push((Operand::Place(Place::local(mir_local)), UseMode::Copy));
+            } else {
+                let ref_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+                let ref_temp = self.fresh_temp(ref_ty);
+                self.emit_assign(Place::local(ref_temp), Rvalue::Ref(Place::local(mir_local)));
+                captures.push((Operand::Place(Place::local(ref_temp)), UseMode::Copy));
+            }
+        }
 
         let dest = self.fresh_temp(closure_ty);
         self.emit_assign(

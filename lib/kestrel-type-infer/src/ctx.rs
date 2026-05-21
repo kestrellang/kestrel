@@ -58,6 +58,12 @@ pub struct InferCtx<'a> {
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
 
+    /// MethodCall exprs where the resolution went through a field access.
+    /// Maps expr → field entity. MIR lowering must interpose a field
+    /// projection before the call (the resolution points to the subscript/
+    /// method on the field's type, not the receiver's type).
+    pub(crate) field_subscripts: HashMap<HirExprId, Entity>,
+
     /// Promotion info for Coerce sites that needed wrapping.
     pub(crate) promotions: HashMap<HirExprId, PromotionInfo>,
 
@@ -212,6 +218,7 @@ impl<'a> InferCtx<'a> {
             errored_coerce_exprs: HashSet::new(),
             poison_protocol_call_recv_on_failure: HashSet::new(),
             resolutions: HashMap::new(),
+            field_subscripts: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),
             type_arg_spans: HashMap::new(),

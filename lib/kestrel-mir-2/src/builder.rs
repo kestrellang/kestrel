@@ -183,13 +183,8 @@ impl<'a> FunctionBuilder<'a> {
         ty: TyId,
         convention: ParamConvention,
     ) -> LocalId {
-        let local_ty = match convention {
-            ParamConvention::Borrow | ParamConvention::MutBorrow => {
-                self.module.ty_arena.pointer(ty)
-            }
-            ParamConvention::Consuming => ty,
-        };
-        let local_id = self.body_mut().add_local(LocalDef::new(name, local_ty));
+        // Local type = logical type regardless of convention (Option B)
+        let local_id = self.body_mut().add_local(LocalDef::new(name, ty));
         self.body_mut().param_count += 1;
         let param = ParamDef::new(name, local_id, ty, convention);
         self.module.functions[self.func_idx.index()].params.push(param);
@@ -572,8 +567,8 @@ mod tests {
 
         let module = m.finish();
         let body = module.functions[0].body.as_ref().unwrap();
-        let ptr_i64 = module.ty_arena.get(body.local(x).ty);
-        assert!(matches!(ptr_i64, MirTy::Pointer(_)));
+        // Option B: local type = logical type, not Pointer-wrapped
+        assert_eq!(body.local(x).ty, i64_ty);
 
         let param = &module.functions[0].params[0];
         assert_eq!(param.ty, i64_ty);

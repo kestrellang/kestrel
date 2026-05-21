@@ -27,4 +27,5 @@ kestrel-mir-lower-2 = { path = "../kestrel-mir-lower-2" }
 kestrel-ownership = { path = "../kestrel-ownership" }
 kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-codegen-cranelift-2 = { path = "../kestrel-codegen-cranelift-2" }
 codespan-reporting = { workspace = true }

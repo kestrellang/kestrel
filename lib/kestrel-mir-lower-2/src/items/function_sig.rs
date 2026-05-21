@@ -65,16 +65,9 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
                 }
             };
             let self_ty = ctx.intern(MirTy::SelfType);
-            let local_ty = match convention {
-                ParamConvention::Borrow | ParamConvention::MutBorrow => {
-                    ctx.module.ty_arena.pointer(self_ty)
-                }
-                ParamConvention::Consuming => self_ty,
-            };
             let local_id = kestrel_mir_2::LocalId::new(0); // placeholder
             let param = ParamDef::new("self", local_id, self_ty, convention);
             def.params.push(param);
-            let _ = local_ty; // local_ty used when body is lowered
         }
 
         let resolved_types = resolve_callable_types(ctx, entity);

@@ -1,11 +1,12 @@
 use std::fmt;
 
+use crate::body::MirBody;
 use crate::immediate::ImmediateKind;
 use crate::operand::{ArgMode, UseMode};
 use crate::statement::{Callee, Rvalue, StatementKind};
 use crate::terminator::{SwitchCase, TerminatorKind};
 use crate::ty::MirTy;
-use crate::{MirModule, TyArena, TyId};
+use crate::{LocalId, MirModule, TyId};
 
 pub struct ModuleDisplay<'a> {
     module: &'a MirModule,
@@ -40,7 +41,7 @@ impl fmt::Display for ModuleDisplay<'_> {
                 if i > 0 {
                     write!(f, ",")?;
                 }
-                write!(f, " {}: {}", field.name, TyDisplay(field.ty, &m.ty_arena))?;
+                write!(f, " {}: {}", field.name, TyDisplay(field.ty, m))?;
             }
             writeln!(f, " }}")?;
         }
@@ -93,9 +94,9 @@ impl fmt::Display for ModuleDisplay<'_> {
                     crate::ParamConvention::MutBorrow => "&var ",
                     crate::ParamConvention::Consuming => "",
                 };
-                write!(f, "{}{}: {}", conv, param.name, TyDisplay(param.ty, &m.ty_arena))?;
+                write!(f, "{}{}: {}", conv, param.name, TyDisplay(param.ty, m))?;
             }
-            write!(f, ") -> {}", TyDisplay(func.ret, &m.ty_arena))?;
+            write!(f, ") -> {}", TyDisplay(func.ret, m))?;
 
             if let Some(body) = &func.body {
                 writeln!(f, " {{")?;
@@ -110,7 +111,7 @@ impl fmt::Display for ModuleDisplay<'_> {
                         f,
                         "    %{}: {}{}",
                         local.name,
-                        TyDisplay(local.ty, &m.ty_arena),
+                        TyDisplay(local.ty, m),
                         marker
                     )?;
                 }
@@ -118,11 +119,11 @@ impl fmt::Display for ModuleDisplay<'_> {
                     writeln!(f, "  bb{i}:")?;
                     for stmt in &block.stmts {
                         write!(f, "    ")?;
-                        write_statement(f, &stmt.kind, &m.ty_arena)?;
+                        write_statement(f, &stmt.kind, body, m)?;
                         writeln!(f)?;
                     }
                     write!(f, "    ")?;
-                    write_terminator(f, &block.terminator.kind, &m.ty_arena)?;
+                    write_terminator(f, &block.terminator.kind, body, m)?;
                     writeln!(f)?;
                 }
                 writeln!(f, "}}")?;
@@ -137,24 +138,36 @@ impl fmt::Display for ModuleDisplay<'_> {
     }
 }
 
-fn write_statement(f: &mut fmt::Formatter<'_>, kind: &StatementKind, arena: &TyArena) -> fmt::Result {
+fn local_name(body: &MirBody, id: LocalId) -> &str {
+    body.locals
+        .get(id.index())
+        .map(|l| l.name.as_str())
+        .unwrap_or("?")
+}
+
+fn write_statement(
+    f: &mut fmt::Formatter<'_>,
+    kind: &StatementKind,
+    body: &MirBody,
+    module: &MirModule,
+) -> fmt::Result {
     match kind {
         StatementKind::Assign { dest, rvalue } => {
-            write!(f, "{} = ", PlaceDisplay(dest))?;
-            write_rvalue(f, rvalue, arena)
+            write!(f, "{} = ", PlaceDisplay(dest, body, module))?;
+            write_rvalue(f, rvalue, body, module)
         }
         StatementKind::Call { dest, callee, args } => {
             if let Some(d) = dest {
-                write!(f, "{} = ", PlaceDisplay(d))?;
+                write!(f, "{} = ", PlaceDisplay(d, body, module))?;
             }
             write!(f, "call ")?;
-            write_callee(f, callee, arena)?;
+            write_callee(f, callee, body, module)?;
             write!(f, "(")?;
             for (i, (op, _)) in args.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}", OperandDisplay(op, arena))?;
+                write!(f, "{}", OperandDisplay(op, body, module))?;
             }
             write!(f, ") [")?;
             for (i, (_, mode)) in args.iter().enumerate() {
@@ -171,43 +184,60 @@ fn write_statement(f: &mut fmt::Formatter<'_>, kind: &StatementKind, arena: &TyA
             }
             write!(f, "]")
         }
-        StatementKind::Drop { place } => write!(f, "drop {}", PlaceDisplay(place)),
+        StatementKind::Uninit { dest } => {
+            write!(f, "{} = uninit", PlaceDisplay(dest, body, module))
+        }
+        StatementKind::Drop { place } => write!(f, "drop {}", PlaceDisplay(place, body, module)),
         StatementKind::DropIf { place, flag } => {
-            write!(f, "drop {} if %{}", PlaceDisplay(place), flag.index())
+            write!(
+                f,
+                "drop {} if %{}",
+                PlaceDisplay(place, body, module),
+                local_name(body, *flag)
+            )
         }
         StatementKind::SetDropFlag { flag, value } => {
-            write!(f, "%{} = {value}", flag.index())
+            write!(f, "%{} = {value}", local_name(body, *flag))
         }
-        StatementKind::ScopeLive(local) => write!(f, "scope_live %{}", local.index()),
+        StatementKind::ScopeLive(local) => write!(f, "scope_live %{}", local_name(body, *local)),
     }
 }
 
-fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt::Result {
+fn write_rvalue(
+    f: &mut fmt::Formatter<'_>,
+    rv: &Rvalue,
+    body: &MirBody,
+    module: &MirModule,
+) -> fmt::Result {
     match rv {
-        Rvalue::Use(op, UseMode::Copy) => write!(f, "use copy {}", OperandDisplay(op, arena)),
-        Rvalue::Use(op, UseMode::Move) => write!(f, "use move {}", OperandDisplay(op, arena)),
-        Rvalue::Ref(place) => write!(f, "ref {}", PlaceDisplay(place)),
-        Rvalue::RefMut(place) => write!(f, "ref_mut {}", PlaceDisplay(place)),
-        Rvalue::Op1 { op, arg } => write!(f, "{op:?} {}", OperandDisplay(arg, arena)),
+        Rvalue::Use(op, UseMode::Copy) => {
+            write!(f, "use copy {}", OperandDisplay(op, body, module))
+        }
+        Rvalue::Use(op, UseMode::Move) => {
+            write!(f, "use move {}", OperandDisplay(op, body, module))
+        }
+        Rvalue::Ref(place) => write!(f, "ref {}", PlaceDisplay(place, body, module)),
+        Rvalue::RefMut(place) => write!(f, "ref_mut {}", PlaceDisplay(place, body, module)),
+        Rvalue::Op1 { op, arg } => write!(f, "{op:?} {}", OperandDisplay(arg, body, module)),
         Rvalue::Op2 { op, lhs, rhs } => {
             write!(
                 f,
                 "{op:?} {}, {}",
-                OperandDisplay(lhs, arena),
-                OperandDisplay(rhs, arena)
+                OperandDisplay(lhs, body, module),
+                OperandDisplay(rhs, body, module)
             )
         }
         Rvalue::Op3 { op, a, b, c } => {
             write!(
                 f,
                 "{op:?} {}, {}, {}",
-                OperandDisplay(a, arena),
-                OperandDisplay(b, arena),
-                OperandDisplay(c, arena)
+                OperandDisplay(a, body, module),
+                OperandDisplay(b, body, module),
+                OperandDisplay(c, body, module)
             )
         }
         Rvalue::Construct { ty, fields } => {
-            write!(f, "construct {} {{", TyDisplay(*ty, arena))?;
+            write!(f, "construct {} {{", TyDisplay(*ty, module))?;
             for (i, (idx, op, mode)) in fields.iter().enumerate() {
                 if i > 0 {
                     write!(f, ",")?;
@@ -216,7 +246,12 @@ fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt
                     UseMode::Copy => "copy",
                     UseMode::Move => "move",
                 };
-                write!(f, " .{}: {m} {}", idx.index(), OperandDisplay(op, arena))?;
+                write!(
+                    f,
+                    " .{}: {m} {}",
+                    idx.index(),
+                    OperandDisplay(op, body, module)
+                )?;
             }
             write!(f, " }}")
         }
@@ -230,7 +265,7 @@ fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt
                     UseMode::Copy => "copy",
                     UseMode::Move => "move",
                 };
-                write!(f, "{m} {}", OperandDisplay(op, arena))?;
+                write!(f, "{m} {}", OperandDisplay(op, body, module))?;
             }
             write!(f, ")")
         }
@@ -239,7 +274,12 @@ fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt
             variant,
             payload,
         } => {
-            write!(f, "enum {}:{} (", TyDisplay(*enum_ty, arena), variant.index())?;
+            write!(
+                f,
+                "enum {}:{} (",
+                TyDisplay(*enum_ty, module),
+                variant.index()
+            )?;
             for (i, (op, mode)) in payload.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
@@ -248,12 +288,12 @@ fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt
                     UseMode::Copy => "copy",
                     UseMode::Move => "move",
                 };
-                write!(f, "{m} {}", OperandDisplay(op, arena))?;
+                write!(f, "{m} {}", OperandDisplay(op, body, module))?;
             }
             write!(f, ")")
         }
         Rvalue::ArrayLiteral { element_ty, values } => {
-            write!(f, "array[{}] [", TyDisplay(*element_ty, arena))?;
+            write!(f, "array[{}] [", TyDisplay(*element_ty, module))?;
             for (i, (op, mode)) in values.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
@@ -262,12 +302,12 @@ fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt
                     UseMode::Copy => "copy",
                     UseMode::Move => "move",
                 };
-                write!(f, "{m} {}", OperandDisplay(op, arena))?;
+                write!(f, "{m} {}", OperandDisplay(op, body, module))?;
             }
             write!(f, "]")
         }
         Rvalue::ApplyPartial { func, captures } => {
-            write!(f, "apply_partial e{} (", func.index())?;
+            write!(f, "apply_partial {} (", module.resolve_name(*func))?;
             for (i, (op, mode)) in captures.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
@@ -276,49 +316,65 @@ fn write_rvalue(f: &mut fmt::Formatter<'_>, rv: &Rvalue, arena: &TyArena) -> fmt
                     UseMode::Copy => "copy",
                     UseMode::Move => "move",
                 };
-                write!(f, "{m} {}", OperandDisplay(op, arena))?;
+                write!(f, "{m} {}", OperandDisplay(op, body, module))?;
             }
             write!(f, ")")
         }
     }
 }
 
-fn write_callee(f: &mut fmt::Formatter<'_>, callee: &Callee, arena: &TyArena) -> fmt::Result {
+fn write_callee(
+    f: &mut fmt::Formatter<'_>,
+    callee: &Callee,
+    body: &MirBody,
+    module: &MirModule,
+) -> fmt::Result {
     match callee {
         Callee::Direct {
-            func,
-            type_args,
-            ..
+            func, type_args, ..
         } => {
-            write!(f, "e{}", func.index())?;
+            write!(f, "{}", module.resolve_name(*func))?;
             if !type_args.is_empty() {
                 write!(f, "[")?;
                 for (i, arg) in type_args.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", TyDisplay(*arg, arena))?;
+                    write!(f, "{}", TyDisplay(*arg, module))?;
                 }
                 write!(f, "]")?;
             }
             Ok(())
         }
         Callee::Resolved(id) => write!(f, "mono_fn{}", id.index()),
-        Callee::Thin(place) => write!(f, "thin {}", PlaceDisplay(place)),
-        Callee::Thick(place) => write!(f, "thick {}", PlaceDisplay(place)),
+        Callee::Thin(place) => {
+            write!(f, "thin {}", PlaceDisplay(place, body, module))
+        }
+        Callee::Thick(place) => {
+            write!(f, "thick {}", PlaceDisplay(place, body, module))
+        }
         Callee::Witness {
-            protocol, method, ..
-        } => write!(f, "witness e{}.{}", protocol.index(), method.name),
+            protocol, method, self_type, ..
+        } => write!(
+            f,
+            "witness {}.{}<self={}>",
+            module.resolve_name(*protocol),
+            method.name,
+            TyDisplay(*self_type, module),
+        ),
     }
 }
 
 fn write_terminator(
     f: &mut fmt::Formatter<'_>,
     kind: &TerminatorKind,
-    arena: &TyArena,
+    body: &MirBody,
+    module: &MirModule,
 ) -> fmt::Result {
     match kind {
-        TerminatorKind::Return(op) => write!(f, "return {}", OperandDisplay(op, arena)),
+        TerminatorKind::Return(op) => {
+            write!(f, "return {}", OperandDisplay(op, body, module))
+        }
         TerminatorKind::Jump(target) => write!(f, "jump bb{}", target.index()),
         TerminatorKind::Branch {
             condition,
@@ -327,7 +383,7 @@ fn write_terminator(
         } => write!(
             f,
             "branch {} -> bb{}, bb{}",
-            OperandDisplay(condition, arena),
+            OperandDisplay(condition, body, module),
             then_block.index(),
             else_block.index()
         ),
@@ -335,7 +391,7 @@ fn write_terminator(
             discriminant,
             cases,
         } => {
-            write!(f, "switch {} -> [", PlaceDisplay(discriminant))?;
+            write!(f, "switch {} -> [", PlaceDisplay(discriminant, body, module))?;
             for (i, (case, block)) in cases.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
@@ -363,13 +419,15 @@ fn write_terminator(
     }
 }
 
-struct PlaceDisplay<'a>(&'a crate::Place);
+struct PlaceDisplay<'a>(&'a crate::Place, &'a MirBody, &'a MirModule);
 
 impl fmt::Display for PlaceDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0.base {
-            crate::PlaceBase::Local(id) => write!(f, "%{}", id.index())?,
-            crate::PlaceBase::Global(entity) => write!(f, "@e{}", entity.index())?,
+            crate::PlaceBase::Local(id) => write!(f, "%{}", local_name(self.1, *id))?,
+            crate::PlaceBase::Global(entity) => {
+                write!(f, "@{}", self.2.resolve_name(*entity))?;
+            }
         }
         for elem in &self.0.projections {
             match elem {
@@ -383,12 +441,14 @@ impl fmt::Display for PlaceDisplay<'_> {
     }
 }
 
-struct OperandDisplay<'a>(&'a crate::Operand, &'a TyArena);
+struct OperandDisplay<'a>(&'a crate::Operand, &'a MirBody, &'a MirModule);
 
 impl fmt::Display for OperandDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            crate::Operand::Place(place) => write!(f, "{}", PlaceDisplay(place)),
+            crate::Operand::Place(place) => {
+                write!(f, "{}", PlaceDisplay(place, self.1, self.2))
+            }
             crate::Operand::Const(imm) => match &imm.kind {
                 ImmediateKind::IntLiteral { bits, value } => write!(f, "{value}_{bits:?}"),
                 ImmediateKind::FloatLiteral { bits, value } => write!(f, "{value}_{bits:?}"),
@@ -396,11 +456,13 @@ impl fmt::Display for OperandDisplay<'_> {
                 ImmediateKind::StringLiteral(s) => write!(f, "\"{s}\""),
                 ImmediateKind::StringPointer(s) => write!(f, "strptr(\"{s}\")"),
                 ImmediateKind::Unit => write!(f, "()"),
-                ImmediateKind::FunctionRef { func, .. } => write!(f, "e{}", func.index()),
+                ImmediateKind::FunctionRef { func, .. } => {
+                    write!(f, "{}", self.2.resolve_name(*func))
+                }
                 ImmediateKind::MonoFunctionRef(id) => write!(f, "mono_fn{}", id.index()),
-                ImmediateKind::NullPtr(ty) => write!(f, "null({})", TyDisplay(*ty, self.1)),
-                ImmediateKind::SizeOf(ty) => write!(f, "sizeof({})", TyDisplay(*ty, self.1)),
-                ImmediateKind::AlignOf(ty) => write!(f, "alignof({})", TyDisplay(*ty, self.1)),
+                ImmediateKind::NullPtr(ty) => write!(f, "null({})", TyDisplay(*ty, self.2)),
+                ImmediateKind::SizeOf(ty) => write!(f, "sizeof({})", TyDisplay(*ty, self.2)),
+                ImmediateKind::AlignOf(ty) => write!(f, "alignof({})", TyDisplay(*ty, self.2)),
                 ImmediateKind::FloatInfinity(bits) => write!(f, "inf_{bits:?}"),
                 ImmediateKind::FloatNan(bits) => write!(f, "nan_{bits:?}"),
                 ImmediateKind::Error => write!(f, "<error>"),
@@ -417,11 +479,13 @@ fn write_param_conv(f: &mut fmt::Formatter<'_>, conv: crate::ParamConvention) ->
     }
 }
 
-struct TyDisplay<'a>(TyId, &'a TyArena);
+struct TyDisplay<'a>(TyId, &'a MirModule);
 
 impl fmt::Display for TyDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.1.get(self.0) {
+        let module = self.1;
+        let arena = &module.ty_arena;
+        match arena.get(self.0) {
             MirTy::I8 => write!(f, "i8"),
             MirTy::I16 => write!(f, "i16"),
             MirTy::I32 => write!(f, "i32"),
@@ -433,7 +497,7 @@ impl fmt::Display for TyDisplay<'_> {
             MirTy::Never => write!(f, "!"),
             MirTy::Str => write!(f, "str"),
             MirTy::Error => write!(f, "<error>"),
-            MirTy::Pointer(inner) => write!(f, "p[{}]", TyDisplay(*inner, self.1)),
+            MirTy::Pointer(inner) => write!(f, "p[{}]", TyDisplay(*inner, module)),
             MirTy::Tuple(elems) if elems.is_empty() => write!(f, "()"),
             MirTy::Tuple(elems) => {
                 write!(f, "(")?;
@@ -441,37 +505,48 @@ impl fmt::Display for TyDisplay<'_> {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", TyDisplay(*elem, self.1))?;
+                    write!(f, "{}", TyDisplay(*elem, module))?;
                 }
                 write!(f, ")")
             }
             MirTy::Named { entity, type_args } => {
-                write!(f, "e{}", entity.index())?;
+                write!(f, "{}", module.resolve_name(*entity))?;
                 if !type_args.is_empty() {
                     write!(f, "[")?;
                     for (i, arg) in type_args.iter().enumerate() {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}", TyDisplay(*arg, self.1))?;
+                        write!(f, "{}", TyDisplay(*arg, module))?;
                     }
                     write!(f, "]")?;
                 }
                 Ok(())
             }
-            MirTy::TypeParam(e) => write!(f, "T{}", e.index()),
+            MirTy::TypeParam(e) => {
+                let name = module.resolve_name(*e);
+                if name == "<unknown>" {
+                    write!(f, "T{}", e.index())
+                } else {
+                    write!(f, "{name}")
+                }
+            }
             MirTy::SelfType => write!(f, "Self"),
             MirTy::AssociatedProjection {
                 base,
                 protocol,
                 assoc_type,
-            } => write!(
-                f,
-                "({}.e{} for e{})",
-                TyDisplay(*base, self.1),
-                assoc_type.index(),
-                protocol.index()
-            ),
+            } => {
+                let proto_name = module.resolve_name(*protocol);
+                let assoc_name = module.resolve_name(*assoc_type);
+                write!(
+                    f,
+                    "({}.{} for {})",
+                    TyDisplay(*base, module),
+                    assoc_name,
+                    proto_name
+                )
+            }
             MirTy::FuncThin { params, ret } => {
                 write!(f, "func(")?;
                 for (i, (ty, conv)) in params.iter().enumerate() {
@@ -479,9 +554,9 @@ impl fmt::Display for TyDisplay<'_> {
                         write!(f, ", ")?;
                     }
                     write_param_conv(f, *conv)?;
-                    write!(f, "{}", TyDisplay(*ty, self.1))?;
+                    write!(f, "{}", TyDisplay(*ty, module))?;
                 }
-                write!(f, ") -> {}", TyDisplay(*ret, self.1))
+                write!(f, ") -> {}", TyDisplay(*ret, module))
             }
             MirTy::FuncThick { params, ret } => {
                 write!(f, "func escaping(")?;
@@ -490,9 +565,9 @@ impl fmt::Display for TyDisplay<'_> {
                         write!(f, ", ")?;
                     }
                     write_param_conv(f, *conv)?;
-                    write!(f, "{}", TyDisplay(*ty, self.1))?;
+                    write!(f, "{}", TyDisplay(*ty, module))?;
                 }
-                write!(f, ") -> {}", TyDisplay(*ret, self.1))
+                write!(f, ") -> {}", TyDisplay(*ret, module))
             }
         }
     }
@@ -528,36 +603,82 @@ mod tests {
 
     #[test]
     fn display_type_primitives() {
-        let mut arena = crate::TyArena::new();
-        let i64_ty = arena.i64();
-        let d = TyDisplay(i64_ty, &arena);
+        let mut module = MirModule::new("test");
+        let i64_ty = module.ty_arena.i64();
+        let d = TyDisplay(i64_ty, &module);
         assert_eq!(d.to_string(), "i64");
     }
 
     #[test]
     fn display_type_pointer() {
-        let mut arena = crate::TyArena::new();
-        let i64_ty = arena.i64();
-        let ptr = arena.pointer(i64_ty);
-        let d = TyDisplay(ptr, &arena);
+        let mut module = MirModule::new("test");
+        let i64_ty = module.ty_arena.i64();
+        let ptr = module.ty_arena.pointer(i64_ty);
+        let d = TyDisplay(ptr, &module);
         assert_eq!(d.to_string(), "p[i64]");
     }
 
     #[test]
     fn display_type_unit() {
-        let mut arena = crate::TyArena::new();
-        let unit = arena.unit();
-        let d = TyDisplay(unit, &arena);
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let d = TyDisplay(unit, &module);
         assert_eq!(d.to_string(), "()");
     }
 
     #[test]
     fn display_type_tuple() {
-        let mut arena = crate::TyArena::new();
-        let i64_ty = arena.i64();
-        let bool_ty = arena.bool();
-        let tup = arena.tuple(vec![i64_ty, bool_ty]);
-        let d = TyDisplay(tup, &arena);
+        let mut module = MirModule::new("test");
+        let i64_ty = module.ty_arena.i64();
+        let bool_ty = module.ty_arena.bool();
+        let tup = module.ty_arena.tuple(vec![i64_ty, bool_ty]);
+        let d = TyDisplay(tup, &module);
         assert_eq!(d.to_string(), "(i64, bool)");
+    }
+
+    #[test]
+    fn display_named_type_with_registered_name() {
+        let mut module = MirModule::new("test");
+        let entity = Entity::from_raw(42);
+        module.register_name(entity, "std.numeric.Int64");
+        let ty = module.ty_arena.intern(MirTy::Named {
+            entity,
+            type_args: vec![],
+        });
+        let d = TyDisplay(ty, &module);
+        assert_eq!(d.to_string(), "std.numeric.Int64");
+    }
+
+    #[test]
+    fn display_named_type_with_type_args() {
+        let mut module = MirModule::new("test");
+        let entity = Entity::from_raw(42);
+        module.register_name(entity, "std.Array");
+        let i64_ty = module.ty_arena.i64();
+        let ty = module.ty_arena.intern(MirTy::Named {
+            entity,
+            type_args: vec![i64_ty],
+        });
+        let d = TyDisplay(ty, &module);
+        assert_eq!(d.to_string(), "std.Array[i64]");
+    }
+
+    #[test]
+    fn display_type_param_with_name() {
+        let mut module = MirModule::new("test");
+        let entity = Entity::from_raw(10);
+        module.register_name(entity, "T");
+        let ty = module.ty_arena.intern(MirTy::TypeParam(entity));
+        let d = TyDisplay(ty, &module);
+        assert_eq!(d.to_string(), "T");
+    }
+
+    #[test]
+    fn display_type_param_without_name() {
+        let mut module = MirModule::new("test");
+        let entity = Entity::from_raw(999);
+        let ty = module.ty_arena.intern(MirTy::TypeParam(entity));
+        let d = TyDisplay(ty, &module);
+        assert_eq!(d.to_string(), "T999");
     }
 }

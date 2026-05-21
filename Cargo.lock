@@ -764,10 +764,12 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-codegen",
  "kestrel-codegen-cranelift",
+ "kestrel-codegen-cranelift-2",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",
  "kestrel-mir",
+ "kestrel-mir-2",
  "kestrel-mir-lower",
  "kestrel-ownership",
  "kestrel-reporting",
@@ -846,6 +848,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-codegen-cranelift-2"
+version = "0.16.0"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-module",
+ "cranelift-native",
+ "cranelift-object",
+ "indexmap",
+ "kestrel-codegen",
+ "kestrel-hecs",
+ "kestrel-mir-2",
+ "target-lexicon 0.12.16",
+]
+
+[[package]]
 name = "kestrel-compiler"
 version = "0.16.0"
 dependencies = [
@@ -854,6 +872,7 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-codegen",
  "kestrel-codegen-cranelift",
+ "kestrel-codegen-cranelift-2",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",

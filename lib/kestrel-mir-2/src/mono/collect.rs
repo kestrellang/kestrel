@@ -17,6 +17,21 @@ use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
 use crate::{FunctionIdx, TyId};
 
+fn format_ty(arena: &TyArena, ty: TyId, names: &IndexMap<Entity, String>) -> String {
+    match arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            let name = names.get(entity).map(|s| s.as_str()).unwrap_or("?");
+            if type_args.is_empty() {
+                name.to_string()
+            } else {
+                let args: Vec<String> = type_args.iter().map(|&a| format_ty(arena, a, names)).collect();
+                format!("{name}[{}]", args.join(", "))
+            }
+        }
+        other => format!("{other:?}"),
+    }
+}
+
 // -- Collection result --
 
 pub struct CollectionResult {
@@ -345,7 +360,21 @@ impl<'a> CollectionContext<'a> {
                         }
                     }
                     Err(e) => {
-                        self.errors.push(e);
+                        // Enrich with entity names for diagnostics
+                        let enriched = match &e {
+                            MonoError::MethodNotFound { method, .. } => {
+                                let self_desc = format_ty(self.arena, concrete_self, self.entity_names);
+                                let proto_name = self.entity_names.get(protocol)
+                                    .map(|s| s.as_str()).unwrap_or("?");
+                                MonoError::MethodNotFound {
+                                    protocol_name: proto_name.to_string(),
+                                    method: method.clone(),
+                                    type_description: self_desc,
+                                }
+                            }
+                            _ => e,
+                        };
+                        self.errors.push(enriched);
                     }
                 }
             }

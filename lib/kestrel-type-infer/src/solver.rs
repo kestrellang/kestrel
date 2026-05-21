@@ -2450,6 +2450,7 @@ fn solve_member(
     ) && (is_call || !args.is_empty())
     {
         ctx.resolutions.insert(expr, resolution.entity);
+        ctx.field_subscripts.insert(expr, resolution.entity);
         // Get the field's type (with struct type param substitution)
         let recv_entity = recv_kind.entity();
         let recv_type_args: Vec<TyVar> = recv_kind.args().to_vec();

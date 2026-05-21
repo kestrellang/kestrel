@@ -15,6 +15,8 @@ kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
 kestrel-ownership = { path = "lib/kestrel-ownership" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
+kestrel-codegen-cranelift-2 = { path = "lib/kestrel-codegen-cranelift-2" }
+kestrel-mir-2 = { path = "lib/kestrel-mir-2" }
 codespan-reporting = { workspace = true }
 clap = { workspace = true }
 
@@ -71,6 +73,7 @@ members = [
     "lib/kestrel-lsp",
     "lib/kestrel-mir-2",
     "lib/kestrel-mir-lower-2",
+    "lib/kestrel-codegen-cranelift-2",
     "lib/kestrel-test-suite",
     # "external/triage",  # TEMP: excluded during memory-model rewrite; restore before merging
 ]

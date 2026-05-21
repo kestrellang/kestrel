@@ -26,6 +26,11 @@ pub struct TypedBody {
     /// Used by codegen to know which function to call.
     pub resolutions: HashMap<HirExprId, Entity>,
 
+    /// MethodCall exprs where the call resolved through a field access.
+    /// Maps expr → field entity. MIR lowering interposes a field projection
+    /// before the call so the receiver is the field value, not `self`.
+    pub field_subscripts: HashMap<HirExprId, Entity>,
+
     /// Promotion info for expressions that need wrapping.
     /// Codegen inserts FromValue.from() calls at these sites.
     pub promotions: HashMap<HirExprId, ResolvedPromotion>,
@@ -262,6 +267,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         expr_types,
         local_types,
         resolutions,
+        field_subscripts: ctx.field_subscripts.clone(),
         promotions,
         type_args,
         errors: ctx.errors.clone(),

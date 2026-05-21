@@ -78,6 +78,30 @@ fn lower_witnesses_for_type(
         };
         let proto_type_args = lower_protocol_type_args(ctx, owner_for_args, ast_type_args);
 
+        // Build type args for witness method bindings.
+        // These are TypeParam TyIds that the monomorphizer will substitute through
+        // the pattern-match bindings to get concrete types.
+        // Combine: impl type params (from the struct/enum) + protocol type args
+        // (which may include extension free params like T in `extend Int64: SeqIndex[T]`).
+        let impl_type_arg_tys: Vec<TyId> = {
+            let mut tys: Vec<TyId> = impl_type_params
+                .iter()
+                .map(|tp| ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
+                .collect();
+            let impl_entities: std::collections::HashSet<kestrel_hecs::Entity> =
+                impl_type_params.iter().map(|tp| tp.entity).collect();
+            for &pta in &proto_type_args {
+                if let MirTy::TypeParam(e) = ctx.module.ty_arena.get(pta) {
+                    if !impl_entities.contains(e) {
+                        tys.push(pta);
+                    }
+                } else {
+                    tys.push(pta);
+                }
+            }
+            tys
+        };
+
         let mut witness = WitnessDef::new(*protocol, impl_ty);
         ctx.register_name(*protocol);
 
@@ -177,7 +201,7 @@ fn lower_witnesses_for_type(
                 witness.add_method(WitnessMethodBinding::new(
                     method_key.clone(),
                     impl_func,
-                    vec![],
+                    impl_type_arg_tys.clone(),
                 ));
                 continue;
             }
@@ -193,7 +217,7 @@ fn lower_witnesses_for_type(
                 witness.add_method(WitnessMethodBinding::new(
                     method_key.clone(),
                     bind_entity,
-                    vec![],
+                    impl_type_arg_tys.clone(),
                 ));
             }
         }

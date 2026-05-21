@@ -262,6 +262,9 @@ pub enum StatementKind {
         callee: Callee,
         args: Vec<(Operand, ArgMode)>,
     },
+    /// Mark a local as initialized without writing a value.
+    /// Used before ref_mut init calls where the callee writes through a pointer.
+    Uninit { dest: Place },
     Drop { place: Place },
     DropIf { place: Place, flag: LocalId },
     SetDropFlag { flag: LocalId, value: bool },
