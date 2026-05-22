@@ -195,7 +195,7 @@ pub fn place_read(
 
             return match repr {
                 // Scalar that's NOT on the stack: variable holds the value directly
-                TypeRepr::Scalar(t) if !fc.stack_locals.contains(id) => Ok(builder.use_var(var)),
+                TypeRepr::Scalar(_) if !fc.stack_locals.contains(id) => Ok(builder.use_var(var)),
                 // Scalar on the stack: variable holds a pointer, load through it
                 TypeRepr::Scalar(t) => {
                     let addr = builder.use_var(var);
@@ -208,6 +208,29 @@ pub fn place_read(
                 // Zst: return sentinel
                 TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
             };
+        }
+    }
+
+    // Fast path: non-stack scalar local with field projections (newtype unwrap).
+    // For single-field newtypes like Float32 (wraps f32), `local.raw` is
+    // identity — the scalar value IS the field. Avoid the address path which
+    // would try to use the scalar as a pointer. Bitcast if the outer and
+    // inner types differ in kind (e.g., I32 for Float32 vs F32 for lang.f32).
+    if let PlaceBase::Local(id) = &place.base {
+        if !fc.stack_locals.contains(id) {
+            let base_ty = fc.body.locals[id.index()].ty;
+            let base_repr = fc.ctx.tc.repr(base_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            if let TypeRepr::Scalar(base_cl) = base_repr {
+                let final_ty = place_type(place, fc.body, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
+                let final_repr = fc.ctx.tc.repr(final_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                if let TypeRepr::Scalar(final_cl) = final_repr {
+                    let val = builder.use_var(fc.local_vars[id.index()]);
+                    if base_cl == final_cl {
+                        return Ok(val);
+                    }
+                    return Ok(builder.ins().bitcast(final_cl, MemFlags::new(), val));
+                }
+            }
         }
     }
 
@@ -253,6 +276,25 @@ pub fn place_write(
                     return Ok(());
                 }
                 TypeRepr::Zst => return Ok(()),
+            }
+        }
+    }
+
+    // Fast path: non-stack scalar local with identity field projections (newtype wrap).
+    // Bitcast if the value type differs from the variable type (e.g., F32 → I32).
+    if let PlaceBase::Local(id) = &place.base {
+        if !fc.stack_locals.contains(id) {
+            let base_ty = fc.body.locals[id.index()].ty;
+            let base_repr = fc.ctx.tc.repr(base_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            if let TypeRepr::Scalar(base_cl) = base_repr {
+                let val_ty = builder.func.dfg.value_type(value);
+                let store_val = if val_ty == base_cl {
+                    value
+                } else {
+                    builder.ins().bitcast(base_cl, MemFlags::new(), value)
+                };
+                builder.def_var(fc.local_vars[id.index()], store_val);
+                return Ok(());
             }
         }
     }
