@@ -216,8 +216,11 @@ pub fn place_read(
     // identity — the scalar value IS the field. Avoid the address path which
     // would try to use the scalar as a pointer. Bitcast if the outer and
     // inner types differ in kind (e.g., I32 for Float32 vs F32 for lang.f32).
+    // Skip when projections include Deref — derefs need an actual load through
+    // the pointer, not a bitcast of the pointer value itself.
     if let PlaceBase::Local(id) = &place.base {
-        if !fc.stack_locals.contains(id) {
+        let has_deref = place.projections.iter().any(|p| matches!(p, PlaceElem::Deref));
+        if !has_deref && !fc.stack_locals.contains(id) {
             let base_ty = fc.body.locals[id.index()].ty;
             let base_repr = fc.ctx.tc.repr(base_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             if let TypeRepr::Scalar(base_cl) = base_repr {
