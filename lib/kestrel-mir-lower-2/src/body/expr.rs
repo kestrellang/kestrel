@@ -409,8 +409,12 @@ impl BodyCtx<'_, '_> {
                 };
                 self.emit_call_returning(callee, call_args, result_ty)
             } else {
-                let type_args = self.resolve_type_args(expr_id);
-                let callee = kestrel_mir_2::Callee::direct_with_args(resolved_entity, type_args, None);
+                let mut type_args = self.resolve_type_args(expr_id);
+                // Static methods on generic types need the parent's type args.
+                // For .fromResidual on Result[T, E], prepend [T, E] from result_ty.
+                type_args = self.prepend_receiver_type_args(result_ty, type_args);
+                let self_type = if !type_args.is_empty() { Some(result_ty) } else { None };
+                let callee = kestrel_mir_2::Callee::direct_with_args(resolved_entity, type_args, self_type);
                 self.emit_call_returning(callee, call_args, result_ty)
             }
         }
