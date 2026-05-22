@@ -19,17 +19,24 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
     // Ensure unit type is interned (shims return unit)
     module.ty_arena.unit();
 
-    // Pre-intern Named types for all structs/enums so shim generation can find them
+    // Pre-intern Named types for all structs/enums so shim generation can find them.
+    // For generic types, intern with TypeParam type_args so shim bodies are generic.
     for s in &module.structs {
+        let type_args: Vec<TyId> = s.type_params.iter()
+            .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
+            .collect();
         module.ty_arena.intern(MirTy::Named {
             entity: s.entity,
-            type_args: vec![],
+            type_args,
         });
     }
     for e in &module.enums {
+        let type_args: Vec<TyId> = e.type_params.iter()
+            .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
+            .collect();
         module.ty_arena.intern(MirTy::Named {
             entity: e.entity,
-            type_args: vec![],
+            type_args,
         });
     }
 
@@ -105,13 +112,17 @@ fn generate_struct_shim(
     _next_entity: &mut u32,
 ) -> (FunctionDef, Vec<Entity>) {
     let name = format!("__drop${}", struct_def.name);
-    let self_ty = module.ty_arena.find(|t| {
-        matches!(t, MirTy::Named { entity, type_args } if *entity == struct_def.entity && type_args.is_empty())
-    });
 
-    // If the Named type isn't interned yet, we can't reference it.
-    // For now, use a placeholder — the type should already exist in the arena.
-    let self_ty = self_ty.expect("struct type should be interned");
+    // Build self_ty: Named with TypeParam type_args for generic types
+    let tp_ty_ids: Vec<TyId> = struct_def.type_params.iter()
+        .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+            .expect("TypeParam should be interned"))
+        .collect();
+    let self_ty = module.ty_arena.find(|t| {
+        matches!(t, MirTy::Named { entity, type_args }
+            if *entity == struct_def.entity && *type_args == tp_ty_ids)
+    }).expect("struct type should be interned");
+
     let unit_ty = find_or_intern_unit(module);
 
     let mut body = MirBody::new();
@@ -127,26 +138,29 @@ fn generate_struct_shim(
     let mut stmts = Vec::new();
     let mut field_type_entities = Vec::new();
 
-    // 1. Call user-defined deinit if any
+    // 1. Call user-defined deinit if any — pass the struct's type params
+    //    so monomorphization substitutes them with concrete types
     if let Some(deinit_entity) = deinit {
         stmts.push(Statement::new(StatementKind::Call {
             dest: None,
-            callee: Callee::direct(*deinit_entity),
+            callee: Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
             args: vec![(Operand::Place(Place::local(self_local)), ArgMode::RefMut)],
         }));
     }
 
-    // 2. Drop fields that need cleanup
+    // 2. Drop fields that need cleanup.
+    //    The callee entity is a placeholder (the field's type entity);
+    //    patch_shim_callees will replace it with the actual shim entity.
+    //    Pass the field type's type_args so monomorphization substitutes them.
     for &field_idx in fields {
         let field_ty = struct_def.fields[field_idx.index()].ty;
         if needs_drop(&module.ty_arena, module, field_ty) {
-            // The callee entity is a placeholder — we use the field's type entity.
-            // patch_shim_callees will replace it with the actual shim entity.
-            if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
+            if let MirTy::Named { entity, type_args } = module.ty_arena.get(field_ty) {
                 let field_entity = *entity;
+                let field_type_args = type_args.clone();
                 stmts.push(Statement::new(StatementKind::Call {
                     dest: None,
-                    callee: Callee::direct(field_entity),
+                    callee: Callee::direct_with_args(field_entity, field_type_args, None),
                     args: vec![(
                         Operand::Place(Place::local(self_local).field(field_idx)),
                         ArgMode::Move,
@@ -165,6 +179,8 @@ fn generate_struct_shim(
     func.kind = FunctionKind::DropShim {
         nominal: struct_def.entity,
     };
+    // Copy type_params from parent struct so the shim is generic
+    func.type_params = struct_def.type_params.clone();
     func.params.push(ParamDef::new("self", self_local, self_ty, ParamConvention::Consuming));
     func.body = Some(body);
 
@@ -178,9 +194,17 @@ fn generate_enum_shim(
     _next_entity: &mut u32,
 ) -> (FunctionDef, Vec<Entity>) {
     let name = format!("__drop${}", enum_def.name);
+
+    // Build self_ty: Named with TypeParam type_args for generic types
+    let tp_ty_ids: Vec<TyId> = enum_def.type_params.iter()
+        .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+            .expect("TypeParam should be interned"))
+        .collect();
     let self_ty = module.ty_arena.find(|t| {
-        matches!(t, MirTy::Named { entity, type_args } if *entity == enum_def.entity && type_args.is_empty())
+        matches!(t, MirTy::Named { entity, type_args }
+            if *entity == enum_def.entity && *type_args == tp_ty_ids)
     }).expect("enum type should be interned");
+
     let unit_ty = find_or_intern_unit(module);
 
     let mut body = MirBody::new();
@@ -195,12 +219,12 @@ fn generate_enum_shim(
 
     let entry = body.add_block(BasicBlock::new());
 
-    // Optional deinit call
+    // Optional deinit call — pass type params so monomorphization substitutes them
     let mut entry_stmts = Vec::new();
     if let Some(deinit_entity) = deinit {
         entry_stmts.push(Statement::new(StatementKind::Call {
             dest: None,
-            callee: Callee::direct(*deinit_entity),
+            callee: Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
             args: vec![(Operand::Place(Place::local(self_local)), ArgMode::RefMut)],
         }));
     }
@@ -220,12 +244,13 @@ fn generate_enum_shim(
             let case_def = &enum_def.cases[variant_idx.index()];
             let field_ty = case_def.payload_fields[field_idx.index()].ty;
             if needs_drop(&module.ty_arena, module, field_ty)
-                && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty)
+                && let MirTy::Named { entity, type_args } = module.ty_arena.get(field_ty)
             {
                 let field_entity = *entity;
+                let field_type_args = type_args.clone();
                 variant_stmts.push(Statement::new(StatementKind::Call {
                     dest: None,
-                    callee: Callee::direct(field_entity),
+                    callee: Callee::direct_with_args(field_entity, field_type_args, None),
                     args: vec![(
                         Operand::Place(
                             Place::local(self_local)
@@ -255,6 +280,8 @@ fn generate_enum_shim(
     func.kind = FunctionKind::DropShim {
         nominal: enum_def.entity,
     };
+    // Copy type_params from parent enum so the shim is generic
+    func.type_params = enum_def.type_params.clone();
     func.params.push(ParamDef::new("self", self_local, self_ty, ParamConvention::Consuming));
     func.body = Some(body);
 

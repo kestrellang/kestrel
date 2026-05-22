@@ -551,11 +551,16 @@ fn expand_drops(
             expand_drops_in_body(body, arena, functions, &mut new_shim_keys);
         }
 
-        // Deduplicate and find truly new shim instantiations
         let mut added_any = false;
-        for key in new_shim_keys {
-            if instantiations.insert(key.clone()) {
-                // Monomorphize the new shim body
+
+        // BFS: process new shim keys and any inner callees they discover
+        let mut pending = new_shim_keys;
+        while !pending.is_empty() {
+            let mut next_pending = Vec::new();
+            for key in pending {
+                if !instantiations.insert(key.clone()) {
+                    continue;
+                }
                 let dummy_cache = WitnessCache { resolved: HashMap::new() };
                 let result = monomorphize_body(
                     arena,
@@ -567,13 +572,40 @@ fn expand_drops(
                     &key,
                     &dummy_cache,
                 );
+                // Discover inner callees (user deinits, nested shim calls)
+                collect_inner_callees(&result, entity_to_func, instantiations, &mut next_pending);
                 mono_bodies.push(result);
                 added_any = true;
             }
+            pending = next_pending;
         }
 
         if !added_any {
             break;
+        }
+    }
+}
+
+/// Scan a monomorphized body for Callee::Direct calls and collect any that aren't
+/// yet in instantiations. This discovers user deinit calls and nested field drop
+/// shim calls within drop shim bodies.
+fn collect_inner_callees(
+    body_result: &MonoBodyResult,
+    entity_to_func: &HashMap<Entity, FunctionIdx>,
+    instantiations: &indexmap::IndexSet<InstantiationKey>,
+    pending: &mut Vec<InstantiationKey>,
+) {
+    let Some(body) = &body_result.body else { return };
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            if let StatementKind::Call { callee: Callee::Direct { func, type_args, self_type }, .. } = &stmt.kind {
+                if entity_to_func.contains_key(func) {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if !instantiations.contains(&key) {
+                        pending.push(key);
+                    }
+                }
+            }
         }
     }
 }
