@@ -331,14 +331,6 @@ fn check_type_concrete(
                 message: format!("TypeParam({e:?}) in {context}"),
             });
         }
-        MirTy::SelfType => {
-            errors.push(MonoVerifyError {
-                func_idx: fi,
-                block,
-                stmt,
-                message: format!("SelfType in {context}"),
-            });
-        }
         MirTy::AssociatedProjection { .. } => {
             errors.push(MonoVerifyError {
                 func_idx: fi,

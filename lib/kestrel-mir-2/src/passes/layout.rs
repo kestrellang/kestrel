@@ -53,7 +53,7 @@ fn has_type_params(arena: &TyArena, field_tys: &[TyId]) -> bool {
 
 fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
     match arena.get(ty) {
-        MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedProjection { .. } => true,
+        MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => true,
         MirTy::Pointer(inner) => ty_contains_param(arena, *inner),
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
@@ -135,7 +135,6 @@ pub fn size_and_align_of(
         }
 
         MirTy::TypeParam(_)
-        | MirTy::SelfType
         | MirTy::AssociatedProjection { .. } => None,
     }
 }

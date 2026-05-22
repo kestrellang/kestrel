@@ -8,7 +8,6 @@ use crate::ParamConvention;
 #[derive(Debug, Clone, Default)]
 pub struct SubstMap {
     pub type_params: HashMap<Entity, TyId>,
-    pub self_type: Option<TyId>,
     pub assoc_types: HashMap<(TyId, Entity, Entity), TyId>,
 }
 
@@ -18,7 +17,7 @@ impl SubstMap {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.type_params.is_empty() && self.self_type.is_none() && self.assoc_types.is_empty()
+        self.type_params.is_empty() && self.assoc_types.is_empty()
     }
 }
 
@@ -44,14 +43,6 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
 
         MirTy::TypeParam(entity) => {
             if let Some(&replacement) = subst.type_params.get(&entity) {
-                replacement
-            } else {
-                ty
-            }
-        }
-
-        MirTy::SelfType => {
-            if let Some(replacement) = subst.self_type {
                 replacement
             } else {
                 ty
@@ -168,19 +159,6 @@ mod tests {
         subst.type_params.insert(t_entity, i64_ty);
 
         let result = substitute(&mut arena, t_ty, &subst);
-        assert_eq!(result, i64_ty);
-    }
-
-    #[test]
-    fn substitute_self_type() {
-        let mut arena = TyArena::new();
-        let self_ty = arena.intern(MirTy::SelfType);
-        let i64_ty = arena.i64();
-
-        let mut subst = SubstMap::new();
-        subst.self_type = Some(i64_ty);
-
-        let result = substitute(&mut arena, self_ty, &subst);
         assert_eq!(result, i64_ty);
     }
 

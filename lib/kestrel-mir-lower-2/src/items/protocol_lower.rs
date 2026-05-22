@@ -75,7 +75,7 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) {
 
                 if let Some(callable) = ctx.world.get::<Callable>(child) {
                     if callable.receiver.is_some() {
-                        let self_ty = ctx.intern(MirTy::SelfType);
+                        let self_ty = crate::ty::build_self_type(ctx, entity);
                         params.push(("self".to_string(), self_ty));
                     }
                     let resolved_types = resolve_callable_types(ctx, child);

@@ -37,7 +37,6 @@ pub enum MirTy {
 
     // Generics (resolved by monomorphization)
     TypeParam(Entity),
-    SelfType,
     AssociatedProjection {
         base: TyId,
         protocol: Entity,
@@ -313,13 +312,6 @@ mod tests {
         let entity = Entity::from_raw(42);
         let id = arena.intern(MirTy::TypeParam(entity));
         assert_eq!(arena.get(id), &MirTy::TypeParam(entity));
-    }
-
-    #[test]
-    fn self_type() {
-        let mut arena = TyArena::new();
-        let id = arena.intern(MirTy::SelfType);
-        assert_eq!(arena.get(id), &MirTy::SelfType);
     }
 
     #[test]

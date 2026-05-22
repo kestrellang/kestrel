@@ -59,6 +59,7 @@ pub fn copy_behavior(
                         WhereConstraint::Implements {
                             type_param,
                             protocol,
+                            ..
                         } if *type_param == entity => {
                             if is_cloneable_protocol(module, *protocol) {
                                 return CopyBehavior::Clone(*protocol);
@@ -79,7 +80,6 @@ pub fn copy_behavior(
             CopyBehavior::Bitwise
         }
 
-        MirTy::SelfType => CopyBehavior::Bitwise,
         MirTy::FuncThick { .. } => CopyBehavior::None,
         MirTy::AssociatedProjection { .. } => CopyBehavior::Bitwise,
     }
@@ -124,7 +124,6 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 
         // Unresolved type param — conservatively needs tracking
         MirTy::TypeParam(_) => true,
-        MirTy::SelfType => true,
         MirTy::AssociatedProjection { .. } => true,
 
         MirTy::FuncThick { .. } => true,

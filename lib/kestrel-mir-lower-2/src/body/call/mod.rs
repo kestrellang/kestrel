@@ -52,13 +52,15 @@ impl BodyCtx<'_, '_> {
         let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        // In protocol extensions, replace protocol receivers with SelfType
+        // In protocol extensions, a bare `Named(protocol, [])` receiver from
+        // inference needs its type params filled in — `build_self_type` produces
+        // `Named(protocol, [TypeParam...])` which the monomorphizer substitutes.
         if self.in_protocol_extension {
-            if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(receiver_ty) {
+            if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(receiver_ty).clone() {
                 if type_args.is_empty()
-                    && self.ctx.world.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol)
+                    && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
                 {
-                    receiver_ty = self.ctx.intern(MirTy::SelfType);
+                    receiver_ty = crate::ty::build_self_type(self.ctx, entity);
                 }
             }
         }

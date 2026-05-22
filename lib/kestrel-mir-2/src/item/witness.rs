@@ -29,6 +29,11 @@ pub struct WitnessDef {
     pub constraints: Vec<WhereConstraint>,
     pub type_bindings: Vec<(Entity, TyId)>,
     pub methods: Vec<WitnessMethodBinding>,
+    /// Protocol type args: maps protocol type params (by position) to their
+    /// expressions in the witness context. For `extend Int64: SeqIndex[T]`,
+    /// this would be `[TypeParam(T_ext)]`. Used by the monomorphizer to
+    /// connect call-site type args to extension free params.
+    pub proto_type_args: Vec<TyId>,
 }
 
 impl WitnessDef {
@@ -39,6 +44,7 @@ impl WitnessDef {
             constraints: Vec::new(),
             type_bindings: Vec::new(),
             methods: Vec::new(),
+            proto_type_args: Vec::new(),
         }
     }
 

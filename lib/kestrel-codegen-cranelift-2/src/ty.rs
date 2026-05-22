@@ -177,7 +177,7 @@ impl TypeCache {
             MirTy::Error => TypeRepr::Scalar(ir::types::I8),
 
             // Post-mono: these should never appear
-            MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedProjection { .. } => {
+            MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => {
                 debug_assert!(false, "unresolved generic type in codegen: {:?}", arena.get(ty));
                 TypeRepr::Scalar(ptr_ty)
             }

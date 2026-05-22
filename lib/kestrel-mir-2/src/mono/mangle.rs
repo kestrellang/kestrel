@@ -9,7 +9,7 @@ use crate::TyId;
 /// Mangle a monomorphized function name using the v0 scheme.
 ///
 /// Grammar:
-///   mangled = "_K0" path receiver? signature? instantiation? self-disambig?
+///   mangled = "_K0" path receiver? signature? return? instantiation? self-disambig?
 pub fn mangle_function(
     arena: &TyArena,
     entity_names: &IndexMap<Entity, String>,
@@ -17,6 +17,7 @@ pub fn mangle_function(
     type_args: &[TyId],
     self_type: Option<TyId>,
     params: &[MonoParam],
+    ret: TyId,
     receiver: Option<ReceiverConvention>,
 ) -> String {
     let mut out = String::with_capacity(64);
@@ -35,6 +36,10 @@ pub fn mangle_function(
     if !params.is_empty() {
         mangle_signature(arena, entity_names, params, &mut out);
     }
+
+    // Return type: "R" type — disambiguates overloads that differ only in return type
+    out.push('R');
+    mangle_type(arena, entity_names, ret, &mut out);
 
     if !type_args.is_empty() {
         out.push('I');
@@ -75,6 +80,11 @@ fn mangle_param(
     param: &MonoParam,
     out: &mut String,
 ) {
+    // Label prefix: "L" ident for labeled params
+    if let Some(label) = &param.label {
+        out.push('L');
+        mangle_ident(label, out);
+    }
     // Convention prefix for non-consuming params
     match param.convention {
         ParamConvention::Borrow => out.push('r'),
@@ -190,7 +200,14 @@ fn mangle_type(
             out.push('E');
         }
 
-        MirTy::TypeParam(_) | MirTy::SelfType | MirTy::AssociatedProjection { .. } => {
+        MirTy::TypeParam(e) => {
+            let name = entity_names.get(e).map(|s| s.as_str()).unwrap_or("?");
+            panic!(
+                "mangle_type: TypeParam({:?}, name={}) reached the mangler — monomorphization bug",
+                e, name
+            );
+        }
+        MirTy::AssociatedProjection { .. } => {
             panic!(
                 "mangle_type: abstract type {:?} reached the mangler — monomorphization bug",
                 arena.get(ty)
@@ -370,16 +387,18 @@ mod tests {
 
     #[test]
     fn mangle_simple_main() {
-        let a = make_arena();
+        let mut a = make_arena();
         let n = names();
-        let result = mangle_function(&a, &n, "main", &[], None, &[], None);
-        assert_eq!(result, "_K04_main");
+        let unit = a.unit();
+        let result = mangle_function(&a, &n, "main", &[], None, &[], unit, None);
+        assert_eq!(result, "_K04_mainRTvE");
     }
 
     #[test]
     fn mangle_method_with_receiver() {
-        let a = make_arena();
+        let mut a = make_arena();
         let n = names();
+        let unit = a.unit();
         let result = mangle_function(
             &a,
             &n,
@@ -387,9 +406,10 @@ mod tests {
             &[],
             None,
             &[],
+            unit,
             Some(ReceiverConvention::Borrow),
         );
-        assert_eq!(result, "_K0N3_std5_Array5_countEr");
+        assert_eq!(result, "_K0N3_std5_Array5_countErRTvE");
     }
 
     #[test]
@@ -397,6 +417,7 @@ mod tests {
         let mut a = make_arena();
         let n = names();
         let i64 = a.i64();
+        let unit = a.unit();
         let result = mangle_function(
             &a,
             &n,
@@ -404,9 +425,10 @@ mod tests {
             &[i64],
             None,
             &[],
+            unit,
             Some(ReceiverConvention::Borrow),
         );
-        assert_eq!(result, "_K0N5_Array6_appendErIi8E");
+        assert_eq!(result, "_K0N5_Array6_appendErRTvEIi8E");
     }
 
     #[test]
@@ -415,9 +437,10 @@ mod tests {
         let e = Entity::from_raw(1);
         let n = names_with(&[(1, "ArrayIterator")]);
         let i64 = a.i64();
+        let unit = a.unit();
         let self_ty = a.named(e, vec![i64]);
-        let result = mangle_function(&a, &n, "Iterator.next", &[], Some(self_ty), &[], None);
-        assert_eq!(result, "_K0N8_Iterator4_nextES_13_ArrayIteratorIi8E");
+        let result = mangle_function(&a, &n, "Iterator.next", &[], Some(self_ty), &[], unit, None);
+        assert_eq!(result, "_K0N8_Iterator4_nextERTvES_13_ArrayIteratorIi8E");
     }
 
     #[test]
@@ -425,12 +448,13 @@ mod tests {
         let mut a = make_arena();
         let n = names();
         let i64 = a.i64();
+        let unit = a.unit();
         let params = vec![
             MonoParam::new("x", i64, ParamConvention::Consuming),
             MonoParam::new("y", i64, ParamConvention::Borrow),
         ];
-        let result = mangle_function(&a, &n, "add", &[], None, &params, None);
-        assert_eq!(result, "_K03_addZi8ri8E");
+        let result = mangle_function(&a, &n, "add", &[], None, &params, unit, None);
+        assert_eq!(result, "_K03_addZi8ri8ERTvE");
     }
 
     #[test]

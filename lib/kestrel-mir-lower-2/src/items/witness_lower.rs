@@ -103,6 +103,7 @@ fn lower_witnesses_for_type(
         };
 
         let mut witness = WitnessDef::new(*protocol, impl_ty);
+        witness.proto_type_args = proto_type_args.clone();
         ctx.register_name(*protocol);
 
         // Build substitution map for protocol type params
@@ -447,7 +448,7 @@ fn bind_associated_types(
         // Blanket conformances
         if source != type_entity {
             if let Some(ty) = find_associated_type(ctx, source, member.entity) {
-                let ty = replace_self_type(ctx, ty, impl_ty);
+                let ty = replace_self_type(ctx, ty, impl_ty, protocol);
                 witness.add_type_binding(member.entity, ty);
             }
         }
@@ -477,13 +478,11 @@ fn find_associated_type(
     None
 }
 
-/// Replace SelfType with the implementing type in a witness binding.
-fn replace_self_type(ctx: &mut LowerCtx, ty: TyId, impl_ty: TyId) -> TyId {
-    let self_ty = ctx.intern(MirTy::SelfType);
+/// Replace the protocol's Self type with the implementing type in a witness binding.
+///
+/// Protocol Self is `TypeParam(protocol_entity)`. We substitute it with `impl_ty`.
+fn replace_self_type(ctx: &mut LowerCtx, ty: TyId, impl_ty: TyId, protocol: Entity) -> TyId {
     let mut subst = SubstMap::new();
-    subst.self_type = Some(impl_ty);
-    if ty == self_ty {
-        return impl_ty;
-    }
+    subst.type_params.insert(protocol, impl_ty);
     substitute(&mut ctx.module.ty_arena, ty, &subst)
 }

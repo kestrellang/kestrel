@@ -242,9 +242,33 @@ pub fn resolve_witness_call(
         subst.type_params.insert(*entity, *ty);
     }
 
+    // Map protocol type params to their concrete values from the call site.
+    // For `extend Int64: SeqIndex[T]`, proto_type_args = [TypeParam(T_ext)]
+    // and method_type_args = [String]. This creates T_ext → String.
+    let proto_tp_entities = protocols
+        .iter()
+        .find(|p| p.entity == protocol)
+        .map(|p| &p.type_params[..])
+        .unwrap_or(&[]);
+    for (i, proto_tp) in proto_tp_entities.iter().enumerate() {
+        if let Some(&concrete_arg) = method_type_args.get(i) {
+            // The witness's proto_type_args[i] is the expression that maps
+            // this protocol type param to the witness context (e.g., TypeParam(T_ext)).
+            if let Some(&proto_expr) = witness.proto_type_args.get(i) {
+                if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
+                    if !subst.type_params.contains_key(ext_entity) {
+                        subst.type_params.insert(*ext_entity, concrete_arg);
+                    }
+                }
+            }
+            // Also map the protocol's own type param entity directly
+            subst.type_params.entry(proto_tp.entity).or_insert(concrete_arg);
+        }
+    }
+
     // Substitute the binding's type_args (protocol type arg expressions)
     // through the bindings to get concrete type args.
-    // e.g., binding.type_args = [TypeParam(T_array)] → substitute → [Int64]
+    // e.g., binding.type_args = [TypeParam(T_ext)] → substitute → [String]
     let mut type_args: Vec<TyId> = binding
         .type_args
         .iter()
@@ -252,11 +276,7 @@ pub fn resolve_witness_call(
         .collect();
 
     // Append any method-level type args past the protocol's param count
-    let proto_param_count = protocols
-        .iter()
-        .find(|p| p.entity == protocol)
-        .map(|p| p.type_params.len())
-        .unwrap_or(0);
+    let proto_param_count = proto_tp_entities.len();
     let method_level_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
     type_args.extend_from_slice(method_level_args);
 
@@ -267,14 +287,15 @@ pub fn resolve_witness_call(
     }
 
     // Determine if self_type should be propagated.
-    // Extension methods (default impls on the protocol itself) need self_type.
+    // Protocol default methods need self_type because their Self param is
+    // TypeParam(protocol_entity). Detect by checking if the first param
+    // is a TypeParam not in the function's type_params list.
     let needs_self = if let Some(func) = concrete_func {
-        use crate::item::function::FunctionKind;
-        matches!(
-            &func.kind,
-            FunctionKind::Method { parent, .. } | FunctionKind::StaticMethod { parent }
-            if protocols.iter().any(|p| p.entity == *parent)
-        )
+        let known_tps: std::collections::HashSet<Entity> =
+            func.type_params.iter().map(|tp| tp.entity).collect();
+        func.params.first().is_some_and(|p| {
+            matches!(arena.get(p.ty), MirTy::TypeParam(e) if !known_tps.contains(e))
+        })
     } else {
         false
     };

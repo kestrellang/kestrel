@@ -149,6 +149,7 @@ pub fn monomorphize(
             &key.type_args,
             key.self_type,
             &body_result.params,
+            body_result.ret,
             receiver,
         );
 
@@ -206,23 +207,65 @@ fn monomorphize_body(
     for (tp, &arg) in func.type_params.iter().zip(key.type_args.iter()) {
         subst.type_params.insert(tp.entity, arg);
     }
-    subst.self_type = key.self_type;
-
+    // Protocol default methods have Self as TypeParam(protocol_entity).
+    if let Some(st) = key.self_type {
+        if let Some(first_param) = func.params.first() {
+            if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
+                if !subst.type_params.contains_key(entity) {
+                    subst.type_params.insert(*entity, st);
+                }
+            }
+        }
+    }
     // Pre-resolve associated types via witness cache
     if let Some(where_clause) = &func.where_clause {
         for constraint in &where_clause.constraints {
             if let crate::item::function::WhereConstraint::Implements {
                 type_param,
                 protocol,
+                protocol_type_args,
             } = constraint
             {
                 let concrete_type = subst
                     .type_params
                     .get(type_param)
-                    .copied()
-                    .or(subst.self_type);
+                    .copied();
 
                 if let Some(concrete_ty) = concrete_type {
+                    // Enrich subst with witness proto_type_args → concrete mappings.
+                    // For `I: SeqIndex[T]` where T→concrete_T, the witness for
+                    // `Int64: SeqIndex[T_ext]` has proto_type_args = [TypeParam(T_ext)].
+                    // We build: T_ext → concrete_T by chaining:
+                    //   where_clause_arg[i] → subst → concrete
+                    //   witness.proto_type_args[i] → TypeParam(T_ext)
+                    for witness in witnesses.iter() {
+                        if witness.protocol != *protocol {
+                            continue;
+                        }
+                        let mut bindings = HashMap::new();
+                        if !witness::match_pattern(arena, witness.implementing_type, concrete_ty, &mut bindings) {
+                            continue;
+                        }
+                        // Chain: where clause type arg entities → subst → concrete,
+                        // then map witness proto_type_args TypeParams to those concrete values.
+                        for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
+                            if let Some(&proto_expr) = witness.proto_type_args.get(pi) {
+                                if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
+                                    if !subst.type_params.contains_key(ext_entity) {
+                                        if let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
+                                            subst.type_params.insert(*ext_entity, cv);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Also add pattern match bindings
+                        for (entity, ty) in &bindings {
+                            subst.type_params.entry(*entity).or_insert(*ty);
+                        }
+                        break;
+                    }
+
                     // Find associated types for this protocol
                     for proto_def in protocols {
                         if proto_def.entity == *protocol {
@@ -253,7 +296,7 @@ fn monomorphize_body(
     let params: Vec<MonoParam> = func
         .params
         .iter()
-        .map(|p| MonoParam::new(&p.name, substitute(arena, p.ty, &subst), p.convention))
+        .map(|p| MonoParam::with_label(&p.name, substitute(arena, p.ty, &subst), p.convention, p.external_label.clone()))
         .collect();
 
     let ret = substitute(arena, func.ret, &subst);

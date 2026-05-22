@@ -111,6 +111,9 @@ pub enum WhereConstraint {
     Implements {
         type_param: Entity,
         protocol: Entity,
+        /// Protocol type arguments as entities from the function's scope.
+        /// For `I: SeqIndex[T]`, this would be `[T_entity]`.
+        protocol_type_args: Vec<Entity>,
     },
     NotImplements {
         type_param: Entity,
@@ -123,6 +126,19 @@ impl WhereConstraint {
         Self::Implements {
             type_param,
             protocol,
+            protocol_type_args: Vec::new(),
+        }
+    }
+
+    pub fn implements_with_args(
+        type_param: Entity,
+        protocol: Entity,
+        protocol_type_args: Vec<Entity>,
+    ) -> Self {
+        Self::Implements {
+            type_param,
+            protocol,
+            protocol_type_args,
         }
     }
 

@@ -472,13 +472,10 @@ impl<'a> CollectionContext<'a> {
         }
     }
 
-    fn func_uses_self_type(&self, func: &FunctionDef) -> bool {
-        for param in &func.params {
-            if type_uses_self(self.arena, param.ty) {
-                return true;
-            }
-        }
-        type_uses_self(self.arena, func.ret)
+    fn func_uses_self_type(&self, _func: &FunctionDef) -> bool {
+        // SelfType was eliminated during MIR lowering — Self is now lowered as
+        // Named(parent_entity, [TypeParam...]), so no function uses SelfType.
+        false
     }
 
     fn apply_partial_callable_for(&self, original: Entity) -> Option<FunctionIdx> {
@@ -498,12 +495,11 @@ impl<'a> CollectionContext<'a> {
 
 // -- Helpers --
 
-fn build_subst(func: &FunctionDef, type_args: &[TyId], self_type: Option<TyId>) -> SubstMap {
+fn build_subst(func: &FunctionDef, type_args: &[TyId], _self_type: Option<TyId>) -> SubstMap {
     let mut subst = SubstMap::new();
     for (tp, &arg) in func.type_params.iter().zip(type_args.iter()) {
         subst.type_params.insert(tp.entity, arg);
     }
-    subst.self_type = self_type;
     subst
 }
 
@@ -518,22 +514,6 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
             params.iter().any(|(p, _)| has_type_param(arena, *p)) || has_type_param(arena, *ret)
         }
         MirTy::AssociatedProjection { base, .. } => has_type_param(arena, *base),
-        MirTy::SelfType => true,
-        _ => false,
-    }
-}
-
-/// Check if a type contains SelfType anywhere.
-fn type_uses_self(arena: &TyArena, ty: TyId) -> bool {
-    match arena.get(ty) {
-        MirTy::SelfType => true,
-        MirTy::Pointer(inner) => type_uses_self(arena, *inner),
-        MirTy::Tuple(elems) => elems.iter().any(|&e| type_uses_self(arena, e)),
-        MirTy::Named { type_args, .. } => type_args.iter().any(|&a| type_uses_self(arena, a)),
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().any(|(p, _)| type_uses_self(arena, *p)) || type_uses_self(arena, *ret)
-        }
-        MirTy::AssociatedProjection { base, .. } => type_uses_self(arena, *base),
         _ => false,
     }
 }

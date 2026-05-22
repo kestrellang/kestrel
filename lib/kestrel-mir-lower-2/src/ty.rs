@@ -64,12 +64,36 @@ pub fn resolve_callable_types(ctx: &mut LowerCtx, entity: Entity) -> Vec<Option<
     }
 }
 
+// === Self type resolution ===
+
+/// Build the concrete type for `Self` given a protocol (or struct/enum) entity.
+///
+/// `Self` in source is syntactic sugar — by MIR time it's just
+/// `Named(entity, [TypeParam(tp)...])`. This avoids an abstract `SelfType`
+/// variant in MIR that every downstream pass would need to handle.
+pub fn build_self_type(ctx: &mut LowerCtx, entity: Entity) -> TyId {
+    let type_args: Vec<TyId> = ctx
+        .world
+        .get::<TypeParams>(entity)
+        .map(|tp| {
+            tp.0.iter()
+                .map(|&tp_entity| {
+                    ctx.register_name(tp_entity);
+                    ctx.intern(MirTy::TypeParam(tp_entity))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ctx.register_name(entity);
+    ctx.module.ty_arena.named(entity, type_args)
+}
+
 // === HirTy → TyId ===
 
 /// Lower a HirTy to an interned TyId.
 pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
     match ty {
-        HirTy::SelfType(_, _) => ctx.intern(MirTy::SelfType),
+        HirTy::SelfType(entity, _) => build_self_type(ctx, *entity),
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
         | HirTy::Protocol { entity, args, .. } => {
@@ -123,7 +147,7 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
             ctx.register_name(*entity);
             ctx.intern(MirTy::TypeParam(*entity))
         }
-        ResolvedTy::SelfType { .. } => ctx.intern(MirTy::SelfType),
+        ResolvedTy::SelfType { entity } => build_self_type(ctx, *entity),
         ResolvedTy::AssocProjection { base, assoc } => {
             let base_ty = lower_resolved_ty(ctx, base);
             let Some(protocol) = ctx.world.parent_of(*assoc) else {
@@ -212,7 +236,7 @@ pub fn lower_named_type(ctx: &mut LowerCtx, entity: Entity, type_args: Vec<TyId>
         {
             ctx.register_name(parent);
             ctx.register_name(entity);
-            let self_ty = ctx.intern(MirTy::SelfType);
+            let self_ty = build_self_type(ctx, parent);
             return ctx.intern(MirTy::AssociatedProjection {
                 base: self_ty,
                 protocol: parent,
@@ -472,9 +496,14 @@ mod tests {
     #[test]
     fn lower_type_self() {
         let mut ctx = setup_stdlib_ctx();
-        let hir = HirTy::SelfType(Entity::from_raw(1), kestrel_span::Span::synthetic(0));
+        let entity = Entity::from_raw(1);
+        let hir = HirTy::SelfType(entity, kestrel_span::Span::synthetic(0));
         let ty = lower_type(&mut ctx, &hir);
-        assert_eq!(ctx.module.ty_arena.get(ty), &MirTy::SelfType);
+        // Self is lowered as Named(entity, []) — the entity has no type params
+        assert_eq!(
+            ctx.module.ty_arena.get(ty),
+            &MirTy::Named { entity, type_args: vec![] }
+        );
     }
 
     #[test]

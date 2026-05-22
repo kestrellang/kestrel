@@ -94,6 +94,7 @@ pub struct MonoParam {
     pub name: String,
     pub ty: TyId,
     pub convention: ParamConvention,
+    pub label: Option<String>,
 }
 
 impl MonoParam {
@@ -102,6 +103,21 @@ impl MonoParam {
             name: name.into(),
             ty,
             convention,
+            label: None,
+        }
+    }
+
+    pub fn with_label(
+        name: impl Into<String>,
+        ty: TyId,
+        convention: ParamConvention,
+        label: Option<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            convention,
+            label,
         }
     }
 }

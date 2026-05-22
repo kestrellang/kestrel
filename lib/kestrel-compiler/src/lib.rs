@@ -299,8 +299,9 @@ impl Compiler {
         let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
         let mono = kestrel_mir_2::mono::monomorphize(mir, &target_mir2)
             .map_err(|errs| {
+                let details: Vec<String> = errs.iter().map(|e| format!("  {e:?}")).collect();
                 kestrel_codegen_cranelift_2::CodegenError::Unsupported(
-                    format!("monomorphization failed: {} errors", errs.len()),
+                    format!("monomorphization failed: {} errors\n{}", errs.len(), details.join("\n")),
                 )
             })?;
         let target = kestrel_codegen::TargetConfig::host();
@@ -320,8 +321,9 @@ impl Compiler {
         let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
         let mono = kestrel_mir_2::mono::monomorphize(mir, &target_mir2)
             .map_err(|errs| {
+                let details: Vec<String> = errs.iter().map(|e| format!("  {e:?}")).collect();
                 kestrel_codegen_cranelift_2::CodegenError::Unsupported(
-                    format!("monomorphization failed: {} errors", errs.len()),
+                    format!("monomorphization failed: {} errors\n{}", errs.len(), details.join("\n")),
                 )
             })?;
         let target = kestrel_codegen::TargetConfig::host();

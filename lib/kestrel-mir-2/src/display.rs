@@ -531,7 +531,6 @@ impl fmt::Display for TyDisplay<'_> {
                     write!(f, "{name}")
                 }
             }
-            MirTy::SelfType => write!(f, "Self"),
             MirTy::AssociatedProjection {
                 base,
                 protocol,

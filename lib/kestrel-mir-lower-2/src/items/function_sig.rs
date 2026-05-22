@@ -13,7 +13,7 @@ use kestrel_mir_2::item::function::{
     CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, ReceiverConvention,
     WhereClause, WhereConstraint,
 };
-use kestrel_mir_2::{MirTy, ParamConvention, TypeParamDef};
+use kestrel_mir_2::{MirTy, ParamConvention, TyId, TypeParamDef};
 use kestrel_name_res::resolve_type::{ResolveTypePath, TypeResolution};
 
 use crate::context::LowerCtx;
@@ -64,7 +64,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
                     kestrel_ast_builder::ReceiverKind::Consuming => ParamConvention::Consuming,
                 }
             };
-            let self_ty = ctx.intern(MirTy::SelfType);
+            let self_ty = resolve_self_type_for_function(ctx, entity);
             let local_id = kestrel_mir_2::LocalId::new(0); // placeholder
             let param = ParamDef::new("self", local_id, self_ty, convention);
             def.params.push(param);
@@ -340,7 +340,13 @@ fn lower_where_constraint(
                 else {
                     continue;
                 };
-                out.add_constraint(WhereConstraint::implements(subject_entity, protocol_entity));
+                // Extract protocol type arguments as entities (e.g., T from SeqIndex[T])
+                let proto_type_arg_entities = extract_type_arg_entities(ctx, protocol_ty, context);
+                out.add_constraint(WhereConstraint::implements_with_args(
+                    subject_entity,
+                    protocol_entity,
+                    proto_type_arg_entities,
+                ));
             }
         }
         AstWhereConstraint::NegativeBound {
@@ -363,6 +369,26 @@ fn lower_where_constraint(
     }
 }
 
+/// Extract protocol type argument entities from an AST type like `SeqIndex[T]`.
+/// Returns entity IDs for each type arg that resolves to a type parameter.
+fn extract_type_arg_entities(
+    ctx: &LowerCtx,
+    ast_ty: &AstType,
+    context: Entity,
+) -> Vec<Entity> {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return Vec::new();
+    };
+    let Some(last_seg) = segments.last() else {
+        return Vec::new();
+    };
+    last_seg
+        .type_args
+        .iter()
+        .filter_map(|arg| resolve_ast_type_to_entity(ctx, arg, context))
+        .collect()
+}
+
 fn resolve_ast_type_to_entity(
     ctx: &LowerCtx,
     ast_ty: &AstType,
@@ -380,4 +406,29 @@ fn resolve_ast_type_to_entity(
         TypeResolution::Found(e) | TypeResolution::NotAType(e) => Some(e),
         TypeResolution::SelfType | TypeResolution::NotFound(_) => None,
     }
+}
+
+/// Walk the parent chain from a function entity to find the enclosing
+/// struct/enum/protocol and build its Self type as `Named(entity, [TypeParam...])`.
+fn resolve_self_type_for_function(ctx: &mut LowerCtx, func_entity: Entity) -> TyId {
+    let mut current = ctx.world.parent_of(func_entity);
+    while let Some(entity) = current {
+        match ctx.world.get::<NodeKind>(entity).cloned() {
+            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
+                return crate::ty::build_self_type(ctx, entity);
+            }
+            Some(NodeKind::Extension) => {
+                // Extension target: resolve the target entity
+                if let Some(target) = ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
+                    extension: entity,
+                    root: ctx.root,
+                }) {
+                    return crate::ty::build_self_type(ctx, target);
+                }
+                return ctx.module.ty_arena.error();
+            }
+            _ => current = ctx.world.parent_of(entity),
+        }
+    }
+    ctx.module.ty_arena.error()
 }
