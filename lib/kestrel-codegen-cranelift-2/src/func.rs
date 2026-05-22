@@ -6,7 +6,8 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_module::{FuncId, Module};
 
 use kestrel_mir_2::{
-    ArgMode, BlockId, LocalId, MirBody, MonoFunction, Operand, PlaceBase, Rvalue, StatementKind,
+    ArgMode, BlockId, LocalId, MirBody, MonoFunction, Operand, Place, PlaceBase, PlaceElem, Rvalue,
+    StatementKind,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -259,6 +260,38 @@ fn collect_stack_locals(body: &MirBody, func: &MonoFunction, ctx: &mut CodegenCt
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    // Locals used as the base of a Deref projection must be on the stack
+    // so place_addr can load the pointer value through the slot.
+    for block in &body.blocks {
+        for stmt in &block.stmts {
+            let places: Vec<&Place> = match &stmt.kind {
+                StatementKind::Assign { dest, rvalue } => {
+                    let mut v: Vec<&Place> = vec![dest];
+                    for (op, _) in rvalue.operands_with_mode() {
+                        if let Operand::Place(p) = op { v.push(p); }
+                    }
+                    v
+                }
+                StatementKind::Call { dest, args, .. } => {
+                    let mut v: Vec<&Place> = Vec::new();
+                    if let Some(d) = dest { v.push(d); }
+                    for (op, _) in args {
+                        if let Operand::Place(p) = op { v.push(p); }
+                    }
+                    v
+                }
+                _ => vec![],
+            };
+            for p in places {
+                if p.projections.iter().any(|proj| matches!(proj, PlaceElem::Deref)) {
+                    if let PlaceBase::Local(id) = &p.base {
+                        stack.insert(*id);
+                    }
+                }
             }
         }
     }
