@@ -21,11 +21,24 @@ pub fn compile_call(
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, dest),
         Callee::Thin(place) => compile_thin_call(fc, builder, place, args, dest),
         Callee::Thick(place) => compile_thick_call(fc, builder, place, args, dest),
-        Callee::Direct { .. } | Callee::Witness { .. } => {
-            debug_assert!(false, "unresolved callee in codegen: {callee:?}");
-            Err(CodegenError::Unsupported(
-                "unresolved callee post-mono".into(),
-            ))
+        Callee::Direct { func, type_args, self_type } => {
+            let func_name = fc.ctx.module.resolve_name(*func);
+            let type_arg_descs: Vec<String> = type_args.iter()
+                .map(|&t| format!("{:?}", fc.ctx.module.ty_arena.get(t)))
+                .collect();
+            let self_desc = self_type.map(|t| format!("{:?}", fc.ctx.module.ty_arena.get(t)));
+            Err(CodegenError::Unsupported(format!(
+                "unresolved callee post-mono: {func_name} (entity={func:?}, type_args=[{}], self_type={self_desc:?})",
+                type_arg_descs.join(", "),
+            )))
+        }
+        Callee::Witness { protocol, method, self_type, .. } => {
+            let proto_name = fc.ctx.module.resolve_name(*protocol);
+            let self_desc = format!("{:?}", fc.ctx.module.ty_arena.get(*self_type));
+            Err(CodegenError::Unsupported(format!(
+                "unresolved witness callee post-mono: {proto_name}.{} on {self_desc}",
+                method.name,
+            )))
         }
     }
 }

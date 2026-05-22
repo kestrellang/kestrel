@@ -51,7 +51,7 @@ pub fn compile_function(
     let ptr_ty = ctx.ptr_ty;
 
     // Scan for address-taken locals
-    let stack_locals = collect_stack_locals(body, ctx);
+    let stack_locals = collect_stack_locals(body, func, ctx);
 
     let mut cl_func = ir::Function::with_name_signature(
         ir::UserFuncName::user(0, func_idx as u32),
@@ -74,7 +74,8 @@ pub fn compile_function(
     builder.switch_to_block(entry);
 
     // Declare variables for all locals.
-    // Address-taken scalars hold a pointer, not the scalar value.
+    // Locals in stack_locals (address-taken, by-ref params, aggregates) hold
+    // pointers; scalars not in the set hold the value directly.
     let mut local_vars = Vec::with_capacity(body.locals.len());
     for (i, local) in body.locals.iter().enumerate() {
         let repr = ctx.tc.repr(local.ty, &ctx.module.ty_arena, ctx.module);
@@ -232,7 +233,7 @@ pub fn compile_function(
 
 /// Scan the body for locals that need stack addresses
 /// (address-taken via Ref/RefMut, or passed by Ref/RefMut to calls).
-fn collect_stack_locals(body: &MirBody, ctx: &mut CodegenCtx<'_>) -> HashSet<LocalId> {
+fn collect_stack_locals(body: &MirBody, func: &MonoFunction, ctx: &mut CodegenCtx<'_>) -> HashSet<LocalId> {
     let mut stack = HashSet::new();
 
     for block in &body.blocks {
@@ -262,11 +263,18 @@ fn collect_stack_locals(body: &MirBody, ctx: &mut CodegenCtx<'_>) -> HashSet<Loc
         }
     }
 
-    // Also mark aggregate locals as stack locals
+    // Mark aggregate locals and by-ref scalar params as stack locals.
+    // By-ref params hold a pointer even for scalar types.
+    let ptr_ty = ctx.ptr_ty;
     for (i, local) in body.locals.iter().enumerate() {
         let repr = ctx.tc.repr(local.ty, &ctx.module.ty_arena, ctx.module);
         if matches!(repr, TypeRepr::Aggregate { .. }) {
             stack.insert(LocalId::new(i));
+        } else if let Some(param) = func.params.get(i) {
+            let pass = crate::abi::param_pass_mode(param.convention, repr, ptr_ty);
+            if matches!(pass, crate::abi::PassMode::ByRef) {
+                stack.insert(LocalId::new(i));
+            }
         }
     }
 

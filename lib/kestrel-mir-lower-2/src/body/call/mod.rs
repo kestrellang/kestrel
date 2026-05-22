@@ -408,8 +408,21 @@ impl BodyCtx<'_, '_> {
         let mut call_args = vec![(self_ref, ArgMode::RefMut)];
         call_args.extend(self.lower_call_args_default(args));
 
-        let callee = Callee::direct_with_args(entity, type_args, Some(result_ty));
-        self.apply_param_modes(&mut call_args, entity);
+        let callee = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_method_key(entity);
+            self.apply_witness_param_modes(&mut call_args, protocol, &key);
+            Callee::Witness {
+                protocol,
+                method: key,
+                self_type: result_ty,
+                method_type_args: type_args,
+            }
+        } else {
+            self.apply_param_modes(&mut call_args, entity);
+            Callee::direct_with_args(entity, type_args, Some(result_ty))
+        };
+
         self.emit_call(None, callee, call_args);
         Operand::Place(Place::local(self_local))
     }

@@ -14,6 +14,18 @@ use crate::func::FuncCompiler;
 use crate::ty::{float_bits_to_cl, int_bits_to_cl, TypeRepr};
 use crate::{imm, mem, place};
 
+/// Extend a comparison result to I8 (Bool). Cranelift's `icmp`/`fcmp` return
+/// a value with the same width as the operands, so for I8 operands the result
+/// is already I8 and no extension is needed.
+fn cmp_to_bool(builder: &mut FunctionBuilder, cmp: Value) -> Value {
+    let ty = builder.func.dfg.value_type(cmp);
+    if ty == ir::types::I8 {
+        cmp
+    } else {
+        builder.ins().uextend(ir::types::I8, cmp)
+    }
+}
+
 pub fn compile_rvalue(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -139,7 +151,7 @@ fn compile_op1(
         Op::FloatPred(_, FloatPredicateKind::IsNan) => {
             // NaN != NaN
             let cmp = builder.ins().fcmp(FloatCC::Unordered, arg, arg);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::FloatPred(_, FloatPredicateKind::IsInfinite) => {
             let abs = builder.ins().fabs(arg);
@@ -197,81 +209,81 @@ fn compile_op2(
         // Integer comparison
         Op::Eq(_) => {
             let cmp = builder.ins().icmp(IntCC::Equal, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Ne(_) => {
             let cmp = builder.ins().icmp(IntCC::NotEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Lt(_, Signedness::Signed) => {
             let cmp = builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Lt(_, Signedness::Unsigned) => {
             let cmp = builder.ins().icmp(IntCC::UnsignedLessThan, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Le(_, Signedness::Signed) => {
             let cmp = builder
                 .ins()
                 .icmp(IntCC::SignedLessThanOrEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Le(_, Signedness::Unsigned) => {
             let cmp = builder
                 .ins()
                 .icmp(IntCC::UnsignedLessThanOrEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Gt(_, Signedness::Signed) => {
             let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Gt(_, Signedness::Unsigned) => {
             let cmp = builder
                 .ins()
                 .icmp(IntCC::UnsignedGreaterThan, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Ge(_, Signedness::Signed) => {
             let cmp = builder
                 .ins()
                 .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::Ge(_, Signedness::Unsigned) => {
             let cmp = builder
                 .ins()
                 .icmp(IntCC::UnsignedGreaterThanOrEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
 
         // Float comparison
         Op::FEq(_) => {
             let cmp = builder.ins().fcmp(FloatCC::Equal, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::FNe(_) => {
             let cmp = builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::FLt(_) => {
             let cmp = builder.ins().fcmp(FloatCC::LessThan, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::FLe(_) => {
             let cmp = builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::FGt(_) => {
             let cmp = builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
         Op::FGe(_) => {
             let cmp = builder
                 .ins()
                 .fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
 
         // Boolean
@@ -279,7 +291,7 @@ fn compile_op2(
         Op::BoolOr => builder.ins().bor(lhs, rhs),
         Op::BoolEq => {
             let cmp = builder.ins().icmp(IntCC::Equal, lhs, rhs);
-            builder.ins().uextend(ir::types::I8, cmp)
+            cmp_to_bool(builder, cmp)
         }
 
         // Pointer
