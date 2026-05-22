@@ -73,10 +73,16 @@ pub fn compile_function(
     builder.append_block_params_for_function_params(entry);
     builder.switch_to_block(entry);
 
-    // Declare variables for all locals
+    // Declare variables for all locals.
+    // Address-taken scalars hold a pointer, not the scalar value.
     let mut local_vars = Vec::with_capacity(body.locals.len());
-    for (_i, local) in body.locals.iter().enumerate() {
-        let cl_ty = ctx.tc.cl_type(local.ty, &ctx.module.ty_arena, ctx.module);
+    for (i, local) in body.locals.iter().enumerate() {
+        let repr = ctx.tc.repr(local.ty, &ctx.module.ty_arena, ctx.module);
+        let cl_ty = if repr.is_scalar() && stack_locals.contains(&LocalId::new(i)) {
+            ptr_ty
+        } else {
+            ctx.tc.cl_type(local.ty, &ctx.module.ty_arena, ctx.module)
+        };
         let var = builder.declare_var(cl_ty);
         local_vars.push(var);
     }

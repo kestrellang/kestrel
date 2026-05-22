@@ -296,7 +296,26 @@ impl<'m> CodegenCtx<'m> {
             let func = &self.module.functions[i];
             if func.body.is_some() {
                 let func_id = self.func_ids[i].expect("function must be declared");
-                func::compile_function(self, i, func_id)?;
+                let func_name = func.name.clone();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    func::compile_function(self, i, func_id)
+                }));
+                match result {
+                    Ok(inner) => inner?,
+                    Err(panic) => {
+                        let msg = if let Some(s) = panic.downcast_ref::<String>() {
+                            s.clone()
+                        } else if let Some(s) = panic.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        return Err(CodegenError::FunctionCompilation {
+                            name: func_name,
+                            source: format!("panic: {msg}").into(),
+                        });
+                    }
+                }
             }
         }
         Ok(())
