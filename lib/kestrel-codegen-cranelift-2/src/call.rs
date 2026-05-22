@@ -92,16 +92,16 @@ fn compile_resolved_call(
         let pass = abi::param_pass_mode(param.convention, repr, ptr_ty);
 
         match pass {
-            PassMode::ByVal(_) => {
-                let val = match arg_mode {
-                    ArgMode::Ref | ArgMode::RefMut => {
-                        // Caller wants to pass by ref but ABI is by-val — shouldn't happen
-                        // for Consuming params. Compile as operand value.
-                        rvalue::compile_operand(fc, builder, operand)?
-                    }
-                    ArgMode::Copy | ArgMode::Move => {
-                        rvalue::compile_operand(fc, builder, operand)?
-                    }
+            PassMode::ByVal(expected_ty) => {
+                let val = rvalue::compile_operand(fc, builder, operand)?;
+                let actual_ty = builder.func.dfg.value_type(val);
+                // By-ref operands hold a pointer; load the scalar through it
+                let val = if actual_ty != expected_ty && actual_ty == ptr_ty {
+                    builder
+                        .ins()
+                        .load(expected_ty, ir::MemFlags::new(), val, ir::immediates::Offset32::new(0))
+                } else {
+                    val
                 };
                 call_args.push(val);
             }
