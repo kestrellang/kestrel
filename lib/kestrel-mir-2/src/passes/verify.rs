@@ -248,6 +248,19 @@ pub fn verify_ownership(module: &MirModule, result: &mut VerifyResult) {
         let cfg = dataflow::compute_cfg_info(body);
         let analysis = InitAnalysis::compute_with_cfg(body, &cfg);
 
+        // Borrowed params and drop-shim self are not dropped by drop_elab
+        let mut skip_drop_check: Vec<bool> = vec![false; body.locals.len()];
+        for p in &func.params {
+            if matches!(p.convention, crate::ty::ParamConvention::Borrow | crate::ty::ParamConvention::MutBorrow) {
+                skip_drop_check[p.local.index()] = true;
+            }
+        }
+        if is_drop_shim {
+            if let Some(p) = func.params.first() {
+                skip_drop_check[p.local.index()] = true;
+            }
+        }
+
         for (bi, block) in body.blocks.iter().enumerate() {
             let block_id = BlockId::new(bi);
 
@@ -270,6 +283,9 @@ pub fn verify_ownership(module: &MirModule, result: &mut VerifyResult) {
                 for (li, local) in body.locals.iter().enumerate() {
                     let local_id = LocalId::new(li);
                     if Some(local_id) == returned_local {
+                        continue;
+                    }
+                    if skip_drop_check[li] {
                         continue;
                     }
                     if !needs_drop(&module.ty_arena, module, local.ty) {

@@ -77,7 +77,9 @@ pub fn copy_behavior(
                     }
                 }
             }
-            CopyBehavior::Bitwise
+            // Unknown at generic time — treat as non-copyable so the lowering
+            // emits Move. After monomorphization the concrete type takes over.
+            CopyBehavior::None
         }
 
         MirTy::FuncThick { .. } => CopyBehavior::None,
@@ -237,14 +239,14 @@ mod tests {
     }
 
     #[test]
-    fn copy_behavior_type_param_default_bitwise() {
+    fn copy_behavior_type_param_default_none() {
         let mut m = ModuleBuilder::new("test");
         let t_entity = m.fresh_entity();
         let t_ty = m.ty(MirTy::TypeParam(t_entity));
         let module = m.finish();
         assert_eq!(
             copy_behavior(&module.ty_arena, &module, t_ty, None),
-            CopyBehavior::Bitwise
+            CopyBehavior::None
         );
     }
 

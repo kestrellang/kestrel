@@ -50,13 +50,7 @@ impl BodyCtx<'_, '_> {
                 arg.1 = match param.convention {
                     ParamConvention::Borrow => ArgMode::Ref,
                     ParamConvention::MutBorrow => ArgMode::RefMut,
-                    ParamConvention::Consuming => {
-                        if self.is_copy_type(param.ty) {
-                            ArgMode::Copy
-                        } else {
-                            ArgMode::Move
-                        }
-                    }
+                    ParamConvention::Consuming => ArgMode::Move,
                 };
             }
             return;
@@ -76,13 +70,7 @@ impl BodyCtx<'_, '_> {
         let skip = if callable.receiver.is_some() { 1 } else { 0 };
         for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
             arg.1 = if param.is_consuming {
-                // Default mode from lower_call_args_default encodes copyability:
-                // Copy → type is bitwise-copyable, keep Copy for consuming
-                if matches!(arg.1, ArgMode::Copy) {
-                    ArgMode::Copy
-                } else {
-                    ArgMode::Move
-                }
+                ArgMode::Move
             } else if param.is_mut {
                 ArgMode::RefMut
             } else {
