@@ -153,11 +153,16 @@ fn compile_op1(
             let cmp = builder.ins().fcmp(FloatCC::Unordered, arg, arg);
             cmp_to_bool(builder, cmp)
         }
-        Op::FloatPred(_, FloatPredicateKind::IsInfinite) => {
+        Op::FloatPred(fb, FloatPredicateKind::IsInfinite) => {
             let abs = builder.ins().fabs(arg);
-            let inf = builder.ins().f64const(f64::INFINITY);
+            let inf = match fb {
+                kestrel_mir_2::FloatBits::F16 | kestrel_mir_2::FloatBits::F32 => {
+                    builder.ins().f32const(f32::INFINITY)
+                }
+                kestrel_mir_2::FloatBits::F64 => builder.ins().f64const(f64::INFINITY),
+            };
             let is_inf = builder.ins().fcmp(FloatCC::Equal, abs, inf);
-            builder.ins().uextend(ir::types::I8, is_inf)
+            cmp_to_bool(builder, is_inf)
         }
         Op::FloatMath(_, FloatMathKind::Floor) => builder.ins().floor(arg),
         Op::FloatMath(_, FloatMathKind::Ceil) => builder.ins().ceil(arg),
