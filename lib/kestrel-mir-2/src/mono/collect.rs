@@ -216,7 +216,7 @@ impl<'a> CollectionContext<'a> {
         }
 
         // Build substitution map
-        let subst = build_subst(func, &key.type_args, key.self_type);
+        let subst = build_subst(func, &key.type_args, key.self_type, self.arena);
         let parent_self = key.self_type;
 
         let Some(body) = &func.body else { return };
@@ -472,9 +472,16 @@ impl<'a> CollectionContext<'a> {
         }
     }
 
-    fn func_uses_self_type(&self, _func: &FunctionDef) -> bool {
-        // SelfType was eliminated during MIR lowering — Self is now lowered as
-        // Named(parent_entity, [TypeParam...]), so no function uses SelfType.
+    fn func_uses_self_type(&self, func: &FunctionDef) -> bool {
+        // Protocol Self is TypeParam(protocol_entity). Detect it by checking
+        // if the first param is a TypeParam not in the function's type_params list.
+        let known_tps: std::collections::HashSet<Entity> =
+            func.type_params.iter().map(|tp| tp.entity).collect();
+        if let Some(first_param) = func.params.first() {
+            if let MirTy::TypeParam(e) = self.arena.get(first_param.ty) {
+                return !known_tps.contains(e);
+            }
+        }
         false
     }
 
@@ -495,10 +502,26 @@ impl<'a> CollectionContext<'a> {
 
 // -- Helpers --
 
-fn build_subst(func: &FunctionDef, type_args: &[TyId], _self_type: Option<TyId>) -> SubstMap {
+fn build_subst(
+    func: &FunctionDef,
+    type_args: &[TyId],
+    self_type: Option<TyId>,
+    arena: &TyArena,
+) -> SubstMap {
     let mut subst = SubstMap::new();
     for (tp, &arg) in func.type_params.iter().zip(type_args.iter()) {
         subst.type_params.insert(tp.entity, arg);
+    }
+    // Protocol default methods have Self as TypeParam(protocol_entity) in their
+    // self param. Map it to the concrete type so substitution resolves it.
+    if let Some(st) = self_type {
+        if let Some(first_param) = func.params.first() {
+            if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
+                if !subst.type_params.contains_key(entity) {
+                    subst.type_params.insert(*entity, st);
+                }
+            }
+        }
     }
     subst
 }

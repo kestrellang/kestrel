@@ -68,10 +68,15 @@ pub fn resolve_callable_types(ctx: &mut LowerCtx, entity: Entity) -> Vec<Option<
 
 /// Build the concrete type for `Self` given a protocol (or struct/enum) entity.
 ///
-/// `Self` in source is syntactic sugar — by MIR time it's just
-/// `Named(entity, [TypeParam(tp)...])`. This avoids an abstract `SelfType`
-/// variant in MIR that every downstream pass would need to handle.
+/// - **Struct/Enum**: `Named(entity, [TypeParam(tp)...])` — a concrete type.
+/// - **Protocol**: `TypeParam(protocol_entity)` — Self in a protocol is genuinely
+///   a type parameter (there are no instances of protocols). The monomorphizer
+///   substitutes it with the concrete conforming type via `InstantiationKey.self_type`.
 pub fn build_self_type(ctx: &mut LowerCtx, entity: Entity) -> TyId {
+    if ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) {
+        ctx.register_name(entity);
+        return ctx.intern(MirTy::TypeParam(entity));
+    }
     let type_args: Vec<TyId> = ctx
         .world
         .get::<TypeParams>(entity)
@@ -497,9 +502,10 @@ mod tests {
     fn lower_type_self() {
         let mut ctx = setup_stdlib_ctx();
         let entity = Entity::from_raw(1);
+        // Entity 1 has no NodeKind, so build_self_type treats it as non-protocol
+        // and produces Named(entity, [])
         let hir = HirTy::SelfType(entity, kestrel_span::Span::synthetic(0));
         let ty = lower_type(&mut ctx, &hir);
-        // Self is lowered as Named(entity, []) — the entity has no type params
         assert_eq!(
             ctx.module.ty_arena.get(ty),
             &MirTy::Named { entity, type_args: vec![] }
