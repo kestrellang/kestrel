@@ -115,6 +115,21 @@ impl BodyCtx<'_, '_> {
             self.resolve_type_args(expr_id)
         };
 
+        // Function-typed receiver: the "method call" is actually calling a
+        // function value (e.g., `self.predicate(char)` where predicate is a
+        // stored closure field). Redirect to indirect call.
+        if matches!(self.ctx.module.ty_arena.get(receiver_ty), MirTy::FuncThick { .. } | MirTy::FuncThin { .. }) {
+            let receiver_val = call_args.remove(0).0;
+            let func_place = self.operand_to_place(receiver_val, receiver_ty);
+            let callee = match self.ctx.module.ty_arena.get(receiver_ty) {
+                MirTy::FuncThin { .. } => Callee::Thin(func_place),
+                _ => Callee::Thick(func_place),
+            };
+            let dest = self.fresh_temp(result_ty);
+            self.emit_call(Some(Place::local(dest)), callee, call_args);
+            return Operand::Place(Place::local(dest));
+        }
+
         // Build callee — one protocol-vs-direct branch
         let callee = if let Some(protocol) = self.ctx.is_protocol_method(resolved) {
             self.ctx.register_name(protocol);
@@ -254,6 +269,22 @@ impl BodyCtx<'_, '_> {
         };
 
         self.ctx.register_name(entity);
+
+        // Stored function field (e.g., `self.predicate(arg)`) — read the field,
+        // call through the function value. Must check before is_init/Callable tests.
+        let entity_kind = self.ctx.world.get::<NodeKind>(entity).cloned();
+        let has_callable = self.ctx.world.get::<Callable>(entity).is_some();
+        if matches!(entity_kind, Some(NodeKind::Field)) && !has_callable {
+            return self.lower_indirect_call(expr_id, callee_expr, args);
+        }
+        // Broader check: if the entity has no Callable and isn't a struct/enum/protocol,
+        // it's probably a field or variable with a function type — use indirect call.
+        if !has_callable
+            && !matches!(entity_kind, Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Initializer | NodeKind::Function))
+        {
+            return self.lower_indirect_call(expr_id, callee_expr, args);
+        }
+
         let is_init = self.is_init_function(entity).is_some();
         let type_args = self.resolve_call_type_args(expr_id, callee_expr, entity, is_init);
 
