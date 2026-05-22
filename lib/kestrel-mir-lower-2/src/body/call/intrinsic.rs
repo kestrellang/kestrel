@@ -3,7 +3,7 @@
 use kestrel_ast_builder::Intrinsic;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExprId};
-use kestrel_mir_2::{FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Operand, Op, Place, Signedness, TyId};
+use kestrel_mir_2::{FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Operand, Op, Place, Rvalue, Signedness, TyId, UseMode};
 
 use crate::body::BodyCtx;
 
@@ -251,6 +251,39 @@ pub(crate) fn try_intrinsic(
     if name == "panic" || name == "panic_unwind" {
         bctx.emit_panic("panic");
         return Some(Operand::Const(kestrel_mir_2::Immediate::unit()));
+    }
+
+    // Float constants (zero-arg, emit as immediates)
+    match name.as_str() {
+        "f32_infinity" => {
+            let ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(ty);
+            let imm = kestrel_mir_2::Immediate::new(kestrel_mir_2::ImmediateKind::FloatInfinity(FloatBits::F32));
+            bctx.emit_assign(Place::local(dest), Rvalue::Use(Operand::Const(imm), UseMode::Copy));
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "f64_infinity" => {
+            let ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(ty);
+            let imm = kestrel_mir_2::Immediate::new(kestrel_mir_2::ImmediateKind::FloatInfinity(FloatBits::F64));
+            bctx.emit_assign(Place::local(dest), Rvalue::Use(Operand::Const(imm), UseMode::Copy));
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "f32_nan" => {
+            let ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(ty);
+            let imm = kestrel_mir_2::Immediate::new(kestrel_mir_2::ImmediateKind::FloatNan(FloatBits::F32));
+            bctx.emit_assign(Place::local(dest), Rvalue::Use(Operand::Const(imm), UseMode::Copy));
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "f64_nan" => {
+            let ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(ty);
+            let imm = kestrel_mir_2::Immediate::new(kestrel_mir_2::ImmediateKind::FloatNan(FloatBits::F64));
+            bctx.emit_assign(Place::local(dest), Rvalue::Use(Operand::Const(imm), UseMode::Copy));
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        _ => {}
     }
 
     let entry = TABLE.iter().find(|e| e.name == name)?;
