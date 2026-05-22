@@ -44,6 +44,19 @@ pub fn place_type(
             PlaceElem::TupleIndex(i) => {
                 if let MirTy::Tuple(elems) = arena.get(ty) {
                     ty = elems[*i as usize];
+                } else if let Some(variant) = current_variant {
+                    // After Downcast: index into the variant's payload fields
+                    if let MirTy::Named { entity, type_args } = arena.get(ty) {
+                        let entity = *entity;
+                        let type_args = type_args.clone();
+                        if let Some(e) = find_mono_enum(&entity, &type_args, module, tc) {
+                            if let Some(case) = e.cases.get(variant.index()) {
+                                if let Some(field) = case.payload_fields.get(*i as usize) {
+                                    ty = field.ty;
+                                }
+                            }
+                        }
+                    }
                 }
                 current_variant = None;
             }
