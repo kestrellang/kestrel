@@ -232,6 +232,11 @@ fn monomorphize_body(
                     .copied();
 
                 if let Some(concrete_ty) = concrete_type {
+                    // The HIR uses SelfType(protocol) in associated type projections
+                    // (e.g. `Self.BytesYield` inside a protocol declaration). Map the
+                    // protocol entity to the concrete type so substitution resolves them.
+                    subst.type_params.entry(*protocol).or_insert(concrete_ty);
+
                     // Enrich subst with witness proto_type_args → concrete mappings.
                     // For `I: SeqIndex[T]` where T→concrete_T, the witness for
                     // `Int64: SeqIndex[T_ext]` has proto_type_args = [TypeParam(T_ext)].
