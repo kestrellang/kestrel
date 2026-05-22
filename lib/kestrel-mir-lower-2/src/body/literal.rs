@@ -163,12 +163,12 @@ impl BodyCtx<'_, '_> {
             },
         );
 
-        // SizeOf
+        // Element stride (bytes per element)
         let size_local = self.fresh_temp(i64_ty);
         self.emit_assign(
             Place::local(size_local),
             Rvalue::Op1 {
-                op: Op::StackAlloc(element_ty), // TODO: should be SizeOf — need to check Op variant
+                op: Op::SizeOf(element_ty),
                 arg: Operand::Const(Immediate::unit()),
             },
         );
@@ -267,7 +267,7 @@ impl BodyCtx<'_, '_> {
         self.emit_assign(
             Place::local(size_local),
             Rvalue::Op1 {
-                op: Op::StackAlloc(pair_ty),
+                op: Op::SizeOf(pair_ty),
                 arg: Operand::Const(Immediate::unit()),
             },
         );

@@ -26,6 +26,19 @@ fn cmp_to_bool(builder: &mut FunctionBuilder, cmp: Value) -> Value {
     }
 }
 
+/// Try to extract a compile-time integer constant from a Cranelift Value.
+fn resolve_iconst(builder: &FunctionBuilder, val: Value) -> Option<i64> {
+    use cranelift_codegen::ir::InstructionData;
+    let dfg = &builder.func.dfg;
+    let val = dfg.resolve_aliases(val);
+    if let ir::ValueDef::Result(inst, 0) = dfg.value_def(val) {
+        if let InstructionData::UnaryImm { imm, .. } = dfg.insts[inst] {
+            return Some(imm.bits());
+        }
+    }
+    None
+}
+
 pub fn compile_rvalue(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -148,7 +161,10 @@ fn compile_op1(
         }
         Op::StackAlloc(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty)
+            // arg is the element count — extract the compile-time constant
+            // so we can size the stack slot correctly.
+            let count = resolve_iconst(builder, arg).unwrap_or(1) as u64;
+            mem::alloc_stack_slot(builder, repr.size() * count, repr.align(), ptr_ty)
         }
 
         // String
