@@ -123,6 +123,13 @@ fn compile_op1(
         Op::PtrFromAddress(_) => arg,
         Op::PtrToAddress => arg,
         Op::PtrIsNull => builder.ins().icmp_imm(IntCC::Equal, arg, 0),
+        Op::PtrNull(_) => builder.ins().iconst(ptr_ty, 0),
+        Op::PtrTo(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
+            mem::store_to_repr(builder, repr, slot, arg);
+            slot
+        }
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
         Op::RefToPtr => arg,
 
@@ -131,6 +138,14 @@ fn compile_op1(
             mem::load_from_repr(builder, repr, arg, ptr_ty)
         }
 
+        Op::SizeOf(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.size() as i64)
+        }
+        Op::AlignOf(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.align() as i64)
+        }
         Op::StackAlloc(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty)

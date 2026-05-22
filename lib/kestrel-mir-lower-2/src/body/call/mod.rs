@@ -27,7 +27,7 @@ impl BodyCtx<'_, '_> {
     ) -> Operand {
         // Priority 1: intrinsic → Op (includes panic)
         if let Some(entity) = self.resolve_callee_entity_from_expr(callee_expr) {
-            if let Some(op) = intrinsic::try_intrinsic(self, expr_id, entity, args) {
+            if let Some(op) = intrinsic::try_intrinsic(self, expr_id, callee_expr, entity, args) {
                 return op;
             }
         }

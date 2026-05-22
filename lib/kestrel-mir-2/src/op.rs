@@ -141,11 +141,15 @@ pub enum Op {
     PtrRead(TyId),        // Op1: ptr -> value
     PtrWrite(TyId),       // Op2: (ptr, value) -> ()
     PtrIsNull,            // Op1: ptr -> bool
+    PtrNull(TyId),        // Op0: () -> ptr (null pointer constant)
+    PtrTo(TyId),          // Op1: value -> ptr (stack-allocate and store)
     PtrCast(TyId),        // Op1: ptr -> ptr (different pointee)
     PtrBitcast(TyId),     // Op1: ptr -> ptr (reinterpret)
     RefToPtr,             // Op1: &T -> p[T]
 
     // Memory
+    SizeOf(TyId),     // Op0: () -> i64 (byte size of type)
+    AlignOf(TyId),    // Op0: () -> i64 (alignment of type)
     StackAlloc(TyId), // Op1: count -> ptr
 
     // String

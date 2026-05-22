@@ -452,8 +452,12 @@ fn substitute_op_type(arena: &mut TyArena, op: &mut crate::op::Op, subst: &Subst
         Op::PtrFromAddress(ty)
         | Op::PtrRead(ty)
         | Op::PtrWrite(ty)
+        | Op::PtrNull(ty)
+        | Op::PtrTo(ty)
         | Op::PtrCast(ty)
         | Op::PtrBitcast(ty)
+        | Op::SizeOf(ty)
+        | Op::AlignOf(ty)
         | Op::StackAlloc(ty) => {
             *ty = substitute(arena, *ty, subst);
         }

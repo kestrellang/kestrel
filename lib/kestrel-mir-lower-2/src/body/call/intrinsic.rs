@@ -236,6 +236,7 @@ static TABLE: &[IntrinsicEntry] = &[
 pub(crate) fn try_intrinsic(
     bctx: &mut BodyCtx,
     expr_id: HirExprId,
+    callee_expr: HirExprId,
     callee_entity: Entity,
     args: &[HirCallArg],
 ) -> Option<Operand> {
@@ -281,6 +282,76 @@ pub(crate) fn try_intrinsic(
             let dest = bctx.fresh_temp(ty);
             let imm = kestrel_mir_2::Immediate::new(kestrel_mir_2::ImmediateKind::FloatNan(FloatBits::F64));
             bctx.emit_assign(Place::local(dest), Rvalue::Use(Operand::Const(imm), UseMode::Copy));
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        _ => {}
+    }
+
+    // Generic intrinsics — extract the type arg from inference and emit typed Ops.
+    // Type args may be on the call expr or the callee expr depending on call syntax.
+    let mut type_args = bctx.resolve_type_args(expr_id);
+    if type_args.is_empty() {
+        type_args = bctx.resolve_type_args(callee_expr);
+    }
+    match name.as_str() {
+        "sizeof" | "alignof" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let op = if name == "sizeof" { Op::SizeOf(ty_arg) } else { Op::AlignOf(ty_arg) };
+            // Zero-arg op: emit as Op1 with a dummy unit operand
+            let unit = Operand::Const(kestrel_mir_2::Immediate::unit());
+            bctx.emit_assign_op1(Place::local(dest), op, unit);
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "ptr_null" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let unit = Operand::Const(kestrel_mir_2::Immediate::unit());
+            bctx.emit_assign_op1(Place::local(dest), Op::PtrNull(ty_arg), unit);
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "ptr_to" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let arg = bctx.lower_expr(args.first()?.value);
+            bctx.emit_assign_op1(Place::local(dest), Op::PtrTo(ty_arg), arg);
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "ptr_from_address" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let arg = bctx.lower_expr(args.first()?.value);
+            bctx.emit_assign_op1(Place::local(dest), Op::PtrFromAddress(ty_arg), arg);
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "ptr_read" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let arg = bctx.lower_expr(args.first()?.value);
+            bctx.emit_assign_op1(Place::local(dest), Op::PtrRead(ty_arg), arg);
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "ptr_write" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let ptr = bctx.lower_expr(args.get(0)?.value);
+            let val = bctx.lower_expr(args.get(1)?.value);
+            bctx.emit_assign_op2(Place::local(dest), Op::PtrWrite(ty_arg), ptr, val);
+            return Some(Operand::Place(Place::local(dest)));
+        }
+        "cast_ptr" => {
+            // cast_ptr[From, To](ptr) — use the second type arg (target pointee)
+            let ty_arg = type_args.get(1).or(type_args.first()).copied()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let dest = bctx.fresh_temp(result_ty);
+            let arg = bctx.lower_expr(args.first()?.value);
+            bctx.emit_assign_op1(Place::local(dest), Op::PtrCast(ty_arg), arg);
             return Some(Operand::Place(Place::local(dest)));
         }
         _ => {}
