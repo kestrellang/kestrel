@@ -343,6 +343,7 @@ fn monomorphize_body(
                         entity_names,
                         callee,
                         &subst,
+                        key.self_type,
                         bi,
                         si,
                         &mut resolved_witnesses,
@@ -468,21 +469,36 @@ fn substitute_callee_and_resolve(
     entity_names: &IndexMap<Entity, String>,
     callee: &mut Callee,
     subst: &SubstMap,
+    parent_self: Option<TyId>,
     block_idx: usize,
     stmt_idx: usize,
     resolved_witnesses: &mut HashMap<(usize, usize), InstantiationKey>,
 ) {
     match callee {
         Callee::Direct {
+            func,
             type_args,
             self_type,
-            ..
         } => {
             for ta in type_args.iter_mut() {
                 *ta = substitute(arena, *ta, subst);
             }
             if let Some(st) = self_type {
                 *st = substitute(arena, *st, subst);
+            }
+            // Nested callees (closures/thunks) inherit parent's self_type
+            // so rewrite_callee can look them up with the correct key.
+            if self_type.is_none() && parent_self.is_some() {
+                if let Some(f) = functions.iter().find(|f| f.entity == *func) {
+                    if matches!(
+                        f.kind,
+                        FunctionKind::Closure { .. }
+                            | FunctionKind::ClosureCall { .. }
+                            | FunctionKind::Thunk { .. }
+                    ) {
+                        *self_type = parent_self;
+                    }
+                }
             }
         }
         Callee::Witness {
