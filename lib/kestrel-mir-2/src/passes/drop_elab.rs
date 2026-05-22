@@ -1,5 +1,7 @@
 use crate::body::{LocalDef, MirBody};
+use crate::item::function::FunctionKind;
 use crate::operand::Operand;
+use crate::ty::ParamConvention;
 use crate::place::Place;
 use crate::statement::{Statement, StatementKind};
 use crate::terminator::TerminatorKind;
@@ -22,15 +24,36 @@ pub fn run_drop_elaboration(module: &mut MirModule) {
 
 fn elaborate_function(module: &mut MirModule, func_idx: usize) {
     // Phase 1: Analysis (read-only)
-    let body = module.functions[func_idx].body.as_ref().unwrap();
+    let func = &module.functions[func_idx];
+    let body = func.body.as_ref().unwrap();
     let cfg = dataflow::compute_cfg_info(body);
     let analysis = InitAnalysis::compute_with_cfg(body, &cfg);
+
+    // Borrowed/mutably-borrowed params are caller-owned — never drop them.
+    // Drop shims own self but already destruct it — dropping would recurse.
+    let borrowed_params: Vec<bool> = {
+        let mut v = vec![false; body.locals.len()];
+        for p in &func.params {
+            if matches!(p.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
+                v[p.local.index()] = true;
+            }
+        }
+        // Drop shim self is Consuming but must not be re-dropped
+        if matches!(func.kind, FunctionKind::DropShim { .. }) {
+            if let Some(p) = func.params.first() {
+                v[p.local.index()] = true;
+            }
+        }
+        v
+    };
 
     let droppable: Vec<LocalId> = body
         .locals
         .iter()
         .enumerate()
-        .filter(|(_, local)| needs_drop(&module.ty_arena, module, local.ty))
+        .filter(|(i, local)| {
+            needs_drop(&module.ty_arena, module, local.ty) && !borrowed_params[*i]
+        })
         .map(|(i, _)| LocalId::new(i))
         .collect();
 
