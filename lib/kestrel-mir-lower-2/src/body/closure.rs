@@ -79,7 +79,13 @@ impl BodyCtx<'_, '_> {
             for &captured in &captured_locals {
                 let cap_ty = self.resolve_local_type(captured);
                 let cap_name = self.hir.locals[captured].name.clone();
-                env_def.add_field(FieldDef::new(&cap_name, cap_ty));
+                // Non-copy captures are stored as pointers (by-ref)
+                let field_ty = if self.is_copy_type(cap_ty) {
+                    cap_ty
+                } else {
+                    self.ctx.module.ty_arena.pointer(cap_ty)
+                };
+                env_def.add_field(FieldDef::new(&cap_name, field_ty));
             }
             let entity = env_def.entity;
             self.ctx.module.add_struct(env_def);
@@ -173,17 +179,34 @@ impl BodyCtx<'_, '_> {
         self.temp_counter = 0;
         self.in_protocol_extension = false;
 
-        // Emit loads from env struct for captured locals
+        // Emit loads from env struct for captured locals.
+        // Copy-captures: env field is T — load the value directly.
+        // Ref-captures: env field is Pointer[T] — load the pointer
+        // into a Pointer[T]-typed local. The local isn't droppable
+        // (Pointer is bitwise), so drop_elab leaves it alone. The
+        // closure body uses the captured variable via auto-deref in
+        // the local_map (field accesses go through the pointer).
         if env_struct_entity.is_some() {
             for (i, &captured) in captured_locals.iter().enumerate() {
                 let closure_local = capture_local_ids[i];
                 let cap_ty = self.body.local(closure_local).ty;
-                let field_place = Place::local(env_local).deref().field(FieldIdx::new(i));
-                let mode = self.use_mode_for(cap_ty);
-                self.emit_assign(
-                    Place::local(closure_local),
-                    Rvalue::Use(Operand::Place(field_place), mode),
-                );
+                let is_ref_capture = !self.is_copy_type(cap_ty);
+                if is_ref_capture {
+                    // Retype local to Pointer[T] and load the pointer from env
+                    let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+                    self.body.locals[closure_local.index()].ty = ptr_ty;
+                    let field_place = Place::local(env_local).deref().field(FieldIdx::new(i));
+                    self.emit_assign(
+                        Place::local(closure_local),
+                        Rvalue::Use(Operand::Place(field_place), UseMode::Copy),
+                    );
+                } else {
+                    let field_place = Place::local(env_local).deref().field(FieldIdx::new(i));
+                    self.emit_assign(
+                        Place::local(closure_local),
+                        Rvalue::Use(Operand::Place(field_place), UseMode::Copy),
+                    );
+                }
             }
         }
 

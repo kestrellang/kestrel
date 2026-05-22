@@ -273,7 +273,18 @@ impl BodyCtx<'_, '_> {
         // Stored field → place projection with FieldIdx
         let base_op = self.lower_expr(base);
         let base_ty = self.resolve_expr_type(base);
-        let place = self.operand_to_place(base_op, base_ty);
+        let mut place = self.operand_to_place(base_op, base_ty);
+        // Auto-deref: if the local is Pointer[T] (ref-capture) but the
+        // expression type is T, insert a deref so field access goes through
+        // the pointer.
+        if let Some(local) = place.root_local() {
+            let local_ty = self.body.local(local).ty;
+            if let MirTy::Pointer(inner) = self.ctx.module.ty_arena.get(local_ty) {
+                if *inner == base_ty {
+                    place = place.deref();
+                }
+            }
+        }
 
         let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
             MirTy::Named { entity, .. } => Some(*entity),
