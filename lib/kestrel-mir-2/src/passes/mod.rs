@@ -8,6 +8,8 @@ pub mod liveness;
 pub mod thunk;
 pub mod verify;
 
+pub use verify::{VerifyError, VerifyResult};
+
 use crate::item::TargetConfig;
 use crate::MirModule;
 

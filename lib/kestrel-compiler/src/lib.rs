@@ -233,7 +233,18 @@ impl Compiler {
         let mut mir = kestrel_mir_lower_2::lower_module(self.world(), self.root());
         let target = kestrel_mir_2::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
-        kestrel_mir_2::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        let verify_result =
+            kestrel_mir_2::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        if !verify_result.is_ok() {
+            let ctx = self.world().query_context();
+            for error in &verify_result.errors {
+                ctx.accumulate(diagnostic::verify_error_to_diagnostic(
+                    error,
+                    &mir,
+                    self.world(),
+                ));
+            }
+        }
         mir
     }
 
@@ -297,13 +308,7 @@ impl Compiler {
     ) -> Result<Vec<u8>, kestrel_codegen_cranelift_2::CodegenError> {
         let mir = self.lower_to_mir2();
         let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
-        let mono = kestrel_mir_2::mono::monomorphize(mir, &target_mir2)
-            .map_err(|errs| {
-                let details: Vec<String> = errs.iter().map(|e| format!("  {e:?}")).collect();
-                kestrel_codegen_cranelift_2::CodegenError::Unsupported(
-                    format!("monomorphization failed: {} errors\n{}", errs.len(), details.join("\n")),
-                )
-            })?;
+        let mono = self.monomorphize_mir2(mir, &target_mir2)?;
         let target = kestrel_codegen::TargetConfig::host();
         let options = kestrel_codegen_cranelift_2::CodegenOptions::default();
         let result = kestrel_codegen_cranelift_2::compile(&mono, &target, &options)?;
@@ -319,15 +324,45 @@ impl Compiler {
     ) -> Result<(), kestrel_codegen_cranelift_2::CodegenError> {
         let mir = self.lower_to_mir2();
         let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
-        let mono = kestrel_mir_2::mono::monomorphize(mir, &target_mir2)
-            .map_err(|errs| {
-                let details: Vec<String> = errs.iter().map(|e| format!("  {e:?}")).collect();
-                kestrel_codegen_cranelift_2::CodegenError::Unsupported(
-                    format!("monomorphization failed: {} errors\n{}", errs.len(), details.join("\n")),
-                )
-            })?;
+        let mono = self.monomorphize_mir2(mir, &target_mir2)?;
         let target = kestrel_codegen::TargetConfig::host();
         kestrel_codegen_cranelift_2::compile_and_link(&mono, &target, options, output_path)
+    }
+
+    /// Monomorphize a MIR-2 module, accumulating any errors as formal
+    /// diagnostics and running post-mono verification when gated.
+    #[allow(clippy::result_large_err)]
+    fn monomorphize_mir2(
+        &self,
+        mir: kestrel_mir_2::MirModule,
+        target: &kestrel_mir_2::TargetConfig,
+    ) -> Result<kestrel_mir_2::mono::MonoModule, kestrel_codegen_cranelift_2::CodegenError> {
+        let mono = kestrel_mir_2::mono::monomorphize(mir, target).map_err(|errs| {
+            let ctx = self.world().query_context();
+            for error in &errs {
+                ctx.accumulate(diagnostic::mono_error_to_diagnostic(error, self.world()));
+            }
+            kestrel_codegen_cranelift_2::CodegenError::Unsupported(format!(
+                "monomorphization failed with {} error(s)",
+                errs.len(),
+            ))
+        })?;
+
+        if std::env::var_os("KESTREL_VERIFY_MIR").is_some() {
+            let mono_verify = kestrel_mir_2::mono::verify::verify_mono(&mono);
+            if !mono_verify.is_ok() {
+                let ctx = self.world().query_context();
+                for error in &mono_verify.errors {
+                    ctx.accumulate(diagnostic::mono_verify_error_to_diagnostic(
+                        error,
+                        &mono,
+                        self.world(),
+                    ));
+                }
+            }
+        }
+
+        Ok(mono)
     }
 
     /// Load all .ks files from a directory, parse and build declarations.

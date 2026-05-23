@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use kestrel_hecs::Entity;
+use kestrel_span::Span;
 
 use crate::item::function::FunctionDef;
 use crate::item::protocol::ProtocolDef;
@@ -18,16 +19,22 @@ pub enum MonoError {
     WitnessNotFound {
         protocol_name: String,
         type_description: String,
+        source_entity: Entity,
+        span: Option<Span>,
     },
     MethodNotFound {
         protocol_name: String,
         method: String,
         type_description: String,
+        source_entity: Entity,
+        span: Option<Span>,
     },
     TypeArgArityMismatch {
         function: String,
         expected: usize,
         got: usize,
+        source_entity: Entity,
+        span: Option<Span>,
     },
 }
 
@@ -37,6 +44,7 @@ impl fmt::Display for MonoError {
             MonoError::WitnessNotFound {
                 protocol_name,
                 type_description,
+                ..
             } => write!(
                 f,
                 "no witness for {type_description}: {protocol_name}"
@@ -45,6 +53,7 @@ impl fmt::Display for MonoError {
                 protocol_name,
                 method,
                 type_description,
+                ..
             } => write!(
                 f,
                 "method {method} not found in witness for {type_description}: {protocol_name}"
@@ -53,10 +62,29 @@ impl fmt::Display for MonoError {
                 function,
                 expected,
                 got,
+                ..
             } => write!(
                 f,
                 "type arg arity mismatch for {function}: expected {expected}, got {got}"
             ),
+        }
+    }
+}
+
+impl MonoError {
+    pub fn source_entity(&self) -> Entity {
+        match self {
+            MonoError::WitnessNotFound { source_entity, .. }
+            | MonoError::MethodNotFound { source_entity, .. }
+            | MonoError::TypeArgArityMismatch { source_entity, .. } => *source_entity,
+        }
+    }
+
+    pub fn span(&self) -> Option<&Span> {
+        match self {
+            MonoError::WitnessNotFound { span, .. }
+            | MonoError::MethodNotFound { span, .. }
+            | MonoError::TypeArgArityMismatch { span, .. } => span.as_ref(),
         }
     }
 }
@@ -209,6 +237,8 @@ pub fn find_witness_with_method(
         protocol_name: format!("{protocol:?}"),
         method: method.name.clone(),
         type_description: format!("{:?}", arena.get(self_type)),
+        source_entity: Entity::from_raw(0),
+        span: None,
     })
 }
 
@@ -323,12 +353,23 @@ pub fn resolve_associated_type(
     self_type: TyId,
     assoc_entity: Entity,
 ) -> Option<TyId> {
+    let verbose = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
+    if verbose {
+        eprintln!("  resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
+            protocol, self_type, arena.get(self_type).clone(), assoc_entity);
+    }
     for witness in witnesses {
         if witness.protocol != protocol {
             continue;
         }
+        if verbose {
+            eprintln!("    witness: impl={:?} ({:?}) bindings={:?}",
+                witness.implementing_type, arena.get(witness.implementing_type).clone(),
+                witness.type_bindings);
+        }
         let mut bindings = HashMap::new();
         if !match_pattern(arena, witness.implementing_type, self_type, &mut bindings) {
+            if verbose { eprintln!("    -> no match"); }
             continue;
         }
         for &(entity, bound_ty) in &witness.type_bindings {

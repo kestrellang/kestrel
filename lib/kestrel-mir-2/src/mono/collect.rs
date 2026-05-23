@@ -211,6 +211,8 @@ impl<'a> CollectionContext<'a> {
                 function: func.name.clone(),
                 expected: func.type_params.len(),
                 got: key.type_args.len(),
+                source_entity: key.func_entity,
+                span: None,
             });
             return;
         }
@@ -218,15 +220,16 @@ impl<'a> CollectionContext<'a> {
         // Build substitution map
         let subst = build_subst(func, &key.type_args, key.self_type, self.arena, self.protocols, self.witnesses);
         let parent_self = key.self_type;
+        let caller_entity = key.func_entity;
 
         let Some(body) = &func.body else { return };
 
         for block in &body.blocks {
             for stmt in &block.stmts {
+                let stmt_span = stmt.span.as_ref();
                 match &stmt.kind {
                     StatementKind::Call { callee, args, .. } => {
-                        self.scan_callee(callee, &subst, parent_self);
-                        // Scan args for function refs
+                        self.scan_callee(callee, &subst, parent_self, caller_entity, stmt_span);
                         for (op, _) in args {
                             self.scan_operand(op, &subst, parent_self);
                         }
@@ -237,7 +240,6 @@ impl<'a> CollectionContext<'a> {
                     _ => {}
                 }
             }
-            // Scan terminator operands for function refs
             self.scan_terminator_operands(&block.terminator, &subst, parent_self);
         }
     }
@@ -247,6 +249,8 @@ impl<'a> CollectionContext<'a> {
         callee: &Callee,
         subst: &SubstMap,
         parent_self: Option<TyId>,
+        caller_entity: Entity,
+        stmt_span: Option<&kestrel_span::Span>,
     ) {
         match callee {
             Callee::Direct {
@@ -358,7 +362,7 @@ impl<'a> CollectionContext<'a> {
                         }
                     }
                     Err(e) => {
-                        // Enrich with entity names for diagnostics
+                        // Enrich with entity names and source location
                         let enriched = match &e {
                             MonoError::MethodNotFound { method, .. } => {
                                 let self_desc = format_ty(self.arena, concrete_self, self.entity_names);
@@ -368,6 +372,8 @@ impl<'a> CollectionContext<'a> {
                                     protocol_name: proto_name.to_string(),
                                     method: method.clone(),
                                     type_description: self_desc,
+                                    source_entity: caller_entity,
+                                    span: stmt_span.cloned(),
                                 }
                             }
                             _ => e,

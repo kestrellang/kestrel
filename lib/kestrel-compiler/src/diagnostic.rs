@@ -290,6 +290,113 @@ impl ToDiagnostic for ResolvedInferError<'_> {
     }
 }
 
+// ===== MIR2 diagnostics =====
+
+/// Resolve a span for a diagnostic: prefer the provided span, fall back to
+/// the entity's DeclSpan from the World, then to a synthetic span.
+fn resolve_span(span: Option<&Span>, entity: Entity, world: &World) -> Span {
+    if let Some(s) = span {
+        return s.clone();
+    }
+    world
+        .get::<kestrel_ast_builder::DeclSpan>(entity)
+        .map(|s| s.0.clone())
+        .unwrap_or_else(|| Span::synthetic(0))
+}
+
+pub fn mono_error_to_diagnostic(
+    error: &kestrel_mir_2::mono::MonoError,
+    world: &World,
+) -> Diagnostic<usize> {
+    let span = resolve_span(error.span(), error.source_entity(), world);
+    Diagnostic::bug()
+        .with_message(format!("internal compiler error: {error}"))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range())
+                .with_message("monomorphization failed here"),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
+}
+
+pub fn verify_error_to_diagnostic(
+    error: &kestrel_mir_2::passes::VerifyError,
+    module: &kestrel_mir_2::MirModule,
+    world: &World,
+) -> Diagnostic<usize> {
+    let func = &module.functions[error.func_idx];
+
+    // Try statement span first, then function's DeclSpan
+    let stmt_span = error.block.and_then(|block_id| {
+        error.stmt.and_then(|si| {
+            func.body
+                .as_ref()
+                .and_then(|body| body.blocks.get(block_id.index()))
+                .and_then(|block| block.stmts.get(si))
+                .and_then(|stmt| stmt.span.as_ref())
+        })
+    });
+    let span = resolve_span(stmt_span, func.entity, world);
+
+    let location = match (error.block, error.stmt) {
+        (Some(b), Some(s)) => format!(" at bb{}[{}]", b.index(), s),
+        (Some(b), None) => format!(" at bb{}", b.index()),
+        _ => String::new(),
+    };
+
+    Diagnostic::bug()
+        .with_message(format!(
+            "internal compiler error: MIR verify failed in '{}'{}: {}",
+            func.name, location, error.message
+        ))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range())
+                .with_message(&error.message),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
+}
+
+pub fn mono_verify_error_to_diagnostic(
+    error: &kestrel_mir_2::mono::MonoVerifyError,
+    module: &kestrel_mir_2::mono::MonoModule,
+    world: &World,
+) -> Diagnostic<usize> {
+    let func = &module.functions[error.func_idx];
+
+    let stmt_span = error.block.and_then(|block_id| {
+        error.stmt.and_then(|si| {
+            func.body
+                .as_ref()
+                .and_then(|body| body.blocks.get(block_id.index()))
+                .and_then(|block| block.stmts.get(si))
+                .and_then(|stmt| stmt.span.as_ref())
+        })
+    });
+    let span = resolve_span(stmt_span, func.source, world);
+
+    let location = match (error.block, error.stmt) {
+        (Some(b), Some(s)) => format!(" at bb{}[{}]", b.index(), s),
+        (Some(b), None) => format!(" at bb{}", b.index()),
+        _ => String::new(),
+    };
+
+    Diagnostic::bug()
+        .with_message(format!(
+            "internal compiler error: post-mono verify failed in '{}'{}: {}",
+            func.name, location, error.message
+        ))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range())
+                .with_message(&error.message),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
+}
+
 // ===== File provider =====
 
 /// File provider backed by the ECS world.

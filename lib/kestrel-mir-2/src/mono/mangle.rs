@@ -207,7 +207,16 @@ fn mangle_type(
                 e, name
             );
         }
-        MirTy::AssociatedProjection { .. } => {
+        MirTy::AssociatedProjection { base, protocol, assoc_type } => {
+            let base_ty = arena.get(*base);
+            let proto_name = entity_names.get(protocol).map(|s| s.as_str()).unwrap_or("?");
+            let assoc_name = entity_names.get(assoc_type).map(|s| s.as_str()).unwrap_or("?");
+            eprintln!("DIAG mangle_type: AssociatedProjection {{");
+            eprintln!("  base: {:?} ({:?})", base, base_ty);
+            eprintln!("  protocol: {:?} ({})", protocol, proto_name);
+            eprintln!("  assoc_type: {:?} ({})", assoc_type, assoc_name);
+            eprintln!("  out so far: {}", out);
+            eprintln!("}}");
             panic!(
                 "mangle_type: abstract type {:?} reached the mangler — monomorphization bug",
                 arena.get(ty)

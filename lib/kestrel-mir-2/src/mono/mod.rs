@@ -8,6 +8,7 @@ pub use types::{
     InstantiationKey, MonoEnum, MonoEnumCase, MonoField, MonoFunction, MonoModule, MonoParam,
     MonoStatic, MonoStruct,
 };
+pub use verify::{MonoVerifyError, MonoVerifyResult};
 pub use witness::MonoError;
 
 use std::collections::HashMap;
