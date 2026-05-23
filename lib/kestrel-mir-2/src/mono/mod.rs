@@ -119,6 +119,7 @@ pub fn monomorphize(
         &mut ty_arena,
         &structs,
         &enums,
+        &witnesses,
         &mono_bodies,
         target,
     );
@@ -408,10 +409,10 @@ fn substitute_callee_and_resolve(
             self_type,
         } => {
             for ta in type_args.iter_mut() {
-                *ta = substitute(arena, *ta, subst);
+                *ta = collect::substitute_and_resolve(arena, witnesses, *ta, subst);
             }
             if let Some(st) = self_type {
-                *st = substitute(arena, *st, subst);
+                *st = collect::substitute_and_resolve(arena, witnesses, *st, subst);
             }
             // Nested callees (closures/thunks) inherit parent's self_type
             // so rewrite_callee can look them up with the correct key.
@@ -434,12 +435,12 @@ fn substitute_callee_and_resolve(
             self_type,
             method_type_args,
         } => {
-            *self_type = substitute(arena, *self_type, subst);
+            *self_type = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
             for ta in method_type_args.iter_mut() {
-                *ta = substitute(arena, *ta, subst);
+                *ta = collect::substitute_and_resolve(arena, witnesses, *ta, subst);
             }
             // Resolve witness to concrete function
-            if let Ok(resolved) = witness::resolve_witness_call(
+            let witness_result = witness::resolve_witness_call(
                 arena,
                 witnesses,
                 protocols,
@@ -449,7 +450,8 @@ fn substitute_callee_and_resolve(
                 method,
                 *self_type,
                 method_type_args,
-            ) {
+            );
+            if let Ok(resolved) = witness_result {
                 resolved_witnesses.insert(
                     (block_idx, stmt_idx),
                     InstantiationKey::new(
@@ -458,6 +460,28 @@ fn substitute_callee_and_resolve(
                         resolved.self_type,
                     ),
                 );
+            } else {
+                // Fallback: if self_type is still a protocol TypeParam, use the
+                // parent's concrete self_type. This happens when a protocol extension
+                // method is lowered with a concrete struct parent — the body still
+                // references TypeParam(protocol_entity) but build_subst only mapped
+                // the struct's type params, not the protocol Self.
+                if let MirTy::TypeParam(tp_entity) = arena.get(*self_type) {
+                    if protocols.iter().any(|p| p.entity == *tp_entity) {
+                        if let Some(concrete) = parent_self {
+                            *self_type = concrete;
+                            if let Ok(resolved) = witness::resolve_witness_call(
+                                arena, witnesses, protocols, functions, entity_names,
+                                *protocol, method, *self_type, method_type_args,
+                            ) {
+                                resolved_witnesses.insert(
+                                    (block_idx, stmt_idx),
+                                    InstantiationKey::new(resolved.func_entity, resolved.type_args, resolved.self_type),
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
         _ => {}
@@ -878,6 +902,7 @@ fn resolve_types_and_layouts(
     arena: &mut TyArena,
     structs: &[StructDef],
     enums: &[EnumDef],
+    witnesses: &[WitnessDef],
     mono_bodies: &[MonoBodyResult],
     target: &TargetConfig,
 ) -> (Vec<MonoStruct>, Vec<MonoEnum>) {
@@ -915,7 +940,7 @@ fn resolve_types_and_layouts(
                     let mut fields = Vec::new();
 
                     for field in &sdef.fields {
-                        let concrete_ty = substitute(arena, field.ty, &subst);
+                        let concrete_ty = collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                         fields.push(MonoField::new(&field.name, concrete_ty));
 
                         if let Some((size, align)) = mono_size_and_align(arena, concrete_ty, target, &layout_cache) {
@@ -949,7 +974,7 @@ fn resolve_types_and_layouts(
                         let mut case_layout = StructLayout::new();
                         let mut mono_fields = Vec::new();
                         for field in &case.payload_fields {
-                            let concrete_ty = substitute(arena, field.ty, &subst);
+                            let concrete_ty = collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                             mono_fields.push(MonoField::new(&field.name, concrete_ty));
                             if let Some((size, align)) = mono_size_and_align(arena, concrete_ty, target, &layout_cache) {
                                 case_layout.append_field(StructLayout::scalar(size, align));
