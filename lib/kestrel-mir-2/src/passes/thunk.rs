@@ -102,9 +102,12 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
 
         for param in &target_params {
             let local = body.add_local(LocalDef::new(&param.name, param.ty));
+            // Thunk params use Consuming convention to match the FuncThick
+            // type (which always uses Consuming). The thunk forwards to the
+            // original function using the original's expected ArgMode.
             thunk_def
                 .params
-                .push(ParamDef::new(&param.name, local, param.ty, param.convention));
+                .push(ParamDef::new(&param.name, local, param.ty, ParamConvention::Consuming));
             body.param_count += 1;
             let mode = match param.convention {
                 ParamConvention::Borrow => ArgMode::Ref,
@@ -141,7 +144,28 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         let entry_id = body.add_block(entry);
         body.entry = entry_id;
         thunk_def.body = Some(body);
+        module.register_name(thunk_entity, &thunk_name);
         module.add_function(thunk_def);
+
+        // Rewrite ApplyPartial references to use the thunk entity so the
+        // thick closure calls through the thunk (which matches FuncThick
+        // calling conventions) rather than the original function directly.
+        for func in &mut module.functions {
+            let Some(body) = &mut func.body else { continue };
+            for block in &mut body.blocks {
+                for stmt in &mut block.stmts {
+                    if let StatementKind::Assign {
+                        rvalue: Rvalue::ApplyPartial { func: f, .. },
+                        ..
+                    } = &mut stmt.kind
+                    {
+                        if *f == *target {
+                            *f = thunk_entity;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
