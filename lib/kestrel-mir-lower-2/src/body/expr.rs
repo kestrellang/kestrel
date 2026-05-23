@@ -495,11 +495,9 @@ impl BodyCtx<'_, '_> {
         if parent_args.is_empty() {
             return method_args;
         }
-        if method_args.len() >= parent_args.len()
-            && method_args[..parent_args.len()] == parent_args[..]
-        {
-            return method_args;
-        }
+        // Always prepend parent type args. The caller truncates to the
+        // function's type_params count to handle cases where inference
+        // already included inherited params.
         let mut result = parent_args;
         result.extend(method_args);
         result

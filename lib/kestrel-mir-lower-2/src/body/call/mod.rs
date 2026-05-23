@@ -144,7 +144,10 @@ impl BodyCtx<'_, '_> {
         } else {
             self.ctx.register_name(resolved);
             self.apply_param_modes(&mut call_args, resolved);
-            let type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
+            let mut type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
+            if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == resolved) {
+                type_args.truncate(mir_func.type_params.len());
+            }
             Callee::direct_with_args(resolved, type_args, Some(receiver_ty))
         };
 
@@ -360,7 +363,10 @@ impl BodyCtx<'_, '_> {
             self.apply_param_modes(&mut call_args, entity);
             if has_receiver {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
-                let ta = self.prepend_receiver_type_args(receiver_ty, type_args);
+                let mut ta = self.prepend_receiver_type_args(receiver_ty, type_args);
+                if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == entity) {
+                    ta.truncate(mir_func.type_params.len());
+                }
                 Callee::direct_with_args(entity, ta, Some(receiver_ty))
             } else {
                 Callee::direct_with_args(entity, type_args, None)

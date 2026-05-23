@@ -216,7 +216,7 @@ impl<'a> CollectionContext<'a> {
         }
 
         // Build substitution map
-        let subst = build_subst(func, &key.type_args, key.self_type, self.arena);
+        let subst = build_subst(func, &key.type_args, key.self_type, self.arena, self.protocols, self.witnesses);
         let parent_self = key.self_type;
 
         let Some(body) = &func.body else { return };
@@ -258,13 +258,11 @@ impl<'a> CollectionContext<'a> {
                     return;
                 };
 
-                // Substitute type args
                 let concrete_type_args: Vec<TyId> = type_args
                     .iter()
-                    .map(|&ta| substitute(self.arena, ta, subst))
+                    .map(|&ta| substitute_and_resolve(self.arena, self.witnesses, ta, subst))
                     .collect();
 
-                // Resolve self_type
                 let callee_func = &self.functions[func_idx.index()];
                 let callee_is_nested = matches!(
                     callee_func.kind,
@@ -273,7 +271,7 @@ impl<'a> CollectionContext<'a> {
                         | FunctionKind::Thunk { .. }
                 );
                 let concrete_self = self_type
-                    .map(|st| substitute(self.arena, st, subst))
+                    .map(|st| substitute_and_resolve(self.arena, self.witnesses, st, subst))
                     .or_else(|| {
                         if self.func_uses_self_type(callee_func) || callee_is_nested {
                             parent_self
@@ -291,7 +289,7 @@ impl<'a> CollectionContext<'a> {
                 {
                     return;
                 }
-                if concrete_type_args.len() < callee_func.type_params.len() {
+                if concrete_type_args.len() != callee_func.type_params.len() {
                     return;
                 }
 
@@ -307,10 +305,10 @@ impl<'a> CollectionContext<'a> {
                 self_type,
                 method_type_args,
             } => {
-                let concrete_self = substitute(self.arena, *self_type, subst);
+                let concrete_self = substitute_and_resolve(self.arena, self.witnesses, *self_type, subst);
                 let concrete_method_args: Vec<TyId> = method_type_args
                     .iter()
-                    .map(|&a| substitute(self.arena, a, subst))
+                    .map(|&a| substitute_and_resolve(self.arena, self.witnesses, a, subst))
                     .collect();
 
                 if has_type_param(self.arena, concrete_self) {
@@ -437,11 +435,11 @@ impl<'a> CollectionContext<'a> {
 
                 let concrete_type_args: Vec<TyId> = type_args
                     .iter()
-                    .map(|&ta| substitute(self.arena, ta, subst))
+                    .map(|&ta| substitute_and_resolve(self.arena, self.witnesses, ta, subst))
                     .collect();
 
                 let concrete_self = self_type
-                    .map(|st| substitute(self.arena, st, subst))
+                    .map(|st| substitute_and_resolve(self.arena, self.witnesses, st, subst))
                     .or(parent_self);
 
                 let key = InstantiationKey::new(
@@ -500,30 +498,209 @@ impl<'a> CollectionContext<'a> {
     }
 }
 
-// -- Helpers --
+// -- Shared helpers for SubstMap construction --
 
-fn build_subst(
+/// Build a complete SubstMap for a function instantiation.
+///
+/// Handles three sources of type bindings:
+/// 1. Explicit type params from the instantiation key
+/// 2. Implicit Self → concrete_type for protocol default methods and their closures
+/// 3. Associated type projections resolved via witness lookup
+///
+/// After this returns, `substitute(arena, ty, &subst)` fully resolves all
+/// TypeParams and AssociatedProjections in the function's types.
+pub fn build_subst(
     func: &FunctionDef,
     type_args: &[TyId],
     self_type: Option<TyId>,
-    arena: &TyArena,
+    arena: &mut TyArena,
+    protocols: &[ProtocolDef],
+    witnesses: &[WitnessDef],
 ) -> SubstMap {
     let mut subst = SubstMap::new();
+
     for (tp, &arg) in func.type_params.iter().zip(type_args.iter()) {
         subst.type_params.insert(tp.entity, arg);
     }
-    // Protocol default methods have Self as TypeParam(protocol_entity) in their
-    // self param. Map it to the concrete type so substitution resolves it.
+
     if let Some(st) = self_type {
-        if let Some(first_param) = func.params.first() {
-            if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
-                if !subst.type_params.contains_key(entity) {
-                    subst.type_params.insert(*entity, st);
-                }
+        if let Some(proto_entity) = detect_implicit_protocol(func, arena, protocols) {
+            subst.type_params.entry(proto_entity).or_insert(st);
+            populate_assoc_types(arena, witnesses, protocols, proto_entity, st, &mut subst);
+        }
+    }
+
+    subst
+}
+
+/// Detect whether a function has an implicit Self: Protocol constraint.
+///
+/// Returns the protocol entity if the first param is TypeParam(protocol_entity),
+/// or (for closures/thunks only) if any param or return type references a
+/// protocol's TypeParam.
+pub fn detect_implicit_protocol(
+    func: &FunctionDef,
+    arena: &TyArena,
+    protocols: &[ProtocolDef],
+) -> Option<Entity> {
+    if let Some(first_param) = func.params.first() {
+        if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
+            if protocols.iter().any(|p| p.entity == *entity) {
+                return Some(*entity);
             }
         }
     }
-    subst
+    // Closures inside protocol default methods inherit self_type but their
+    // first param is env pointer, not Self. Scan their types for protocol
+    // TypeParams, gated by function kind to avoid scanning every method.
+    if !matches!(
+        func.kind,
+        FunctionKind::Closure { .. }
+            | FunctionKind::ClosureCall { .. }
+            | FunctionKind::Thunk { .. }
+    ) {
+        return None;
+    }
+    for proto in protocols {
+        if proto.associated_types.is_empty() {
+            continue;
+        }
+        let used = func.params.iter().any(|p| references_type_param(arena, p.ty, proto.entity))
+            || references_type_param(arena, func.ret, proto.entity);
+        if used {
+            return Some(proto.entity);
+        }
+    }
+    None
+}
+
+/// Resolve all associated types for a (protocol, concrete_type) pair and
+/// insert them into the SubstMap. Handles transitive chains like
+/// `FilterIterator[I].Item = I.Item` via bounded witness lookup.
+pub fn populate_assoc_types(
+    arena: &mut TyArena,
+    witnesses: &[WitnessDef],
+    protocols: &[ProtocolDef],
+    protocol: Entity,
+    concrete_ty: TyId,
+    subst: &mut SubstMap,
+) {
+    let Some(proto_def) = protocols.iter().find(|p| p.entity == protocol) else {
+        return;
+    };
+    for assoc in &proto_def.associated_types {
+        let assoc_key = (concrete_ty, protocol, assoc.entity);
+        if subst.assoc_types.contains_key(&assoc_key) {
+            continue;
+        }
+        if let Some(bound_ty) = witness::resolve_associated_type(
+            arena, witnesses, protocol, concrete_ty, assoc.entity,
+        ) {
+            let resolved = substitute(arena, bound_ty, subst);
+            // Use deep_resolve for nested projections like
+            // FlattenIterator.Item = Iterator.Item(Iterator.Item(I))
+            let final_ty = deep_resolve(arena, witnesses, resolved, 0);
+            subst.assoc_types.insert(assoc_key, final_ty);
+        }
+    }
+}
+
+/// Substitute a type through a SubstMap, then recursively resolve any
+/// AssociatedProjection nodes that emerge. Use for callee type_args in
+/// scan_callee where the parent's SubstMap resolves TypeParams but the
+/// resulting type may contain projections that need witness lookup.
+pub fn substitute_and_resolve(
+    arena: &mut TyArena,
+    witnesses: &[WitnessDef],
+    ty: TyId,
+    subst: &SubstMap,
+) -> TyId {
+    let sub = substitute(arena, ty, subst);
+    deep_resolve(arena, witnesses, sub, 0)
+}
+
+/// Recursively walk a type tree and resolve all AssociatedProjection nodes
+/// whose base is concrete via witness lookup.
+fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: u32) -> TyId {
+    if depth > 16 {
+        return ty;
+    }
+    match arena.get(ty).clone() {
+        MirTy::AssociatedProjection {
+            base,
+            protocol,
+            assoc_type,
+        } => {
+            let resolved_base = deep_resolve(arena, witnesses, base, depth + 1);
+            if !has_type_param(arena, resolved_base) {
+                if let Some(bound) = witness::resolve_associated_type(
+                    arena, witnesses, protocol, resolved_base, assoc_type,
+                ) {
+                    return deep_resolve(arena, witnesses, bound, depth + 1);
+                }
+            }
+            if resolved_base != base {
+                arena.intern(MirTy::AssociatedProjection {
+                    base: resolved_base,
+                    protocol,
+                    assoc_type,
+                })
+            } else {
+                ty
+            }
+        }
+        MirTy::Named { entity, type_args } => {
+            let new_args: Vec<TyId> = type_args
+                .iter()
+                .map(|&a| deep_resolve(arena, witnesses, a, depth + 1))
+                .collect();
+            if new_args != type_args { arena.named(entity, new_args) } else { ty }
+        }
+        MirTy::Pointer(inner) => {
+            let r = deep_resolve(arena, witnesses, inner, depth + 1);
+            if r != inner { arena.pointer(r) } else { ty }
+        }
+        MirTy::Tuple(elems) => {
+            let new: Vec<TyId> = elems.iter().map(|&e| deep_resolve(arena, witnesses, e, depth + 1)).collect();
+            if new != elems { arena.tuple(new) } else { ty }
+        }
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            let is_thin = matches!(arena.get(ty), MirTy::FuncThin { .. });
+            let new_params: Vec<(TyId, crate::ty::ParamConvention)> = params
+                .iter()
+                .map(|&(p, c)| (deep_resolve(arena, witnesses, p, depth + 1), c))
+                .collect();
+            let new_ret = deep_resolve(arena, witnesses, ret, depth + 1);
+            let changed = new_params.iter().zip(params.iter()).any(|((np, _), (op, _))| np != op)
+                || new_ret != ret;
+            if changed {
+                if is_thin {
+                    arena.intern(MirTy::FuncThin { params: new_params, ret: new_ret })
+                } else {
+                    arena.intern(MirTy::FuncThick { params: new_params, ret: new_ret })
+                }
+            } else {
+                ty
+            }
+        }
+        _ => ty,
+    }
+}
+
+/// Check if a type tree contains TypeParam(entity) anywhere.
+fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
+    match arena.get(ty) {
+        MirTy::TypeParam(e) => *e == entity,
+        MirTy::Pointer(inner) => references_type_param(arena, *inner, entity),
+        MirTy::Tuple(elems) => elems.iter().any(|&e| references_type_param(arena, e, entity)),
+        MirTy::Named { type_args, .. } => type_args.iter().any(|&a| references_type_param(arena, a, entity)),
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+            params.iter().any(|(p, _)| references_type_param(arena, *p, entity))
+                || references_type_param(arena, *ret, entity)
+        }
+        MirTy::AssociatedProjection { base, .. } => references_type_param(arena, *base, entity),
+        _ => false,
+    }
 }
 
 /// Check if a type contains any unresolved TypeParam.

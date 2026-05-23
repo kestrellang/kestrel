@@ -31,7 +31,7 @@ use crate::terminator::TerminatorKind;
 use crate::ty::{MirTy, TyArena};
 use crate::{FunctionIdx, MirModule, MonoFuncId, TyId};
 
-use self::collect::{CollectionResult, WitnessCache};
+use self::collect::CollectionResult;
 
 /// Monomorphize a generic MirModule into a concrete MonoModule.
 pub fn monomorphize(
@@ -75,6 +75,7 @@ pub fn monomorphize(
     // Phase 2: Body monomorphization
     let mut mono_bodies: Vec<MonoBodyResult> = Vec::with_capacity(instantiations.len());
 
+    let _ = witness_cache;
     for key in &instantiations {
         let result = monomorphize_body(
             &mut ty_arena,
@@ -84,7 +85,6 @@ pub fn monomorphize(
             &entity_names,
             &entity_to_func,
             key,
-            &witness_cache,
         );
         mono_bodies.push(result);
     }
@@ -142,12 +142,22 @@ pub fn monomorphize(
             _ => None,
         });
 
+        // Safety net: resolve any residual projections in key type_args/self_type.
+        // Phase 1 should produce fully-resolved keys, but deep_resolve catches
+        // edge cases where substitute() couldn't resolve nested projections.
+        let resolved_type_args: Vec<TyId> = key.type_args
+            .iter()
+            .map(|&ta| collect::substitute_and_resolve(&mut mono_module.ty_arena, &witnesses, ta, &SubstMap::new()))
+            .collect();
+        let resolved_self = key.self_type
+            .map(|st| collect::substitute_and_resolve(&mut mono_module.ty_arena, &witnesses, st, &SubstMap::new()));
+
         let mangled_name = mangle::mangle_function(
             &mono_module.ty_arena,
             &entity_names,
             func_name,
-            &key.type_args,
-            key.self_type,
+            &resolved_type_args,
+            resolved_self,
             &body_result.params,
             body_result.ret,
             receiver,
@@ -156,8 +166,8 @@ pub fn monomorphize(
         mono_module.add_function(MonoFunction {
             name: mangled_name,
             source: key.func_entity,
-            type_args: key.type_args.clone(),
-            self_type: key.self_type,
+            type_args: resolved_type_args,
+            self_type: resolved_self,
             params: body_result.params.clone(),
             ret: body_result.ret,
             body: body_result.body.clone(),
@@ -195,29 +205,19 @@ fn monomorphize_body(
     entity_names: &IndexMap<Entity, String>,
     entity_to_func: &HashMap<Entity, FunctionIdx>,
     key: &InstantiationKey,
-    _witness_cache: &WitnessCache,
 ) -> MonoBodyResult {
     let func_idx = entity_to_func
         .get(&key.func_entity)
         .expect("instantiation key must reference a valid function");
     let func = &functions[func_idx.index()];
 
-    // Build SubstMap
-    let mut subst = SubstMap::new();
-    for (tp, &arg) in func.type_params.iter().zip(key.type_args.iter()) {
-        subst.type_params.insert(tp.entity, arg);
-    }
-    // Protocol default methods have Self as TypeParam(protocol_entity).
-    if let Some(st) = key.self_type {
-        if let Some(first_param) = func.params.first() {
-            if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
-                if !subst.type_params.contains_key(entity) {
-                    subst.type_params.insert(*entity, st);
-                }
-            }
-        }
-    }
-    // Pre-resolve associated types via witness cache
+    // Build a complete SubstMap: type params + implicit protocol Self + where
+    // clause constraints + associated type bindings. After this, substitute()
+    // fully resolves all TypeParams and AssociatedProjections.
+    let mut subst = collect::build_subst(func, &key.type_args, key.self_type, arena, protocols, witnesses);
+
+    // Where-clause witness enrichment: map proto_type_args → concrete values
+    // and pattern-match bindings from witness implementing_type.
     if let Some(where_clause) = &func.where_clause {
         for constraint in &where_clause.constraints {
             if let crate::item::function::WhereConstraint::Implements {
@@ -226,84 +226,48 @@ fn monomorphize_body(
                 protocol_type_args,
             } = constraint
             {
-                let concrete_type = subst
-                    .type_params
-                    .get(type_param)
-                    .copied();
+                let Some(concrete_ty) = subst.type_params.get(type_param).copied() else {
+                    continue;
+                };
 
-                if let Some(concrete_ty) = concrete_type {
-                    // The HIR uses SelfType(protocol) in associated type projections
-                    // (e.g. `Self.BytesYield` inside a protocol declaration). Map the
-                    // protocol entity to the concrete type so substitution resolves them.
-                    subst.type_params.entry(*protocol).or_insert(concrete_ty);
+                subst.type_params.entry(*protocol).or_insert(concrete_ty);
 
-                    // Enrich subst with witness proto_type_args → concrete mappings.
-                    // For `I: SeqIndex[T]` where T→concrete_T, the witness for
-                    // `Int64: SeqIndex[T_ext]` has proto_type_args = [TypeParam(T_ext)].
-                    // We build: T_ext → concrete_T by chaining:
-                    //   where_clause_arg[i] → subst → concrete
-                    //   witness.proto_type_args[i] → TypeParam(T_ext)
-                    for witness in witnesses.iter() {
-                        if witness.protocol != *protocol {
-                            continue;
-                        }
-                        let mut bindings = HashMap::new();
-                        if !witness::match_pattern(arena, witness.implementing_type, concrete_ty, &mut bindings) {
-                            continue;
-                        }
-                        // Chain: where clause type arg entities → subst → concrete,
-                        // then map witness proto_type_args TypeParams to those concrete values.
-                        for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
-                            if let Some(&proto_expr) = witness.proto_type_args.get(pi) {
-                                if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
-                                    if !subst.type_params.contains_key(ext_entity) {
-                                        if let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
-                                            subst.type_params.insert(*ext_entity, cv);
-                                        }
+                for witness in witnesses.iter() {
+                    if witness.protocol != *protocol {
+                        continue;
+                    }
+                    let mut bindings = HashMap::new();
+                    if !witness::match_pattern(arena, witness.implementing_type, concrete_ty, &mut bindings) {
+                        continue;
+                    }
+                    for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
+                        if let Some(&proto_expr) = witness.proto_type_args.get(pi) {
+                            if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
+                                if !subst.type_params.contains_key(ext_entity) {
+                                    if let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
+                                        subst.type_params.insert(*ext_entity, cv);
                                     }
                                 }
                             }
                         }
-                        // Also add pattern match bindings
-                        for (entity, ty) in &bindings {
-                            subst.type_params.entry(*entity).or_insert(*ty);
-                        }
-                        break;
                     }
-
-                    // Find associated types for this protocol
-                    for proto_def in protocols {
-                        if proto_def.entity == *protocol {
-                            for assoc in &proto_def.associated_types {
-                                if let Some(bound_ty) = witness::resolve_associated_type(
-                                    arena,
-                                    witnesses,
-                                    *protocol,
-                                    concrete_ty,
-                                    assoc.entity,
-                                ) {
-                                    // Substitute the binding through our SubstMap
-                                    let resolved = substitute(arena, bound_ty, &subst);
-                                    subst.assoc_types.insert(
-                                        (concrete_ty, *protocol, assoc.entity),
-                                        resolved,
-                                    );
-                                }
-                            }
-                        }
+                    for (entity, ty) in &bindings {
+                        subst.type_params.entry(*entity).or_insert(*ty);
                     }
+                    break;
                 }
+
+                collect::populate_assoc_types(arena, witnesses, protocols, *protocol, concrete_ty, &mut subst);
             }
         }
     }
 
-    // Substitute param types
+    // Substitute param and return types
     let params: Vec<MonoParam> = func
         .params
         .iter()
         .map(|p| MonoParam::with_label(&p.name, substitute(arena, p.ty, &subst), p.convention, p.external_label.clone()))
         .collect();
-
     let ret = substitute(arena, func.ret, &subst);
 
     let extern_info = func.extern_info.clone();
@@ -322,12 +286,10 @@ fn monomorphize_body(
     let mut mono_body = body.clone();
     let mut resolved_witnesses = HashMap::new();
 
-    // Substitute local types
     for local in &mut mono_body.locals {
         local.ty = substitute(arena, local.ty, &subst);
     }
 
-    // Walk blocks: substitute types in statements and resolve witnesses
     for (bi, block) in mono_body.blocks.iter_mut().enumerate() {
         for (si, stmt) in block.stmts.iter_mut().enumerate() {
             match &mut stmt.kind {
@@ -348,7 +310,6 @@ fn monomorphize_body(
                         si,
                         &mut resolved_witnesses,
                     );
-                    // Substitute types in args (function ref immediates)
                     for (op, _) in args.iter_mut() {
                         substitute_operand(arena, op, &subst);
                     }
@@ -356,8 +317,19 @@ fn monomorphize_body(
                 _ => {}
             }
         }
-        // Substitute terminator operands
         substitute_terminator(arena, &mut block.terminator, &subst);
+    }
+
+    // Resolve any AssociatedProjections that survived substitution. This
+    // handles cases where substitute() replaces a TypeParam base to produce
+    // a concrete-base projection that isn't in the SubstMap's assoc_types.
+    let resolve = |arena: &mut TyArena, ty: TyId| -> TyId {
+        collect::substitute_and_resolve(arena, witnesses, ty, &SubstMap::new())
+    };
+    let params: Vec<MonoParam> = params.into_iter().map(|mut p| { p.ty = resolve(arena, p.ty); p }).collect();
+    let ret = resolve(arena, ret);
+    for local in &mut mono_body.locals {
+        local.ty = resolve(arena, local.ty);
     }
 
     MonoBodyResult {
@@ -586,7 +558,6 @@ fn expand_drops(
                 if !instantiations.insert(key.clone()) {
                     continue;
                 }
-                let dummy_cache = WitnessCache { resolved: HashMap::new() };
                 let result = monomorphize_body(
                     arena,
                     functions,
@@ -595,7 +566,6 @@ fn expand_drops(
                     entity_names,
                     entity_to_func,
                     &key,
-                    &dummy_cache,
                 );
                 // Discover inner callees (user deinits, nested shim calls)
                 collect_inner_callees(&result, entity_to_func, instantiations, &mut next_pending);
