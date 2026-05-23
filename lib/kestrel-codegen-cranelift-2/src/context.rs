@@ -238,9 +238,22 @@ impl<'m> CodegenCtx<'m> {
     // -- Functions --
 
     fn declare_all_functions(&mut self) -> Result<(), CodegenError> {
+        let mut declared: std::collections::HashMap<String, FuncId> = std::collections::HashMap::new();
         for (i, func) in self.module.functions.iter().enumerate() {
-            let func_id = self.declare_function(func, i)?;
-            self.func_ids[i] = Some(func_id);
+            let name = if let Some(ext) = &func.extern_info {
+                ext.symbol_name.clone()
+            } else if self.is_main_function(func) {
+                "main".to_string()
+            } else {
+                func.name.clone()
+            };
+            if let Some(&existing_id) = declared.get(&name) {
+                self.func_ids[i] = Some(existing_id);
+            } else {
+                let func_id = self.declare_function(func, i)?;
+                declared.insert(name, func_id);
+                self.func_ids[i] = Some(func_id);
+            }
         }
         Ok(())
     }
