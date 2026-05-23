@@ -217,9 +217,8 @@ impl Compiler {
     /// 3. Thunk + layout passes
     ///
     /// Set `KESTREL_VERIFY_MIR=1` to run [`MirModule::verify`] at the
-    /// pre-drop-elab and post-pass stages. Stage 6 keeps verification
-    /// warn-only — diagnostics print to stderr but don't fail the build.
-    /// Stage 8 will flip the pre-drop-elab "no Drop/DropIf" check to a
+    /// pre-drop-elab and post-pass stages for MIR-1. MIR-2 always runs
+    /// verification (warn-only). Stage 8 will flip verification to a
     /// hard error.
     pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
         self.lower_to_mir_with_diagnostics().0
@@ -330,7 +329,8 @@ impl Compiler {
     }
 
     /// Monomorphize a MIR-2 module, accumulating any errors as formal
-    /// diagnostics and running post-mono verification when gated.
+    /// diagnostics. Post-mono verification runs unconditionally and
+    /// aborts compilation on failure.
     #[allow(clippy::result_large_err)]
     fn monomorphize_mir2(
         &self,
@@ -348,18 +348,19 @@ impl Compiler {
             ))
         })?;
 
-        if std::env::var_os("KESTREL_VERIFY_MIR").is_some() {
-            let mono_verify = kestrel_mir_2::mono::verify::verify_mono(&mono);
-            if !mono_verify.is_ok() {
-                let ctx = self.world().query_context();
-                for error in &mono_verify.errors {
-                    ctx.accumulate(diagnostic::mono_verify_error_to_diagnostic(
-                        error,
-                        &mono,
-                        self.world(),
-                    ));
-                }
+        let mono_verify = kestrel_mir_2::mono::verify::verify_mono(&mono);
+        if !mono_verify.is_ok() {
+            let ctx = self.world().query_context();
+            for error in &mono_verify.errors {
+                ctx.accumulate(diagnostic::mono_verify_error_to_diagnostic(
+                    error,
+                    &mono,
+                    self.world(),
+                ));
             }
+            return Err(kestrel_codegen_cranelift_2::CodegenError::Unsupported(
+                format!("MIR verification failed with {} error(s)", mono_verify.errors.len()),
+            ));
         }
 
         Ok(mono)

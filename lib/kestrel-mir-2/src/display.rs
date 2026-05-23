@@ -163,14 +163,7 @@ fn write_statement(
             write!(f, "call ")?;
             write_callee(f, callee, body, module)?;
             write!(f, "(")?;
-            for (i, (op, _)) in args.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", OperandDisplay(op, body, module))?;
-            }
-            write!(f, ") [")?;
-            for (i, (_, mode)) in args.iter().enumerate() {
+            for (i, (op, mode)) in args.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
@@ -180,9 +173,9 @@ fn write_statement(
                     ArgMode::Ref => "ref",
                     ArgMode::RefMut => "ref_mut",
                 };
-                write!(f, "{s}")?;
+                write!(f, "{s} {}", OperandDisplay(op, body, module))?;
             }
-            write!(f, "]")
+            write!(f, ")")
         }
         StatementKind::Uninit { dest } => {
             write!(f, "{} = uninit", PlaceDisplay(dest, body, module))
@@ -450,8 +443,8 @@ impl fmt::Display for OperandDisplay<'_> {
                 write!(f, "{}", PlaceDisplay(place, self.1, self.2))
             }
             crate::Operand::Const(imm) => match &imm.kind {
-                ImmediateKind::IntLiteral { bits, value } => write!(f, "{value}_{bits:?}"),
-                ImmediateKind::FloatLiteral { bits, value } => write!(f, "{value}_{bits:?}"),
+                ImmediateKind::IntLiteral { bits, value } => write!(f, "{bits:?} {value}"),
+                ImmediateKind::FloatLiteral { bits, value } => write!(f, "{bits:?} {value}"),
                 ImmediateKind::BoolLiteral(b) => write!(f, "{b}"),
                 ImmediateKind::StringLiteral(s) => write!(f, "\"{s}\""),
                 ImmediateKind::StringPointer(s) => write!(f, "strptr(\"{s}\")"),

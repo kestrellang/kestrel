@@ -199,7 +199,9 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
                 .as_ref()
                 .and_then(|b| b.opaque_concrete_type.as_ref())
                 .cloned()
-                .unwrap_or(ResolvedTy::Error);
+                .unwrap_or_else(|| {
+                    panic!("ICE: opaque type origin {:?} has no concrete type", origin)
+                });
 
             let type_params = ctx
                 .world

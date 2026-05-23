@@ -163,7 +163,8 @@ fn compile_op1(
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             // arg is the element count — extract the compile-time constant
             // so we can size the stack slot correctly.
-            let count = resolve_iconst(builder, arg).unwrap_or(1) as u64;
+            let count = resolve_iconst(builder, arg)
+                .expect("ICE: StackAlloc element count is not a compile-time constant") as u64;
             mem::alloc_stack_slot(builder, repr.size() * count, repr.align(), ptr_ty)
         }
 
@@ -561,7 +562,13 @@ fn store_variant_payload(
                 if let Some(vl) = el.variant_layouts.get(variant.index()) {
                     for (i, (operand, _)) in payload.iter().enumerate() {
                         let val = compile_operand(fc, builder, operand)?;
-                        let field_offset = vl.field_offsets.get(i).copied().unwrap_or(0);
+                        let field_offset = vl.field_offsets.get(i).copied().unwrap_or_else(|| {
+                            panic!(
+                                "ICE: enum variant field offset missing for field {i}, \
+                                 variant has {} offsets",
+                                vl.field_offsets.len()
+                            )
+                        });
                         let total_offset = payload_offset + field_offset;
                         let field_ty = e.cases[variant.index()].payload_fields[i].ty;
                         let field_repr =
@@ -636,7 +643,12 @@ fn compile_apply_partial(
                 break;
             }
         }
-        found.unwrap_or_else(|| builder.ins().iconst(ptr_ty, 0))
+        found.unwrap_or_else(|| {
+            panic!(
+                "ICE: closure target entity {:?} not found in mono module",
+                func_entity
+            )
+        })
     };
 
     // Allocate env struct on stack (captures laid out sequentially)
@@ -739,11 +751,11 @@ fn operand_type(fc: &FuncCompiler<'_, '_>, op: &Operand) -> kestrel_mir_2::TyId 
                         MirTy::I64 if matches!(bits, kestrel_mir_2::IntBits::I64) => true,
                         _ => false,
                     })
-                    .unwrap_or(kestrel_mir_2::TyId::new(0)),
+                    .unwrap_or_else(|| panic!("ICE: int type {:?} not found in arena", bits)),
                 ImmediateKind::BoolLiteral(_) => arena
                     .find(|t| matches!(t, MirTy::Bool))
-                    .unwrap_or(kestrel_mir_2::TyId::new(0)),
-                _ => kestrel_mir_2::TyId::new(0),
+                    .expect("ICE: Bool type not found in arena"),
+                _ => panic!("ICE: unexpected immediate kind in operand_type"),
             }
         }
     }

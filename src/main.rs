@@ -107,9 +107,9 @@ struct BuildArgs {
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
 
-    /// Use the new MIR-2 codegen backend.
-    #[arg(long = "mir2")]
-    mir2: bool,
+    /// Use the legacy MIR-1 codegen backend.
+    #[arg(long = "mir-old")]
+    mir_old: bool,
 }
 
 #[derive(Args)]
@@ -188,22 +188,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    if args.mir2 {
-        let options = cranelift2_backend::CodegenOptions {
-            opt_level: args.opt_level,
-            libraries: args.libraries,
-            library_paths: args.library_paths,
-            frameworks: args.frameworks,
-            c_sources,
-            ..Default::default()
-        };
-        let result = compiler.compile_and_link2(&output_path, &options);
-        driver.emit_diagnostics().ok();
-        result.map_err(|e| {
-            eprintln!("error: {}", e);
-            ExitCode::FAILURE
-        })?;
-    } else {
+    if args.mir_old {
         let mir = lower_with_ownership(compiler.world(), compiler.root());
         let target = globals.codegen_target()?;
         let options = CodegenOptions {
@@ -215,6 +200,21 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
             ..Default::default()
         };
         let result = cranelift_backend::compile_and_link(&mir, &target, &options, &output_path);
+        driver.emit_diagnostics().ok();
+        result.map_err(|e| {
+            eprintln!("error: {}", e);
+            ExitCode::FAILURE
+        })?;
+    } else {
+        let options = cranelift2_backend::CodegenOptions {
+            opt_level: args.opt_level,
+            libraries: args.libraries,
+            library_paths: args.library_paths,
+            frameworks: args.frameworks,
+            c_sources,
+            ..Default::default()
+        };
+        let result = compiler.compile_and_link2(&output_path, &options);
         driver.emit_diagnostics().ok();
         result.map_err(|e| {
             eprintln!("error: {}", e);

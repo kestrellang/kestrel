@@ -239,7 +239,7 @@ impl BodyCtx<'_, '_> {
             if is_static {
                 let self_type = self.type_from_type_ref(base);
                 let type_args = self.prepend_receiver_type_args(self_type, vec![]);
-                let callee = kestrel_mir_2::Callee::direct_with_args(getter_entity, type_args, Some(self_type));
+                let callee = kestrel_mir_2::Callee::direct_with_args(getter_entity, type_args, None);
                 return self.emit_call_returning(callee, vec![], result_ty);
             }
 
@@ -260,7 +260,7 @@ impl BodyCtx<'_, '_> {
             }
 
             let type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
-            let callee = kestrel_mir_2::Callee::direct_with_args(getter_entity, type_args, Some(receiver_ty));
+            let callee = kestrel_mir_2::Callee::direct_with_args(getter_entity, type_args, None);
             return self.emit_call_returning(callee, vec![(base_val, kestrel_mir_2::ArgMode::Ref)], result_ty);
         }
 
@@ -330,11 +330,13 @@ impl BodyCtx<'_, '_> {
                     .world
                     .get::<kestrel_ast_builder::Name>(entity)
                     .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                let enum_entity = self.ctx.world.parent_of(entity);
-                let variant_idx = enum_entity
-                    .and_then(|e| self.ctx.resolve_variant_idx(e, &case_name))
-                    .unwrap_or(kestrel_mir_2::VariantIdx::new(0));
+                    .unwrap_or_else(|| panic!("ICE: enum case {:?} has no Name", entity));
+                let enum_entity = self.ctx.world.parent_of(entity)
+                    .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", entity));
+                let variant_idx = self.ctx.resolve_variant_idx(enum_entity, &case_name)
+                    .unwrap_or_else(|| panic!(
+                        "ICE: variant '{}' not found in enum {:?}", case_name, enum_entity
+                    ));
                 let dest = self.fresh_temp(ty);
                 self.emit_enum_variant(Place::local(dest), ty, variant_idx, vec![]);
                 Operand::Place(Place::local(dest))
@@ -388,12 +390,15 @@ impl BodyCtx<'_, '_> {
                 .unwrap_or_default();
 
             let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
-                MirTy::Named { entity, .. } => Some(*entity),
-                _ => None,
+                MirTy::Named { entity, .. } => *entity,
+                other => panic!(
+                    "ICE: enum case '{}' result type is not Named: {:?}", name, other
+                ),
             };
-            let variant_idx = enum_entity
-                .and_then(|e| self.ctx.resolve_variant_idx(e, name))
-                .unwrap_or(kestrel_mir_2::VariantIdx::new(0));
+            let variant_idx = self.ctx.resolve_variant_idx(enum_entity, name)
+                .unwrap_or_else(|| panic!(
+                    "ICE: variant '{}' not found in enum {:?}", name, enum_entity
+                ));
 
             let dest = self.fresh_temp(result_ty);
             self.emit_enum_variant(Place::local(dest), result_ty, variant_idx, payload);

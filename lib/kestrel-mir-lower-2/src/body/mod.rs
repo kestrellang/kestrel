@@ -193,7 +193,7 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
         self.local_map
             .get(&hir_id)
             .copied()
-            .unwrap_or_else(|| LocalId::new(0))
+            .unwrap_or_else(|| panic!("ICE: HIR local {:?} has no MIR mapping", hir_id))
     }
 
     pub fn resolve_local_type(&mut self, hir_id: HirLocalId) -> TyId {

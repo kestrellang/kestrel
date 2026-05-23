@@ -164,7 +164,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
         if self.isEmpty {
             return String()
         }
-        let ptr = self.source.getValue().ptr;
+        let ptr = self._rawPtr();
         String.fromBytesUnchecked(ptr.offset(by: self.start), self.byteCount)
     }
 
@@ -175,7 +175,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     }
 
     func _readByte(at offset: Int64) -> UInt8 {
-        self.source.getValue().ptr.offset(by: offset).read()
+        self._rawPtr().offset(by: offset).read()
     }
 
     // -- Iteration -----------------------------------------------------------

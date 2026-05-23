@@ -125,8 +125,12 @@ public struct StringBuilder: Cloneable {
         if self.len == 0 {
             return String()
         }
-        let storage = StringStorage(ptr: self.ptr, len: self.len, cap: self.cap);
+        // Capture fields before resetting — the StringStorage local's
+        // deinit must NOT free the buffer (CowBox/RcBox owns it now).
+        var storage = StringStorage(ptr: self.ptr, len: self.len, cap: self.cap);
         let result = String(storage: CowBox(storage));
+        // Disarm storage's deinit so the drop doesn't double-free.
+        storage.cap = 0;
         self.ptr = Pointer[UInt8].nullPointer();
         self.len = 0;
         self.cap = 0;

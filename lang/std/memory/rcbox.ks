@@ -97,23 +97,28 @@ public struct RcBox[T]: Cloneable {
     /// Returns `true` when no other clone is sharing storage. The litmus
     /// test for "safe to mutate in place" in COW collections.
     public func isUnique() -> Bool {
-        self.ptr.read().refCount == 1
+        // Read only the refCount field to avoid creating a full
+        // RcBoxStorage copy (whose drop would deinit the shared value).
+        let rcPtr = self.ptr.asRaw().cast[Int64]();
+        rcPtr.read() == 1
     }
 
     /// Current strong reference count. Mostly useful for tests and
     /// diagnostics; production COW logic should branch on `isUnique`.
     public func refCount() -> Int64 {
-        self.ptr.read().refCount
+        let rcPtr = self.ptr.asRaw().cast[Int64]();
+        rcPtr.read()
     }
 
     /// Bumps the refcount and returns a second `RcBox` pointing at the
     /// same storage. The receiver and the returned box now both reference
     /// the value; the next mutation should test `isUnique`.
     public func clone() -> RcBox[T] {
-        // TODO: Should use atomic increment
-        var storage = self.ptr.read();
-        storage.refCount = storage.refCount + 1;
-        self.ptr.write(storage);
+        // Read/write only the refCount field to avoid creating a full
+        // RcBoxStorage copy (whose drop would deinit the shared value).
+        let rcPtr = self.ptr.asRaw().cast[Int64]();
+        let count = rcPtr.read();
+        rcPtr.write(count + 1);
         RcBox(inner: self.ptr)
     }
 
@@ -127,17 +132,20 @@ public struct RcBox[T]: Cloneable {
     // Drop one reference; deallocate storage when the count hits zero.
     // Called from deinit; not exposed publicly.
     private func release() {
-        // TODO: Should use atomic decrement
-        var storage = self.ptr.read();
-        storage.refCount = storage.refCount - 1;
+        // Read/write only the refCount field to avoid creating a full
+        // RcBoxStorage copy (whose drop would deinit the shared value).
+        let rcPtr = self.ptr.asRaw().cast[Int64]();
+        let count = rcPtr.read();
+        let newCount = count - 1;
 
-        if storage.refCount == 0 {
-            // Last reference, deallocate
+        if newCount == 0 {
+            // Last reference — read the full storage so the value's
+            // deinit runs when the local goes out of scope.
             let layout = Layout.of[RcBoxStorage[T]]();
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
         } else {
-            self.ptr.write(storage)
+            rcPtr.write(newCount)
         }
     }
 

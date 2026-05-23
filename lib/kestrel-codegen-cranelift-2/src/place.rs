@@ -429,14 +429,22 @@ fn enum_variant_field_offset(
     module: &MonoModule,
     tc: &TypeCache,
 ) -> u64 {
-    if let Some(e) = find_mono_enum(entity, type_args, module, tc) {
-        if let Some(Layout::Enum(el)) = &e.type_info.layout {
-            if let Some(vl) = el.variant_layouts.get(variant.index()) {
-                return vl.field_offsets.get(field_idx.index()).copied().unwrap_or(0);
-            }
-        }
-    }
-    0
+    let e = find_mono_enum(entity, type_args, module, tc)
+        .unwrap_or_else(|| panic!("ICE: mono enum {:?} not found for variant field offset", entity));
+    let Layout::Enum(el) = e.type_info.layout.as_ref()
+        .expect("ICE: enum has no layout") else {
+        panic!("ICE: enum layout is not Layout::Enum");
+    };
+    let vl = el.variant_layouts.get(variant.index())
+        .unwrap_or_else(|| panic!(
+            "ICE: variant index {} out of range (enum has {} variants)",
+            variant.index(), el.variant_layouts.len()
+        ));
+    vl.field_offsets.get(field_idx.index()).copied()
+        .unwrap_or_else(|| panic!(
+            "ICE: field index {} out of range (variant has {} fields)",
+            field_idx.index(), vl.field_offsets.len()
+        ))
 }
 
 fn tuple_elem_offset(
