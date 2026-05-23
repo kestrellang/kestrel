@@ -160,11 +160,15 @@ fn compile_thin_call(
     let ptr_ty = fc.ctx.ptr_ty;
     let func_ptr = place::place_read(fc, builder, func_place)?;
 
-    // Infer return type from the place's FuncThin type
+    // Infer return type from the place's FuncThin type (unwrap Pointer for borrowed funcs)
     let func_ty = place::place_type(func_place, fc.body, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
     let arena = &fc.ctx.module.ty_arena;
+    let inner_ty = match arena.get(func_ty) {
+        MirTy::Pointer(inner) => *inner,
+        _ => func_ty,
+    };
 
-    let (param_tys, ret_ty) = if let MirTy::FuncThin { params, ret } = arena.get(func_ty) {
+    let (param_tys, ret_ty) = if let MirTy::FuncThin { params, ret } = arena.get(inner_ty) {
         (params.clone(), *ret)
     } else {
         return Err(CodegenError::Unsupported("thin call on non-FuncThin".into()));
@@ -245,15 +249,19 @@ fn compile_thick_call(
         Offset32::new(ptr_size as i32),
     );
 
-    // Infer types from FuncThick
+    // Infer types from FuncThick (unwrap Pointer for borrowed closures)
     let func_ty = place::place_type(closure_place, fc.body, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
     let arena = &fc.ctx.module.ty_arena;
+    let inner_ty = match arena.get(func_ty) {
+        MirTy::Pointer(inner) => *inner,
+        _ => func_ty,
+    };
 
-    let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret } = arena.get(func_ty) {
+    let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret } = arena.get(inner_ty) {
         (params.clone(), *ret)
     } else {
         return Err(CodegenError::Unsupported(
-            "thick call on non-FuncThick".into(),
+            format!("thick call on non-FuncThick: got {:?}", arena.get(func_ty)),
         ));
     };
 

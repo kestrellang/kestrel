@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
-use crate::item::function::{FunctionDef, FunctionKind};
+use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
 use crate::item::enum_def::EnumDef;
@@ -527,6 +527,53 @@ pub fn build_subst(
         if let Some(proto_entity) = detect_implicit_protocol(func, arena, protocols) {
             subst.type_params.entry(proto_entity).or_insert(st);
             populate_assoc_types(arena, witnesses, protocols, proto_entity, st, &mut subst);
+        }
+    }
+
+    // Where-clause enrichment: for each `T: Protocol` constraint, map the
+    // protocol entity → concrete type, bind extension type params from witness
+    // pattern matching, and populate associated types.
+    if let Some(where_clause) = &func.where_clause {
+        for constraint in &where_clause.constraints {
+            if let WhereConstraint::Implements {
+                type_param,
+                protocol,
+                protocol_type_args,
+            } = constraint
+            {
+                let Some(concrete_ty) = subst.type_params.get(type_param).copied() else {
+                    continue;
+                };
+
+                subst.type_params.entry(*protocol).or_insert(concrete_ty);
+
+                for wit in witnesses.iter() {
+                    if wit.protocol != *protocol {
+                        continue;
+                    }
+                    let mut bindings = HashMap::new();
+                    if !witness::match_pattern(arena, wit.implementing_type, concrete_ty, &mut bindings) {
+                        continue;
+                    }
+                    for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
+                        if let Some(&proto_expr) = wit.proto_type_args.get(pi) {
+                            if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
+                                if !subst.type_params.contains_key(ext_entity) {
+                                    if let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
+                                        subst.type_params.insert(*ext_entity, cv);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (entity, ty) in &bindings {
+                        subst.type_params.entry(*entity).or_insert(*ty);
+                    }
+                    break;
+                }
+
+                populate_assoc_types(arena, witnesses, protocols, *protocol, concrete_ty, &mut subst);
+            }
         }
     }
 

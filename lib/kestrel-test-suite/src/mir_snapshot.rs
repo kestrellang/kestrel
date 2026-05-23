@@ -70,12 +70,12 @@ pub fn check_mir_snapshot(
 
 /// Extract the MIR display text for a single function by name.
 ///
-/// Renders the full module, then finds the `func @<name>` block and
+/// Renders the full module, then finds the `fn <name>` block and
 /// returns everything from that line through its closing `}`.
 fn extract_function_mir(mir: &MirModule, func_name: &str) -> Result<String, String> {
     let full = format!("{}", mir.display());
 
-    // Find the function by matching `func @<name>` or `func @....<name>`
+    // Find the function by matching `fn <name>` (MIR-2 format)
     let mut result_lines: Vec<&str> = Vec::new();
     let mut inside = false;
     let mut brace_depth: i32 = 0;
@@ -83,13 +83,13 @@ fn extract_function_mir(mir: &MirModule, func_name: &str) -> Result<String, Stri
     for line in full.lines() {
         if !inside {
             let trimmed = line.trim();
-            if trimmed.starts_with("func @") {
-                // Extract the function name from `func @<name>(...`
-                let after_at = &trimmed[6..];
-                let name_end = after_at
+            if trimmed.starts_with("fn ") {
+                // Extract the function name from `fn <name>(...`
+                let after_fn = &trimmed[3..];
+                let name_end = after_fn
                     .find(|c: char| c == '(' || c == '[' || c == ' ')
-                    .unwrap_or(after_at.len());
-                let name = &after_at[..name_end];
+                    .unwrap_or(after_fn.len());
+                let name = &after_fn[..name_end];
                 if name == func_name || name.ends_with(&format!(".{}", func_name)) {
                     inside = true;
                     brace_depth = line.chars().filter(|&c| c == '{').count() as i32

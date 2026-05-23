@@ -211,56 +211,7 @@ fn monomorphize_body(
         .expect("instantiation key must reference a valid function");
     let func = &functions[func_idx.index()];
 
-    // Build a complete SubstMap: type params + implicit protocol Self + where
-    // clause constraints + associated type bindings. After this, substitute()
-    // fully resolves all TypeParams and AssociatedProjections.
-    let mut subst = collect::build_subst(func, &key.type_args, key.self_type, arena, protocols, witnesses);
-
-    // Where-clause witness enrichment: map proto_type_args → concrete values
-    // and pattern-match bindings from witness implementing_type.
-    if let Some(where_clause) = &func.where_clause {
-        for constraint in &where_clause.constraints {
-            if let crate::item::function::WhereConstraint::Implements {
-                type_param,
-                protocol,
-                protocol_type_args,
-            } = constraint
-            {
-                let Some(concrete_ty) = subst.type_params.get(type_param).copied() else {
-                    continue;
-                };
-
-                subst.type_params.entry(*protocol).or_insert(concrete_ty);
-
-                for witness in witnesses.iter() {
-                    if witness.protocol != *protocol {
-                        continue;
-                    }
-                    let mut bindings = HashMap::new();
-                    if !witness::match_pattern(arena, witness.implementing_type, concrete_ty, &mut bindings) {
-                        continue;
-                    }
-                    for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
-                        if let Some(&proto_expr) = witness.proto_type_args.get(pi) {
-                            if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
-                                if !subst.type_params.contains_key(ext_entity) {
-                                    if let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
-                                        subst.type_params.insert(*ext_entity, cv);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    for (entity, ty) in &bindings {
-                        subst.type_params.entry(*entity).or_insert(*ty);
-                    }
-                    break;
-                }
-
-                collect::populate_assoc_types(arena, witnesses, protocols, *protocol, concrete_ty, &mut subst);
-            }
-        }
-    }
+    let subst = collect::build_subst(func, &key.type_args, key.self_type, arena, protocols, witnesses);
 
     // Substitute param and return types
     let params: Vec<MonoParam> = func
