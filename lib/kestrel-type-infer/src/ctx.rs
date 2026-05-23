@@ -390,6 +390,17 @@ impl<'a> InferCtx<'a> {
         result
     }
 
+    /// Allocate a TyVar directly resolved to an AssocProjection.
+    /// Unlike `project_associated`, this does NOT emit an Associated constraint —
+    /// use when the projection must survive as-is (e.g. cycle-breaking in
+    /// `solve_associated` where re-emitting the constraint would loop).
+    pub fn assoc_projection(&mut self, base: TyVar, assoc: Entity) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::AssocProjection { base, assoc }));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar bound to a Tuple type.
     pub fn tuple(&mut self, elements: Vec<TyVar>) -> TyVar {
         let idx = self.types.len() as u32;

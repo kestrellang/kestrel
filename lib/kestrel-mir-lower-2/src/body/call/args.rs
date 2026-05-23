@@ -1,12 +1,18 @@
 //! Shared arg lowering, type-arg resolution, mode assignment, defaults.
 
+use std::collections::HashMap;
+
 use kestrel_ast_builder::{Attributes, Callable, NodeKind};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
-use kestrel_mir_2::{ArgMode, MirTy, Operand, ParamConvention, TyId};
+use kestrel_hir::res::LocalId as HirLocalId;
+use kestrel_hir_lower::LowerBody;
+use kestrel_mir_2::body::LocalDef;
+use kestrel_mir_2::{ArgMode, BlockId, Immediate, LocalId, MirTy, Operand, ParamConvention, TyId};
+use kestrel_type_infer::InferBody;
 
-use crate::body::BodyCtx;
-use crate::ty::{lower_resolved_ty, lower_type};
+use crate::body::{BodyCtx, HirRef, TypedRef};
+use crate::ty::{lower_resolved_ty, lower_type, resolve_type_annotation};
 
 impl BodyCtx<'_, '_> {
     /// Lower call args to (Operand, ArgMode) pairs with default mode (Copy for
@@ -27,6 +33,95 @@ impl BodyCtx<'_, '_> {
                 (op, mode)
             })
             .collect()
+    }
+
+
+    /// Fill in missing default arguments for a call by inline-lowering
+    /// each default expression into the current function body.
+    ///
+    /// `callee_entity` is the resolved function/method entity.
+    /// `explicit_count` is the number of explicit HIR args (not counting receiver).
+    pub(crate) fn expand_default_args(
+        &mut self,
+        call_args: &mut Vec<(Operand, ArgMode)>,
+        callee_entity: Entity,
+        explicit_count: usize,
+    ) {
+        let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
+            return;
+        };
+        if explicit_count >= callable.params.len() {
+            return;
+        }
+
+        let defaults: Vec<Entity> = callable.params[explicit_count..]
+            .iter()
+            .filter_map(|p| p.default_entity)
+            .collect();
+
+        for default_entity in defaults {
+            let param_ty = resolve_type_annotation(self.ctx, default_entity);
+            let default_val = self.lower_default_arg_inline(default_entity, param_ty);
+            let mode = if self.is_copy_type(param_ty) {
+                ArgMode::Copy
+            } else {
+                ArgMode::Ref
+            };
+            call_args.push((default_val, mode));
+        }
+    }
+
+    /// Lower a default parameter expression inline into the current
+    /// function body. Temporarily swaps the active HirBody/TypedBody
+    /// to the default entity's, lowers the tail expression, then restores.
+    fn lower_default_arg_inline(
+        &mut self,
+        default_entity: Entity,
+        param_ty: TyId,
+    ) -> Operand {
+        let Some(default_hir) = self.ctx.query.query(LowerBody {
+            entity: default_entity,
+            root: self.ctx.root,
+        }) else {
+            return Operand::Const(Immediate::error());
+        };
+        let default_typed = self.ctx.query.query(InferBody {
+            entity: default_entity,
+            root: self.ctx.root,
+        });
+
+        let tail = default_hir.tail_expr;
+
+        // Save current state
+        let saved_hir = std::mem::replace(&mut self.hir, HirRef::Owned(default_hir));
+        let saved_typed = std::mem::replace(
+            &mut self.typed,
+            default_typed.map(TypedRef::Owned),
+        );
+        let saved_local_map = std::mem::take(&mut self.local_map);
+
+        // Create locals for the default body's HIR locals
+        let default_locals: Vec<_> = self.hir.locals.iter().map(|(id, l)| (id, l.name.clone())).collect();
+        for (hir_id, name) in &default_locals {
+            let ty = self.resolve_local_type(*hir_id);
+            let mir_local = LocalDef::new(name, ty);
+            let mir_id = self.body.add_local(mir_local);
+            self.local_map.insert(*hir_id, mir_id);
+        }
+
+        // Lower the tail expression
+        let result = if let Some(tail_id) = tail {
+            self.lower_expr(tail_id)
+        } else {
+            Operand::Const(Immediate::unit())
+        };
+
+        // Restore
+        self.hir = saved_hir;
+        self.typed = saved_typed;
+        self.local_map = saved_local_map;
+
+        result
     }
 
     /// Apply param modes from the callee's declared conventions.
@@ -125,7 +220,7 @@ impl BodyCtx<'_, '_> {
         }
     }
 
-    fn find_protocol_method_entity(
+    pub(crate) fn find_protocol_method_entity(
         &self,
         protocol: Entity,
         method: &kestrel_mir_2::WitnessMethodKey,

@@ -19,7 +19,7 @@ impl BodyCtx<'_, '_> {
     /// Apply a recorded `FromValue.from(value)` promotion if type-infer
     /// stored one for this expression.
     fn apply_promotion(&mut self, expr_id: HirExprId, operand: Operand) -> Operand {
-        let Some(typed) = self.typed else {
+        let Some(typed) = self.typed.as_ref() else {
             return operand;
         };
         let Some(promotion) = typed.promotions.get(&expr_id) else {
@@ -35,7 +35,7 @@ impl BodyCtx<'_, '_> {
 
     fn lower_expr_no_promote(&mut self, expr_id: HirExprId) -> Operand {
         let expr = self.hir.exprs[expr_id].clone();
-        let span = expr_span(self.hir, expr_id);
+        let span = expr_span(&self.hir, expr_id);
         let prev_span = self.current_span.replace(span);
         let result = self.lower_expr_inner(expr_id, &expr);
         self.current_span = prev_span;
@@ -79,7 +79,7 @@ impl BodyCtx<'_, '_> {
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
 
             HirExpr::OverloadSet { candidates, .. } => {
-                if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id)) {
+                if let Some(&resolved) = self.typed.as_ref().and_then(|t| t.resolutions.get(&expr_id)) {
                     self.ctx.register_name(resolved);
                     let type_args = self.resolve_type_args(expr_id);
                     Operand::Const(Immediate::function_ref(resolved, type_args, None))
@@ -183,6 +183,7 @@ impl BodyCtx<'_, '_> {
     ) -> Operand {
         let resolved = self
             .typed
+            .as_ref()
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
 
@@ -366,6 +367,7 @@ impl BodyCtx<'_, '_> {
 
         let resolved = self
             .typed
+            .as_ref()
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
         let is_enum_case = resolved.is_none_or(|e| {
@@ -469,7 +471,7 @@ impl BodyCtx<'_, '_> {
 
     /// Resolve type args for an expression from inference results.
     pub fn resolve_type_args(&mut self, expr_id: HirExprId) -> Vec<TyId> {
-        if let Some(typed) = self.typed
+        if let Some(typed) = self.typed.as_ref()
             && let Some(resolved_args) = typed.type_args.get(&expr_id)
         {
             return resolved_args

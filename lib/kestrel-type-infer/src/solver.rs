@@ -1644,9 +1644,10 @@ fn solve_associated(
                     {
                         if ctx.resolve(tv) == resolved_result {
                             // Self-referential: the where_clause_assoc_subs TyVar is the same
-                            // as our result. Create a concrete TypeAlias directly to break
-                            // the cycle (lower_hir_ty_plain would also return the same TyVar).
-                            ctx.type_alias(*entity, vec![])
+                            // as our result. Create an AssocProjection to preserve the base
+                            // type for MIR lowering (needed for correct monomorphization
+                            // when multiple type params conform to the same protocol).
+                            ctx.assoc_projection(container, *entity)
                         } else {
                             tv
                         }
@@ -1659,7 +1660,7 @@ fn solve_associated(
                         })
                     {
                         if ctx.resolve(tv) == resolved_result {
-                            ctx.type_alias(*entity, vec![])
+                            ctx.assoc_projection(container, *entity)
                         } else {
                             tv
                         }
@@ -2263,6 +2264,8 @@ fn solve_member(
         // information the bound-search path needs.
         let should_substitute = match ctx.slot(bound_resolved) {
             TySlot::Resolved(TyKind::TypeAlias { entity: e, .. }) if *e == entity => false,
+            // AssocProjection whose assoc matches = same abstract type, don't substitute
+            TySlot::Resolved(TyKind::AssocProjection { assoc: a, .. }) if *a == entity => false,
             TySlot::Resolved(_) => true,
             _ => false,
         };

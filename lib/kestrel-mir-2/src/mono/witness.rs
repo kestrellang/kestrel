@@ -296,30 +296,12 @@ pub fn resolve_witness_call(
         }
     }
 
-    // Substitute the binding's type_args (protocol type arg expressions)
-    // through the bindings to get concrete type args.
-    // e.g., binding.type_args = [TypeParam(T_ext)] → substitute → [String]
-    let mut type_args: Vec<TyId> = binding
-        .type_args
-        .iter()
-        .map(|&ta| substitute(arena, ta, &subst))
-        .collect();
-
-    // Append any method-level type args past the protocol's param count
-    let proto_param_count = proto_tp_entities.len();
-    let method_level_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
-    type_args.extend_from_slice(method_level_args);
-
-    // Cap to the concrete function's param count
     let concrete_func = functions.iter().find(|f| f.entity == binding.func);
-    if let Some(func) = concrete_func {
-        type_args.truncate(func.type_params.len());
-    }
 
-    // Determine if self_type should be propagated.
-    // Protocol default methods need self_type because their Self param is
-    // TypeParam(protocol_entity). Detect by checking if the first param
-    // is a TypeParam not in the function's type_params list.
+    // Determine if self_type should be propagated. Protocol default methods
+    // need self_type because their Self param is TypeParam(protocol_entity).
+    // Detect by checking if the first param is a TypeParam not in the
+    // function's type_params list.
     let needs_self = if let Some(func) = concrete_func {
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
@@ -329,6 +311,32 @@ pub fn resolve_witness_call(
     } else {
         false
     };
+
+    let proto_param_count = proto_tp_entities.len();
+    let mut type_args: Vec<TyId> = if needs_self {
+        // Protocol-extension default methods receive Self via `self_type`.
+        // Their function type params are the protocol-level args followed by
+        // the method-level args, already laid out that way at the call site.
+        // The witness implementation type params describe the concrete Self
+        // pattern and must not be prepended here.
+        method_type_args.to_vec()
+    } else {
+        // Direct implementation: prepend witness implementation type args,
+        // then append method-level type args past the protocol's own params.
+        let mut args: Vec<TyId> = binding
+            .type_args
+            .iter()
+            .map(|&ta| substitute(arena, ta, &subst))
+            .collect();
+        let method_level_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
+        args.extend_from_slice(method_level_args);
+        args
+    };
+
+    // Cap to the concrete function's param count.
+    if let Some(func) = concrete_func {
+        type_args.truncate(func.type_params.len());
+    }
 
     Ok(ResolvedWitnessCall {
         func_entity: binding.func,
@@ -426,9 +434,11 @@ pub fn protocol_inherits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::item::function::{FunctionDef, ParamDef};
     use crate::item::protocol::ProtocolDef;
     use crate::item::witness::{WitnessDef, WitnessMethodBinding};
     use crate::statement::WitnessMethodKey;
+    use crate::{LocalId, ParamConvention, TypeParamDef};
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
@@ -692,6 +702,55 @@ mod tests {
             i64,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn protocol_default_method_uses_call_site_method_type_args() {
+        let mut a = TyArena::new();
+        let iterator = entity(1);
+        let flat_map = entity(2);
+        let array_slice_iter = entity(3);
+        let impl_t = entity(4);
+        let method_u = entity(5);
+
+        let impl_t_ty = a.intern(MirTy::TypeParam(impl_t));
+        let pattern = a.named(array_slice_iter, vec![impl_t_ty]);
+        let i64 = a.i64();
+        let self_ty = a.named(array_slice_iter, vec![i64]);
+        let returned_iter = a.named(entity(6), vec![i64]);
+
+        let mut witness = WitnessDef::new(iterator, pattern);
+        witness.add_method(WitnessMethodBinding::new(
+            WitnessMethodKey::new("flatMap", vec![Some("as".into())]),
+            flat_map,
+            vec![impl_t_ty],
+        ));
+
+        let self_param = a.intern(MirTy::TypeParam(iterator));
+        let mut func = FunctionDef::new(flat_map, "Iterator.flatMap", a.tuple(vec![]));
+        func.type_params.push(TypeParamDef::new(method_u, "U"));
+        func.params.push(ParamDef::new(
+            "self",
+            LocalId::new(0),
+            self_param,
+            ParamConvention::Borrow,
+        ));
+
+        let resolved = resolve_witness_call(
+            &mut a,
+            &[witness],
+            &[ProtocolDef::new(iterator, "Iterator")],
+            &[func],
+            &indexmap::IndexMap::new(),
+            iterator,
+            &WitnessMethodKey::new("flatMap", vec![Some("as".into())]),
+            self_ty,
+            &[returned_iter],
+        )
+        .unwrap();
+
+        assert_eq!(resolved.type_args, vec![returned_iter]);
+        assert_eq!(resolved.self_type, Some(self_ty));
     }
 
     // -- resolve_associated_type --

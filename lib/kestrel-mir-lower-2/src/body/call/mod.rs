@@ -67,6 +67,7 @@ impl BodyCtx<'_, '_> {
 
         let resolved_entity = self
             .typed
+            .as_ref()
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
 
@@ -96,7 +97,7 @@ impl BodyCtx<'_, '_> {
         // through a field. Interpose a field projection so the receiver is
         // the field value, not `self`.
         let (receiver_ty, mut call_args) =
-            if let Some(&field_entity) = self.typed.and_then(|t| t.field_subscripts.get(&expr_id))
+            if let Some(&field_entity) = self.typed.as_ref().and_then(|t| t.field_subscripts.get(&expr_id))
             {
                 self.rewrite_field_subscript(receiver_ty, call_args, field_entity, method_name)
             } else {
@@ -129,6 +130,8 @@ impl BodyCtx<'_, '_> {
             self.emit_call(Some(Place::local(dest)), callee, call_args);
             return Operand::Place(Place::local(dest));
         }
+
+        self.expand_default_args(&mut call_args, resolved, args.len());
 
         // Build callee — one protocol-vs-direct branch
         let callee = if let Some(protocol) = self.ctx.is_protocol_method(resolved) {
@@ -265,6 +268,11 @@ impl BodyCtx<'_, '_> {
         let method_type_args = self.resolve_type_args(expr_id);
         let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
         let method_key = WitnessMethodKey::new(method_name, labels);
+
+        if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
+            self.expand_default_args(&mut call_args, method_entity, args.len());
+        }
+
         self.apply_witness_param_modes(&mut call_args, protocol, &method_key);
 
         let callee = Callee::Witness {
@@ -290,11 +298,11 @@ impl BodyCtx<'_, '_> {
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Find the resolved entity
-        let entity = if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&expr_id))
+        let entity = if let Some(&resolved) = self.typed.as_ref().and_then(|t| t.resolutions.get(&expr_id))
         {
             resolved
         } else if let Some(&resolved) =
-            self.typed.and_then(|t| t.resolutions.get(&callee_expr))
+            self.typed.as_ref().and_then(|t| t.resolutions.get(&callee_expr))
         {
             resolved
         } else if let HirExpr::Def(e, _, _) = &self.hir.exprs[callee_expr] {
@@ -358,6 +366,8 @@ impl BodyCtx<'_, '_> {
             call_args.insert(0, (receiver_val, receiver_mode));
         }
 
+        self.expand_default_args(&mut call_args, entity, args.len());
+
         // Protocol vs direct — one branch
         let callee = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
             self.ctx.register_name(protocol);
@@ -409,7 +419,7 @@ impl BodyCtx<'_, '_> {
             return None;
         }
 
-        let result_ty = self.resolve_expr_type(expr_id);
+        let result_ty = self.resolve_enum_case_type(expr_id, callee_expr, entity);
         let case_name = self
             .ctx
             .world
@@ -482,6 +492,7 @@ impl BodyCtx<'_, '_> {
 
         let mut call_args = vec![(self_ref, ArgMode::RefMut)];
         call_args.extend(self.lower_call_args_default(args));
+        self.expand_default_args(&mut call_args, entity, args.len());
 
         let callee = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
             self.ctx.register_name(protocol);
@@ -529,7 +540,7 @@ impl BodyCtx<'_, '_> {
     // === Helpers ===
 
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
-        if let Some(&resolved) = self.typed.and_then(|t| t.resolutions.get(&callee_expr)) {
+        if let Some(&resolved) = self.typed.as_ref().and_then(|t| t.resolutions.get(&callee_expr)) {
             return Some(resolved);
         }
         match &self.hir.exprs[callee_expr] {
@@ -540,5 +551,48 @@ impl BodyCtx<'_, '_> {
 
     fn is_struct_entity(&self, entity: Entity) -> bool {
         self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Struct)
+    }
+
+    /// Resolve the enum type for an enum case constructor call. Inference
+    /// sometimes doesn't record a type for the outer `Call` expression, so
+    /// fall back to constructing `Named { entity: parent_enum, type_args }`
+    /// from the case entity's parent and any available type arguments.
+    fn resolve_enum_case_type(
+        &mut self,
+        expr_id: HirExprId,
+        callee_expr: HirExprId,
+        case_entity: Entity,
+    ) -> TyId {
+        let inferred = self.resolve_expr_type(expr_id);
+        match self.ctx.module.ty_arena.get(inferred).clone() {
+            MirTy::Named { type_args, .. } if type_args.is_empty() => {
+                // Check if the enum is generic — if so, supplement type args
+                let parent = self.ctx.world.parent_of(case_entity).unwrap_or(case_entity);
+                let is_generic = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::TypeParams>(parent)
+                    .is_some_and(|tp| !tp.0.is_empty());
+                if is_generic {
+                    let type_args = self.resolve_type_args(callee_expr);
+                    if !type_args.is_empty() {
+                        self.ctx.register_name(parent);
+                        return self.ctx.module.ty_arena.named(parent, type_args);
+                    }
+                }
+                inferred
+            }
+            MirTy::Error => {
+                // Inference didn't record a type — construct from parent enum entity
+                if let Some(parent) = self.ctx.world.parent_of(case_entity) {
+                    self.ctx.register_name(parent);
+                    let type_args = self.resolve_type_args(callee_expr);
+                    self.ctx.module.ty_arena.named(parent, type_args)
+                } else {
+                    inferred
+                }
+            }
+            _ => inferred,
+        }
     }
 }

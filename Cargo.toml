@@ -75,7 +75,7 @@ members = [
     "lib/kestrel-mir-lower-2",
     "lib/kestrel-codegen-cranelift-2",
     "lib/kestrel-test-suite",
-    # "external/triage",  # TEMP: excluded during memory-model rewrite; restore before merging
+    "external/triage",
 ]
 exclude = ["registry", "external/flock-registry"]
 

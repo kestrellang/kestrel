@@ -15,7 +15,11 @@ pub fn compile_block(
     let block = &fc.body.blocks[block_id.index()];
 
     for stmt in &block.stmts {
-        stmt::compile_statement(fc, builder, &stmt.kind)?;
+        if stmt::compile_statement(fc, builder, &stmt.kind)? {
+            // Statement diverged (e.g. call to a `!`-returning function).
+            // A trap was already emitted; skip remaining statements and terminator.
+            return Ok(());
+        }
     }
 
     terminator::compile_terminator(fc, builder, &block.terminator)?;

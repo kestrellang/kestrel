@@ -37,11 +37,45 @@ pub(crate) struct LoopInfo {
     pub label: Option<String>,
 }
 
+/// Holds either a borrowed or owned HirBody so BodyCtx can temporarily
+/// switch to a different body (e.g. for inline default-arg lowering)
+/// without lifetime conflicts.
+pub(crate) enum HirRef<'a> {
+    Borrowed(&'a HirBody),
+    Owned(HirBody),
+}
+
+impl std::ops::Deref for HirRef<'_> {
+    type Target = HirBody;
+    fn deref(&self) -> &HirBody {
+        match self {
+            HirRef::Borrowed(r) => r,
+            HirRef::Owned(o) => o,
+        }
+    }
+}
+
+/// Same pattern for TypedBody.
+pub(crate) enum TypedRef<'a> {
+    Borrowed(&'a TypedBody),
+    Owned(TypedBody),
+}
+
+impl std::ops::Deref for TypedRef<'_> {
+    type Target = TypedBody;
+    fn deref(&self) -> &TypedBody {
+        match self {
+            TypedRef::Borrowed(r) => r,
+            TypedRef::Owned(o) => o,
+        }
+    }
+}
+
 /// Per-function body lowering context.
 pub(crate) struct BodyCtx<'a, 'w> {
     pub ctx: &'a mut LowerCtx<'w>,
-    pub hir: &'a HirBody,
-    pub typed: Option<&'a TypedBody>,
+    pub hir: HirRef<'a>,
+    pub typed: Option<TypedRef<'a>>,
     pub func_entity: Entity,
     pub func_idx: usize,
     pub in_protocol_extension: bool,
@@ -64,8 +98,8 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
     ) -> Self {
         Self {
             ctx,
-            hir,
-            typed,
+            hir: HirRef::Borrowed(hir),
+            typed: typed.map(TypedRef::Borrowed),
             func_entity,
             func_idx,
             in_protocol_extension,
@@ -80,21 +114,26 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
 
     /// Main entry: lower the function body into MIR blocks.
     pub fn lower_body(&mut self) {
+        // Snapshot locals and statements to break the self.hir borrow
+        let locals: Vec<_> = self.hir.locals.iter().map(|(id, l)| (id, l.name.clone())).collect();
+        let params_len = self.hir.params.len();
+        let statements: Vec<_> = self.hir.statements.clone();
+
         // Create locals for all HIR locals (params + user locals)
-        for (hir_id, local) in self.hir.locals.iter() {
-            let ty = self.resolve_local_type(hir_id);
-            let mir_local = LocalDef::new(&local.name, ty);
+        for (hir_id, name) in &locals {
+            let ty = self.resolve_local_type(*hir_id);
+            let mir_local = LocalDef::new(name, ty);
             let mir_id = self.body.add_local(mir_local);
-            self.local_map.insert(hir_id, mir_id);
+            self.local_map.insert(*hir_id, mir_id);
         }
-        self.body.param_count = self.hir.params.len();
+        self.body.param_count = params_len;
 
         let entry = self.new_block();
         self.body.entry = entry;
         self.current_block = Some(entry);
 
         // Lower top-level statements
-        for &stmt_id in &self.hir.statements {
+        for &stmt_id in &statements {
             self.lower_stmt(stmt_id);
             if self.is_terminated() {
                 break;
@@ -104,7 +143,7 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
         // Lower tail expression
         if !self.is_terminated() {
             if let Some(tail) = self.hir.tail_expr {
-                let tail_span = expr_span(self.hir, tail);
+                let tail_span = expr_span(&self.hir, tail);
                 let value = self.lower_expr(tail);
                 if !self.is_terminated() {
                     let prev = self.current_span.replace(tail_span);
@@ -158,7 +197,7 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
     }
 
     pub fn resolve_local_type(&mut self, hir_id: HirLocalId) -> TyId {
-        if let Some(typed) = self.typed
+        if let Some(typed) = self.typed.as_ref()
             && let Some(resolved) = typed.local_types.get(&hir_id)
         {
             return lower_resolved_ty(self.ctx, resolved);
@@ -167,7 +206,7 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
     }
 
     pub fn resolve_expr_type(&mut self, expr_id: kestrel_hir::body::HirExprId) -> TyId {
-        if let Some(typed) = self.typed
+        if let Some(typed) = self.typed.as_ref()
             && let Some(resolved) = typed.expr_types.get(&expr_id)
         {
             return lower_resolved_ty(self.ctx, resolved);
@@ -265,12 +304,6 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
                 let imm_clone = imm.clone();
                 self.emit_assign_const(Place::local(temp), imm_clone);
                 *operand = Operand::Place(Place::local(temp));
-            } else if *mode == ArgMode::RefMut
-                && let Operand::Place(place) = operand
-            {
-                // RefMut args are initialized by the callee (e.g. init calls) —
-                // mark them Live for init-state analysis
-                self.push_stmt(StatementKind::Uninit { dest: place.clone() });
             }
         }
         self.push_stmt(StatementKind::Call { dest, callee, args });

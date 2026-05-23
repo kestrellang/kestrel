@@ -165,6 +165,14 @@ pub fn monomorphize(
             receiver,
         );
 
+        {
+            let verbose = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
+            if verbose && (func_name.contains("Bool.hash") || func_name.contains("DefaultHasher") || func_name.contains("SplitWhereView")) {
+                eprintln!("  Phase5: MonoFuncId({}) = {} key=({:?}, ta={:?}, st={:?}) (mangled: {})",
+                    i, func_name, key.func_entity, key.type_args, key.self_type,
+                    &mangled_name[..mangled_name.len().min(80)]);
+            }
+        }
         mono_module.add_function(MonoFunction {
             name: mangled_name,
             source: key.func_entity,
@@ -775,6 +783,7 @@ fn rewrite_callee(
     resolved_witnesses: &HashMap<(usize, usize), InstantiationKey>,
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
 ) {
+    let verbose = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
     match callee {
         Callee::Direct {
             func,
@@ -787,7 +796,13 @@ fn rewrite_callee(
                 *self_type,
             );
             if let Some(&mono_id) = func_id_map.get(&key) {
+                if verbose && (*func == Entity::from_raw(681) || *func == Entity::from_raw(1179) || *func == Entity::from_raw(683)) {
+                    eprintln!("  REWRITE Direct {:?} ta={:?} st={:?} -> MonoFuncId({})",
+                        func, type_args, self_type, mono_id.index());
+                }
                 *callee = Callee::Resolved(mono_id);
+            } else if verbose {
+                eprintln!("  UNRESOLVED Direct {:?} ta={:?} st={:?}", func, type_args, self_type);
             }
         }
         Callee::Witness { .. } => {

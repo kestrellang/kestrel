@@ -1,5 +1,5 @@
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, Value};
+use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_frontend::FunctionBuilder;
 
 use cranelift_module::Module;
@@ -10,13 +10,15 @@ use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::{mem, place, rvalue};
 
+/// Returns true if the callee diverges (returns `!`), meaning subsequent
+/// code in the block is unreachable.
 pub fn compile_call(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
     callee: &Callee,
     args: &[(Operand, ArgMode)],
     dest: Option<&Place>,
-) -> Result<(), CodegenError> {
+) -> Result<bool, CodegenError> {
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, dest),
         Callee::Thin(place) => compile_thin_call(fc, builder, place, args, dest),
@@ -43,13 +45,17 @@ pub fn compile_call(
     }
 }
 
+fn ret_ty_is_never(fc: &FuncCompiler<'_, '_>, ret: kestrel_mir_2::TyId) -> bool {
+    matches!(fc.ctx.module.ty_arena.get(ret), MirTy::Never)
+}
+
 fn compile_resolved_call(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
     mono_id: MonoFuncId,
     args: &[(Operand, ArgMode)],
     dest: Option<&Place>,
-) -> Result<(), CodegenError> {
+) -> Result<bool, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
     let target_func = &fc.ctx.module.functions[mono_id.index()];
 
@@ -147,7 +153,14 @@ fn compile_resolved_call(
     let inst = builder.ins().call(func_ref, &call_args);
 
     // Handle return value
-    write_call_result(fc, builder, inst, ret_mode, sret_slot, dest)
+    write_call_result(fc, builder, inst, ret_mode, sret_slot, dest)?;
+
+    if ret_ty_is_never(fc, target_func.ret) {
+        builder.ins().trap(TrapCode::unwrap_user(2));
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn compile_thin_call(
@@ -156,7 +169,7 @@ fn compile_thin_call(
     func_place: &Place,
     args: &[(Operand, ArgMode)],
     dest: Option<&Place>,
-) -> Result<(), CodegenError> {
+) -> Result<bool, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
     let func_ptr = place::place_read(fc, builder, func_place)?;
 
@@ -223,7 +236,14 @@ fn compile_thin_call(
 
     let inst = builder.ins().call_indirect(sig_ref, func_ptr, &call_args);
 
-    write_call_result(fc, builder, inst, ret_mode, sret_slot, dest)
+    write_call_result(fc, builder, inst, ret_mode, sret_slot, dest)?;
+
+    if matches!(fc.ctx.module.ty_arena.get(ret_ty), MirTy::Never) {
+        builder.ins().trap(TrapCode::unwrap_user(2));
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn compile_thick_call(
@@ -232,7 +252,7 @@ fn compile_thick_call(
     closure_place: &Place,
     args: &[(Operand, ArgMode)],
     dest: Option<&Place>,
-) -> Result<(), CodegenError> {
+) -> Result<bool, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
     let ptr_size = fc.ctx.ptr_size;
 
@@ -316,7 +336,14 @@ fn compile_thick_call(
 
     let inst = builder.ins().call_indirect(sig_ref, func_ptr, &call_args);
 
-    write_call_result(fc, builder, inst, ret_mode, sret_slot, dest)
+    write_call_result(fc, builder, inst, ret_mode, sret_slot, dest)?;
+
+    if matches!(fc.ctx.module.ty_arena.get(ret_ty), MirTy::Never) {
+        builder.ins().trap(TrapCode::unwrap_user(2));
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 /// Build a single call argument, respecting the callee's PassMode.

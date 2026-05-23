@@ -8,11 +8,13 @@ use crate::func::FuncCompiler;
 use crate::place;
 use crate::rvalue;
 
+/// Returns true if the statement diverges (e.g. calls a `!`-returning
+/// function), meaning the rest of the block is unreachable.
 pub fn compile_statement(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
     kind: &StatementKind,
-) -> Result<(), CodegenError> {
+) -> Result<bool, CodegenError> {
     match kind {
         StatementKind::Assign { dest, rvalue } => {
             let val = rvalue::compile_rvalue(fc, builder, rvalue)?;
@@ -24,7 +26,9 @@ pub fn compile_statement(
             callee,
             args,
         } => {
-            call::compile_call(fc, builder, callee, args, dest.as_ref())?;
+            if call::compile_call(fc, builder, callee, args, dest.as_ref())? {
+                return Ok(true);
+            }
         }
 
         StatementKind::Uninit { dest } => {
@@ -44,5 +48,5 @@ pub fn compile_statement(
         | StatementKind::ScopeLive(_) => {}
     }
 
-    Ok(())
+    Ok(false)
 }

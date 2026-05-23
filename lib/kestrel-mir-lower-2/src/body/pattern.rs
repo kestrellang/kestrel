@@ -36,7 +36,7 @@ impl BodyCtx<'_, '_> {
         let join_block = self.new_block();
 
         let tree = kestrel_pattern_matching::compile_decision_tree(
-            self.hir,
+            &self.hir,
             &self.ctx.query,
             self.ctx.root,
             &scrutinee_ty,
@@ -238,7 +238,7 @@ impl BodyCtx<'_, '_> {
     }
 
     fn resolve_expr_resolved_ty(&self, expr_id: HirExprId) -> ResolvedTy {
-        if let Some(typed) = self.typed
+        if let Some(typed) = self.typed.as_ref()
             && let Some(resolved) = typed.expr_types.get(&expr_id)
         {
             return resolved.clone();
