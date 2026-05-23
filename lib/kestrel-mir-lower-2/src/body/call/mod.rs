@@ -170,7 +170,8 @@ impl BodyCtx<'_, '_> {
             _ => return (receiver_ty, call_args),
         };
 
-        // Stored field: project into the struct
+        // Stored field: project into the struct, substituting the struct's
+        // type params with the receiver's concrete type args
         if let Some(field_idx) = self.ctx.resolve_field_idx(recv_entity, field_name) {
             let field_ty = self
                 .ctx
@@ -181,9 +182,23 @@ impl BodyCtx<'_, '_> {
                 .and_then(|s| s.fields.get(field_idx.index()))
                 .map(|f| f.ty);
 
-            let Some(field_ty) = field_ty else {
+            let Some(mut field_ty) = field_ty else {
                 return (receiver_ty, call_args);
             };
+
+            // Substitute struct type params → receiver type args so nested
+            // generics (e.g. Route[T].middleware where T is Router's param)
+            // use the caller's type param entities, not the field struct's.
+            if let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(receiver_ty) {
+                let type_args = type_args.clone();
+                if let Some(sdef) = self.ctx.module.structs.iter().find(|s| s.entity == recv_entity) {
+                    let mut subst = kestrel_mir_2::substitute::SubstMap::new();
+                    for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
+                        subst.type_params.insert(tp.entity, arg);
+                    }
+                    field_ty = kestrel_mir_2::substitute::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+                }
+            }
 
             if let Some((old_receiver, _)) = call_args.first() {
                 if let Some(place) = old_receiver.as_place() {

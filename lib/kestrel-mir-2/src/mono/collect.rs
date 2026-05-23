@@ -528,6 +528,25 @@ pub fn build_subst(
             subst.type_params.entry(proto_entity).or_insert(st);
             populate_assoc_types(arena, witnesses, protocols, proto_entity, st, &mut subst);
         }
+        // Protocol extension methods on concrete structs: the body may reference
+        // TypeParam(protocol_entity) but detect_implicit_protocol only catches
+        // protocol default methods. Map every protocol that self_type conforms to.
+        for proto in protocols {
+            if subst.type_params.contains_key(&proto.entity) {
+                continue;
+            }
+            for wit in witnesses {
+                if wit.protocol != proto.entity {
+                    continue;
+                }
+                let mut bindings = HashMap::new();
+                if witness::match_pattern(arena, wit.implementing_type, st, &mut bindings) {
+                    subst.type_params.entry(proto.entity).or_insert(st);
+                    populate_assoc_types(arena, witnesses, protocols, proto.entity, st, &mut subst);
+                    break;
+                }
+            }
+        }
     }
 
     // Where-clause enrichment: for each `T: Protocol` constraint, map the

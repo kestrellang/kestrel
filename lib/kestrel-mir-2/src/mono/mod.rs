@@ -460,28 +460,6 @@ fn substitute_callee_and_resolve(
                         resolved.self_type,
                     ),
                 );
-            } else {
-                // Fallback: if self_type is still a protocol TypeParam, use the
-                // parent's concrete self_type. This happens when a protocol extension
-                // method is lowered with a concrete struct parent — the body still
-                // references TypeParam(protocol_entity) but build_subst only mapped
-                // the struct's type params, not the protocol Self.
-                if let MirTy::TypeParam(tp_entity) = arena.get(*self_type) {
-                    if protocols.iter().any(|p| p.entity == *tp_entity) {
-                        if let Some(concrete) = parent_self {
-                            *self_type = concrete;
-                            if let Ok(resolved) = witness::resolve_witness_call(
-                                arena, witnesses, protocols, functions, entity_names,
-                                *protocol, method, *self_type, method_type_args,
-                            ) {
-                                resolved_witnesses.insert(
-                                    (block_idx, stmt_idx),
-                                    InstantiationKey::new(resolved.func_entity, resolved.type_args, resolved.self_type),
-                                );
-                            }
-                        }
-                    }
-                }
             }
         }
         _ => {}
