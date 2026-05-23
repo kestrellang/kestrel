@@ -257,10 +257,10 @@ impl BodyCtx<'_, '_> {
         let lit_op = if let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(string_ty) {
             let entity = *entity;
             if let Some(init) = self.find_string_literal_init(entity) {
-                let ptr = Operand::Const(Immediate::string(literal.to_string()));
+                let ptr = Operand::Const(Immediate::string_pointer(literal.to_string()));
                 let len = Operand::Const(Immediate::i64(literal.len() as i128));
                 self.ctx.register_name(init);
-                let callee = Callee::direct_with_args(init, vec![], Some(string_ty));
+                let callee = Callee::direct_with_args(init, vec![], None);
                 self.emit_init_literal_call(
                     callee,
                     vec![(ptr, ArgMode::Copy), (len, ArgMode::Copy)],
@@ -375,11 +375,13 @@ fn constructor_to_switch_case(bctx: &mut BodyCtx, ctor: &Constructor) -> SwitchC
                 .world
                 .get::<kestrel_ast_builder::Name>(*entity)
                 .map(|n| n.0.clone())
-                .unwrap_or_default();
-            let enum_entity = bctx.ctx.world.parent_of(*entity);
-            let idx = enum_entity
-                .and_then(|e| bctx.ctx.resolve_variant_idx(e, &case_name))
-                .unwrap_or(VariantIdx::new(0));
+                .unwrap_or_else(|| panic!("ICE: enum case {:?} has no Name", entity));
+            let enum_entity = bctx.ctx.world.parent_of(*entity)
+                .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", entity));
+            let idx = bctx.ctx.resolve_variant_idx(enum_entity, &case_name)
+                .unwrap_or_else(|| panic!(
+                    "ICE: variant '{}' not found in enum {:?}", case_name, enum_entity
+                ));
             SwitchCase::Variant(idx)
         }
         Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v),

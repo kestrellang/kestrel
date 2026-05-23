@@ -85,6 +85,10 @@ impl Immediate {
         Self::new(ImmediateKind::StringLiteral(s.into()))
     }
 
+    pub fn string_pointer(s: impl Into<String>) -> Self {
+        Self::new(ImmediateKind::StringPointer(s.into()))
+    }
+
     pub fn unit() -> Self {
         Self::new(ImmediateKind::Unit)
     }

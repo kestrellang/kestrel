@@ -20,7 +20,7 @@ impl BodyCtx<'_, '_> {
             match lit {
                 HirLiteral::String { value: content, .. } => {
                     if let Some(init) = self.find_string_literal_init(entity) {
-                        let ptr = Operand::Const(Immediate::string(content.clone()));
+                        let ptr = Operand::Const(Immediate::string_pointer(content.clone()));
                         let len = Operand::Const(Immediate::i64(content.len() as i128));
                         self.ctx.register_name(init);
                         let callee = Callee::direct_with_args(init, vec![], None);
