@@ -151,7 +151,7 @@ impl BodyCtx<'_, '_> {
             if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == resolved) {
                 type_args.truncate(mir_func.type_params.len());
             }
-            Callee::direct_with_args(resolved, type_args, Some(receiver_ty))
+            Callee::direct_with_args(resolved, type_args, None)
         };
 
         let dest = self.fresh_temp(result_ty);
@@ -224,7 +224,7 @@ impl BodyCtx<'_, '_> {
 
             self.ctx.register_name(field_entity);
             let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
-            let callee = Callee::direct_with_args(field_entity, type_args, Some(receiver_ty));
+            let callee = Callee::direct_with_args(field_entity, type_args, None);
             let (old_receiver, _) = call_args.remove(0);
             let getter_dest = self.fresh_temp(field_ty);
             self.emit_call(
@@ -392,7 +392,10 @@ impl BodyCtx<'_, '_> {
                 if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == entity) {
                     ta.truncate(mir_func.type_params.len());
                 }
-                Callee::direct_with_args(entity, ta, Some(receiver_ty))
+                // Direct methods don't need self_type — receiver type args are
+                // already prepended into type_args. Only protocol default methods
+                // need self_type (they use Witness callee, not this branch).
+                Callee::direct_with_args(entity, ta, None)
             } else {
                 Callee::direct_with_args(entity, type_args, None)
             }
@@ -425,11 +428,13 @@ impl BodyCtx<'_, '_> {
             .world
             .get::<kestrel_ast_builder::Name>(entity)
             .map(|n| n.0.clone())
-            .unwrap_or_default();
-        let enum_entity = self.ctx.world.parent_of(entity);
-        let variant_idx = enum_entity
-            .and_then(|e| self.ctx.resolve_variant_idx(e, &case_name))
-            .unwrap_or(kestrel_mir_2::VariantIdx::new(0));
+            .unwrap_or_else(|| panic!("ICE: enum case {:?} has no Name", entity));
+        let enum_entity = self.ctx.world.parent_of(entity)
+            .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", entity));
+        let variant_idx = self.ctx.resolve_variant_idx(enum_entity, &case_name)
+            .unwrap_or_else(|| panic!(
+                "ICE: variant '{}' not found in enum {:?}", case_name, enum_entity
+            ));
 
         let payload: Vec<(Operand, UseMode)> = args
             .iter()
@@ -488,6 +493,12 @@ impl BodyCtx<'_, '_> {
         result_ty: TyId,
     ) -> Operand {
         let self_local = self.fresh_temp(result_ty);
+        // Mark the local as initialized before the call — the init function
+        // writes through the RefMut reference, but the verifier only tracks
+        // dest and Move args.  Uninit tells init-state this storage is live.
+        self.push_stmt(kestrel_mir_2::statement::StatementKind::Uninit {
+            dest: Place::local(self_local),
+        });
         let self_ref = Operand::Place(Place::local(self_local));
 
         let mut call_args = vec![(self_ref, ArgMode::RefMut)];
@@ -506,7 +517,11 @@ impl BodyCtx<'_, '_> {
             }
         } else {
             self.apply_param_modes(&mut call_args, entity);
-            Callee::direct_with_args(entity, type_args, Some(result_ty))
+            // Init functions are direct implementations — self_type is only
+            // needed for protocol default methods (where the body has an
+            // implicit Self TypeParam). Omitting it avoids duplicate
+            // instantiations that differ only by self_type.
+            Callee::direct_with_args(entity, type_args, None)
         };
 
         self.emit_call(None, callee, call_args);
@@ -567,7 +582,8 @@ impl BodyCtx<'_, '_> {
         match self.ctx.module.ty_arena.get(inferred).clone() {
             MirTy::Named { type_args, .. } if type_args.is_empty() => {
                 // Check if the enum is generic — if so, supplement type args
-                let parent = self.ctx.world.parent_of(case_entity).unwrap_or(case_entity);
+                let parent = self.ctx.world.parent_of(case_entity)
+                    .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", case_entity));
                 let is_generic = self
                     .ctx
                     .world

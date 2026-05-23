@@ -23,7 +23,7 @@ impl BodyCtx<'_, '_> {
                         let ptr = Operand::Const(Immediate::string(content.clone()));
                         let len = Operand::Const(Immediate::i64(content.len() as i128));
                         self.ctx.register_name(init);
-                        let callee = Callee::direct_with_args(init, vec![], Some(result_ty));
+                        let callee = Callee::direct_with_args(init, vec![], None);
                         return self.emit_init_literal_call(callee, vec![
                             (ptr, ArgMode::Copy), (len, ArgMode::Copy),
                         ], result_ty);
@@ -34,7 +34,7 @@ impl BodyCtx<'_, '_> {
                     if let Some(init) = self.find_null_literal_init(entity) {
                         self.ctx.register_name(init);
                         let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-                        let callee = Callee::direct_with_args(init, type_args, Some(result_ty));
+                        let callee = Callee::direct_with_args(init, type_args, None);
                         return self.emit_init_literal_call(callee, vec![], result_ty);
                     }
                     return self.lower_literal_primitive(lit, result_ty);
@@ -54,7 +54,7 @@ impl BodyCtx<'_, '_> {
                 let param_ty = self.resolve_init_param_type(init).unwrap_or(result_ty);
                 let primitive = self.lower_literal_primitive(lit, param_ty);
                 self.ctx.register_name(init);
-                let callee = Callee::direct_with_args(init, vec![], Some(result_ty));
+                let callee = Callee::direct_with_args(init, vec![], None);
                 return self.emit_init_literal_call(callee, vec![(primitive, ArgMode::Copy)], result_ty);
             }
         }
@@ -95,6 +95,9 @@ impl BodyCtx<'_, '_> {
         result_ty: TyId,
     ) -> Operand {
         let self_local = self.fresh_temp(result_ty);
+        self.push_stmt(kestrel_mir_2::statement::StatementKind::Uninit {
+            dest: Place::local(self_local),
+        });
         let mut call_args = vec![(Operand::Place(Place::local(self_local)), ArgMode::RefMut)];
         call_args.extend(args);
         self.emit_call(None, callee, call_args);
@@ -208,8 +211,11 @@ impl BodyCtx<'_, '_> {
 
         // Call init(ptr, count)
         self.ctx.register_name(init_entity);
-        let callee = Callee::direct_with_args(init_entity, type_args, Some(result_ty));
+        let callee = Callee::direct_with_args(init_entity, type_args, None);
         let self_local = self.fresh_temp(result_ty);
+        self.push_stmt(kestrel_mir_2::statement::StatementKind::Uninit {
+            dest: Place::local(self_local),
+        });
         let call_args = vec![
             (Operand::Place(Place::local(self_local)), ArgMode::RefMut),
             (Operand::Place(Place::local(ptr_local)), ArgMode::Copy),
@@ -317,8 +323,11 @@ impl BodyCtx<'_, '_> {
         }
 
         self.ctx.register_name(init_entity);
-        let callee = Callee::direct_with_args(init_entity, type_args, Some(result_ty));
+        let callee = Callee::direct_with_args(init_entity, type_args, None);
         let self_local = self.fresh_temp(result_ty);
+        self.push_stmt(kestrel_mir_2::statement::StatementKind::Uninit {
+            dest: Place::local(self_local),
+        });
         let call_args = vec![
             (Operand::Place(Place::local(self_local)), ArgMode::RefMut),
             (Operand::Place(Place::local(ptr_local)), ArgMode::Copy),
@@ -398,16 +407,17 @@ impl BodyCtx<'_, '_> {
         })?;
 
         let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-        // Resolve element type from the pointer param
-        let ptr_ty = init_func.params.get(1)?.ty;
-        let element_ty = match self.ctx.module.ty_arena.get(ptr_ty) {
-            MirTy::Pointer(inner) => *inner,
-            _ => return None,
+        // Extract element type from result_ty's type args (Array[T] → T),
+        // not the init function's generic param which is unsubstituted.
+        let element_ty = match self.ctx.module.ty_arena.get(result_ty) {
+            MirTy::Named { type_args, .. } => type_args.first().copied(),
+            _ => None,
         };
+        let element_ty = element_ty?;
         Some((init_func.entity, element_ty, type_args))
     }
 
-    fn resolve_dict_literal_init(&self, result_ty: TyId) -> Option<(Entity, TyId, Vec<TyId>)> {
+    fn resolve_dict_literal_init(&mut self, result_ty: TyId) -> Option<(Entity, TyId, Vec<TyId>)> {
         let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(result_ty) else {
             return None;
         };
@@ -432,9 +442,14 @@ impl BodyCtx<'_, '_> {
         })?;
 
         let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-        let ptr_ty = init_func.params.get(1)?.ty;
-        let pair_ty = match self.ctx.module.ty_arena.get(ptr_ty) {
-            MirTy::Pointer(inner) => *inner,
+        // Build the concrete pair type from result_ty's type args (Dict[K, V] → (K, V)),
+        // not the init function's generic param which is unsubstituted.
+        let pair_ty = match self.ctx.module.ty_arena.get(result_ty) {
+            MirTy::Named { type_args, .. } if type_args.len() >= 2 => {
+                let k = type_args[0];
+                let v = type_args[1];
+                self.ctx.module.ty_arena.tuple(vec![k, v])
+            }
             _ => return None,
         };
         Some((init_func.entity, pair_ty, type_args))

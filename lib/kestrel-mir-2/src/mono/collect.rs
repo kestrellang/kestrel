@@ -143,6 +143,11 @@ impl<'a> CollectionContext<'a> {
                 continue;
             }
 
+            // Lang intrinsics have no body — codegen handles them as ops
+            if func.body.is_none() && func.extern_info.is_none() {
+                continue;
+            }
+
             // Closures and thunks are discovered through their parent
             if matches!(
                 func.kind,
@@ -262,12 +267,17 @@ impl<'a> CollectionContext<'a> {
                     return;
                 };
 
+                let callee_func = &self.functions[func_idx.index()];
+
+                // Lang intrinsics: no body, no extern — codegen handles as ops
+                if callee_func.body.is_none() && callee_func.extern_info.is_none() {
+                    return;
+                }
+
                 let concrete_type_args: Vec<TyId> = type_args
                     .iter()
                     .map(|&ta| substitute_and_resolve(self.arena, self.witnesses, ta, subst))
                     .collect();
-
-                let callee_func = &self.functions[func_idx.index()];
                 let callee_is_nested = matches!(
                     callee_func.kind,
                     FunctionKind::Closure { .. }
