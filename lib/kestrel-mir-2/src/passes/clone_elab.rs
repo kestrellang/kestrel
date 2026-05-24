@@ -85,20 +85,21 @@ fn elaborate_block(
                     if let Operand::Place(place) = operand
                         && let Some(local) = place.root_local()
                     {
-                        let ty = body.local(local).ty;
-                        if is_clone_type(&module.ty_arena, module, ty, where_clause) {
-                            if !place.projections.is_empty()
-                                && crate::ty_query::needs_drop(&module.ty_arena, module, ty)
-                            {
-                                continue;
-                            }
-                            let is_live = live.get(local.index());
+                        let ty = place_type_for_clone(module, body, place);
+                        let is_live = live.get(local.index());
+                        if let Some(needs_clone) = copy_rewrite(
+                            &module.ty_arena,
+                            module,
+                            ty,
+                            where_clause,
+                            is_live,
+                        ) {
                             stmt_rewrites.push(StmtRewrite::CallArg {
                                 stmt_index: si,
                                 arg_index: ai,
                                 source: place.clone(),
                                 ty,
-                                needs_clone: is_live,
+                                needs_clone,
                             });
                         }
                     }
@@ -115,7 +116,10 @@ fn elaborate_block(
         && let Some(local) = place.root_local()
     {
         let ty = body.local(local).ty;
-        if is_clone_type(&module.ty_arena, module, ty, where_clause) {
+        if matches!(
+            copy_behavior(&module.ty_arena, module, ty, where_clause),
+            CopyBehavior::Clone(_)
+        ) {
             // Return is a terminator — nothing follows in this block. The exit
             // state of a Return block is empty, so the local is dead after the
             // return. Always rewrite to Move, no clone needed.
@@ -255,16 +259,39 @@ struct TermRewrite {
 
 // ---- Helpers ----
 
-fn is_clone_type(
+fn copy_rewrite(
     arena: &TyArena,
     module: &MirModule,
     ty: TyId,
     where_clause: Option<&WhereClause>,
-) -> bool {
-    matches!(
-        copy_behavior(arena, module, ty, where_clause),
-        CopyBehavior::Clone(_)
+    is_live_after: bool,
+) -> Option<bool> {
+    match copy_behavior(arena, module, ty, where_clause) {
+        CopyBehavior::Clone(_) => Some(is_live_after),
+        CopyBehavior::None if !is_live_after => Some(false),
+        CopyBehavior::None | CopyBehavior::Bitwise => None,
+    }
+}
+
+fn place_type_for_clone(module: &MirModule, body: &MirBody, place: &Place) -> TyId {
+    let mut arena = module.ty_arena.clone();
+    let ty = crate::place_ty::place_type(
+        &mut arena,
+        &module.structs,
+        &module.enums,
+        &module.statics,
+        &body.locals,
+        place,
     )
+    .filter(|ty| ty.index() < module.ty_arena.len())
+    .or_else(|| place.root_local().map(|local| body.local(local).ty));
+
+    ty.unwrap_or_else(|| {
+        module
+            .ty_arena
+            .find(|ty| matches!(ty, crate::ty::MirTy::Error))
+            .unwrap_or(TyId::new(0))
+    })
 }
 
 fn collect_rvalue_rewrites(
@@ -284,24 +311,15 @@ fn collect_rvalue_rewrites(
         let Some(local) = place.root_local() else {
             continue;
         };
-        let ty = body.local(local).ty;
-        if is_clone_type(arena, module, ty, where_clause) {
-            // TODO: projected copies from droppable aggregates where the field
-            // type is bitwise-copyable should stay as Copy — rewriting to Move
-            // would create a projected move that the verifier rejects. Long-term,
-            // per-field init tracking would handle this properly.
-            if !place.projections.is_empty()
-                && crate::ty_query::needs_drop(arena, module, ty)
-            {
-                continue;
-            }
-            let is_live = live.get(local.index());
+        let ty = place_type_for_clone(module, body, place);
+        let is_live = live.get(local.index());
+        if let Some(needs_clone) = copy_rewrite(arena, module, ty, where_clause, is_live) {
             out.push(StmtRewrite::RvalueOperand {
                 stmt_index,
                 operand_index: oi,
                 source: (*place).clone(),
                 ty,
-                needs_clone: is_live,
+                needs_clone,
             });
         }
     }

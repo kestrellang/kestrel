@@ -353,7 +353,7 @@ fn verify_statement_ownership(
     body: &crate::MirBody,
     analysis: &InitAnalysis,
     where_clause: Option<&crate::item::function::WhereClause>,
-    is_drop_shim: bool,
+    _is_drop_shim: bool,
     result: &mut VerifyResult,
 ) {
     let err = |msg: String| VerifyError {
@@ -386,29 +386,10 @@ fn verify_statement_ownership(
                 }
 
                 if mode == Some(UseMode::Copy)
-                    && p.projections.is_empty()
-                    && copy_behavior(&module.ty_arena, module, body.locals[local.index()].ty, where_clause) == CopyBehavior::None
+                    && place_copy_behavior(module, body, p, where_clause) == CopyBehavior::None
                 {
                     result.errors.push(err(format!(
-                        "copy of affine local %{} '{}'",
-                        local.index(),
-                        body.locals[local.index()].name
-                    )));
-                }
-
-                if mode == Some(UseMode::Move)
-                    && !is_drop_shim
-                    && !p.projections.is_empty()
-                    && needs_drop(&module.ty_arena, module, body.locals[local.index()].ty)
-                {
-                    let field_ty_desc = if let Some(crate::place::PlaceElem::Field(fi)) = p.projections.first() {
-                        let local_ty = body.locals[local.index()].ty;
-                        format!(" (field {} of {:?})", fi.index(), module.ty_arena.get(local_ty))
-                    } else {
-                        String::new()
-                    };
-                    result.errors.push(err(format!(
-                        "projected move out of droppable aggregate %{} '{}'{field_ty_desc}",
+                        "copy of affine place rooted at %{} '{}'",
                         local.index(),
                         body.locals[local.index()].name
                     )));
@@ -417,32 +398,59 @@ fn verify_statement_ownership(
         }
         StatementKind::Call { args, .. } => {
             for (ai, (operand, mode)) in args.iter().enumerate() {
-                if *mode != ArgMode::Move {
-                    continue;
-                }
                 let Operand::Place(p) = operand else { continue };
                 let Some(local) = p.root_local() else { continue };
 
-                if state_before(local) == InitState::Dead {
+                if *mode == ArgMode::Move && state_before(local) == InitState::Dead {
                     result.errors.push(err(format!(
                         "call arg {ai}: move of already-dead local %{}",
                         local.index()
                     )));
                 }
 
-                if !is_drop_shim
-                    && !p.projections.is_empty()
-                    && needs_drop(&module.ty_arena, module, body.locals[local.index()].ty)
+                if *mode == ArgMode::Copy
+                    && place_copy_behavior(module, body, p, where_clause) == CopyBehavior::None
                 {
                     result.errors.push(err(format!(
-                        "call arg {ai}: projected move out of droppable aggregate %{}",
+                        "call arg {ai}: copy of affine place rooted at %{}",
                         local.index()
                     )));
                 }
             }
         }
+        StatementKind::Drop { place } | StatementKind::DropIf { place, .. } => {
+            if let Some(local) = place.root_local()
+                && state_before(local) == InitState::Dead
+            {
+                result.errors.push(err(format!(
+                    "drop of already-dead local %{} '{}'",
+                    local.index(),
+                    body.locals[local.index()].name
+                )));
+            }
+        }
         _ => {}
     }
+}
+
+fn place_copy_behavior(
+    module: &MirModule,
+    body: &crate::MirBody,
+    place: &crate::Place,
+    where_clause: Option<&crate::item::function::WhereClause>,
+) -> CopyBehavior {
+    let mut arena = module.ty_arena.clone();
+    let ty = crate::place_ty::place_type(
+        &mut arena,
+        &module.structs,
+        &module.enums,
+        &module.statics,
+        &body.locals,
+        place,
+    )
+    .or_else(|| place.root_local().map(|local| body.locals[local.index()].ty))
+    .unwrap_or_else(|| arena.error());
+    copy_behavior(&arena, module, ty, where_clause)
 }
 
 #[cfg(test)]
@@ -656,35 +664,54 @@ mod tests {
         assert!(result.errors[0].message.contains("copy of affine"));
     }
 
-    // ---- Ownership: projected move of droppable aggregate ----
+    // ---- Ownership: projected copy of affine field ----
 
     #[test]
-    fn projected_move_of_droppable_is_error() {
+    fn projected_copy_of_affine_field_is_error() {
         let mut m = ModuleBuilder::new("test");
-        let (_, d_ty) = setup_droppable(&mut m);
-        let i64_ty = m.i64();
+        let (_inner_entity, inner_ty) = setup_droppable(&mut m);
+
+        let outer_entity = m.fresh_entity();
+        m.register_name(outer_entity, "Outer");
+        let outer_ty = m.named(outer_entity, vec![]);
+        let mut outer_def = StructDef::new(outer_entity, "Outer");
+        outer_def.add_field(FieldDef::new("inner", inner_ty));
+        outer_def.type_info = TypeInfo {
+            copy: CopyBehavior::Bitwise,
+            drop: DropBehavior::None,
+            layout: None,
+        };
+        m.add_struct(outer_def);
+
         let unit_ty = m.unit();
         let mut f = m.function("f", unit_ty);
-        let x = f.local("x", d_ty);
-        let y = f.local("y", i64_ty);
+        let x = f.local("x", outer_ty);
+        let y = f.local("y", inner_ty);
         let bb0 = f.block_id();
         {
             let mut b = f.block_at(bb0);
             b.assign_const(Place::local(x), Immediate::i64(0));
-            // Move of x.0 (projected) — not allowed in MIR-2 v1
+            // The root type is marked bitwise-copyable, but the projected
+            // field type is affine.
             b.assign(
                 Place::local(y),
                 Rvalue::Use(
                     Operand::Place(Place::local(x).field(FieldIdx::new(0))),
-                    UseMode::Move,
+                    UseMode::Copy,
                 ),
             );
             b.ret_unit();
         }
         let module = m.finish();
         let result = verify(&module);
-        assert!(!result.is_ok());
-        assert!(result.errors[0].message.contains("projected move"));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|err| err.message.contains("copy of affine")),
+            "errors: {:?}",
+            result.errors
+        );
     }
 
     // ---- Panic paths: no ownership checks ----

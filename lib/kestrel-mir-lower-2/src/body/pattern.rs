@@ -207,11 +207,15 @@ impl BodyCtx<'_, '_> {
                     let func = &self.ctx.module.functions[self.func_idx];
                     func.params
                         .get(idx)
-                        .map(|p| !matches!(
-                            p.convention,
-                            kestrel_mir_2::ParamConvention::Borrow
-                                | kestrel_mir_2::ParamConvention::MutBorrow
-                        ))
+                        .map(|p| match p.convention {
+                            kestrel_mir_2::ParamConvention::Borrow => false,
+                            // Mutating receivers can move out of fields as
+                            // long as the field is overwritten before return.
+                            kestrel_mir_2::ParamConvention::MutBorrow => {
+                                !scrutinee.projections.is_empty()
+                            }
+                            kestrel_mir_2::ParamConvention::Consuming => true,
+                        })
                         .unwrap_or(true)
                 } else {
                     true

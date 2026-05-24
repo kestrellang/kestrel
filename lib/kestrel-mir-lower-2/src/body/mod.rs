@@ -377,7 +377,7 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
 
     /// Determine UseMode (Copy or Move) for a type.
     pub fn use_mode_for(&self, ty: TyId) -> UseMode {
-        if self.is_copy_type(ty) {
+        if self.is_copy_or_clone_type(ty) {
             UseMode::Copy
         } else {
             UseMode::Move
@@ -390,7 +390,7 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
             ParamConvention::Borrow => ArgMode::Ref,
             ParamConvention::MutBorrow => ArgMode::RefMut,
             ParamConvention::Consuming => {
-                if self.is_copy_type(ty) {
+                if self.is_copy_or_clone_type(ty) {
                     ArgMode::Copy
                 } else {
                     ArgMode::Move
@@ -412,6 +412,22 @@ impl<'a, 'w> BodyCtx<'a, 'w> {
                 wc,
             ),
             CopyBehavior::Bitwise
+        )
+    }
+
+    /// Check if a type can be duplicated directly or through clone elaboration.
+    pub fn is_copy_or_clone_type(&self, ty: TyId) -> bool {
+        let wc = self.ctx.module.functions[self.func_idx]
+            .where_clause
+            .as_ref();
+        matches!(
+            kestrel_mir_2::ty_query::copy_behavior(
+                &self.ctx.module.ty_arena,
+                &self.ctx.module,
+                ty,
+                wc,
+            ),
+            CopyBehavior::Bitwise | CopyBehavior::Clone(_)
         )
     }
 

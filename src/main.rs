@@ -252,13 +252,10 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
             print!("{}", mir.display());
         },
         DumpKind::Mir2 => {
-            match compiler.lower_to_mir2() {
-                Ok(mir2) => print!("{}", mir2.display()),
-                Err(_) => {
-                    driver.emit_diagnostics().ok();
-                    return Err(ExitCode::FAILURE);
-                }
-            }
+            // Always dump the MIR, even with verify errors — this is a debugging command
+            let mir2 = compiler.lower_to_mir2_unchecked();
+            print!("{}", mir2.display());
+            driver.emit_diagnostics().ok();
         },
         DumpKind::Cranelift => {
             let mir = lower_with_ownership(compiler.world(), compiler.root());

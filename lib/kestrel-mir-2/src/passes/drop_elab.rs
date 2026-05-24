@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use kestrel_debug::ktrace;
 
-use crate::body::{LocalDef, MirBody, ScopeId};
+use crate::body::{BasicBlock, LocalDef, MirBody, ScopeId};
 use crate::item::function::FunctionKind;
 use crate::operand::Operand;
 use crate::ty::ParamConvention;
 use crate::place::Place;
 use crate::statement::{Statement, StatementKind};
-use crate::terminator::TerminatorKind;
+use crate::terminator::{Terminator, TerminatorKind};
 use crate::ty_query::needs_drop;
 use crate::{BlockId, LocalId, MirModule};
 
@@ -78,6 +78,31 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         .map(|(i, _)| BlockId::new(i))
         .collect();
 
+    let mut loop_locals: HashMap<(BlockId, BlockId), Vec<LocalId>> = HashMap::new();
+    for (&local, scope) in &body.local_scopes {
+        if let ScopeId::Loop { header, exit } = scope
+            && droppable.contains(&local)
+        {
+            loop_locals.entry((*header, *exit)).or_default().push(local);
+        }
+    }
+
+    let mut loop_inside: HashMap<(BlockId, BlockId), HashSet<BlockId>> = HashMap::new();
+    for &(header, exit) in loop_locals.keys() {
+        let mut inside = HashSet::new();
+        let mut queue = VecDeque::new();
+        inside.insert(header);
+        queue.push_back(header);
+        while let Some(b) = queue.pop_front() {
+            for &succ in &body.block(b).terminator.successors() {
+                if succ != exit && inside.insert(succ) {
+                    queue.push_back(succ);
+                }
+            }
+        }
+        loop_inside.insert((header, exit), inside);
+    }
+
     // Compute return drop actions per block
     let mut return_drops: Vec<(BlockId, Vec<Statement>)> = Vec::new();
     for &rb in &return_blocks {
@@ -91,6 +116,9 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         };
 
         for &local in droppable.iter().rev() {
+            if loop_local_is_out_of_scope_at_return(body, &loop_inside, rb, local) {
+                continue;
+            }
             if Some(local) == is_returned_local {
                 continue;
             }
@@ -177,39 +205,9 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
     // Compute scope-exit drops for loop-scoped locals.
     // When control exits a loop (break → exit block, continue/back-edge → header),
     // all loop-scoped locals that are Live/Maybe must be dropped.
-    let mut scope_exit_drops: Vec<(BlockId, Vec<Statement>)> = Vec::new();
+    let mut scope_exit_drops: Vec<(BlockId, BlockId, Vec<Statement>)> = Vec::new();
     {
-        // Collect unique loops and their scoped locals
-        let mut loop_locals: HashMap<(BlockId, BlockId), Vec<LocalId>> = HashMap::new();
-        for (&local, scope) in &body.local_scopes {
-            if let ScopeId::Loop { header, exit } = scope {
-                if droppable.contains(&local) {
-                    loop_locals
-                        .entry((*header, *exit))
-                        .or_default()
-                        .push(local);
-                }
-            }
-        }
-
         if !loop_locals.is_empty() {
-            // Compute loop membership: blocks reachable from header without going through exit
-            let mut loop_inside: HashMap<(BlockId, BlockId), HashSet<BlockId>> = HashMap::new();
-            for &(header, exit) in loop_locals.keys() {
-                let mut inside = HashSet::new();
-                let mut queue = VecDeque::new();
-                inside.insert(header);
-                queue.push_back(header);
-                while let Some(b) = queue.pop_front() {
-                    for &succ in &body.block(b).terminator.successors() {
-                        if succ != exit && inside.insert(succ) {
-                            queue.push_back(succ);
-                        }
-                    }
-                }
-                loop_inside.insert((header, exit), inside);
-            }
-
             // For each block, check if any outgoing edge is a scope exit or back-edge
             for bi in 0..num_blocks {
                 let block = BlockId::new(bi);
@@ -218,10 +216,14 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
                     continue;
                 }
 
-                let mut drops_for_block: Vec<Statement> = Vec::new();
                 let successors = body.block(block).terminator.successors();
+                let mut seen_targets = HashSet::new();
 
                 for &target in &successors {
+                    if !seen_targets.insert(target) {
+                        continue;
+                    }
+                    let mut drops_for_edge: Vec<Statement> = Vec::new();
                     for (&(header, exit), inside) in &loop_inside {
                         if !inside.contains(&block) {
                             continue;
@@ -238,12 +240,12 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
                             let state = compute_state_before_terminator(&analysis, body, block, local);
                             match state {
                                 InitState::Live => {
-                                    drops_for_block.push(Statement::new(StatementKind::Drop {
+                                    drops_for_edge.push(Statement::new(StatementKind::Drop {
                                         place: Place::local(local),
                                     }));
                                 }
                                 InitState::Maybe => {
-                                    drops_for_block.push(Statement::new(StatementKind::DropIf {
+                                    drops_for_edge.push(Statement::new(StatementKind::DropIf {
                                         place: Place::local(local),
                                         flag: LocalId::new(0), // placeholder
                                     }));
@@ -252,10 +254,9 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
                             }
                         }
                     }
-                }
-
-                if !drops_for_block.is_empty() {
-                    scope_exit_drops.push((block, drops_for_block));
+                    if !drops_for_edge.is_empty() {
+                        scope_exit_drops.push((block, target, drops_for_edge));
+                    }
                 }
             }
         }
@@ -279,7 +280,7 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
             }
         }
     }
-    for (_, drops) in &scope_exit_drops {
+    for (_, _, drops) in &scope_exit_drops {
         for stmt in drops {
             if let StatementKind::DropIf { place, .. } = &stmt.kind {
                 if let Some(local) = place.root_local() {
@@ -290,45 +291,73 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
     }
 
     // Compute flag update locations
-    let mut flag_updates: Vec<(BlockId, usize, bool, LocalId)> = Vec::new();
+    let mut flag_updates: Vec<(BlockId, usize, usize, bool, LocalId)> = Vec::new();
+    let mut next_flag_update_order = 0usize;
     for bi in 0..num_blocks {
         let block = BlockId::new(bi);
         let bb = body.block(block);
         for si in 0..bb.stmts.len() {
             match &bb.stmts[si].kind {
                 StatementKind::Assign { dest, rvalue } => {
-                    if let Some(local) = dest.root_local()
-                        && needs_flag[local.index()]
-                    {
-                        flag_updates.push((block, si + 1, true, local));
-                    }
                     for (op, mode) in rvalue.operands_with_mode() {
                         if mode == Some(crate::UseMode::Move)
                             && let Operand::Place(p) = op
                             && let Some(local) = p.root_local()
                             && needs_flag[local.index()]
                         {
-                            flag_updates.push((block, si + 1, false, local));
+                            flag_updates.push((block, si + 1, next_flag_update_order, false, local));
+                            next_flag_update_order += 1;
                         }
+                    }
+                    if let Some(local) = dest.root_local()
+                        && needs_flag[local.index()]
+                    {
+                        flag_updates.push((block, si + 1, next_flag_update_order, true, local));
+                        next_flag_update_order += 1;
                     }
                 }
                 StatementKind::Call { dest, args, .. } => {
-                    if let Some(local) = dest.as_ref().and_then(|d| d.root_local())
-                        && needs_flag[local.index()]
-                    {
-                        flag_updates.push((block, si + 1, true, local));
-                    }
                     for (operand, mode) in args {
                         if *mode == crate::ArgMode::Move
                             && let Operand::Place(p) = operand
                             && let Some(local) = p.root_local()
                             && needs_flag[local.index()]
                         {
-                            flag_updates.push((block, si + 1, false, local));
+                            flag_updates.push((block, si + 1, next_flag_update_order, false, local));
+                            next_flag_update_order += 1;
                         }
                     }
+                    if let Some(local) = dest.as_ref().and_then(|d| d.root_local())
+                        && needs_flag[local.index()]
+                    {
+                        flag_updates.push((block, si + 1, next_flag_update_order, true, local));
+                        next_flag_update_order += 1;
+                    }
                 }
-                _ => {}
+                StatementKind::Uninit { dest } => {
+                    if let Some(local) = dest.root_local()
+                        && needs_flag[local.index()]
+                    {
+                        flag_updates.push((block, si + 1, next_flag_update_order, true, local));
+                        next_flag_update_order += 1;
+                    }
+                }
+                StatementKind::Drop { place } | StatementKind::DropIf { place, .. } => {
+                    if place.projections.is_empty()
+                        && let Some(local) = place.root_local()
+                        && needs_flag[local.index()]
+                    {
+                        flag_updates.push((block, si + 1, next_flag_update_order, false, local));
+                        next_flag_update_order += 1;
+                    }
+                }
+                StatementKind::ScopeLive(local) => {
+                    if needs_flag[local.index()] {
+                        flag_updates.push((block, si + 1, next_flag_update_order, false, *local));
+                        next_flag_update_order += 1;
+                    }
+                }
+                StatementKind::SetDropFlag { .. } => {}
             }
         }
     }
@@ -349,20 +378,6 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         }
     }
 
-    // Insert SetDropFlag(false) at function entry
-    let entry = body.entry;
-    let mut entry_flags: Vec<Statement> = Vec::new();
-    for &flag in flag_map.iter().flatten() {
-        entry_flags.push(Statement::new(StatementKind::SetDropFlag {
-            flag,
-            value: false,
-        }));
-    }
-    let entry_stmts = &mut body.block_mut(entry).stmts;
-    let mut existing = std::mem::take(entry_stmts);
-    entry_flags.append(&mut existing);
-    *entry_stmts = entry_flags;
-
     // Insert return drops (patch DropIf placeholders with actual flags)
     for (rb, mut drops) in return_drops {
         for stmt in &mut drops {
@@ -376,34 +391,15 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         body.block_mut(rb).stmts.extend(drops);
     }
 
-    // Insert overwrite-drops (patch DropIf flags, reverse order to preserve indices)
-    overwrite_drops.sort_by(|a, b| b.0.index().cmp(&a.0.index()).then(b.1.cmp(&a.1)));
-    for (block, pos, mut stmt) in overwrite_drops {
-        if let StatementKind::DropIf { place, flag } = &mut stmt.kind
-            && let Some(local) = place.root_local()
-            && let Some(real_flag) = flag_map[local.index()]
-        {
-            *flag = real_flag;
-        }
-        body.block_mut(block).stmts.insert(pos, stmt);
-    }
-
-    // Insert scope-exit drops (appended before terminator, patch DropIf flags)
-    for (block, mut drops) in scope_exit_drops {
-        for stmt in &mut drops {
-            if let StatementKind::DropIf { place, flag } = &mut stmt.kind
-                && let Some(local) = place.root_local()
-                && let Some(real_flag) = flag_map[local.index()]
-            {
-                *flag = real_flag;
-            }
-        }
-        body.block_mut(block).stmts.extend(drops);
-    }
-
-    // Insert flag updates (reverse order to preserve indices)
-    flag_updates.sort_by(|a, b| b.0.index().cmp(&a.0.index()).then(b.1.cmp(&a.1)));
-    for (block, pos, value, local) in flag_updates {
+    // Insert flag updates before overwrite drops. Their positions are relative
+    // to the original statements and must land after the original write/move.
+    flag_updates.sort_by(|a, b| {
+        b.0.index()
+            .cmp(&a.0.index())
+            .then(b.1.cmp(&a.1))
+            .then(b.2.cmp(&a.2))
+    });
+    for (block, pos, _, value, local) in flag_updates {
         if let Some(flag) = flag_map[local.index()] {
             body.block_mut(block).stmts.insert(
                 pos,
@@ -411,6 +407,42 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
             );
         }
     }
+
+    // Insert overwrite-drops (patch DropIf flags, reverse order to preserve indices)
+    overwrite_drops.sort_by(|a, b| b.0.index().cmp(&a.0.index()).then(b.1.cmp(&a.1)));
+    for (block, pos, mut stmt) in overwrite_drops {
+        patch_drop_if_flags(std::slice::from_mut(&mut stmt), &flag_map);
+        body.block_mut(block).stmts.insert(pos, stmt);
+    }
+
+    // Insert scope-exit drops on the specific outgoing edge that exits a loop
+    // scope. This avoids running cleanup on successor paths that stay inside
+    // the loop.
+    for (from, target, mut drops) in scope_exit_drops {
+        patch_drop_if_flags(&mut drops, &flag_map);
+        append_drop_flag_resets(&mut drops, &flag_map);
+
+        let cleanup = body.add_block(BasicBlock {
+            stmts: drops,
+            terminator: Terminator::jump(target),
+        });
+        replace_terminator_successor(&mut body.block_mut(from).terminator.kind, target, cleanup);
+    }
+
+    // Insert SetDropFlag(false) at function entry last so position-based
+    // insertions above stay relative to the original statement indexes.
+    let entry = body.entry;
+    let mut entry_flags: Vec<Statement> = Vec::new();
+    for &flag in flag_map.iter().flatten() {
+        entry_flags.push(Statement::new(StatementKind::SetDropFlag {
+            flag,
+            value: false,
+        }));
+    }
+    let entry_stmts = &mut body.block_mut(entry).stmts;
+    let mut existing = std::mem::take(entry_stmts);
+    entry_flags.append(&mut existing);
+    *entry_stmts = entry_flags;
 }
 
 /// Compute the init state of a local just before the terminator of a block.
@@ -427,6 +459,92 @@ fn compute_state_before_terminator(
     analysis.state_after(body, block, num_stmts - 1, local)
 }
 
+fn loop_local_is_out_of_scope_at_return(
+    body: &MirBody,
+    loop_inside: &HashMap<(BlockId, BlockId), HashSet<BlockId>>,
+    return_block: BlockId,
+    local: LocalId,
+) -> bool {
+    match body.local_scopes.get(&local) {
+        Some(ScopeId::Loop { header, exit }) => loop_inside
+            .get(&(*header, *exit))
+            .is_some_and(|inside| !inside.contains(&return_block)),
+        _ => false,
+    }
+}
+
+fn patch_drop_if_flags(stmts: &mut [Statement], flag_map: &[Option<LocalId>]) {
+    for stmt in stmts {
+        if let StatementKind::DropIf { place, flag } = &mut stmt.kind
+            && let Some(local) = place.root_local()
+            && let Some(real_flag) = flag_map[local.index()]
+        {
+            *flag = real_flag;
+        }
+    }
+}
+
+fn append_drop_flag_resets(stmts: &mut Vec<Statement>, flag_map: &[Option<LocalId>]) {
+    let mut reset_locals = HashSet::new();
+    for stmt in stmts.iter() {
+        match &stmt.kind {
+            StatementKind::Drop { place } | StatementKind::DropIf { place, .. } => {
+                if let Some(local) = place.root_local()
+                    && flag_map[local.index()].is_some()
+                {
+                    reset_locals.insert(local);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut reset_locals: Vec<_> = reset_locals.into_iter().collect();
+    reset_locals.sort_by_key(|local| local.index());
+    for local in reset_locals {
+        if let Some(flag) = flag_map[local.index()] {
+            stmts.push(Statement::new(StatementKind::SetDropFlag {
+                flag,
+                value: false,
+            }));
+        }
+    }
+}
+
+fn replace_terminator_successor(
+    terminator: &mut TerminatorKind,
+    old_target: BlockId,
+    new_target: BlockId,
+) {
+    match terminator {
+        TerminatorKind::Jump(target) => {
+            if *target == old_target {
+                *target = new_target;
+            }
+        }
+        TerminatorKind::Branch {
+            then_block,
+            else_block,
+            ..
+        } => {
+            if *then_block == old_target {
+                *then_block = new_target;
+            }
+            if *else_block == old_target {
+                *else_block = new_target;
+            }
+        }
+        TerminatorKind::Switch { cases, .. } => {
+            for (_, target) in cases {
+                if *target == old_target {
+                    *target = new_target;
+                }
+            }
+        }
+        TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {}
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -437,7 +555,6 @@ mod tests {
     use crate::immediate::Immediate;
     use crate::item::struct_def::{FieldDef, StructDef};
     use crate::item::{CopyBehavior, DropBehavior, TypeInfo};
-    use crate::FieldIdx;
 
     fn setup_droppable_module() -> (ModuleBuilder, Entity, crate::TyId) {
         let mut m = ModuleBuilder::new("test");

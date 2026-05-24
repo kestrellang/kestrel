@@ -79,7 +79,7 @@ impl BodyCtx<'_, '_> {
             self.lower_call_args_default(args)
         } else {
             let receiver_val = self.lower_expr(receiver_expr);
-            let receiver_mode = if self.is_copy_type(receiver_ty) {
+            let receiver_mode = if self.is_copy_or_clone_type(receiver_ty) {
                 ArgMode::Copy
             } else {
                 ArgMode::Ref
@@ -206,7 +206,7 @@ impl BodyCtx<'_, '_> {
             if let Some((old_receiver, _)) = call_args.first() {
                 if let Some(place) = old_receiver.as_place() {
                     let field_place = place.clone().field(field_idx);
-                    let field_mode = if self.is_copy_type(field_ty) {
+                    let field_mode = if self.is_copy_or_clone_type(field_ty) {
                         ArgMode::Copy
                     } else {
                         ArgMode::Ref
@@ -232,7 +232,7 @@ impl BodyCtx<'_, '_> {
                 callee,
                 vec![(old_receiver, ArgMode::Ref)],
             );
-            let field_mode = if self.is_copy_type(field_ty) {
+            let field_mode = if self.is_copy_or_clone_type(field_ty) {
                 ArgMode::Copy
             } else {
                 ArgMode::Ref
@@ -256,7 +256,7 @@ impl BodyCtx<'_, '_> {
         let result_ty = self.resolve_expr_type(expr_id);
         let receiver_val = self.lower_expr(receiver_expr);
 
-        let receiver_mode = if self.is_copy_type(receiver_ty) {
+        let receiver_mode = if self.is_copy_or_clone_type(receiver_ty) {
             ArgMode::Copy
         } else {
             ArgMode::Ref
@@ -358,7 +358,7 @@ impl BodyCtx<'_, '_> {
         if has_receiver {
             let receiver_ty = self.resolve_expr_type(callee_expr);
             let receiver_val = self.lower_expr(callee_expr);
-            let receiver_mode = if self.is_copy_type(receiver_ty) {
+            let receiver_mode = if self.is_copy_or_clone_type(receiver_ty) {
                 ArgMode::Copy
             } else {
                 ArgMode::Ref

@@ -33,7 +33,7 @@ pub fn fix_drop_behaviors(module: &mut MirModule) {
 /// aggregates" rule on match/switch patterns.
 fn field_needs_drop(module: &MirModule, ty: crate::TyId) -> bool {
     match module.ty_arena.get(ty) {
-        MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => false,
+        MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => true,
         _ => needs_drop(&module.ty_arena, module, ty),
     }
 }
@@ -53,7 +53,7 @@ fn fix_structs(module: &mut MirModule) -> bool {
             continue;
         }
 
-        match &module.structs[si].type_info.drop {
+        match &mut module.structs[si].type_info.drop {
             DropBehavior::None => {
                 ktrace!("drop-fix", "promoting struct '{}' to droppable (fields: {:?})",
                     module.structs[si].name, droppable_fields);
@@ -62,6 +62,14 @@ fn fix_structs(module: &mut MirModule) -> bool {
                     fields: droppable_fields,
                 };
                 changed = true;
+            }
+            DropBehavior::StructDrop { fields, .. } => {
+                for field in droppable_fields {
+                    if !fields.contains(&field) {
+                        fields.push(field);
+                        changed = true;
+                    }
+                }
             }
             _ => {}
         }
@@ -90,13 +98,28 @@ fn fix_enums(module: &mut MirModule) -> bool {
             continue;
         }
 
-        match &module.enums[ei].type_info.drop {
+        match &mut module.enums[ei].type_info.drop {
             DropBehavior::None => {
                 module.enums[ei].type_info.drop = DropBehavior::EnumDrop {
                     deinit: None,
                     variants: droppable_variants,
                 };
                 changed = true;
+            }
+            DropBehavior::EnumDrop { variants, .. } => {
+                for (variant, fields_to_add) in droppable_variants {
+                    if let Some((_, fields)) = variants.iter_mut().find(|(v, _)| *v == variant) {
+                        for field in fields_to_add {
+                            if !fields.contains(&field) {
+                                fields.push(field);
+                                changed = true;
+                            }
+                        }
+                    } else {
+                        variants.push((variant, fields_to_add));
+                        changed = true;
+                    }
+                }
             }
             _ => {}
         }

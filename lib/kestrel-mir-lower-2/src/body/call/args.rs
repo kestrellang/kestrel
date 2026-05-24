@@ -25,7 +25,7 @@ impl BodyCtx<'_, '_> {
             .map(|arg| {
                 let op = self.lower_expr(arg.value);
                 let ty = self.resolve_expr_type(arg.value);
-                let mode = if self.is_copy_type(ty) {
+                let mode = if self.is_copy_or_clone_type(ty) {
                     ArgMode::Copy
                 } else {
                     ArgMode::Ref
@@ -62,7 +62,7 @@ impl BodyCtx<'_, '_> {
         for default_entity in defaults {
             let param_ty = resolve_type_annotation(self.ctx, default_entity);
             let default_val = self.lower_default_arg_inline(default_entity, param_ty);
-            let mode = if self.is_copy_type(param_ty) {
+            let mode = if self.is_copy_or_clone_type(param_ty) {
                 ArgMode::Copy
             } else {
                 ArgMode::Ref
@@ -145,7 +145,13 @@ impl BodyCtx<'_, '_> {
                 arg.1 = match param.convention {
                     ParamConvention::Borrow => ArgMode::Ref,
                     ParamConvention::MutBorrow => ArgMode::RefMut,
-                    ParamConvention::Consuming => ArgMode::Move,
+                    ParamConvention::Consuming => {
+                        if matches!(arg.1, ArgMode::Copy) {
+                            ArgMode::Copy
+                        } else {
+                            ArgMode::Move
+                        }
+                    }
                 };
             }
             return;
@@ -165,7 +171,11 @@ impl BodyCtx<'_, '_> {
         let skip = if callable.receiver.is_some() { 1 } else { 0 };
         for (arg, param) in call_args.iter_mut().skip(skip).zip(callable.params.iter()) {
             arg.1 = if param.is_consuming {
-                ArgMode::Move
+                if matches!(arg.1, ArgMode::Copy) {
+                    ArgMode::Copy
+                } else {
+                    ArgMode::Move
+                }
             } else if param.is_mut {
                 ArgMode::RefMut
             } else {

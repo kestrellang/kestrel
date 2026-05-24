@@ -57,7 +57,7 @@ pub enum MirTy {
     Error,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TyArena {
     types: Vec<MirTy>,
     intern_map: HashMap<MirTy, TyId>,

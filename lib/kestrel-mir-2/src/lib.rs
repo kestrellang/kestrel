@@ -10,6 +10,7 @@ pub mod op;
 pub mod operand;
 pub mod passes;
 pub mod place;
+pub mod place_ty;
 pub mod statement;
 pub mod substitute;
 pub mod terminator;

@@ -126,14 +126,21 @@ fn transfer_statement(state: &mut InitMap, kind: &StatementKind) {
             }
         }
         StatementKind::Drop { place } => {
-            // Drop consumes the value
-            if let Some(local) = place.root_local() {
+            // A projected drop consumes only that field/element. The current
+            // analysis is root-local based, so only whole-local drops kill the
+            // root.
+            if place.projections.is_empty()
+                && let Some(local) = place.root_local()
+            {
                 state.set(local, InitState::Dead);
             }
         }
         StatementKind::DropIf { place, .. } => {
-            // After DropIf, the value is dead (flag handles the conditional)
-            if let Some(local) = place.root_local() {
+            // After a whole-local DropIf, the value is dead (flag handles the
+            // conditional).
+            if place.projections.is_empty()
+                && let Some(local) = place.root_local()
+            {
                 state.set(local, InitState::Dead);
             }
         }

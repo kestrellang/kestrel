@@ -20,13 +20,13 @@ use crate::body::MirBody;
 use crate::immediate::ImmediateKind;
 use crate::item::function::{FunctionDef, FunctionKind};
 use crate::item::protocol::ProtocolDef;
+use crate::item::static_def::StaticDef;
 use crate::item::struct_def::StructDef;
 use crate::item::enum_def::EnumDef;
 use crate::item::witness::WitnessDef;
 use crate::item::{Layout, TargetConfig};
 use crate::layout::{EnumLayout, StructLayout};
 use crate::operand::Operand;
-use crate::place::PlaceElem;
 use crate::statement::{Callee, Rvalue, StatementKind};
 use crate::substitute::{SubstMap, substitute};
 use crate::terminator::TerminatorKind;
@@ -139,6 +139,9 @@ pub fn monomorphize(
     expand_drops(
         &mut ty_arena,
         &functions,
+        &structs,
+        &enums,
+        &statics,
         &protocols,
         &witnesses,
         &entity_names,
@@ -532,6 +535,9 @@ fn substitute_terminator(
 fn expand_drops(
     arena: &mut TyArena,
     functions: &[FunctionDef],
+    structs: &[StructDef],
+    enums: &[EnumDef],
+    statics: &[StaticDef],
     protocols: &[ProtocolDef],
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
@@ -547,7 +553,15 @@ fn expand_drops(
             let Some(body) = &mut body_result.body else {
                 continue;
             };
-            expand_drops_in_body(body, arena, functions, &mut new_shim_keys);
+            expand_drops_in_body(
+                body,
+                arena,
+                functions,
+                structs,
+                enums,
+                statics,
+                &mut new_shim_keys,
+            );
         }
 
         let mut added_any = false;
@@ -609,8 +623,11 @@ fn collect_inner_callees(
 
 fn expand_drops_in_body(
     body: &mut MirBody,
-    arena: &TyArena,
+    arena: &mut TyArena,
     functions: &[FunctionDef],
+    structs: &[StructDef],
+    enums: &[EnumDef],
+    statics: &[StaticDef],
     new_shim_keys: &mut Vec<InstantiationKey>,
 ) {
     struct DropExpansion {
@@ -670,18 +687,14 @@ fn expand_drops_in_body(
             continue;
         };
         let place = place.clone();
-        let local_ty = body.locals[place.root_local().expect("ICE: Drop/DropIf place has no local root").index()].ty;
-
-        // For deref places (%ptr.*), the drop target is the pointed-to type T,
-        // not the Pointer(T) type of the root local.
-        let drop_ty = if place.projections.iter().any(|p| matches!(p, PlaceElem::Deref)) {
-            match arena.get(local_ty) {
-                MirTy::Pointer(inner) => *inner,
-                _ => local_ty,
-            }
-        } else {
-            local_ty
-        };
+        let drop_ty = crate::place_ty::place_type(
+            arena,
+            structs,
+            enums,
+            statics,
+            &body.locals,
+            &place,
+        ).expect("ICE: Drop place has no resolvable type");
 
         match arena.get(drop_ty) {
             MirTy::Named { .. } => {
@@ -743,17 +756,14 @@ fn expand_drops_in_body(
         };
         let place = place.clone();
         let flag = *flag;
-        let local_ty = body.locals[place.root_local().expect("ICE: Drop/DropIf place has no local root").index()].ty;
-
-        // For deref places (%ptr.*), the drop target is the pointed-to type T.
-        let drop_ty = if place.projections.iter().any(|p| matches!(p, PlaceElem::Deref)) {
-            match arena.get(local_ty) {
-                MirTy::Pointer(inner) => *inner,
-                _ => local_ty,
-            }
-        } else {
-            local_ty
-        };
+        let drop_ty = crate::place_ty::place_type(
+            arena,
+            structs,
+            enums,
+            statics,
+            &body.locals,
+            &place,
+        ).expect("ICE: DropIf place has no resolvable type");
 
         // FuncThick and other non-droppable types: remove the DropIf
         if matches!(arena.get(drop_ty), MirTy::FuncThick { .. }) || !type_has_drop_action(arena, drop_ty, functions) {

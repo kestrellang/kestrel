@@ -250,6 +250,27 @@ impl Compiler {
         Ok(mir)
     }
 
+    /// Lower to MIR-2 without aborting on verification errors.
+    /// Diagnostics are still accumulated but the module is always returned.
+    pub fn lower_to_mir2_unchecked(&self) -> kestrel_mir_2::MirModule {
+        let mut mir = kestrel_mir_lower_2::lower_module(self.world(), self.root());
+        let target = kestrel_mir_2::TargetConfig::host_64();
+        let mut next_entity = self.world().entity_count() as u32;
+        let verify_result =
+            kestrel_mir_2::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        if !verify_result.is_ok() {
+            let ctx = self.world().query_context();
+            for error in &verify_result.errors {
+                ctx.accumulate(diagnostic::verify_error_to_diagnostic(
+                    error,
+                    &mir,
+                    self.world(),
+                ));
+            }
+        }
+        mir
+    }
+
     /// Same as [`Self::lower_to_mir`] but also returns the
     /// [`kestrel_ownership::Diagnostics`] (E500/E501) accumulated by the
     /// move-check pass. Callers that surface user diagnostics (the CLI,

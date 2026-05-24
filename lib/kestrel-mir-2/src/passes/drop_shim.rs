@@ -148,25 +148,17 @@ fn generate_struct_shim(
         }));
     }
 
-    // 2. Drop fields that need cleanup.
-    //    The callee entity is a placeholder (the field's type entity);
-    //    patch_shim_callees will replace it with the actual shim entity.
-    //    Pass the field type's type_args so monomorphization substitutes them.
+    // 2. Drop fields that need cleanup. Keep these as MIR Drop statements so
+    // monomorphization can resolve generic fields to either concrete shims or
+    // no-ops.
     for &field_idx in fields {
         let field_ty = struct_def.fields[field_idx.index()].ty;
         if needs_drop(&module.ty_arena, module, field_ty) {
-            if let MirTy::Named { entity, type_args } = module.ty_arena.get(field_ty) {
-                let field_entity = *entity;
-                let field_type_args = type_args.clone();
-                stmts.push(Statement::new(StatementKind::Call {
-                    dest: None,
-                    callee: Callee::direct_with_args(field_entity, field_type_args, None),
-                    args: vec![(
-                        Operand::Place(Place::local(self_local).field(field_idx)),
-                        ArgMode::Move,
-                    )],
-                }));
-                field_type_entities.push(field_entity);
+            stmts.push(Statement::new(StatementKind::Drop {
+                place: Place::local(self_local).field(field_idx),
+            }));
+            if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
+                field_type_entities.push(*entity);
             }
         }
     }
@@ -243,24 +235,15 @@ fn generate_enum_shim(
         for &field_idx in field_indices {
             let case_def = &enum_def.cases[variant_idx.index()];
             let field_ty = case_def.payload_fields[field_idx.index()].ty;
-            if needs_drop(&module.ty_arena, module, field_ty)
-                && let MirTy::Named { entity, type_args } = module.ty_arena.get(field_ty)
-            {
-                let field_entity = *entity;
-                let field_type_args = type_args.clone();
-                variant_stmts.push(Statement::new(StatementKind::Call {
-                    dest: None,
-                    callee: Callee::direct_with_args(field_entity, field_type_args, None),
-                    args: vec![(
-                        Operand::Place(
-                            Place::local(self_local)
-                                .downcast(*variant_idx)
-                                .field(field_idx),
-                        ),
-                        ArgMode::Move,
-                    )],
+            if needs_drop(&module.ty_arena, module, field_ty) {
+                variant_stmts.push(Statement::new(StatementKind::Drop {
+                    place: Place::local(self_local)
+                        .downcast(*variant_idx)
+                        .field(field_idx),
                 }));
-                field_type_entities.push(field_entity);
+                if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
+                    field_type_entities.push(*entity);
+                }
             }
         }
 
@@ -378,7 +361,7 @@ mod tests {
         // Outer type with Inner field
         let outer_entity = m.fresh_entity();
         m.register_name(outer_entity, "Outer");
-        let outer_ty = m.named(outer_entity, vec![]);
+        let _outer_ty = m.named(outer_entity, vec![]);
         let mut outer_def = StructDef::new(outer_entity, "Outer");
         outer_def.add_field(FieldDef::new("value", inner_ty));
         outer_def.add_field(FieldDef::new("count", i64_ty));
@@ -403,12 +386,15 @@ mod tests {
             FunctionKind::DropShim { nominal } if nominal == outer_entity
         ));
         let body = outer_shim.body.as_ref().unwrap();
-        // Should have 1 statement: call __drop$Inner(move self.0)
+        // Should have 1 statement: drop self.0. Mono expansion resolves the
+        // concrete field shim after generic substitution.
         assert_eq!(body.blocks[0].stmts.len(), 1);
-        assert!(matches!(
-            &body.blocks[0].stmts[0].kind,
-            StatementKind::Call { args, .. } if args.len() == 1
-        ));
+        assert_eq!(
+            body.blocks[0].stmts[0].kind,
+            StatementKind::Drop {
+                place: Place::local(crate::LocalId::new(0)).field(FieldIdx::new(0)),
+            }
+        );
 
         // Inner shim should also exist
         assert!(find_shim_by_name(&module, "__drop$Inner")
@@ -458,7 +444,7 @@ mod tests {
 
         let shim = find_shim_by_name(&module, "__drop$MyType");
         let body = shim.body.as_ref().unwrap();
-        // 2 statements: deinit call + field drop call
+        // 2 statements: deinit call + projected field drop
         assert_eq!(body.blocks[0].stmts.len(), 2);
 
         // First: deinit call with RefMut
@@ -470,13 +456,12 @@ mod tests {
             other => panic!("expected deinit call, got {other:?}"),
         }
 
-        // Second: field drop call with Move
-        match &body.blocks[0].stmts[1].kind {
-            StatementKind::Call { args, .. } => {
-                assert_eq!(args[0].1, ArgMode::Move);
+        assert_eq!(
+            body.blocks[0].stmts[1].kind,
+            StatementKind::Drop {
+                place: Place::local(crate::LocalId::new(0)).field(FieldIdx::new(0)),
             }
-            other => panic!("expected field drop, got {other:?}"),
-        }
+        );
     }
 
     // ---- Enum with per-variant drops ----
@@ -648,10 +633,10 @@ mod tests {
         }
     }
 
-    // ---- Callee patching: field drop calls reference the shim entity ----
+    // ---- Field cleanup stays projected until mono drop expansion ----
 
     #[test]
-    fn shim_callees_are_patched() {
+    fn shim_field_cleanup_uses_projected_drop() {
         let mut m = ModuleBuilder::new("test");
         let i64_ty = m.i64();
 
@@ -685,16 +670,16 @@ mod tests {
         let mut next_entity = 100;
         synthesize_drop_shims(&mut module, &mut next_entity);
 
-        // The outer shim's field drop call should reference the inner shim's entity,
-        // not the inner struct's entity
-        let inner_shim_entity = find_drop_shim(&module, inner_entity).unwrap();
+        // The outer shim keeps a generic projected Drop. Mono expansion resolves
+        // the concrete inner shim from the projected place type.
+        assert!(find_drop_shim(&module, inner_entity).is_some());
         let outer_shim = find_shim_by_name(&module, "__drop$Outer");
         let body = outer_shim.body.as_ref().unwrap();
-        match &body.blocks[0].stmts[0].kind {
-            StatementKind::Call { callee: Callee::Direct { func, .. }, .. } => {
-                assert_eq!(*func, inner_shim_entity);
+        assert_eq!(
+            body.blocks[0].stmts[0].kind,
+            StatementKind::Drop {
+                place: Place::local(crate::LocalId::new(0)).field(FieldIdx::new(0)),
             }
-            other => panic!("expected patched call, got {other:?}"),
-        }
+        );
     }
 }
