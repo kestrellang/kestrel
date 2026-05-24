@@ -228,7 +228,7 @@ impl Compiler {
     ///
     /// Runs the full pass pipeline: clone elab → thunk → drop shim →
     /// drop elab → layout → verify.
-    pub fn lower_to_mir2(&self) -> kestrel_mir_2::MirModule {
+    pub fn lower_to_mir2(&self) -> Result<kestrel_mir_2::MirModule, kestrel_codegen_cranelift_2::CodegenError> {
         let mut mir = kestrel_mir_lower_2::lower_module(self.world(), self.root());
         let target = kestrel_mir_2::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
@@ -243,8 +243,11 @@ impl Compiler {
                     self.world(),
                 ));
             }
+            return Err(kestrel_codegen_cranelift_2::CodegenError::Unsupported(
+                format!("MIR verification failed with {} error(s)", verify_result.errors.len()),
+            ));
         }
-        mir
+        Ok(mir)
     }
 
     /// Same as [`Self::lower_to_mir`] but also returns the
@@ -305,7 +308,7 @@ impl Compiler {
     pub fn compile_to_object2(
         &self,
     ) -> Result<Vec<u8>, kestrel_codegen_cranelift_2::CodegenError> {
-        let mir = self.lower_to_mir2();
+        let mir = self.lower_to_mir2()?;
         let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
         let mono = self.monomorphize_mir2(mir, &target_mir2)?;
         let target = kestrel_codegen::TargetConfig::host();
@@ -321,7 +324,7 @@ impl Compiler {
         output_path: &Path,
         options: &kestrel_codegen_cranelift_2::CodegenOptions,
     ) -> Result<(), kestrel_codegen_cranelift_2::CodegenError> {
-        let mir = self.lower_to_mir2();
+        let mir = self.lower_to_mir2()?;
         let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
         let mono = self.monomorphize_mir2(mir, &target_mir2)?;
         let target = kestrel_codegen::TargetConfig::host();

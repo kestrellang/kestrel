@@ -9,5 +9,6 @@ workspace = true
 [dependencies]
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-span = { path = "../kestrel-span" }
+kestrel-debug = { path = "../kestrel-debug" }
 indexmap = { workspace = true }
 smallvec = { workspace = true }

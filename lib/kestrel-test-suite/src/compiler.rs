@@ -120,9 +120,9 @@ impl TestCompiler {
     }
 
     /// Lower to MIR2. Runs inference first if needed.
-    pub fn mir(&self) -> MirModule {
+    pub fn mir(&self) -> Result<MirModule, String> {
         self.infer();
-        self.compiler.lower_to_mir2()
+        self.compiler.lower_to_mir2().map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
     /// Compile, link, and run. Returns the run result.
@@ -276,7 +276,10 @@ impl TestCompiler {
 
     /// Assert the MIR output contains the given string.
     pub fn expect_mir_contains(&self, needle: &str) {
-        let mir = self.mir();
+        let mir = match self.mir() {
+            Ok(m) => m,
+            Err(e) => panic!("{e}"),
+        };
         let mir_text = format!("{}", mir.display());
         if !mir_text.contains(needle) {
             panic!(

@@ -1,6 +1,7 @@
 pub mod clone_elab;
 pub mod dataflow;
 pub mod drop_elab;
+pub mod drop_fix;
 pub mod drop_shim;
 pub mod init_state;
 pub mod layout;
@@ -23,6 +24,7 @@ pub fn run_pipeline(
 ) -> verify::VerifyResult {
     clone_elab::run_clone_elaboration(module);
     thunk::run_thunk_pass(module, next_entity);
+    drop_fix::fix_drop_behaviors(module);
     drop_shim::synthesize_drop_shims(module, next_entity);
     drop_elab::run_drop_elaboration(module);
     layout::run_layout_pass(module, target);

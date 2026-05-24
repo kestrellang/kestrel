@@ -181,7 +181,7 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
 
         TestMode::Mir => {
             tc.check_no_errors()?;
-            let mir = tc.mir();
+            let mir = tc.mir().map_err(|e| Into::<Box<dyn std::error::Error>>::into(e))?;
             mir_snapshot::check_mir_snapshot(
                 path,
                 &mir,

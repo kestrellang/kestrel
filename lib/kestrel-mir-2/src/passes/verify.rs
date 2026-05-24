@@ -34,6 +34,12 @@ pub fn verify(module: &MirModule) -> VerifyResult {
     let mut result = VerifyResult::default();
     verify_structure(module, &mut result);
     verify_ownership(module, &mut result);
+    for err in &result.errors {
+        kestrel_debug::ktrace!("verify", "ERROR in func[{}] '{}': {}",
+            err.func_idx,
+            module.functions[err.func_idx].name,
+            err.message);
+    }
     result
 }
 
@@ -395,8 +401,14 @@ fn verify_statement_ownership(
                     && !p.projections.is_empty()
                     && needs_drop(&module.ty_arena, module, body.locals[local.index()].ty)
                 {
+                    let field_ty_desc = if let Some(crate::place::PlaceElem::Field(fi)) = p.projections.first() {
+                        let local_ty = body.locals[local.index()].ty;
+                        format!(" (field {} of {:?})", fi.index(), module.ty_arena.get(local_ty))
+                    } else {
+                        String::new()
+                    };
                     result.errors.push(err(format!(
-                        "projected move out of droppable aggregate %{} '{}'",
+                        "projected move out of droppable aggregate %{} '{}'{field_ty_desc}",
                         local.index(),
                         body.locals[local.index()].name
                     )));

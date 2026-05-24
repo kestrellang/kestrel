@@ -125,6 +125,14 @@ pub fn monomorphize(
         mono_bodies.push(result);
     }
 
+    // Phase 3a-pre: Resolve Witness → Direct BEFORE drop expansion.
+    // Drop expansion may split blocks (DropIf → Branch + Call + Jump),
+    // shifting statement indices. resolved_witnesses is keyed by
+    // (block_idx, stmt_idx), so it must be consumed before indices change.
+    for body_result in &mut mono_bodies {
+        resolve_witnesses_to_direct(body_result);
+    }
+
     // Phase 3a: Drop expansion — rewrite Drop/DropIf/SetDropFlag to Call/Branch/Assign.
     // This also discovers drop shim instantiations iteratively.
     let mut instantiations = instantiations;
@@ -954,6 +962,28 @@ fn rewrite_callee(
             }
         }
         _ => {}
+    }
+}
+
+/// Resolve Callee::Witness → Callee::Direct using the resolved_witnesses
+/// map (keyed by pre-expansion block/stmt indices). Must run before
+/// expand_drops, which shifts indices by splitting blocks.
+fn resolve_witnesses_to_direct(body_result: &mut MonoBodyResult) {
+    let Some(body) = &mut body_result.body else {
+        return;
+    };
+    for (bi, block) in body.blocks.iter_mut().enumerate() {
+        for (si, stmt) in block.stmts.iter_mut().enumerate() {
+            if let StatementKind::Call { callee: callee @ Callee::Witness { .. }, .. } = &mut stmt.kind {
+                if let Some(target_key) = body_result.resolved_witnesses.get(&(bi, si)) {
+                    *callee = Callee::Direct {
+                        func: target_key.func_entity,
+                        type_args: target_key.type_args.clone(),
+                        self_type: target_key.self_type,
+                    };
+                }
+            }
+        }
     }
 }
 

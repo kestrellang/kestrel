@@ -252,8 +252,13 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
             print!("{}", mir.display());
         },
         DumpKind::Mir2 => {
-            let mir2 = compiler.lower_to_mir2();
-            print!("{}", mir2.display());
+            match compiler.lower_to_mir2() {
+                Ok(mir2) => print!("{}", mir2.display()),
+                Err(_) => {
+                    driver.emit_diagnostics().ok();
+                    return Err(ExitCode::FAILURE);
+                }
+            }
         },
         DumpKind::Cranelift => {
             let mir = lower_with_ownership(compiler.world(), compiler.root());
@@ -278,7 +283,13 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
             }
         },
         DumpKind::Cranelift2 => {
-            let mir2 = compiler.lower_to_mir2();
+            let mir2 = match compiler.lower_to_mir2() {
+                Ok(m) => m,
+                Err(_) => {
+                    driver.emit_diagnostics().ok();
+                    return Err(ExitCode::FAILURE);
+                }
+            };
             let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
             match kestrel_mir_2::mono::monomorphize(mir2, &target_mir2) {
                 Ok(mono) => {

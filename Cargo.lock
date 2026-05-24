@@ -1113,6 +1113,7 @@ name = "kestrel-mir-2"
 version = "0.16.0"
 dependencies = [
  "indexmap",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-span",
  "smallvec",

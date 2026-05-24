@@ -1,4 +1,8 @@
-use crate::body::{LocalDef, MirBody};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use kestrel_debug::ktrace;
+
+use crate::body::{LocalDef, MirBody, ScopeId};
 use crate::item::function::FunctionKind;
 use crate::operand::Operand;
 use crate::ty::ParamConvention;
@@ -61,6 +65,11 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         return;
     }
 
+    ktrace!("drop-elab", "function '{}': {} droppable locals: {:?}",
+        func.name,
+        droppable.len(),
+        droppable.iter().map(|&l| format!("%{} ({})", l.index(), body.locals[l.index()].name)).collect::<Vec<_>>());
+
     let return_blocks: Vec<BlockId> = body
         .blocks
         .iter()
@@ -68,14 +77,6 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         .filter(|(_, bb)| matches!(bb.terminator.kind, TerminatorKind::Return(_)))
         .map(|(i, _)| BlockId::new(i))
         .collect();
-
-    // Determine which locals need flags
-    let mut needs_flag: Vec<bool> = vec![false; body.locals.len()];
-    for &local in &droppable {
-        needs_flag[local.index()] = return_blocks.iter().any(|&rb| {
-            compute_state_before_terminator(&analysis, body, rb, local) == InitState::Maybe
-        });
-    }
 
     // Compute return drop actions per block
     let mut return_drops: Vec<(BlockId, Vec<Statement>)> = Vec::new();
@@ -142,16 +143,148 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
             if let Some(local) = dest_local
                 && let Some(di) = droppable.iter().position(|&d| d == local)
             {
-                if states[di] == InitState::Live {
-                    overwrite_drops.push((
-                        block,
-                        si,
-                        Statement::new(StatementKind::Drop {
-                            place: Place::local(local),
-                        }),
-                    ));
+                match states[di] {
+                    InitState::Live => {
+                        ktrace!("drop-elab", "  overwrite-drop: %{} ({}) at bb{}:{} state=Live",
+                            local.index(), body.locals[local.index()].name, bi, si);
+                        overwrite_drops.push((
+                            block,
+                            si,
+                            Statement::new(StatementKind::Drop {
+                                place: Place::local(local),
+                            }),
+                        ));
+                    }
+                    InitState::Maybe => {
+                        ktrace!("drop-elab", "  overwrite-drop: %{} ({}) at bb{}:{} state=Maybe",
+                            local.index(), body.locals[local.index()].name, bi, si);
+                        overwrite_drops.push((
+                            block,
+                            si,
+                            Statement::new(StatementKind::DropIf {
+                                place: Place::local(local),
+                                flag: LocalId::new(0), // placeholder, patched below
+                            }),
+                        ));
+                    }
+                    InitState::Dead => {}
                 }
                 states[di] = InitState::Live;
+            }
+        }
+    }
+
+    // Compute scope-exit drops for loop-scoped locals.
+    // When control exits a loop (break → exit block, continue/back-edge → header),
+    // all loop-scoped locals that are Live/Maybe must be dropped.
+    let mut scope_exit_drops: Vec<(BlockId, Vec<Statement>)> = Vec::new();
+    {
+        // Collect unique loops and their scoped locals
+        let mut loop_locals: HashMap<(BlockId, BlockId), Vec<LocalId>> = HashMap::new();
+        for (&local, scope) in &body.local_scopes {
+            if let ScopeId::Loop { header, exit } = scope {
+                if droppable.contains(&local) {
+                    loop_locals
+                        .entry((*header, *exit))
+                        .or_default()
+                        .push(local);
+                }
+            }
+        }
+
+        if !loop_locals.is_empty() {
+            // Compute loop membership: blocks reachable from header without going through exit
+            let mut loop_inside: HashMap<(BlockId, BlockId), HashSet<BlockId>> = HashMap::new();
+            for &(header, exit) in loop_locals.keys() {
+                let mut inside = HashSet::new();
+                let mut queue = VecDeque::new();
+                inside.insert(header);
+                queue.push_back(header);
+                while let Some(b) = queue.pop_front() {
+                    for &succ in &body.block(b).terminator.successors() {
+                        if succ != exit && inside.insert(succ) {
+                            queue.push_back(succ);
+                        }
+                    }
+                }
+                loop_inside.insert((header, exit), inside);
+            }
+
+            // For each block, check if any outgoing edge is a scope exit or back-edge
+            for bi in 0..num_blocks {
+                let block = BlockId::new(bi);
+                // Skip return blocks — return-drops already handle those locals
+                if matches!(body.block(block).terminator.kind, TerminatorKind::Return(_) | TerminatorKind::Panic(_)) {
+                    continue;
+                }
+
+                let mut drops_for_block: Vec<Statement> = Vec::new();
+                let successors = body.block(block).terminator.successors();
+
+                for &target in &successors {
+                    for (&(header, exit), inside) in &loop_inside {
+                        if !inside.contains(&block) {
+                            continue;
+                        }
+                        // Scope exit: target is outside the loop, or target is
+                        // the header (back-edge — locals reset by scope_live)
+                        let is_scope_exit = !inside.contains(&target) || target == header;
+                        if !is_scope_exit {
+                            continue;
+                        }
+
+                        let locals = &loop_locals[&(header, exit)];
+                        for &local in locals.iter().rev() {
+                            let state = compute_state_before_terminator(&analysis, body, block, local);
+                            match state {
+                                InitState::Live => {
+                                    drops_for_block.push(Statement::new(StatementKind::Drop {
+                                        place: Place::local(local),
+                                    }));
+                                }
+                                InitState::Maybe => {
+                                    drops_for_block.push(Statement::new(StatementKind::DropIf {
+                                        place: Place::local(local),
+                                        flag: LocalId::new(0), // placeholder
+                                    }));
+                                }
+                                InitState::Dead => {}
+                            }
+                        }
+                    }
+                }
+
+                if !drops_for_block.is_empty() {
+                    scope_exit_drops.push((block, drops_for_block));
+                }
+            }
+        }
+    }
+
+    // Determine which locals need flags by scanning all collected DropIf statements
+    let mut needs_flag: Vec<bool> = vec![false; body.locals.len()];
+    for (_, drops) in &return_drops {
+        for stmt in drops {
+            if let StatementKind::DropIf { place, .. } = &stmt.kind {
+                if let Some(local) = place.root_local() {
+                    needs_flag[local.index()] = true;
+                }
+            }
+        }
+    }
+    for (_, _, stmt) in &overwrite_drops {
+        if let StatementKind::DropIf { place, .. } = &stmt.kind {
+            if let Some(local) = place.root_local() {
+                needs_flag[local.index()] = true;
+            }
+        }
+    }
+    for (_, drops) in &scope_exit_drops {
+        for stmt in drops {
+            if let StatementKind::DropIf { place, .. } = &stmt.kind {
+                if let Some(local) = place.root_local() {
+                    needs_flag[local.index()] = true;
+                }
             }
         }
     }
@@ -243,10 +376,29 @@ fn elaborate_function(module: &mut MirModule, func_idx: usize) {
         body.block_mut(rb).stmts.extend(drops);
     }
 
-    // Insert overwrite-drops (reverse order to preserve indices)
+    // Insert overwrite-drops (patch DropIf flags, reverse order to preserve indices)
     overwrite_drops.sort_by(|a, b| b.0.index().cmp(&a.0.index()).then(b.1.cmp(&a.1)));
-    for (block, pos, stmt) in overwrite_drops {
+    for (block, pos, mut stmt) in overwrite_drops {
+        if let StatementKind::DropIf { place, flag } = &mut stmt.kind
+            && let Some(local) = place.root_local()
+            && let Some(real_flag) = flag_map[local.index()]
+        {
+            *flag = real_flag;
+        }
         body.block_mut(block).stmts.insert(pos, stmt);
+    }
+
+    // Insert scope-exit drops (appended before terminator, patch DropIf flags)
+    for (block, mut drops) in scope_exit_drops {
+        for stmt in &mut drops {
+            if let StatementKind::DropIf { place, flag } = &mut stmt.kind
+                && let Some(local) = place.root_local()
+                && let Some(real_flag) = flag_map[local.index()]
+            {
+                *flag = real_flag;
+            }
+        }
+        body.block_mut(block).stmts.extend(drops);
     }
 
     // Insert flag updates (reverse order to preserve indices)
