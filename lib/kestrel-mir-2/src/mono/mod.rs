@@ -630,18 +630,15 @@ fn expand_drops_in_body(
     statics: &[StaticDef],
     new_shim_keys: &mut Vec<InstantiationKey>,
 ) {
+    // Loop until no Drop statements remain — tuple expansion can insert
+    // new Drops that need further processing.
+    loop {
     struct DropExpansion {
-        block_idx: usize,
-        stmt_idx: usize,
-    }
-    struct DropIfExpansion {
         block_idx: usize,
         stmt_idx: usize,
     }
 
     let mut drops = Vec::new();
-    let mut drop_ifs = Vec::new();
-    let mut set_flags = Vec::new();
 
     for (bi, block) in body.blocks.iter().enumerate() {
         for (si, stmt) in block.stmts.iter().enumerate() {
@@ -650,36 +647,22 @@ fn expand_drops_in_body(
                     block_idx: bi,
                     stmt_idx: si,
                 }),
-                StatementKind::DropIf { .. } => drop_ifs.push(DropIfExpansion {
-                    block_idx: bi,
-                    stmt_idx: si,
-                }),
-                StatementKind::SetDropFlag { .. } => set_flags.push((bi, si)),
+                StatementKind::DropIf { .. } => {
+                    debug_assert!(false, "ICE: DropIf should have been expanded by drop_flag_expand");
+                }
+                StatementKind::SetDropFlag { .. } => {
+                    debug_assert!(false, "ICE: SetDropFlag should have been expanded by drop_flag_expand");
+                }
                 _ => {}
             }
         }
     }
 
-    // Expand SetDropFlag → Assign
-    for &(bi, si) in &set_flags {
-        let stmt = &body.blocks[bi].stmts[si];
-        if let StatementKind::SetDropFlag { flag, value } = &stmt.kind {
-            let flag = *flag;
-            let value = *value;
-            body.blocks[bi].stmts[si] = crate::statement::Statement {
-                kind: StatementKind::Assign {
-                    dest: crate::place::Place::local(flag),
-                    rvalue: Rvalue::Use(
-                        Operand::Const(crate::immediate::Immediate::bool(value)),
-                        crate::operand::UseMode::Copy,
-                    ),
-                },
-                span: body.blocks[bi].stmts[si].span.clone(),
-            };
-        }
+    if drops.is_empty() {
+        break;
     }
 
-    // Expand Drop statements. Process in reverse so spliced-in
+    // Expand Drop → Call(shim). Process in reverse so spliced-in
     // statements don't shift indices of earlier entries.
     for exp in drops.iter().rev() {
         let stmt = &body.blocks[exp.block_idx].stmts[exp.stmt_idx];
@@ -747,132 +730,12 @@ fn expand_drops_in_body(
         }
     }
 
-    // Expand DropIf → Branch + Call/Drop + Jump (adds new blocks)
-    // Process in reverse order so block indices stay valid for earlier expansions
-    for exp in drop_ifs.iter().rev() {
-        let stmt = &body.blocks[exp.block_idx].stmts[exp.stmt_idx];
-        let StatementKind::DropIf { place, flag } = &stmt.kind else {
-            continue;
-        };
-        let place = place.clone();
-        let flag = *flag;
-        let drop_ty = crate::place_ty::place_type(
-            arena,
-            structs,
-            enums,
-            statics,
-            &body.locals,
-            &place,
-        ).expect("ICE: DropIf place has no resolvable type");
-
-        // FuncThick and other non-droppable types: remove the DropIf
-        if matches!(arena.get(drop_ty), MirTy::FuncThick { .. }) || !type_has_drop_action(arena, drop_ty, functions) {
-            noop_stmt(&mut body.blocks[exp.block_idx].stmts[exp.stmt_idx], &place);
-            continue;
-        }
-
-        // Tuple: expand to per-element DropIf statements (same flag)
-        if let MirTy::Tuple(elems) = arena.get(drop_ty) {
-            let elems = elems.clone();
-            let span = body.blocks[exp.block_idx].stmts[exp.stmt_idx].span.clone();
-            let mut element_drops: Vec<crate::statement::Statement> = Vec::new();
-            for (i, &elem_ty) in elems.iter().enumerate() {
-                if elem_ty_needs_drop(arena, elem_ty, functions) {
-                    element_drops.push(crate::statement::Statement {
-                        kind: StatementKind::DropIf {
-                            place: place.clone().tuple_index(i as u32),
-                            flag,
-                        },
-                        span: span.clone(),
-                    });
-                }
-            }
-            body.blocks[exp.block_idx].stmts.splice(
-                exp.stmt_idx..=exp.stmt_idx,
-                element_drops,
-            );
-            continue;
-        }
-
-        // Named: expand to Branch + Call + Jump
-        let Some((shim_entity, type_args)) = find_drop_shim_for_type(arena, drop_ty, functions) else {
-            noop_stmt(&mut body.blocks[exp.block_idx].stmts[exp.stmt_idx], &place);
-            continue;
-        };
-
-        let span = body.blocks[exp.block_idx].stmts[exp.stmt_idx].span.clone();
-        let continue_block = crate::BlockId::new(body.blocks.len());
-        let drop_block = crate::BlockId::new(body.blocks.len() + 1);
-        let skip_block = crate::BlockId::new(body.blocks.len() + 2);
-
-        let remaining_stmts = body.blocks[exp.block_idx]
-            .stmts
-            .split_off(exp.stmt_idx + 1);
-        let old_terminator = std::mem::replace(
-            &mut body.blocks[exp.block_idx].terminator,
-            crate::terminator::Terminator {
-                kind: TerminatorKind::Branch {
-                    condition: Operand::Place(crate::place::Place::local(flag)),
-                    then_block: drop_block,
-                    else_block: skip_block,
-                },
-                span: span.clone(),
-            },
-        );
-        body.blocks[exp.block_idx].stmts.pop();
-
-        body.blocks.push(crate::body::BasicBlock {
-            stmts: remaining_stmts,
-            terminator: old_terminator,
-        });
-
-        body.blocks.push(crate::body::BasicBlock {
-            stmts: vec![crate::statement::Statement {
-                kind: StatementKind::Call {
-                    dest: None,
-                    callee: Callee::Direct {
-                        func: shim_entity,
-                        type_args: type_args.clone(),
-                        self_type: None,
-                    },
-                    args: vec![(Operand::Place(place), crate::operand::ArgMode::Move)],
-                },
-                span,
-            }],
-            terminator: crate::terminator::Terminator {
-                kind: TerminatorKind::Jump(continue_block),
-                span: None,
-            },
-        });
-
-        body.blocks.push(crate::body::BasicBlock {
-            stmts: vec![],
-            terminator: crate::terminator::Terminator {
-                kind: TerminatorKind::Jump(continue_block),
-                span: None,
-            },
-        });
-
-        new_shim_keys.push(InstantiationKey::new(shim_entity, type_args, None));
-    }
+    } // end loop
 }
 
-/// Replace a Drop/DropIf with a Uninit no-op (accepted by the post-mono verifier).
+/// Replace a Drop with a Uninit no-op (accepted by the post-mono verifier).
 fn noop_stmt(stmt: &mut crate::statement::Statement, place: &crate::place::Place) {
     stmt.kind = StatementKind::Uninit { dest: place.clone() };
-}
-
-/// Check if a type has any drop action (shim or inline expansion).
-fn type_has_drop_action(arena: &TyArena, ty: TyId, functions: &[FunctionDef]) -> bool {
-    match arena.get(ty) {
-        MirTy::Named { .. } => find_drop_shim_for_type(arena, ty, functions).is_some(),
-        MirTy::Tuple(elems) => {
-            let elems = elems.clone();
-            elems.iter().any(|&e| elem_ty_needs_drop(arena, e, functions))
-        }
-        MirTy::FuncThick { .. } => false,
-        _ => false,
-    }
 }
 
 /// Check if an element type needs a Drop statement during tuple expansion.

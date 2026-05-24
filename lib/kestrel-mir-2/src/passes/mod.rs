@@ -2,6 +2,7 @@ pub mod clone_elab;
 pub mod dataflow;
 pub mod drop_elab;
 pub mod drop_fix;
+pub mod drop_flag_expand;
 pub mod drop_shim;
 pub mod init_state;
 pub mod layout;
@@ -15,7 +16,7 @@ use crate::item::TargetConfig;
 use crate::MirModule;
 
 /// Run the full generic MIR pipeline:
-/// clone elab → thunk → drop shim → drop elab → layout → verify.
+/// clone elab → thunk → drop shim → drop elab → drop flag expand → layout → verify.
 /// Returns the verify result. The module is mutated in place.
 pub fn run_pipeline(
     module: &mut MirModule,
@@ -27,6 +28,7 @@ pub fn run_pipeline(
     drop_fix::fix_drop_behaviors(module);
     drop_shim::synthesize_drop_shims(module, next_entity);
     drop_elab::run_drop_elaboration(module);
+    drop_flag_expand::run_drop_flag_expansion(module);
     layout::run_layout_pass(module, target);
     verify::verify(module)
 }
@@ -223,12 +225,15 @@ mod pipeline_tests {
         assert!(result.is_ok(), "pipeline errors: {:?}", result.errors);
 
         let body = get_body(&module, fi);
-        let has_drop_if = body.blocks.iter().any(|bb| {
+        // After drop_flag_expand, DropIf is expanded into Branch+Drop+Jump
+        let has_no_drop_if = !body.blocks.iter().any(|bb| {
             bb.stmts
                 .iter()
                 .any(|s| matches!(s.kind, crate::StatementKind::DropIf { .. }))
         });
-        assert!(has_drop_if, "Maybe locals should have DropIf");
+        assert!(has_no_drop_if, "DropIf should be expanded into CFG branches");
+        // The expansion creates new blocks with Drop statements
+        assert!(body.blocks.len() > 4, "expansion should have added blocks");
     }
 
     // ---- 4. Return droppable local (moved to caller, not dropped) ----

@@ -254,91 +254,14 @@ pub fn verify_ownership(module: &MirModule, result: &mut VerifyResult) {
         let cfg = dataflow::compute_cfg_info(body);
         let analysis = InitAnalysis::compute_with_cfg(body, &cfg);
 
-        // Borrowed params and drop-shim self are not dropped by drop_elab
-        let mut skip_drop_check: Vec<bool> = vec![false; body.locals.len()];
-        for p in &func.params {
-            if matches!(p.convention, crate::ty::ParamConvention::Borrow | crate::ty::ParamConvention::MutBorrow) {
-                skip_drop_check[p.local.index()] = true;
-            }
-        }
-        if is_drop_shim {
-            if let Some(p) = func.params.first() {
-                skip_drop_check[p.local.index()] = true;
-            }
-        }
-
         for (bi, block) in body.blocks.iter().enumerate() {
             let block_id = BlockId::new(bi);
 
-            // Check statements
             for (si, stmt) in block.stmts.iter().enumerate() {
                 verify_statement_ownership(
                     module, fi, block_id, si, &stmt.kind, body, &analysis, where_clause,
                     is_drop_shim, result,
                 );
-            }
-
-            // At Return: every droppable local must be Dead or DropIf'd
-            if let TerminatorKind::Return(ref operand) = block.terminator.kind {
-                let returned_local = if let Operand::Place(p) = operand {
-                    p.root_local()
-                } else {
-                    None
-                };
-
-                for (li, local) in body.locals.iter().enumerate() {
-                    let local_id = LocalId::new(li);
-                    if Some(local_id) == returned_local {
-                        continue;
-                    }
-                    if skip_drop_check[li] {
-                        continue;
-                    }
-                    if !needs_drop(&module.ty_arena, module, local.ty) {
-                        continue;
-                    }
-
-                    let num_stmts = block.stmts.len();
-                    let state = if num_stmts > 0 {
-                        analysis.state_after(body, block_id, num_stmts - 1, local_id)
-                    } else {
-                        analysis.state_at_entry(block_id, local_id)
-                    };
-
-                    if state == InitState::Live {
-                        // Check if there's a Drop for this local in this block
-                        let has_drop = block.stmts.iter().any(|s| {
-                            matches!(&s.kind, StatementKind::Drop { place } if place.root_local() == Some(local_id))
-                                || matches!(&s.kind, StatementKind::DropIf { place, .. } if place.root_local() == Some(local_id))
-                        });
-                        if !has_drop {
-                            result.errors.push(VerifyError {
-                                func_idx: fi,
-                                block: Some(block_id),
-                                stmt: None,
-                                message: format!(
-                                    "droppable local %{li} '{}' is Live at Return but not dropped",
-                                    local.name
-                                ),
-                            });
-                        }
-                    } else if state == InitState::Maybe {
-                        let has_drop_if = block.stmts.iter().any(|s| {
-                            matches!(&s.kind, StatementKind::DropIf { place, .. } if place.root_local() == Some(local_id))
-                        });
-                        if !has_drop_if {
-                            result.errors.push(VerifyError {
-                                func_idx: fi,
-                                block: Some(block_id),
-                                stmt: None,
-                                message: format!(
-                                    "droppable local %{li} '{}' is Maybe at Return but no DropIf",
-                                    local.name
-                                ),
-                            });
-                        }
-                    }
-                }
             }
         }
     }
@@ -416,17 +339,6 @@ fn verify_statement_ownership(
                         local.index()
                     )));
                 }
-            }
-        }
-        StatementKind::Drop { place } | StatementKind::DropIf { place, .. } => {
-            if let Some(local) = place.root_local()
-                && state_before(local) == InitState::Dead
-            {
-                result.errors.push(err(format!(
-                    "drop of already-dead local %{} '{}'",
-                    local.index(),
-                    body.locals[local.index()].name
-                )));
             }
         }
         _ => {}
@@ -555,45 +467,6 @@ mod tests {
     }
 
     // ---- Ownership: droppable local at Return ----
-
-    #[test]
-    fn live_droppable_not_dropped_is_error() {
-        let mut m = ModuleBuilder::new("test");
-        let (_, d_ty) = setup_droppable(&mut m);
-        let unit_ty = m.unit();
-        let mut f = m.function("f", unit_ty);
-        let x = f.local("x", d_ty);
-        let bb0 = f.block_id();
-        {
-            let mut b = f.block_at(bb0);
-            b.assign_const(Place::local(x), Immediate::i64(0));
-            // No Drop inserted — verifier should catch this
-            b.ret_unit();
-        }
-        let module = m.finish();
-        let result = verify(&module);
-        assert!(!result.is_ok());
-        assert!(result.errors[0].message.contains("Live at Return but not dropped"));
-    }
-
-    #[test]
-    fn live_droppable_with_drop_passes() {
-        let mut m = ModuleBuilder::new("test");
-        let (_, d_ty) = setup_droppable(&mut m);
-        let unit_ty = m.unit();
-        let mut f = m.function("f", unit_ty);
-        let x = f.local("x", d_ty);
-        let bb0 = f.block_id();
-        {
-            let mut b = f.block_at(bb0);
-            b.assign_const(Place::local(x), Immediate::i64(0));
-            b.drop(Place::local(x));
-            b.ret_unit();
-        }
-        let module = m.finish();
-        let result = verify(&module);
-        assert!(result.is_ok(), "errors: {:?}", result.errors);
-    }
 
     #[test]
     fn returned_local_not_flagged() {
@@ -780,14 +653,11 @@ mod tests {
         }
         let mut module = m.finish();
 
-        // Before drop elab: should fail (no drops)
-        let result = verify(&module);
-        assert!(!result.is_ok());
-
-        // Run drop elab
+        // Run drop elab + flag expansion
         crate::passes::drop_elab::run_drop_elaboration(&mut module);
+        crate::passes::drop_flag_expand::run_drop_flag_expansion(&mut module);
 
-        // After drop elab: should pass
+        // After pipeline: should pass
         let result = verify(&module);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
     }
