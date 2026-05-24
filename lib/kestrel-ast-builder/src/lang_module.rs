@@ -481,6 +481,13 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
     seed_generic_fn(
         world,
         lang,
+        "drop_in_place",
+        &[("ptr", ptr_t.clone())],
+        unit_ty(),
+    );
+    seed_generic_fn(
+        world,
+        lang,
         "ptr_offset",
         &[("ptr", ptr_t.clone()), ("offset", i64_ty.clone())],
         ptr_t.clone(),

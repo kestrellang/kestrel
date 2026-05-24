@@ -1,9 +1,10 @@
 //! Expression lowering — HirExpr dispatch.
 
-use kestrel_ast_builder::{Callable, NodeKind};
-use kestrel_hir::body::{HirBlock, HirExpr, HirExprId};
+use kestrel_ast_builder::{Callable, NodeKind, Settable};
+use kestrel_hir::body::{HirBlock, HirCallArg, HirExpr, HirExprId};
 use kestrel_mir_2::{
-    FieldIdx, Immediate, MirTy, Operand, Place, Rvalue, TyId, UseMode,
+    ArgMode, Callee, FieldIdx, Immediate, MirTy, Operand, Place, Rvalue, TyId, UseMode,
+    WitnessMethodKey,
 };
 
 use super::{BodyCtx, expr_span};
@@ -446,7 +447,12 @@ impl BodyCtx<'_, '_> {
         target: HirExprId,
         value: HirExprId,
     ) -> Operand {
-        // TODO: setter dispatch (Phase 4 stmt.rs)
+        // Setter dispatch: computed properties, subscripts, field-subscripts
+        if let Some(result) = self.try_lower_setter_assign(target, value) {
+            return result;
+        }
+
+        // Fallback: stored-place assignment
         let rhs_ty = self.resolve_expr_type(value);
         let rhs = self.lower_expr(value);
         let lhs = self.lower_expr(target);
@@ -454,6 +460,321 @@ impl BodyCtx<'_, '_> {
             self.emit_value_transfer(dest, rhs, rhs_ty);
         }
         Operand::Const(Immediate::unit())
+    }
+
+    // --- Setter dispatch ---
+
+    /// If the assignment target is a computed property or subscript with a
+    /// setter, emit a setter call and return unit. Otherwise return None
+    /// so the caller falls through to stored-place assignment.
+    fn try_lower_setter_assign(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+    ) -> Option<Operand> {
+        let target = self.hir.exprs[target_id].clone();
+        match target {
+            HirExpr::Field { base, name, .. } => {
+                self.try_lower_field_setter(target_id, value_id, base, name.as_str_or_empty())
+            }
+            HirExpr::Def(entity, _, _) => {
+                self.try_lower_def_setter(value_id, entity)
+            }
+            HirExpr::Call { callee, args, .. } => {
+                self.try_lower_call_setter(target_id, value_id, callee, &args)
+            }
+            HirExpr::MethodCall { receiver, method, args, .. } => {
+                self.try_lower_method_call_setter(
+                    target_id, value_id, receiver,
+                    method.as_str_or_empty(), &args,
+                )
+            }
+            _ => None,
+        }
+    }
+
+    /// Arm 1: `obj.computedProp = v` / `Type.staticProp = v` / protocol property setter
+    fn try_lower_field_setter(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+        base: HirExprId,
+        field_name: &str,
+    ) -> Option<Operand> {
+        let resolved = self.typed.as_ref()
+            .and_then(|t| t.resolutions.get(&target_id))
+            .copied()?;
+
+        let is_field = self.ctx.world.get::<NodeKind>(resolved) == Some(&NodeKind::Field);
+        let parent_is_protocol = is_field
+            && self.ctx.world.parent_of(resolved).is_some_and(|p| {
+                self.ctx.world.get::<NodeKind>(p) == Some(&NodeKind::Protocol)
+            });
+        let has_callable = self.ctx.world.get::<Callable>(resolved).is_some();
+        let has_settable = self.ctx.world.get::<Settable>(resolved).is_some();
+
+        // Protocol property setter → witness dispatch with "{name}.set"
+        if parent_is_protocol && !has_callable && has_settable {
+            let protocol = self.ctx.world.parent_of(resolved).unwrap();
+            self.ctx.register_name(protocol);
+            let is_static = self.ctx.world
+                .get::<kestrel_ast_builder::Static>(resolved).is_some();
+            let rhs = self.lower_expr(value_id);
+            let method_type_args = self.resolve_type_args(target_id);
+            let method = WitnessMethodKey::simple(format!("{field_name}.set"));
+
+            if is_static {
+                let self_type = self.type_from_type_ref(base);
+                let mut call_args = vec![(rhs, ArgMode::Copy)];
+                self.apply_witness_param_modes(&mut call_args, protocol, &method);
+                let callee = Callee::Witness {
+                    protocol, method, self_type, method_type_args,
+                };
+                self.emit_call(None, callee, call_args);
+            } else {
+                let receiver_ty = self.resolve_expr_type(base);
+                let base_val = self.lower_expr(base);
+                let mut call_args = vec![
+                    (base_val, ArgMode::RefMut),
+                    (rhs, ArgMode::Copy),
+                ];
+                self.apply_witness_param_modes(&mut call_args, protocol, &method);
+                let callee = Callee::Witness {
+                    protocol, method, self_type: receiver_ty, method_type_args,
+                };
+                self.emit_call(None, callee, call_args);
+            }
+            return Some(Operand::Const(Immediate::unit()));
+        }
+
+        // Concrete computed property setter
+        let setter = self.ctx.find_setter_child(resolved)?;
+        self.ctx.register_name(setter);
+        let is_static = self.ctx.world
+            .get::<kestrel_ast_builder::Static>(resolved).is_some();
+        let rhs = self.lower_expr(value_id);
+
+        if is_static {
+            let self_type = self.type_from_type_ref(base);
+            let type_args = self.prepend_receiver_type_args(self_type, vec![]);
+            let mut call_args = vec![(rhs, ArgMode::Copy)];
+            self.apply_param_modes(&mut call_args, setter);
+            let callee = Callee::direct_with_args(setter, type_args, None);
+            self.emit_call(None, callee, call_args);
+        } else {
+            let receiver_ty = self.resolve_expr_type(base);
+            let base_val = self.lower_expr(base);
+            let type_args = self.resolve_type_args(target_id);
+            let type_args = self.prepend_receiver_type_args(receiver_ty, type_args);
+
+            if let Some(protocol) = self.ctx.is_protocol_method(setter) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_setter_key(setter);
+                let mut call_args = vec![
+                    (base_val, ArgMode::RefMut),
+                    (rhs, ArgMode::Copy),
+                ];
+                self.apply_witness_param_modes(&mut call_args, protocol, &key);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: receiver_ty,
+                    method_type_args: type_args,
+                };
+                self.emit_call(None, callee, call_args);
+            } else {
+                let mut call_args = vec![
+                    (base_val, ArgMode::RefMut),
+                    (rhs, ArgMode::Copy),
+                ];
+                self.apply_param_modes(&mut call_args, setter);
+                let callee = Callee::direct_with_args(setter, type_args, None);
+                self.emit_call(None, callee, call_args);
+            }
+        }
+        Some(Operand::Const(Immediate::unit()))
+    }
+
+    /// Arm 2: `globalComputedProp = v`
+    fn try_lower_def_setter(
+        &mut self,
+        value_id: HirExprId,
+        entity: kestrel_hecs::Entity,
+    ) -> Option<Operand> {
+        let setter = self.ctx.find_setter_child(entity)?;
+        self.ctx.register_name(setter);
+        let rhs = self.lower_expr(value_id);
+        let mut call_args = vec![(rhs, ArgMode::Copy)];
+        self.apply_param_modes(&mut call_args, setter);
+        let callee = Callee::direct_with_args(setter, vec![], None);
+        self.emit_call(None, callee, call_args);
+        Some(Operand::Const(Immediate::unit()))
+    }
+
+    /// Arm 3: `h(i) = v` — subscript setter
+    fn try_lower_call_setter(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+        callee_expr: HirExprId,
+        args: &[HirCallArg],
+    ) -> Option<Operand> {
+        let resolved = self.typed.as_ref()
+            .and_then(|t| t.resolutions.get(&target_id))
+            .copied()?;
+        if self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Subscript) {
+            return None;
+        }
+
+        let setter = self.ctx.find_setter_child(resolved)?;
+        self.ctx.register_name(setter);
+        let is_static = self.ctx.world
+            .get::<kestrel_ast_builder::Static>(resolved).is_some();
+        let mut subscript_args = self.lower_call_args_default(args);
+        let rhs = self.lower_expr(value_id);
+
+        if is_static {
+            let self_type = self.type_from_type_ref(callee_expr);
+            let type_args = self.prepend_receiver_type_args(self_type, vec![]);
+            subscript_args.push((rhs, ArgMode::Copy));
+            self.apply_param_modes(&mut subscript_args, setter);
+            let callee = Callee::direct_with_args(setter, type_args, None);
+            self.emit_call(None, callee, subscript_args);
+        } else {
+            let receiver_ty = self.resolve_expr_type(callee_expr);
+            let receiver_val = self.lower_expr(callee_expr);
+            let type_args = self.resolve_type_args(target_id);
+
+            let mut call_args = vec![(receiver_val, ArgMode::RefMut)];
+            call_args.append(&mut subscript_args);
+            call_args.push((rhs, ArgMode::Copy));
+
+            if let Some(protocol) = self.ctx.is_protocol_method(setter) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_setter_key(setter);
+                self.apply_witness_param_modes(&mut call_args, protocol, &key);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: receiver_ty,
+                    method_type_args: type_args,
+                };
+                self.emit_call(None, callee, call_args);
+            } else {
+                let type_args = self.prepend_receiver_type_args(receiver_ty, type_args);
+                self.apply_param_modes(&mut call_args, setter);
+                let callee = Callee::direct_with_args(setter, type_args, None);
+                self.emit_call(None, callee, call_args);
+            }
+        }
+        Some(Operand::Const(Immediate::unit()))
+    }
+
+    /// Arm 4: `obj.field(i) = v` — subscript setter through a struct field
+    fn try_lower_method_call_setter(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+        receiver: HirExprId,
+        method_name: &str,
+        args: &[HirCallArg],
+    ) -> Option<Operand> {
+        let resolved = self.typed.as_ref()
+            .and_then(|t| t.resolutions.get(&target_id))
+            .copied()?;
+        if self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Subscript) {
+            return None;
+        }
+
+        let receiver_ty = self.resolve_expr_type(receiver);
+        let receiver_entity = match self.ctx.module.ty_arena.get(receiver_ty) {
+            MirTy::Named { entity, .. } => Some(*entity),
+            _ => None,
+        };
+        let subscript_parent = self.ctx.world.parent_of(resolved);
+
+        // Only handle subscript-on-field — if the subscript belongs directly
+        // to the receiver type, the Call arm handles it.
+        if subscript_parent.is_none() || subscript_parent == receiver_entity {
+            return None;
+        }
+
+        // Skip computed-property subscript-set (stored fields only)
+        let prefix_entity = receiver_entity.and_then(|recv| {
+            self.ctx.world.children_of(recv).iter().copied().find(|&c| {
+                self.ctx.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                    && self.ctx.world
+                        .get::<kestrel_ast_builder::Name>(c)
+                        .is_some_and(|n| n.0 == method_name)
+            })
+        });
+        let is_computed_property = prefix_entity.is_some_and(|e| {
+            self.ctx.world.get::<Callable>(e).is_some()
+        });
+        if is_computed_property {
+            return None;
+        }
+
+        let setter = self.ctx.find_setter_child(resolved)?;
+        self.ctx.register_name(setter);
+
+        // Resolve field type and project through it
+        let recv_entity = receiver_entity?;
+        let field_idx = self.ctx.resolve_field_idx(recv_entity, method_name)?;
+        let mut field_ty = self.ctx.module.structs.iter()
+            .find(|s| s.entity == recv_entity)
+            .and_then(|s| s.fields.get(field_idx.index()))
+            .map(|f| f.ty)?;
+
+        // Substitute struct type params → receiver's concrete type args
+        if let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(receiver_ty) {
+            let type_args = type_args.clone();
+            if let Some(sdef) = self.ctx.module.structs.iter().find(|s| s.entity == recv_entity) {
+                let mut subst = kestrel_mir_2::substitute::SubstMap::new();
+                for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(tp.entity, arg);
+                }
+                field_ty = kestrel_mir_2::substitute::substitute(
+                    &mut self.ctx.module.ty_arena, field_ty, &subst,
+                );
+            }
+        }
+
+        let receiver_val = self.lower_expr(receiver);
+        let field_place = match receiver_val {
+            Operand::Place(p) => p.field(field_idx),
+            Operand::Const(_) => {
+                let place = self.operand_to_place(receiver_val, receiver_ty);
+                place.field(field_idx)
+            }
+        };
+
+        let mut subscript_args = self.lower_call_args_default(args);
+        let rhs = self.lower_expr(value_id);
+        let type_args = self.resolve_type_args(target_id);
+
+        let mut call_args = vec![(Operand::Place(field_place), ArgMode::RefMut)];
+        call_args.append(&mut subscript_args);
+        call_args.push((rhs, ArgMode::Copy));
+
+        if let Some(protocol) = self.ctx.is_protocol_method(setter) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_setter_key(setter);
+            self.apply_witness_param_modes(&mut call_args, protocol, &key);
+            let callee = Callee::Witness {
+                protocol,
+                method: key,
+                self_type: field_ty,
+                method_type_args: type_args,
+            };
+            self.emit_call(None, callee, call_args);
+        } else {
+            let type_args = self.prepend_receiver_type_args(field_ty, type_args);
+            self.apply_param_modes(&mut call_args, setter);
+            let callee = Callee::direct_with_args(setter, type_args, None);
+            self.emit_call(None, callee, call_args);
+        }
+        Some(Operand::Const(Immediate::unit()))
     }
 
     // === Block ===

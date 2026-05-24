@@ -193,6 +193,12 @@ public struct Pointer[T]: Equatable, Hashable {
         lang.ptr_write(self._raw, value)
     }
 
+    /// Runs T's destructor at this address without copying the value to stack.
+    /// The pointer remains valid but the pointee is left in a destroyed state.
+    public func dropInPlace() {
+        lang.drop_in_place(self._raw)
+    }
+
     /// Strides the pointer by `n` *elements* (multiplied by `sizeof[T]`).
     /// Compare with `RawPointer.offset`, which strides by raw bytes.
     public func offset(by n: Int64) -> Pointer[T] {

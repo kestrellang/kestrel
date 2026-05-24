@@ -3,7 +3,7 @@
 use kestrel_ast_builder::Intrinsic;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExprId};
-use kestrel_mir_2::{FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Operand, Op, Place, Rvalue, Signedness, TyId, UseMode};
+use kestrel_mir_2::{FloatBits, FloatMathKind, FloatPredicateKind, Immediate, IntBits, Operand, Op, Place, Rvalue, Signedness, StatementKind, TyId, UseMode};
 
 use crate::body::BodyCtx;
 
@@ -330,11 +330,25 @@ pub(crate) fn try_intrinsic(
         }
         "ptr_read" => {
             let ty_arg = *type_args.first()?;
-            let result_ty = bctx.resolve_expr_type(expr_id);
-            let dest = bctx.fresh_temp(result_ty);
             let arg = bctx.lower_expr(args.first()?.value);
-            bctx.emit_assign_op1(Place::local(dest), Op::PtrRead(ty_arg), arg);
-            return Some(Operand::Place(Place::local(dest)));
+            // Store just the pointer in a Pointer(T) local — no destructor,
+            // so drop elaboration is harmless. Return a deref place so reads
+            // load directly from the pointed-to address.
+            let ptr_ty = bctx.ctx.module.ty_arena.pointer(ty_arg);
+            let ptr_local = bctx.fresh_temp(ptr_ty);
+            bctx.emit_assign(Place::local(ptr_local), Rvalue::Use(arg, UseMode::Copy));
+            return Some(Operand::Place(Place::local(ptr_local).deref()));
+        }
+        "drop_in_place" => {
+            let ty_arg = *type_args.first()?;
+            let arg = bctx.lower_expr(args.first()?.value);
+            let ptr_ty = bctx.ctx.module.ty_arena.pointer(ty_arg);
+            let ptr_local = bctx.fresh_temp(ptr_ty);
+            bctx.emit_assign(Place::local(ptr_local), Rvalue::Use(arg, UseMode::Copy));
+            bctx.push_stmt(StatementKind::Drop {
+                place: Place::local(ptr_local).deref(),
+            });
+            return Some(Operand::Const(Immediate::unit()));
         }
         "ptr_write" => {
             let ty_arg = *type_args.first()?;

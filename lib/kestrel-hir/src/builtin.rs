@@ -235,6 +235,7 @@ pub enum Builtin {
     // ===== Builtin structs =====
     ArrayStruct,
     SliceStruct,
+    ManuallyDropStruct,
 
     // ===== String interpolation =====
     DefaultStringInterpolation,
@@ -420,6 +421,7 @@ impl Builtin {
             // Builtin structs
             Self::ArrayStruct => "ArrayStruct",
             Self::SliceStruct => "SliceStruct",
+            Self::ManuallyDropStruct => "ManuallyDrop",
 
             // String interpolation
             Self::DefaultStringInterpolation => "DefaultStringInterpolation",
@@ -605,6 +607,7 @@ impl Builtin {
             // Builtin structs
             "ArrayStruct" => Some(Self::ArrayStruct),
             "SliceStruct" => Some(Self::SliceStruct),
+            "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
 
             // String interpolation
             "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
@@ -783,7 +786,7 @@ impl Builtin {
             | Self::ResultTypeOperator => BuiltinKind::TypeAlias,
 
             // Builtin structs
-            Self::ArrayStruct | Self::SliceStruct => BuiltinKind::Struct,
+            Self::ArrayStruct | Self::SliceStruct | Self::ManuallyDropStruct => BuiltinKind::Struct,
 
             // String interpolation
             Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,

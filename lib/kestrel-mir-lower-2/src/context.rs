@@ -114,6 +114,25 @@ impl<'w> LowerCtx<'w> {
         WitnessMethodKey::new(name, labels)
     }
 
+    /// Build a WitnessMethodKey for a Setter entity by deriving
+    /// `"{parent_name}.set"` from the parent Field/Subscript.
+    /// Uses the parent's labels (not the setter's own Callable params)
+    /// to match the witness table key built by witness_lower.rs.
+    pub fn witness_setter_key(&self, setter: Entity) -> WitnessMethodKey {
+        let parent = self.world.parent_of(setter);
+        let parent_key = parent
+            .map(|p| self.witness_method_key(p))
+            .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
+        WitnessMethodKey::new(format!("{}.set", parent_key.name), parent_key.labels)
+    }
+
+    /// Find a `NodeKind::Setter` child of a Field or Subscript entity.
+    pub fn find_setter_child(&self, parent: Entity) -> Option<Entity> {
+        self.world.children_of(parent).iter().copied().find(|&e| {
+            self.world.get::<NodeKind>(e) == Some(&NodeKind::Setter)
+        })
+    }
+
     /// Consume the context and return the built MIR module.
     pub fn finish(self) -> MirModule {
         self.module

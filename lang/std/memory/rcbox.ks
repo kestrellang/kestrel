@@ -139,8 +139,10 @@ public struct RcBox[T]: Cloneable {
         let newCount = count - 1;
 
         if newCount == 0 {
-            // Last reference — read the full storage so the value's
-            // deinit runs when the local goes out of scope.
+            // Drop the value field in-place at the heap address, then free the block.
+            // RcBoxStorage layout: [refCount: Int64, value: T]
+            let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
+            self.ptr.asRaw().offset(by: valueOffset).cast[T]().dropInPlace();
             let layout = Layout.of[RcBoxStorage[T]]();
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)

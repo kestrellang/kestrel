@@ -7,7 +7,7 @@ use cranelift_module::{FuncId, Module};
 
 use kestrel_mir_2::{
     ArgMode, BlockId, LocalId, MirBody, MonoFunction, Operand, Place, PlaceBase, PlaceElem, Rvalue,
-    StatementKind,
+    StatementKind, TerminatorKind,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -291,6 +291,23 @@ fn collect_stack_locals(body: &MirBody, func: &MonoFunction, ctx: &mut CodegenCt
                     if let PlaceBase::Local(id) = &p.base {
                         stack.insert(*id);
                     }
+                }
+            }
+        }
+    }
+
+    // Also scan terminators for deref bases (e.g. Return of a deref place)
+    for block in &body.blocks {
+        let term_places: Vec<&Place> = match &block.terminator.kind {
+            TerminatorKind::Return(Operand::Place(p)) => vec![p],
+            TerminatorKind::Branch { condition: Operand::Place(p), .. } => vec![p],
+            TerminatorKind::Switch { discriminant, .. } => vec![discriminant],
+            _ => vec![],
+        };
+        for p in term_places {
+            if p.projections.iter().any(|proj| matches!(proj, PlaceElem::Deref)) {
+                if let PlaceBase::Local(id) = &p.base {
+                    stack.insert(*id);
                 }
             }
         }
