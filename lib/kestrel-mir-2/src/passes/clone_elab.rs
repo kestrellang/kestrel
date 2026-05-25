@@ -259,6 +259,7 @@ struct TermRewrite {
 
 // ---- Helpers ----
 
+
 fn copy_rewrite(
     arena: &TyArena,
     module: &MirModule,

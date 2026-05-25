@@ -72,6 +72,7 @@ members = [
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
     "lib/kestrel-mir-2",
+    "lib/kestrel-mir-3",
     "lib/kestrel-mir-lower-2",
     "lib/kestrel-codegen-cranelift-2",
     "lib/kestrel-test-suite",
