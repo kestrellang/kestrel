@@ -61,8 +61,11 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
         .collect();
 
     // Master init function
-    let master_idx = synthesize_master_init(ctx, &thunks);
-    inject_init_call_into_main(ctx, master_idx);
+    let _master_idx = synthesize_master_init(ctx, &thunks);
+    // Static init disabled: the init thunks call misresolved functions
+    // (e.g. Int32.maxValue instead of Int32.init). Re-enable once the
+    // monomorphizer function resolution is fixed.
+    // inject_init_call_into_main(ctx, _master_idx);
 }
 
 /// Create `func __init$<name>() -> T { <initializer expr> }`.

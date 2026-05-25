@@ -229,27 +229,27 @@ impl<'m> CodegenCtx<'m> {
     // -- Functions --
 
     fn declare_all_functions(&mut self) -> Result<(), CodegenError> {
-        let mut declared: HashMap<String, FuncId> = HashMap::new();
+        // Extern imports with the same symbol must share a FuncId.
+        // Local functions always get unique IDs — even if mangled names
+        // collide, each mono function is a distinct compilation unit.
+        let mut extern_declared: HashMap<String, FuncId> = HashMap::new();
         for (i, func) in self.module.functions.iter().enumerate() {
-            let name = if let Some(ext) = &func.extern_info {
-                ext.symbol_name.clone()
-            } else if self.is_main_function(func) {
-                "main".to_string()
-            } else {
-                func.name.clone()
-            };
-            if let Some(&existing_id) = declared.get(&name) {
-                self.func_ids[i] = Some(existing_id);
-            } else {
-                let func_id = self.declare_function(func, i)?;
-                declared.insert(name, func_id);
-                self.func_ids[i] = Some(func_id);
+            if let Some(ext) = &func.extern_info {
+                if let Some(&existing_id) = extern_declared.get(&ext.symbol_name) {
+                    self.func_ids[i] = Some(existing_id);
+                    continue;
+                }
             }
+            let func_id = self.declare_function(func, i)?;
+            if let Some(ext) = &func.extern_info {
+                extern_declared.insert(ext.symbol_name.clone(), func_id);
+            }
+            self.func_ids[i] = Some(func_id);
         }
         Ok(())
     }
 
-    fn declare_function(&mut self, func: &MonoFunction, _idx: usize) -> Result<FuncId, CodegenError> {
+    fn declare_function(&mut self, func: &MonoFunction, idx: usize) -> Result<FuncId, CodegenError> {
         let is_main = self.is_main_function(func);
         let call_conv = self.isa.default_call_conv();
 
@@ -281,7 +281,11 @@ impl<'m> CodegenCtx<'m> {
                 self.module,
                 call_conv,
             );
-            (sig, Linkage::Local, func.name.clone())
+            // Append mono index to guarantee unique names within the
+            // Cranelift module. The linker sees mangled_name; the suffix
+            // only prevents Cranelift's declare_function dedup.
+            let unique_name = format!("{}.mono{}", func.name, idx);
+            (sig, Linkage::Local, unique_name)
         };
 
         let func_id = self
@@ -341,6 +345,11 @@ impl<'m> CodegenCtx<'m> {
             }
             for (cat, count) in by_cat.iter() {
                 eprintln!("  {count:>5} {cat}");
+            }
+            if std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok() {
+                for (name, err) in &errors {
+                    eprintln!("    {name}: {err}");
+                }
             }
         }
         Ok(())

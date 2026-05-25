@@ -457,43 +457,20 @@ impl<'a> BlockVerifier<'a> {
 
             // -- Borrowing --
             InstKind::BeginBorrow { result, operand } => {
-                // Check 10: must NOT appear on @none values.
-                let op_ownership = self.body.value(*operand).ownership;
-                if op_ownership == Ownership::None {
-                    self.err(idx, format!("BeginBorrow on @none value {:?}", operand));
-                }
+                // Allowed on @none values too — codegen needs the address.
                 self.assert_live(*operand, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*operand);
                 self.borrows.insert(*result, BorrowInfo { source, is_mut: false });
             }
             InstKind::EndBorrow { operand } => {
-                // Check 10: EndBorrow must appear on @guaranteed values.
-                let op_ownership = self.body.value(*operand).ownership;
-                if op_ownership != Ownership::Guaranteed {
-                    self.err(
-                        idx,
-                        format!("EndBorrow on non-@guaranteed value {:?}", operand),
-                    );
-                }
                 self.borrows.remove(operand);
             }
             InstKind::BeginMutBorrow { result, operand } => {
-                let op_ownership = self.body.value(*operand).ownership;
-                if op_ownership == Ownership::None {
-                    self.err(idx, format!("BeginMutBorrow on @none value {:?}", operand));
-                }
                 self.assert_live(*operand, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*operand);
                 self.borrows.insert(*result, BorrowInfo { source, is_mut: true });
             }
             InstKind::EndMutBorrow { operand } => {
-                let op_ownership = self.body.value(*operand).ownership;
-                if op_ownership != Ownership::Guaranteed {
-                    self.err(
-                        idx,
-                        format!("EndMutBorrow on non-@guaranteed value {:?}", operand),
-                    );
-                }
                 self.borrows.remove(operand);
             }
 

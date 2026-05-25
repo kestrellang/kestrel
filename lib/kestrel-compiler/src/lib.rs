@@ -423,7 +423,7 @@ impl Compiler {
     }
 
     #[allow(clippy::result_large_err)]
-    fn monomorphize_mir3(
+    pub fn monomorphize_mir3(
         &self,
         mir: kestrel_mir_3::MirModule,
     ) -> Result<kestrel_mir_3::mono::MonoModule, kestrel_codegen_cranelift_3::CodegenError> {

@@ -141,6 +141,8 @@ enum DumpKind {
     Cranelift,
     /// Cranelift IR via the new MIR-2 → mono → codegen-2 pipeline.
     Cranelift2,
+    /// Cranelift IR via the MIR-3 (OSSA) pipeline.
+    Cranelift3,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
     Diagnostics,
     // TODO: future dump kinds — add when display impls exist.
@@ -334,6 +336,35 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
                     for e in &errs {
                         eprintln!("mono error: {}", e);
                     }
+                    return Err(ExitCode::FAILURE);
+                }
+            }
+        },
+        DumpKind::Cranelift3 => {
+            let mir = compiler.lower_to_mir3().map_err(|e| {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            })?;
+            let mono = compiler.monomorphize_mir3(mir).map_err(|e| {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            })?;
+            let target = globals.codegen_target()?;
+            let options = cranelift3_backend::CodegenOptions {
+                emit_clif: true,
+                ..Default::default()
+            };
+            match cranelift3_backend::compile(&mono, &target, &options) {
+                Ok(result) => {
+                    for (name, clif) in &result.clif_text {
+                        println!("; function: {name}");
+                        print!("{clif}");
+                        println!();
+                    }
+                }
+                Err(e) => {
+                    driver.emit_diagnostics().ok();
+                    eprintln!("error: {e}");
                     return Err(ExitCode::FAILURE);
                 }
             }

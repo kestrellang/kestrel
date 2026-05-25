@@ -975,17 +975,20 @@ fn compile_resolved_call(
                 call_args.push(val);
             }
             PassMode::ByRef => {
-                let actual_ty = builder.func.dfg.value_type(val);
-                if repr.is_scalar() || actual_ty != ptr_ty {
-                    // Scalar values must be spilled to the stack so the
-                    // callee receives a pointer. On 64-bit targets, i64
-                    // scalars have the same Cranelift type as pointers,
-                    // so we check the MIR repr to detect them.
-                    let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
-                    mem::store_to_repr(builder, repr, slot, val);
-                    call_args.push(slot);
-                } else {
+                if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
+                    // Borrow/MutBorrow args always go through BeginBorrow
+                    // in the lowerer, so the value is already an address.
                     call_args.push(val);
+                } else {
+                    // Consuming arg passed by-ref: spill scalar to stack.
+                    let actual_ty = builder.func.dfg.value_type(val);
+                    if repr.is_scalar() || actual_ty != ptr_ty {
+                        let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
+                        mem::store_to_repr(builder, repr, slot, val);
+                        call_args.push(slot);
+                    } else {
+                        call_args.push(val);
+                    }
                 }
             }
             PassMode::Zst => {}

@@ -910,31 +910,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// @none values pass through directly — no borrow/copy needed.
     pub fn prepare_call_arg(&mut self, value: ValueId, convention: ParamConvention) -> CallArg {
         let ownership = self.body.value(value).ownership;
-        // Trivial values pass through regardless of convention
-        if ownership == Ownership::None {
-            return CallArg { value, convention };
-        }
         match convention {
             ParamConvention::Borrow => {
-                let borrow = if ownership == Ownership::Owned {
-                    self.emit_begin_borrow(value)
-                } else {
-                    value
-                };
+                // Always emit BeginBorrow so codegen uniformly gets an address.
+                let borrow = self.emit_begin_borrow(value);
                 CallArg { value: borrow, convention }
             }
             ParamConvention::MutBorrow => {
-                let borrow = if ownership == Ownership::Owned {
-                    self.emit_begin_mut_borrow(value)
-                } else {
-                    value
-                };
+                let borrow = self.emit_begin_mut_borrow(value);
                 CallArg { value: borrow, convention }
             }
             ParamConvention::Consuming => {
                 if ownership == Ownership::Owned {
-                    // Conservative: copy for consuming. copy_optimize will
-                    // elide if it's the last use.
                     let copy = self.emit_copy_value(value);
                     self.consume(copy);
                     CallArg { value: copy, convention }

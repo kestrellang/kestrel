@@ -4,8 +4,10 @@ use std::process::Command;
 use kestrel_codegen::TargetConfig;
 use target_lexicon::OperatingSystem;
 
+use std::sync::atomic::Ordering;
+
 use crate::error::CodegenError;
-use crate::CodegenOptions;
+use crate::{CodegenOptions, LINK_COUNTER};
 
 pub fn link_executable(
     object_path: &Path,
@@ -18,7 +20,8 @@ pub fn link_executable(
     let tmp_dir = std::env::temp_dir();
     let mut c_objects: Vec<std::path::PathBuf> = Vec::new();
     for (i, c_src) in options.c_sources.iter().enumerate() {
-        let c_obj = tmp_dir.join(format!("kestrel_c{}_{}.o", std::process::id(), i));
+        let link_id = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let c_obj = tmp_dir.join(format!("kestrel_c{}_{}_{}.o", std::process::id(), link_id, i));
         let c_output = Command::new(&cc)
             .arg("-c")
             .arg(c_src)

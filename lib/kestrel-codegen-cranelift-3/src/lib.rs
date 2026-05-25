@@ -10,9 +10,12 @@ pub mod terminator;
 pub mod ty;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use kestrel_codegen::TargetConfig;
 use kestrel_mir_3::mono::MonoModule;
+
+pub(crate) static LINK_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub use error::CodegenError;
 
@@ -63,7 +66,8 @@ pub fn compile_and_link(
     let result = compile(module, target, options)?;
 
     let tmp_dir = std::env::temp_dir();
-    let obj_name = format!("kestrel_{}.o", std::process::id());
+    let id = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let obj_name = format!("kestrel_{}_{}.o", std::process::id(), id);
     let obj_path = tmp_dir.join(obj_name);
     std::fs::write(&obj_path, &result.object_bytes)?;
 
