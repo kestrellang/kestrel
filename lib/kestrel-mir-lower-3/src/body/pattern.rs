@@ -236,11 +236,14 @@ impl OssaBodyCtx<'_, '_> {
                 self.push_scope();
                 self.emit_bindings(bindings, scrutinee, scrutinee_ty);
                 if let Some(arm) = arms.get(*arm_index) {
-                    let mut body_val = self.lower_expr(arm.body);
+                    let body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
-                        self.destroy_scope_except(&[body_val]);
+                        let tracker_vals = self.tracker.values();
+                        let mut keep = vec![body_val];
+                        keep.extend(&tracker_vals);
+                        self.destroy_scope_except(&keep);
                         let mut args = vec![body_val];
-                        args.extend(self.tracker.values());
+                        args.extend(tracker_vals);
                         self.emit_jump(join_block, args);
                     }
                 }

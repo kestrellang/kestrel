@@ -400,10 +400,11 @@ mod tests {
         }
 
         let clean_count = mir.functions.iter().filter(|f| {
-            f.body.as_ref().is_some_and(|b| {
+            let pass = f.body.as_ref().is_some_and(|b| {
                 !b.values.is_empty() && !b.blocks.is_empty()
                     && kestrel_mir_3::verify::verify_ossa(b, &mir).is_empty()
-            })
+            });
+            pass
         }).count();
         eprintln!("{clean_count}/{bodies} functions pass verifier cleanly");
         eprintln!("(verifier errors are expected during initial development)");

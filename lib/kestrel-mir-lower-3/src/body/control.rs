@@ -54,9 +54,12 @@ impl OssaBodyCtx<'_, '_> {
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
-            self.destroy_scope_except(&[then_val]);
+            let tracker_vals = self.tracker.values();
+            let mut keep = vec![then_val];
+            keep.extend(&tracker_vals);
+            self.destroy_scope_except(&keep);
             let mut args = vec![then_val];
-            args.extend(self.tracker.values());
+            args.extend(tracker_vals);
             self.emit_jump(merge_block, args);
         }
         self.pop_scope();
@@ -69,9 +72,12 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
             if !self.is_terminated() {
-                self.destroy_scope_except(&[else_val]);
+                let tracker_vals = self.tracker.values();
+                let mut keep = vec![else_val];
+                keep.extend(&tracker_vals);
+                self.destroy_scope_except(&keep);
                 let mut args = vec![else_val];
-                args.extend(self.tracker.values());
+                args.extend(tracker_vals);
                 self.emit_jump(merge_block, args);
             }
         } else {
@@ -136,10 +142,12 @@ impl OssaBodyCtx<'_, '_> {
         let _ = self.lower_hir_block(body);
 
         if !self.is_terminated() {
-            self.exit_scope();
             // Tracker has the current versions of header values,
-            // updated by nested if/match merges via rebind_scope_values.
+            // updated by nested if/match merges via rebind_scope_values
+            // and by variable reassignment via tracker.rebind.
             let back_edge_vals = self.tracker.values();
+            self.destroy_scope_except(&back_edge_vals);
+            self.pop_scope();
             for &v in &back_edge_vals {
                 self.consume(v);
             }
