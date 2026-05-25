@@ -9,6 +9,7 @@ pub mod inst;
 pub mod item;
 pub mod layout;
 pub mod op;
+pub mod substitute;
 pub mod terminator;
 pub mod ty;
 pub mod ty_query;
@@ -27,8 +28,10 @@ pub use immediate::{Immediate, ImmediateKind};
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
 pub use layout::{EnumLayout, StructLayout};
 pub use op::{FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness};
+pub use substitute::{SubstMap, substitute};
 pub use terminator::SwitchCase;
 pub use ty::{MirTy, ParamConvention, TyArena};
+pub use item::WitnessMethodKey;
 pub use value::Ownership;
 
 use item::enum_def::EnumDef;

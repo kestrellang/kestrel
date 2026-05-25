@@ -1,0 +1,848 @@
+//! Expression lowering — HirExpr dispatch → ValueId.
+//!
+//! Every arm returns a `ValueId`. The key OSSA differences from MIR-2:
+//! - No `Operand` / `Place` / `Rvalue` — everything is a `ValueId`.
+//! - `emit_literal` instead of `lower_literal` (returns `ValueId` directly).
+//! - `emit_struct_extract` / `emit_tuple_extract` instead of place projections.
+//! - Calls use `Callee` + `Vec<CallArg>` instead of `Vec<(Operand, ArgMode)>`.
+//!
+//! Sub-modules handle the heavy lifting:
+//! - `call` — call/method/protocol dispatch
+//! - `control` — if/loop/break/continue/match
+//! - `literal` — array/dict/string literal lowering
+//! - `closure` — closure capture and thunk generation
+
+use kestrel_ast_builder::{Callable, NodeKind, Settable};
+use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
+use kestrel_mir_3::callee::Callee;
+use kestrel_mir_3::inst::CallArg;
+use kestrel_mir_3::item::witness::WitnessMethodKey;
+use kestrel_mir_3::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
+
+use super::{OssaBodyCtx, expr_span};
+use crate::ty::lower_resolved_ty;
+
+impl OssaBodyCtx<'_, '_> {
+    /// Lower an HIR expression to a ValueId, applying promotion if needed.
+    pub fn lower_expr(&mut self, expr_id: HirExprId) -> ValueId {
+        let value = self.lower_expr_no_promote(expr_id);
+        self.apply_promotion(expr_id, value)
+    }
+
+    /// Apply a recorded `FromValue.from(value)` promotion if type-infer
+    /// stored one for this expression.
+    fn apply_promotion(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
+        let Some(typed) = self.typed.as_ref() else {
+            return value;
+        };
+        let Some(promotion) = typed.promotions.get(&expr_id).cloned() else {
+            return value;
+        };
+        let method = promotion.method;
+        let target_ty = lower_resolved_ty(self.ctx, &promotion.target);
+        self.ctx.register_name(method);
+        let type_args = self.prepend_receiver_type_args(target_ty, vec![]);
+        let callee = Callee::direct_with_args(method, type_args, None);
+        let arg = self.prepare_call_arg(value, ParamConvention::Borrow);
+        self.emit_call_returning(callee, vec![arg], target_ty)
+    }
+
+    fn lower_expr_no_promote(&mut self, expr_id: HirExprId) -> ValueId {
+        let expr = self.hir.exprs[expr_id].clone();
+        let span = expr_span(&self.hir, expr_id);
+        let prev_span = self.current_span.replace(span);
+        let result = self.lower_expr_inner(expr_id, &expr);
+        self.current_span = prev_span;
+        result
+    }
+
+    fn lower_expr_inner(&mut self, expr_id: HirExprId, expr: &HirExpr) -> ValueId {
+        match expr {
+            HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
+
+            HirExpr::Local(hir_local, _) => {
+                let val = self.map_local(*hir_local);
+                // Return a use of the local: copies @owned, passes through @none
+                self.emit_value_use(val)
+            }
+
+            HirExpr::Tuple { elements, .. } => {
+                let elems: Vec<ValueId> = elements
+                    .iter()
+                    .map(|&e| self.lower_expr(e))
+                    .collect();
+                let ty = self.resolve_expr_type(expr_id);
+                self.emit_tuple(ty, elems)
+            }
+
+            HirExpr::Field { base, name, .. } => {
+                self.lower_field_access(expr_id, *base, name.as_str_or_empty())
+            }
+
+            HirExpr::TupleIndex { base, index, .. } => {
+                let base_val = self.lower_expr(*base);
+                let result_ty = self.resolve_expr_type(expr_id);
+                self.emit_tuple_extract(base_val, *index, result_ty)
+            }
+
+            HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
+
+            HirExpr::OverloadSet { candidates, .. } => {
+                if let Some(&resolved) =
+                    self.typed.as_ref().and_then(|t| t.resolutions.get(&expr_id))
+                {
+                    self.ctx.register_name(resolved);
+                    let type_args = self.resolve_type_args(expr_id);
+                    self.emit_literal(Immediate::function_ref(resolved, type_args, None))
+                } else if let Some(&first) = candidates.first() {
+                    self.ctx.register_name(first);
+                    self.emit_literal(Immediate::function_ref(first, vec![], None))
+                } else {
+                    self.emit_literal(Immediate::error())
+                }
+            }
+
+            HirExpr::ImplicitMember { name, args, .. } => {
+                self.lower_implicit_member(expr_id, name.as_str_or_empty(), args.as_deref())
+            }
+
+            // === Calls — delegate to call module (stubbed until Phase D) ===
+            HirExpr::Call { callee, args, .. } => {
+                self.lower_call_expr(expr_id, *callee, args)
+            }
+            HirExpr::MethodCall {
+                receiver,
+                method,
+                type_args: hir_type_args,
+                args,
+                ..
+            } => self.lower_method_call_expr(
+                expr_id,
+                *receiver,
+                method.as_str_or_empty(),
+                hir_type_args.as_deref(),
+                args,
+            ),
+            HirExpr::ProtocolCall {
+                receiver,
+                protocol,
+                method,
+                type_args: hir_type_args,
+                args,
+                ..
+            } => self.lower_protocol_call_expr(
+                expr_id,
+                *receiver,
+                *protocol,
+                method.as_str_or_empty(),
+                hir_type_args.as_deref(),
+                args,
+            ),
+
+            // === Control flow — delegate to control module (stubbed until Phase C) ===
+            HirExpr::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => self.lower_if(expr_id, *condition, then_body, else_body.as_ref()),
+
+            HirExpr::Loop { body, label, .. } => {
+                self.lower_loop(body, label.as_deref())
+            }
+            HirExpr::Break { label, .. } => self.lower_break(label.as_deref()),
+            HirExpr::Continue { label, .. } => self.lower_continue(label.as_deref()),
+
+            HirExpr::Return { value, .. } => {
+                let ret_val = if let Some(v) = value {
+                    self.lower_expr(*v)
+                } else {
+                    self.emit_literal(Immediate::unit())
+                };
+                // Destroy ALL scoped values (all scopes) before returning
+                self.destroy_scopes_to_depth(0, &[ret_val]);
+                self.emit_ret(ret_val);
+                self.emit_literal(Immediate::unit())
+            }
+
+            HirExpr::Assign { target, value, .. } => {
+                self.lower_assign(expr_id, *target, *value)
+            }
+
+            HirExpr::Match {
+                scrutinee, arms, ..
+            } => self.lower_match(expr_id, *scrutinee, arms),
+
+            // === Literals — delegate to literal module (stubbed until Phase E) ===
+            HirExpr::Array { elements, .. } => {
+                self.lower_array_literal(expr_id, elements)
+            }
+            HirExpr::Dict { entries, .. } => {
+                self.lower_dict_literal(expr_id, entries)
+            }
+
+            // === Closure — delegate to closure module (stubbed until Phase E) ===
+            HirExpr::Closure { params, body, .. } => {
+                self.lower_closure_expr(expr_id, params, body)
+            }
+
+            HirExpr::Block { body, .. } => self.lower_hir_block(body),
+
+            HirExpr::Sugar { inner, .. } => self.lower_expr(*inner),
+
+            HirExpr::Error { .. } => self.emit_literal(Immediate::error()),
+        }
+    }
+
+    // ================================================================
+    // Field access
+    // ================================================================
+
+    fn lower_field_access(
+        &mut self,
+        expr_id: HirExprId,
+        base: HirExprId,
+        field_name: &str,
+    ) -> ValueId {
+        let resolved = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+            .copied();
+
+        let is_callable = resolved.is_some_and(|e| {
+            self.ctx.world.get::<Callable>(e).is_some()
+        });
+        let is_static = resolved.is_some_and(|e| {
+            self.ctx
+                .world
+                .get::<kestrel_ast_builder::Static>(e)
+                .is_some()
+        });
+        let is_protocol_property = !is_callable
+            && resolved.is_some_and(|e| {
+                matches!(self.ctx.world.get::<NodeKind>(e), Some(NodeKind::Field))
+                    && self.ctx.world.parent_of(e).is_some_and(|p| {
+                        matches!(self.ctx.world.get::<NodeKind>(p), Some(NodeKind::Protocol))
+                    })
+            });
+
+        // Protocol property → witness dispatch
+        if is_protocol_property {
+            let property_entity = resolved.unwrap();
+            let protocol = self.ctx.world.parent_of(property_entity).unwrap();
+            self.ctx.register_name(protocol);
+            let result_ty = self.resolve_expr_type(expr_id);
+            let method_type_args = self.resolve_type_args(expr_id);
+            if is_static {
+                let self_type = self.type_from_type_ref(base);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: WitnessMethodKey::simple(field_name),
+                    self_type,
+                    method_type_args,
+                };
+                return self.emit_call_returning(callee, vec![], result_ty);
+            } else {
+                let receiver_ty = self.resolve_expr_type(base);
+                let base_val = self.lower_expr(base);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: WitnessMethodKey::simple(field_name),
+                    self_type: receiver_ty,
+                    method_type_args,
+                };
+                let arg = self.prepare_call_arg(base_val, ParamConvention::Borrow);
+                return self.emit_call_returning(callee, vec![arg], result_ty);
+            }
+        }
+
+        // Computed property → getter call
+        if is_callable {
+            let getter_entity = resolved.unwrap();
+            self.ctx.register_name(getter_entity);
+            let result_ty = self.resolve_expr_type(expr_id);
+
+            if is_static {
+                let self_type = self.type_from_type_ref(base);
+                let type_args = self.prepend_receiver_type_args(self_type, vec![]);
+                let callee = Callee::direct_with_args(getter_entity, type_args, None);
+                return self.emit_call_returning(callee, vec![], result_ty);
+            }
+
+            let receiver_ty = self.resolve_expr_type(base);
+            let base_val = self.lower_expr(base);
+            let method_type_args = self.resolve_type_args(expr_id);
+
+            if let Some(protocol) = self.ctx.is_protocol_method(getter_entity) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_method_key(getter_entity);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: receiver_ty,
+                    method_type_args,
+                };
+                let arg = self.prepare_call_arg(base_val, ParamConvention::Borrow);
+                return self.emit_call_returning(callee, vec![arg], result_ty);
+            }
+
+            let type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
+            let callee = Callee::direct_with_args(getter_entity, type_args, None);
+            let arg = self.prepare_call_arg(base_val, ParamConvention::Borrow);
+            return self.emit_call_returning(callee, vec![arg], result_ty);
+        }
+
+        // Static stored field → global ref
+        if is_static {
+            let static_entity = resolved.unwrap();
+            self.ctx.register_name(static_entity);
+            return self.emit_global_ref(static_entity);
+        }
+
+        // Stored field → StructExtract
+        let base_val = self.lower_expr(base);
+        let base_ty = self.resolve_expr_type(base);
+        let result_ty = self.resolve_expr_type(expr_id);
+
+        let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
+            MirTy::Named { entity, .. } => Some(*entity),
+            _ => None,
+        };
+        if let Some(se) = struct_entity {
+            if let Some(idx) = self.ctx.resolve_field_idx(se, field_name) {
+                return self.emit_struct_extract(base_val, idx, result_ty);
+            }
+        }
+        // Fallback: field not found in lowered structs (generic type, etc.)
+        // Use index 0 as placeholder — resolved during monomorphization
+        self.emit_struct_extract(base_val, FieldIdx::new(0), result_ty)
+    }
+
+    // ================================================================
+    // Def (entity reference)
+    // ================================================================
+
+    fn lower_def(&mut self, expr_id: HirExprId, entity: kestrel_hecs::Entity) -> ValueId {
+        self.ctx.register_name(entity);
+        let kind = self.ctx.world.get::<NodeKind>(entity).cloned();
+        match kind {
+            Some(NodeKind::Function | NodeKind::Initializer) => {
+                let inferred_ty = self.resolve_expr_type(expr_id);
+                // If the expression is used as a thick function value (closure),
+                // wrap it in ApplyPartial with no captures.
+                if matches!(
+                    self.ctx.module.ty_arena.get(inferred_ty),
+                    MirTy::FuncThick { .. }
+                ) {
+                    return self.emit_apply_partial(entity, vec![], inferred_ty);
+                }
+                let type_args = self.resolve_type_args(expr_id);
+                self.emit_literal(Immediate::function_ref(entity, type_args, None))
+            }
+            Some(NodeKind::EnumCase) => {
+                let ty = self.resolve_expr_type(expr_id);
+                let case_name = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_else(|| panic!("ICE: enum case {:?} has no Name", entity));
+                let enum_entity = self
+                    .ctx
+                    .world
+                    .parent_of(entity)
+                    .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", entity));
+                let variant_idx = self.ctx.resolve_variant_idx(enum_entity, &case_name)
+                    .unwrap_or_else(|| {
+                        panic!("ICE: variant '{}' not found in enum {:?}", case_name, enum_entity)
+                    });
+                self.emit_enum_variant(ty, variant_idx, vec![])
+            }
+            Some(NodeKind::Field) => {
+                if self.ctx.world.get::<Callable>(entity).is_some() {
+                    // Computed property getter call (no receiver)
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let callee = Callee::direct_with_args(entity, vec![], None);
+                    self.emit_call_returning(callee, vec![], result_ty)
+                } else {
+                    // Static stored field
+                    self.emit_global_ref(entity)
+                }
+            }
+            Some(NodeKind::TypeParameter | NodeKind::TypeAlias) => {
+                self.emit_literal(Immediate::unit())
+            }
+            _ => self.emit_literal(Immediate::error()),
+        }
+    }
+
+    // ================================================================
+    // Implicit member (.None, .Some(x), .fromResidual(x))
+    // ================================================================
+
+    fn lower_implicit_member(
+        &mut self,
+        expr_id: HirExprId,
+        name: &str,
+        args: Option<&[HirCallArg]>,
+    ) -> ValueId {
+        let result_ty = self.resolve_expr_type(expr_id);
+
+        let resolved = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+            .copied();
+        let is_enum_case = resolved.is_none_or(|e| {
+            self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::EnumCase)
+        });
+
+        if is_enum_case {
+            // Enum case with optional payload
+            let payload: Vec<ValueId> = args
+                .map(|a| {
+                    a.iter()
+                        .map(|arg| self.lower_expr(arg.value))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
+                MirTy::Named { entity, .. } => *entity,
+                other => panic!(
+                    "ICE: enum case '{}' result type is not Named: {:?}",
+                    name, other
+                ),
+            };
+            let variant_idx = self.ctx.resolve_variant_idx(enum_entity, name)
+                .unwrap_or_else(|| {
+                    panic!("ICE: variant '{}' not found in enum {:?}", name, enum_entity)
+                });
+
+            self.emit_enum_variant(result_ty, variant_idx, payload)
+        } else {
+            // Static method call (e.g., .fromResidual)
+            let resolved_entity = resolved.unwrap();
+            self.ctx.register_name(resolved_entity);
+            let call_args: Vec<CallArg> = args
+                .map(|a| {
+                    a.iter()
+                        .map(|arg| {
+                            let val = self.lower_expr(arg.value);
+                            self.prepare_call_arg(val, ParamConvention::Borrow)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if let Some(protocol) = self.ctx.is_protocol_method(resolved_entity) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_method_key(resolved_entity);
+                let type_args = self.resolve_type_args(expr_id);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: result_ty,
+                    method_type_args: type_args,
+                };
+                self.emit_call_returning(callee, call_args, result_ty)
+            } else {
+                let mut type_args = self.resolve_type_args(expr_id);
+                // Static methods on generic types need the parent's type args
+                type_args = self.prepend_receiver_type_args(result_ty, type_args);
+                let self_type = if !type_args.is_empty() {
+                    Some(result_ty)
+                } else {
+                    None
+                };
+                let callee = Callee::direct_with_args(resolved_entity, type_args, self_type);
+                self.emit_call_returning(callee, call_args, result_ty)
+            }
+        }
+    }
+
+    // ================================================================
+    // Assign
+    // ================================================================
+
+    fn lower_assign(
+        &mut self,
+        _expr_id: HirExprId,
+        target: HirExprId,
+        value: HirExprId,
+    ) -> ValueId {
+        // Setter dispatch: computed properties, subscripts, field-subscripts
+        if let Some(result) = self.try_lower_setter_assign(target, value) {
+            return result;
+        }
+
+        // Simple stored assignment: rebind the local in local_map
+        let rhs = self.lower_expr(value);
+        let target_expr = self.hir.exprs[target].clone();
+        match target_expr {
+            HirExpr::Local(hir_local, _) => {
+                let old_val = self.local_map.get(&hir_local).copied();
+                // Destroy the old value if it was @owned
+                if let Some(old) = old_val {
+                    let ownership = self.body.value(old).ownership;
+                    if ownership == kestrel_mir_3::value::Ownership::Owned {
+                        self.emit_destroy_value(old);
+                    }
+                }
+                self.local_map.insert(hir_local, rhs);
+            }
+            _ => {
+                // Field assignment or other complex target — for now, treat
+                // as a no-op. Sub-modules (StoreAssign via address) handle this.
+            }
+        }
+        self.emit_literal(Immediate::unit())
+    }
+
+    // ----------------------------------------------------------------
+    // Setter dispatch
+    // ----------------------------------------------------------------
+
+    /// If the assignment target is a computed property or subscript with a
+    /// setter, emit a setter call and return unit. Otherwise return None
+    /// so the caller falls through to stored assignment.
+    fn try_lower_setter_assign(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+    ) -> Option<ValueId> {
+        let target = self.hir.exprs[target_id].clone();
+        match target {
+            HirExpr::Field { base, name, .. } => {
+                self.try_lower_field_setter(target_id, value_id, base, name.as_str_or_empty())
+            }
+            HirExpr::Def(entity, _, _) => self.try_lower_def_setter(value_id, entity),
+            HirExpr::Call { callee, args, .. } => {
+                self.try_lower_call_setter(target_id, value_id, callee, &args)
+            }
+            HirExpr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => self.try_lower_method_call_setter(
+                target_id,
+                value_id,
+                receiver,
+                method.as_str_or_empty(),
+                &args,
+            ),
+            _ => None,
+        }
+    }
+
+    /// Arm 1: `obj.computedProp = v` / `Type.staticProp = v` / protocol property setter
+    fn try_lower_field_setter(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+        base: HirExprId,
+        field_name: &str,
+    ) -> Option<ValueId> {
+        let resolved = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&target_id))
+            .copied()?;
+
+        let is_field = self.ctx.world.get::<NodeKind>(resolved) == Some(&NodeKind::Field);
+        let parent_is_protocol = is_field
+            && self.ctx.world.parent_of(resolved).is_some_and(|p| {
+                self.ctx.world.get::<NodeKind>(p) == Some(&NodeKind::Protocol)
+            });
+        let has_callable = self.ctx.world.get::<Callable>(resolved).is_some();
+        let has_settable = self.ctx.world.get::<Settable>(resolved).is_some();
+
+        // Protocol property setter → witness dispatch with "{name}.set"
+        if parent_is_protocol && !has_callable && has_settable {
+            let protocol = self.ctx.world.parent_of(resolved).unwrap();
+            self.ctx.register_name(protocol);
+            let is_static = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Static>(resolved)
+                .is_some();
+            let rhs = self.lower_expr(value_id);
+            let method_type_args = self.resolve_type_args(target_id);
+            let method = WitnessMethodKey::simple(format!("{field_name}.set"));
+
+            if is_static {
+                let self_type = self.type_from_type_ref(base);
+                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let callee = Callee::Witness {
+                    protocol,
+                    method,
+                    self_type,
+                    method_type_args,
+                };
+                self.emit_call_void(callee, vec![rhs_arg]);
+            } else {
+                let receiver_ty = self.resolve_expr_type(base);
+                let base_val = self.lower_expr(base);
+                let receiver_arg = self.prepare_call_arg(base_val, ParamConvention::MutBorrow);
+                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let callee = Callee::Witness {
+                    protocol,
+                    method,
+                    self_type: receiver_ty,
+                    method_type_args,
+                };
+                self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);
+            }
+            return Some(self.emit_literal(Immediate::unit()));
+        }
+
+        // Concrete computed property setter
+        let setter = self.ctx.find_setter_child(resolved)?;
+        self.ctx.register_name(setter);
+        let is_static = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Static>(resolved)
+            .is_some();
+        let rhs = self.lower_expr(value_id);
+
+        if is_static {
+            let self_type = self.type_from_type_ref(base);
+            let type_args = self.prepend_receiver_type_args(self_type, vec![]);
+            let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+            let callee = Callee::direct_with_args(setter, type_args, None);
+            self.emit_call_void(callee, vec![rhs_arg]);
+        } else {
+            let receiver_ty = self.resolve_expr_type(base);
+            let base_val = self.lower_expr(base);
+            let type_args = self.resolve_type_args(target_id);
+            let type_args = self.prepend_receiver_type_args(receiver_ty, type_args);
+
+            if let Some(protocol) = self.ctx.is_protocol_method(setter) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_setter_key(setter);
+                let receiver_arg = self.prepare_call_arg(base_val, ParamConvention::MutBorrow);
+                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: receiver_ty,
+                    method_type_args: type_args,
+                };
+                self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);
+            } else {
+                let receiver_arg = self.prepare_call_arg(base_val, ParamConvention::MutBorrow);
+                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let callee = Callee::direct_with_args(setter, type_args, None);
+                self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);
+            }
+        }
+        Some(self.emit_literal(Immediate::unit()))
+    }
+
+    /// Arm 2: `globalComputedProp = v`
+    fn try_lower_def_setter(
+        &mut self,
+        value_id: HirExprId,
+        entity: kestrel_hecs::Entity,
+    ) -> Option<ValueId> {
+        let setter = self.ctx.find_setter_child(entity)?;
+        self.ctx.register_name(setter);
+        let rhs = self.lower_expr(value_id);
+        let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+        let callee = Callee::direct_with_args(setter, vec![], None);
+        self.emit_call_void(callee, vec![rhs_arg]);
+        Some(self.emit_literal(Immediate::unit()))
+    }
+
+    /// Arm 3: `h(i) = v` — subscript setter
+    fn try_lower_call_setter(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+        callee_expr: HirExprId,
+        args: &[HirCallArg],
+    ) -> Option<ValueId> {
+        let resolved = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&target_id))
+            .copied()?;
+        if self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Subscript) {
+            return None;
+        }
+
+        let setter = self.ctx.find_setter_child(resolved)?;
+        self.ctx.register_name(setter);
+        let is_static = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Static>(resolved)
+            .is_some();
+        let subscript_args: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a.value)).collect();
+        let rhs = self.lower_expr(value_id);
+
+        if is_static {
+            let self_type = self.type_from_type_ref(callee_expr);
+            let type_args = self.prepend_receiver_type_args(self_type, vec![]);
+            let mut call_args: Vec<CallArg> = subscript_args
+                .into_iter()
+                .map(|v| self.prepare_call_arg(v, ParamConvention::Borrow))
+                .collect();
+            call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
+            let callee = Callee::direct_with_args(setter, type_args, None);
+            self.emit_call_void(callee, call_args);
+        } else {
+            let receiver_ty = self.resolve_expr_type(callee_expr);
+            let receiver_val = self.lower_expr(callee_expr);
+            let type_args = self.resolve_type_args(target_id);
+
+            let mut call_args = vec![
+                self.prepare_call_arg(receiver_val, ParamConvention::MutBorrow),
+            ];
+            for v in subscript_args {
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
+
+            if let Some(protocol) = self.ctx.is_protocol_method(setter) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_setter_key(setter);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: receiver_ty,
+                    method_type_args: type_args,
+                };
+                self.emit_call_void(callee, call_args);
+            } else {
+                let type_args = self.prepend_receiver_type_args(receiver_ty, type_args);
+                let callee = Callee::direct_with_args(setter, type_args, None);
+                self.emit_call_void(callee, call_args);
+            }
+        }
+        Some(self.emit_literal(Immediate::unit()))
+    }
+
+    /// Arm 4: `obj.field(i) = v` — subscript setter through a struct field
+    fn try_lower_method_call_setter(
+        &mut self,
+        target_id: HirExprId,
+        value_id: HirExprId,
+        receiver: HirExprId,
+        method_name: &str,
+        args: &[HirCallArg],
+    ) -> Option<ValueId> {
+        let resolved = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&target_id))
+            .copied()?;
+        if self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Subscript) {
+            return None;
+        }
+
+        let receiver_ty = self.resolve_expr_type(receiver);
+        let receiver_entity = match self.ctx.module.ty_arena.get(receiver_ty) {
+            MirTy::Named { entity, .. } => Some(*entity),
+            _ => None,
+        };
+        let subscript_parent = self.ctx.world.parent_of(resolved);
+
+        // Only handle subscript-on-field — if the subscript belongs directly
+        // to the receiver type, the Call arm handles it.
+        if subscript_parent.is_none() || subscript_parent == receiver_entity {
+            return None;
+        }
+
+        // Skip computed-property subscript-set (stored fields only)
+        let prefix_entity = receiver_entity.and_then(|recv| {
+            self.ctx.world.children_of(recv).iter().copied().find(|&c| {
+                self.ctx.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                    && self
+                        .ctx
+                        .world
+                        .get::<kestrel_ast_builder::Name>(c)
+                        .is_some_and(|n| n.0 == method_name)
+            })
+        });
+        let is_computed_property = prefix_entity.is_some_and(|e| {
+            self.ctx.world.get::<Callable>(e).is_some()
+        });
+        if is_computed_property {
+            return None;
+        }
+
+        let setter = self.ctx.find_setter_child(resolved)?;
+        self.ctx.register_name(setter);
+
+        // Resolve field type and extract through it
+        let recv_entity = receiver_entity?;
+        let field_idx = self.ctx.resolve_field_idx(recv_entity, method_name)?;
+        let mut field_ty = self
+            .ctx
+            .module
+            .structs
+            .iter()
+            .find(|s| s.entity == recv_entity)
+            .and_then(|s| s.fields.get(field_idx.index()))
+            .map(|f| f.ty)?;
+
+        // Substitute struct type params → receiver's concrete type args
+        if let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(receiver_ty) {
+            let type_args = type_args.clone();
+            if let Some(sdef) = self
+                .ctx
+                .module
+                .structs
+                .iter()
+                .find(|s| s.entity == recv_entity)
+            {
+                let mut subst = kestrel_mir_3::SubstMap::new();
+                for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(tp.entity, arg);
+                }
+                field_ty =
+                    kestrel_mir_3::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+            }
+        }
+
+        // In OSSA, we lower the receiver and extract the field to get
+        // a value we can pass as MutBorrow to the setter.
+        let receiver_val = self.lower_expr(receiver);
+        let field_val = self.emit_struct_extract(receiver_val, field_idx, field_ty);
+
+        let subscript_args: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a.value)).collect();
+        let rhs = self.lower_expr(value_id);
+        let type_args = self.resolve_type_args(target_id);
+
+        let mut call_args = vec![
+            self.prepare_call_arg(field_val, ParamConvention::MutBorrow),
+        ];
+        for v in subscript_args {
+            call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+        }
+        call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
+
+        if let Some(protocol) = self.ctx.is_protocol_method(setter) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_setter_key(setter);
+            let callee = Callee::Witness {
+                protocol,
+                method: key,
+                self_type: field_ty,
+                method_type_args: type_args,
+            };
+            self.emit_call_void(callee, call_args);
+        } else {
+            let type_args = self.prepend_receiver_type_args(field_ty, type_args);
+            let callee = Callee::direct_with_args(setter, type_args, None);
+            self.emit_call_void(callee, call_args);
+        }
+        Some(self.emit_literal(Immediate::unit()))
+    }
+
+
+}
