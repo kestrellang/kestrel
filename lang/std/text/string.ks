@@ -745,15 +745,19 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     // ========================================================================
 
     /// Returns the concatenation `self + other`. Required by `Addable`.
-    ///
-    /// Builds a fresh string with both halves — avoids clone+append
-    /// which triggers a COW aliasing bug with the current Rvalue::Copy
-    /// codegen (bitwise copy without refcount bump).
-    public func add(other: String) -> String {
-        var result = String(capacity: self.byteCount + other.byteCount);
-        result.append(self);
-        result.append(other);
-        result
+    /// When `self` is uniquely owned (refcount 1), appends in place —
+    /// no allocation. Otherwise builds a fresh string with both halves.
+    public consuming func add(consuming other: String) -> String {
+        if self.storage.isUnique() {
+            var result = self;
+            result.append(other);
+            result
+        } else {
+            var result = String(capacity: self.byteCount + other.byteCount);
+            result.append(self);
+            result.append(other);
+            result
+        }
     }
 
     /// Returns true if both strings have the same byte sequence.

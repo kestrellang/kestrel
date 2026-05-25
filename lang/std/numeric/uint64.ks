@@ -398,13 +398,13 @@ public struct UInt64:
 
     /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
     /// `addSaturating` to clamp.
-    public func add(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.raw, other.raw)) }
+    public consuming func add(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.raw, other.raw)) }
 
     /// `self - other`, wrapping on overflow.
-    public func subtract(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.raw, other.raw)) }
+    public consuming func subtract(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.raw, other.raw)) }
 
     /// `self * other`, wrapping on overflow.
-    public func multiply(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.raw, other.raw)) }
+    public consuming func multiply(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.raw, other.raw)) }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -413,7 +413,7 @@ public struct UInt64:
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public func divide(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -421,7 +421,7 @@ public struct UInt64:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public func modulo(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_rem(self.raw, other.raw)) }
+    public consuming func modulo(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_unsigned_rem(self.raw, other.raw)) }
 
     
     
@@ -606,25 +606,25 @@ public struct UInt64:
     // ========================================================================
 
     /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-    public func bitwiseAnd(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_and(self.raw, other.raw)) }
+    public consuming func bitwiseAnd(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_and(self.raw, other.raw)) }
 
     /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-    public func bitwiseOr(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_or(self.raw, other.raw)) }
+    public consuming func bitwiseOr(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_or(self.raw, other.raw)) }
 
     /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-    public func bitwiseXor(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_xor(self.raw, other.raw)) }
+    public consuming func bitwiseXor(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_xor(self.raw, other.raw)) }
 
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-    public func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.raw)) }
+    public consuming func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.raw)) }
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: Int64) -> UInt64 { UInt64(raw: lang.i64_shl(self.raw, count.raw)) }
+    public consuming func shiftLeft(consuming by count: Int64) -> UInt64 { UInt64(raw: lang.i64_shl(self.raw, count.raw)) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: Int64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.raw, count.raw)) }
+    public consuming func shiftRight(consuming by count: Int64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.raw, count.raw)) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.

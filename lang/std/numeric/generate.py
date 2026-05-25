@@ -1040,7 +1040,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         negate_method = f"""/// Two's-complement negation. Wraps at the minimum value:
     /// `{type_name}.minValue.negate() == {type_name}.minValue`. Use
     /// `negateChecked` to surface the overflow.
-    public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
+    public consuming func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
         abs_method = f"""/// Absolute value. Wraps at the minimum value
     /// (`{type_name}.minValue.abs() == {type_name}.minValue`); use
     /// `absChecked` if that's a problem.

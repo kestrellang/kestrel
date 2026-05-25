@@ -394,14 +394,14 @@ public struct Float64:
 
     /// IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
     /// is inf.
-    public func add(other: Float64) -> Float64 { Float64(raw: lang.f64_add(self.raw, other.raw)) }
+    public consuming func add(consuming other: Float64) -> Float64 { Float64(raw: lang.f64_add(self.raw, other.raw)) }
 
     /// IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
-    public func subtract(other: Float64) -> Float64 { Float64(raw: lang.f64_sub(self.raw, other.raw)) }
+    public consuming func subtract(consuming other: Float64) -> Float64 { Float64(raw: lang.f64_sub(self.raw, other.raw)) }
 
     /// IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
     /// the result follows the usual algebra.
-    public func multiply(other: Float64) -> Float64 { Float64(raw: lang.f64_mul(self.raw, other.raw)) }
+    public consuming func multiply(consuming other: Float64) -> Float64 { Float64(raw: lang.f64_mul(self.raw, other.raw)) }
 
     /// IEEE 754 division. Unlike integer divide, dividing by zero does not
     /// trap — it produces ±infinity (or NaN for `0.0 / 0.0`).
@@ -418,11 +418,11 @@ public struct Float64:
     /// 1.0 / 0.0;                  // inf
     /// 0.0 / 0.0;                  // nan
     /// ```
-    public func divide(other: Float64) -> Float64 { Float64(raw: lang.f64_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: Float64) -> Float64 { Float64(raw: lang.f64_div(self.raw, other.raw)) }
 
     /// IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
     /// is `+0.0`.
-    public func negate() -> Float64 { Float64(raw: lang.f64_neg(self.raw)) }
+    public consuming func negate() -> Float64 { Float64(raw: lang.f64_neg(self.raw)) }
 
     // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS
