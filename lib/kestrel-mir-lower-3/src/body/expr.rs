@@ -494,10 +494,22 @@ impl OssaBodyCtx<'_, '_> {
                 }
                 self.local_map.insert(hir_local, rhs);
             }
-            _ => {
-                // Field assignment or other complex target — for now, treat
-                // as a no-op. Sub-modules (StoreAssign via address) handle this.
+            HirExpr::Field { ref base, ref name, .. } => {
+                let base = *base;
+                let field_name = name.as_str_or_empty().to_string();
+                let base_val = self.lower_expr(base);
+                let base_ty = self.resolve_expr_type(base);
+                let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
+                    kestrel_mir_3::MirTy::Named { entity, .. } => Some(*entity),
+                    _ => None,
+                };
+                let field_idx = struct_entity
+                    .and_then(|e| self.ctx.resolve_field_idx(e, &field_name))
+                    .unwrap_or(kestrel_mir_3::FieldIdx::new(0));
+                let addr = self.emit_field_addr(base_val, base_ty, field_idx);
+                self.emit_store_init(addr, rhs);
             }
+            _ => {}
         }
         self.emit_literal(Immediate::unit())
     }

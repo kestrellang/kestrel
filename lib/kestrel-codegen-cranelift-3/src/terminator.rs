@@ -18,6 +18,32 @@ fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
     vals.iter().map(|v| BlockArg::Value(*v)).collect()
 }
 
+/// Coerce values to match the target block's declared param types.
+fn coerce_block_args(
+    builder: &mut FunctionBuilder,
+    target: ir::Block,
+    vals: &[Value],
+) -> Vec<Value> {
+    let param_types: Vec<ir::Type> = builder.block_params(target)
+        .iter()
+        .map(|&p| builder.func.dfg.value_type(p))
+        .collect();
+
+    vals.iter().enumerate().map(|(i, &val)| {
+        let actual = builder.func.dfg.value_type(val);
+        let expected = param_types.get(i).copied().unwrap_or(actual);
+        if actual == expected {
+            val
+        } else if actual.bytes() < expected.bytes() && actual.is_int() && expected.is_int() {
+            builder.ins().uextend(expected, val)
+        } else if actual.bytes() > expected.bytes() && actual.is_int() && expected.is_int() {
+            builder.ins().ireduce(expected, val)
+        } else {
+            val
+        }
+    }).collect()
+}
+
 pub fn compile_terminator(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -28,7 +54,8 @@ pub fn compile_terminator(
         TerminatorKind::Jump { target, args } => {
             let block = fc.block_map[target.index()];
             let cl_args: Vec<Value> = args.iter().map(|v| fc.get_value(builder, *v)).collect();
-            let ba = to_block_args(&cl_args);
+            let coerced = coerce_block_args(builder, block, &cl_args);
+            let ba = to_block_args(&coerced);
             builder.ins().jump(block, &ba);
             Ok(())
         }
@@ -112,8 +139,10 @@ fn compile_branch(
 
     let then_vals: Vec<Value> = then_args.iter().map(|v| fc.get_value(builder, *v)).collect();
     let else_vals: Vec<Value> = else_args.iter().map(|v| fc.get_value(builder, *v)).collect();
-    let then_ba = to_block_args(&then_vals);
-    let else_ba = to_block_args(&else_vals);
+    let then_coerced = coerce_block_args(builder, then_cl, &then_vals);
+    let else_coerced = coerce_block_args(builder, else_cl, &else_vals);
+    let then_ba = to_block_args(&then_coerced);
+    let else_ba = to_block_args(&else_coerced);
 
     builder.ins().brif(cmp, then_cl, &then_ba, else_cl, &else_ba);
 
@@ -169,7 +198,8 @@ fn compile_switch(
     let wildcard_info = wildcard.map(|arm| {
         let cl_block = fc.block_map[arm.target.index()];
         let cl_args: Vec<Value> = arm.args.iter().map(|v| fc.get_value(builder, *v)).collect();
-        (cl_block, cl_args)
+        let coerced = coerce_block_args(builder, cl_block, &cl_args);
+        (cl_block, coerced)
     });
 
     let concrete_cases: Vec<_> = cases
@@ -189,7 +219,8 @@ fn compile_switch(
 
     for (i, arm) in concrete_cases.iter().enumerate() {
         let target = fc.block_map[arm.target.index()];
-        let target_args: Vec<Value> = arm.args.iter().map(|v| fc.get_value(builder, *v)).collect();
+        let raw_args: Vec<Value> = arm.args.iter().map(|v| fc.get_value(builder, *v)).collect();
+        let target_args = coerce_block_args(builder, target, &raw_args);
         let is_last = i == concrete_cases.len() - 1;
 
         match &arm.pattern {

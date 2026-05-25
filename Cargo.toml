@@ -16,6 +16,7 @@ kestrel-ownership = { path = "lib/kestrel-ownership" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
 kestrel-codegen-cranelift-2 = { path = "lib/kestrel-codegen-cranelift-2" }
+kestrel-codegen-cranelift-3 = { path = "lib/kestrel-codegen-cranelift-3" }
 kestrel-mir-2 = { path = "lib/kestrel-mir-2" }
 codespan-reporting = { workspace = true }
 clap = { workspace = true }

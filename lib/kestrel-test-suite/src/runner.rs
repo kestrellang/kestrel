@@ -34,11 +34,21 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift_2::CodegenOptions {
-        c_sources: stdlib_c_sources(),
-        ..Default::default()
+    let use_mir3 = std::env::var("KESTREL_MIR3").is_ok();
+    let link_result = if use_mir3 {
+        let options = kestrel_codegen_cranelift_3::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler.compile_and_link3(&exe_path, &options).map_err(|e| format!("{e}"))
+    } else {
+        let options = kestrel_codegen_cranelift_2::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler.compile_and_link2(&exe_path, &options).map_err(|e| format!("{e}"))
     };
-    if let Err(e) = compiler.compile_and_link2(&exe_path, &options) {
+    if let Err(e) = link_result {
         let mut msg = format!("codegen/link failed: {e}");
         let diagnostics = compiler.diagnostics();
         if !diagnostics.is_empty() {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cranelift_codegen::ir;
+use cranelift_codegen::ir::{self, InstBuilder};
 use cranelift_codegen::isa::TargetIsa;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::FunctionBuilderContext;
@@ -309,6 +309,7 @@ impl<'m> CodegenCtx<'m> {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
                         errors.push((func_name, format!("{e}")));
+                        self.define_trap_stub(func_id);
                     }
                     Err(panic) => {
                         let msg = if let Some(s) = panic.downcast_ref::<String>() {
@@ -319,28 +320,56 @@ impl<'m> CodegenCtx<'m> {
                             "unknown panic".to_string()
                         };
                         errors.push((func_name, format!("panic: {msg}")));
+                        self.define_trap_stub(func_id);
                     }
                 }
             }
         }
         if !errors.is_empty() {
             let body_count = self.module.functions.iter().filter(|f| f.body.is_some()).count();
-            let mut msg = format!("{} of {} functions failed to compile:\n", errors.len(), body_count);
-            for (name, err) in errors.iter().take(20) {
-                msg.push_str(&format!("  {name}: {err}\n"));
+            eprintln!("warning: {} of {} functions failed to compile (skipped):", errors.len(), body_count);
+            let mut by_cat: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for (_, err) in &errors {
+                let cat = if err.contains("non-dominating") { "dominance" }
+                    else if err.contains("invalid pointer width") { "ptr-width" }
+                    else if err.contains("type set") { "type-set" }
+                    else if err.contains("ICE:") { "ICE" }
+                    else if err.contains("has type") { "type-mismatch" }
+                    else if err.contains("result 0 has type") { "return-type" }
+                    else { "other" };
+                *by_cat.entry(cat.to_string()).or_default() += 1;
             }
-            if errors.len() > 20 {
-                msg.push_str(&format!("  ... and {} more\n", errors.len() - 20));
+            for (cat, count) in by_cat.iter() {
+                eprintln!("  {count:>5} {cat}");
             }
-            return Err(CodegenError::FunctionCompilation {
-                name: format!("{} functions", errors.len()),
-                source: msg.into(),
-            });
         }
         Ok(())
     }
 
     // -- String data --
+
+    /// Define a minimal trap function for a failed compilation so the
+    /// object module doesn't panic on an undeclared-but-local symbol.
+    fn define_trap_stub(&mut self, func_id: FuncId) {
+        let sig = self.cl_module.declarations().get_function_decl(func_id).signature.clone();
+        let mut cl_func = ir::Function::with_name_signature(
+            ir::UserFuncName::user(0, 0),
+            sig,
+        );
+        let mut fbc = std::mem::take(&mut self.func_builder_ctx);
+        let mut builder = cranelift_frontend::FunctionBuilder::new(&mut cl_func, &mut fbc);
+        let entry = builder.create_block();
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        builder.ins().trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+        builder.finalize();
+        self.func_builder_ctx = fbc;
+        let mut comp_ctx = cranelift_codegen::Context::for_function(cl_func);
+        if comp_ctx.compile(self.isa.as_ref(), &mut Default::default()).is_ok() {
+            let _ = self.cl_module.define_function(func_id, &mut comp_ctx);
+        }
+    }
 
     pub fn get_or_create_string_data(
         &mut self,

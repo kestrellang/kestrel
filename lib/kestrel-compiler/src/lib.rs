@@ -390,6 +390,64 @@ impl Compiler {
         Ok(mono)
     }
 
+    // ================================================================
+    // MIR-3 (OSSA) pipeline
+    // ================================================================
+
+    /// Lower to MIR-3 (OSSA), run the pass pipeline, and verify.
+    #[allow(clippy::result_large_err)]
+    pub fn lower_to_mir3(&self) -> Result<kestrel_mir_3::MirModule, kestrel_codegen_cranelift_3::CodegenError> {
+        let mut mir = kestrel_mir_lower_3::lower_module(self.world(), self.root());
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let mut next_entity = self.world().entity_count() as u32;
+        let errors = kestrel_mir_3::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        if !errors.is_empty() {
+            return Err(kestrel_codegen_cranelift_3::CodegenError::Unsupported(
+                format!("OSSA verification failed with {} error(s)", errors.len()),
+            ));
+        }
+        Ok(mir)
+    }
+
+    /// Lower to MIR-3, monomorphize, expand, compile, and link to an executable.
+    #[allow(clippy::result_large_err)]
+    pub fn compile_and_link3(
+        &self,
+        output_path: &Path,
+        options: &kestrel_codegen_cranelift_3::CodegenOptions,
+    ) -> Result<(), kestrel_codegen_cranelift_3::CodegenError> {
+        let mir = self.lower_to_mir3()?;
+        let mono = self.monomorphize_mir3(mir)?;
+        let target = kestrel_codegen::TargetConfig::host();
+        kestrel_codegen_cranelift_3::compile_and_link(&mono, &target, options, output_path)
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn monomorphize_mir3(
+        &self,
+        mir: kestrel_mir_3::MirModule,
+    ) -> Result<kestrel_mir_3::mono::MonoModule, kestrel_codegen_cranelift_3::CodegenError> {
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let generic_functions = mir.functions.clone();
+
+        let mut mono = kestrel_mir_3::mono::monomorphize(mir, &target).map_err(|errs| {
+            kestrel_codegen_cranelift_3::CodegenError::Unsupported(format!(
+                "monomorphization failed with {} error(s)", errs.len(),
+            ))
+        })?;
+
+        kestrel_mir_3::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
+
+        let mono_verify = kestrel_mir_3::mono::verify::verify_mono(&mono);
+        if !mono_verify.is_ok() {
+            return Err(kestrel_codegen_cranelift_3::CodegenError::Unsupported(
+                format!("post-mono verification failed with {} error(s)", mono_verify.errors.len()),
+            ));
+        }
+
+        Ok(mono)
+    }
+
     /// Load all .ks files from a directory, parse and build declarations.
     pub fn load_dir(&mut self, path: &Path) {
         let mut files: Vec<_> = Self::collect_ks_files(path);

@@ -11,6 +11,7 @@ use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
 use kestrel_codegen::TargetConfig as CodegenTargetConfig;
 use kestrel_codegen_cranelift::{self as cranelift_backend, CodegenOptions};
 use kestrel_codegen_cranelift_2 as cranelift2_backend;
+use kestrel_codegen_cranelift_3 as cranelift3_backend;
 use kestrel_compiler::{Compiler, Severity};
 use kestrel_compiler_driver::CompilerDriver;
 use kestrel_mir_lower::lower_module;
@@ -110,6 +111,10 @@ struct BuildArgs {
     /// Use the legacy MIR-1 codegen backend.
     #[arg(long = "mir-old")]
     mir_old: bool,
+
+    /// Use the experimental MIR-3 (OSSA) codegen backend.
+    #[arg(long = "mir3")]
+    mir3: bool,
 }
 
 #[derive(Args)]
@@ -188,7 +193,22 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    if args.mir_old {
+    if args.mir3 {
+        let options = cranelift3_backend::CodegenOptions {
+            opt_level: args.opt_level,
+            libraries: args.libraries,
+            library_paths: args.library_paths,
+            frameworks: args.frameworks,
+            c_sources,
+            ..Default::default()
+        };
+        let result = compiler.compile_and_link3(&output_path, &options);
+        driver.emit_diagnostics().ok();
+        result.map_err(|e| {
+            eprintln!("error: {}", e);
+            ExitCode::FAILURE
+        })?;
+    } else if args.mir_old {
         let mir = lower_with_ownership(compiler.world(), compiler.root());
         let target = globals.codegen_target()?;
         let options = CodegenOptions {

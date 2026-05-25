@@ -87,10 +87,14 @@ pub fn compile_function(
         }
         let cl_block = block_map[i];
         for param in &mir_block.params {
-            let repr = ctx.tc.repr(param.ty, &ctx.module.ty_arena, ctx.module);
-            let cl_ty = match repr {
-                TypeRepr::Scalar(t) => t,
-                TypeRepr::Aggregate { .. } | TypeRepr::Zst => ptr_ty,
+            let cl_ty = if param.ownership == kestrel_mir_3::value::Ownership::Guaranteed {
+                ptr_ty
+            } else {
+                let repr = ctx.tc.repr(param.ty, &ctx.module.ty_arena, ctx.module);
+                match repr {
+                    TypeRepr::Scalar(t) => t,
+                    TypeRepr::Aggregate { .. } | TypeRepr::Zst => ptr_ty,
+                }
             };
             let cl_val = builder.append_block_param(cl_block, cl_ty);
             value_map.insert(param.value, cl_val);
@@ -123,9 +127,28 @@ pub fn compile_function(
         let repr = ctx.tc.repr(param_ty, &ctx.module.ty_arena, ctx.module);
         let pass = abi::param_pass_mode(func.params[i].convention, repr, ptr_ty);
         match pass {
-            PassMode::ByVal(_) | PassMode::ByRef => {
+            PassMode::ByVal(_) => {
                 value_map.insert(value_id, block_params_entry[param_idx]);
                 param_idx += 1;
+            }
+            PassMode::ByRef => {
+                let ptr_val = block_params_entry[param_idx];
+                param_idx += 1;
+                let convention = func.params[i].convention;
+                // MutBorrow params are pointers the callee writes through.
+                // Keep the pointer as-is so FieldAddr/StoreInit work.
+                // Borrow params on scalars: load the scalar so OSSA ops
+                // (arithmetic, comparisons) work directly on the value.
+                if convention == kestrel_mir_3::ParamConvention::Borrow && repr.is_scalar() {
+                    if let TypeRepr::Scalar(t) = repr {
+                        let loaded = builder.ins().load(t, ir::MemFlags::new(), ptr_val, ir::immediates::Offset32::new(0));
+                        value_map.insert(value_id, loaded);
+                    } else {
+                        value_map.insert(value_id, ptr_val);
+                    }
+                } else {
+                    value_map.insert(value_id, ptr_val);
+                }
             }
             PassMode::Zst => {
                 let zero = builder.ins().iconst(ptr_ty, 0);

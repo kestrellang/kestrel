@@ -16,6 +16,7 @@ use kestrel_mir_3::mono::MonoModule;
 
 pub use error::CodegenError;
 
+#[derive(Clone)]
 pub struct CodegenOptions {
     pub opt_level: u8,
     pub libraries: Vec<String>,

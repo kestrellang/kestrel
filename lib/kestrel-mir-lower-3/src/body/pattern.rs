@@ -128,16 +128,18 @@ impl OssaBodyCtx<'_, '_> {
 
                     self.switch_to(true_block);
                     self.rebind_scope_values(&current_live, &true_params);
+                    let rebound = rebound_value(scrutinee, &current_live, &true_params);
                     self.emit_decision_tree_threaded(
-                        &cases[0].1, scrutinee, scrutinee_ty, arms, result_ty,
+                        &cases[0].1, rebound, scrutinee_ty, arms, result_ty,
                         join_block,
                     );
 
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(false_block);
                     self.rebind_scope_values(&current_live, &false_params);
+                    let rebound = rebound_value(scrutinee, &current_live, &false_params);
                     self.emit_decision_tree_threaded(
-                        &cases[1].1, scrutinee, scrutinee_ty, arms, result_ty,
+                        &cases[1].1, rebound, scrutinee_ty, arms, result_ty,
                         join_block,
                     );
                     return;
@@ -146,6 +148,7 @@ impl OssaBodyCtx<'_, '_> {
                 // String literal chain
                 if cases.iter().any(|(c, _)| matches!(c, Constructor::StringLiteral(_))) {
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
+                    let mut current_scrutinee = scrutinee;
                     for (ctor, subtree) in cases.iter() {
                         let Constructor::StringLiteral(lit) = ctor else { continue };
                         let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
@@ -166,18 +169,20 @@ impl OssaBodyCtx<'_, '_> {
 
                         self.switch_to(hit_block);
                         self.rebind_scope_values(&str_live, &hit_params);
+                        let rebound = rebound_value(current_scrutinee, &str_live, &hit_params);
                         self.emit_decision_tree_threaded(
-                            subtree, scrutinee, scrutinee_ty, arms, result_ty,
+                            subtree, rebound, scrutinee_ty, arms, result_ty,
                             join_block,
                         );
 
                         self.restore_scope(&str_snapshot);
                         self.switch_to(miss_block);
                         self.rebind_scope_values(&str_live, &miss_params);
+                        current_scrutinee = rebound_value(current_scrutinee, &str_live, &miss_params);
                     }
                     if let Some(def_tree) = default {
                         self.emit_decision_tree_threaded(
-                            def_tree, scrutinee, scrutinee_ty, arms, result_ty,
+                            def_tree, current_scrutinee, scrutinee_ty, arms, result_ty,
                             join_block,
                         );
                     } else {
@@ -215,8 +220,9 @@ impl OssaBodyCtx<'_, '_> {
                     if i > 0 { self.restore_scope(&branch_snapshot); }
                     self.switch_to(*block_id);
                     self.rebind_scope_values(&current_live, params);
+                    let rebound = rebound_value(scrutinee, &current_live, params);
                     self.emit_decision_tree_threaded(
-                        subtree, scrutinee, scrutinee_ty, arms, result_ty,
+                        subtree, rebound, scrutinee_ty, arms, result_ty,
                         join_block,
                     );
                 }
@@ -225,8 +231,9 @@ impl OssaBodyCtx<'_, '_> {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(def_block);
                     self.rebind_scope_values(&current_live, &def_params);
+                    let rebound = rebound_value(scrutinee, &current_live, &def_params);
                     self.emit_decision_tree_threaded(
-                        def_tree, scrutinee, scrutinee_ty, arms, result_ty,
+                        def_tree, rebound, scrutinee_ty, arms, result_ty,
                         join_block,
                     );
                 }
@@ -273,17 +280,19 @@ impl OssaBodyCtx<'_, '_> {
 
                         self.switch_to(success_block);
                         self.rebind_scope_values(&guard_live, &success_params);
+                        let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                         self.emit_decision_tree_threaded(
-                            success, scrutinee, scrutinee_ty, arms, result_ty,
+                            success, rebound, scrutinee_ty, arms, result_ty,
                             join_block,
                         );
 
                         self.restore_scope(&guard_snapshot);
                         self.switch_to(failure_block);
                         self.rebind_scope_values(&guard_live, &failure_params);
+                        let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
                         self.pop_scope();
                         self.emit_decision_tree_threaded(
-                            failure, scrutinee, scrutinee_ty, arms, result_ty,
+                            failure, rebound, scrutinee_ty, arms, result_ty,
                             join_block,
                         );
                         return;
@@ -303,6 +312,20 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
+}
+
+/// Find the rebound version of `val` after a rebind from `old` to `new`.
+/// If `val` appears in `old`, return the corresponding `new` entry;
+/// otherwise return `val` unchanged.
+fn rebound_value(val: ValueId, old: &[ValueId], new: &[ValueId]) -> ValueId {
+    if let Some(pos) = old.iter().position(|&v| v == val) {
+        new[pos]
+    } else {
+        val
+    }
+}
+
+impl OssaBodyCtx<'_, '_> {
     /// Emit SSA bindings for a matched arm.
     ///
     /// Each binding's access path is applied to the scrutinee via consuming
@@ -382,6 +405,7 @@ impl OssaBodyCtx<'_, '_> {
                             self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
                                 result, operand: current, variant: variant_idx, field: field_idx,
                             });
+                            self.track_none(result);
                             current = result;
                         }
                         current_ty = field_ty;
@@ -395,6 +419,7 @@ impl OssaBodyCtx<'_, '_> {
                             self.push_inst(kestrel_mir_3::inst::InstKind::StructExtract {
                                 result, operand: current, field: field_idx,
                             });
+                            self.track_none(result);
                             current = result;
                         }
                         current_ty = field_ty;
@@ -415,6 +440,7 @@ impl OssaBodyCtx<'_, '_> {
                             self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
                                 result, operand: current, variant: variant_idx, field: field_idx,
                             });
+                            self.track_none(result);
                             current = result;
                         }
                         current_ty = field_ty;
@@ -427,6 +453,7 @@ impl OssaBodyCtx<'_, '_> {
                             self.push_inst(kestrel_mir_3::inst::InstKind::TupleExtract {
                                 result, operand: current, index: *i as u32,
                             });
+                            self.track_none(result);
                             current = result;
                         }
                         current_ty = elem_ty;

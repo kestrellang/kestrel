@@ -83,12 +83,14 @@ fn synthesize_init_thunk(ctx: &mut LowerCtx, static_entity: Entity, static_ty: T
 }
 
 /// Create the master `__kestrel_init_statics()` that calls each thunk
-/// and assigns the result to the corresponding global.
-///
-/// TODO: This function currently creates an empty OssaBody stub.
-/// The full OSSA instruction emission will be implemented when the
-/// body lowering module is complete.
+/// and stores the result into the corresponding global.
 fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) -> usize {
+    use kestrel_mir_3::callee::Callee;
+    use kestrel_mir_3::inst::{InstKind, Instruction};
+    use kestrel_mir_3::terminator::{Terminator, TerminatorKind};
+    use kestrel_mir_3::value::{Ownership, ValueDef};
+    use kestrel_mir_3::Immediate;
+
     let entity = ctx.next_synthetic_entity();
     ctx.module.register_name(entity, INIT_STATICS_NAME);
 
@@ -98,29 +100,75 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
     let func_id = ctx.module.add_function(def);
     let func_idx = func_id.index();
 
-    // TODO: Emit OSSA instructions for each thunk call + global store.
-    // The old MIR-2 version used Statement/Rvalue/Place which don't exist
-    // in the OSSA model. This needs to use the OSSA builder once the body
-    // module is complete.
-    let ossa_body = OssaBody::new();
-    ctx.module.functions[func_idx].body = Some(ossa_body);
+    let mut body = OssaBody::new();
+    let entry = body.alloc_block();
+    body.entry = entry;
 
+    for &(static_entity, thunk_func_idx, static_ty) in thunks {
+        let thunk_entity = ctx.module.functions[thunk_func_idx].entity;
+
+        // tmp = call __init$...()
+        let ownership = kestrel_mir_3::body::ownership_for_type(
+            static_ty, &ctx.module.ty_arena, &ctx.module,
+        );
+        let tmp = body.alloc_value(match ownership {
+            Ownership::Owned => ValueDef::owned(static_ty),
+            _ => ValueDef::none(static_ty),
+        });
+        body.block_mut(entry).insts.push(Instruction::new(InstKind::Call {
+            result: Some(tmp),
+            callee: Callee::direct(thunk_entity),
+            args: vec![],
+        }));
+
+        // addr = global_ref static_entity
+        let ptr_ty = ctx.module.ty_arena.pointer(static_ty);
+        let addr = body.alloc_value(ValueDef::none(ptr_ty));
+        body.block_mut(entry).insts.push(Instruction::new(
+            InstKind::GlobalRef { result: addr, entity: static_entity },
+        ));
+
+        // store_init addr, tmp
+        body.block_mut(entry).insts.push(Instruction::new(
+            InstKind::StoreInit { address: addr, value: tmp },
+        ));
+    }
+
+    // return ()
+    let unit_val = body.alloc_value(ValueDef::none(unit_ty));
+    body.block_mut(entry).insts.push(Instruction::new(
+        InstKind::Literal { result: unit_val, value: Immediate::unit() },
+    ));
+    body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
+
+    ctx.module.functions[func_idx].body = Some(body);
     func_idx
 }
 
 /// Prepend a call to the init function at the start of `main`'s entry block.
-///
-/// TODO: This needs OSSA-model instruction insertion once the body module
-/// is complete.
 fn inject_init_call_into_main(ctx: &mut LowerCtx, init_func_idx: usize) {
-    let _main_idx = ctx
+    use kestrel_mir_3::callee::Callee;
+    use kestrel_mir_3::inst::{InstKind, Instruction};
+
+    let main_idx = ctx
         .module
         .functions
         .iter()
         .enumerate()
         .find(|(_, f)| f.name.split('.').next_back() == Some("main"))
         .map(|(i, _)| i);
-    // TODO: Insert call instruction into main's entry block using OSSA model
+    let Some(main_idx) = main_idx else { return };
+
+    let init_entity = ctx.module.functions[init_func_idx].entity;
+    let main_func = &mut ctx.module.functions[main_idx];
+    let Some(body) = main_func.body.as_mut() else { return };
+
+    let call = Instruction::new(InstKind::Call {
+        result: None,
+        callee: Callee::direct(init_entity),
+        args: vec![],
+    });
+    body.block_mut(body.entry).insts.insert(0, call);
 }
 
 fn extract_file_constant(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<FileConstantData> {

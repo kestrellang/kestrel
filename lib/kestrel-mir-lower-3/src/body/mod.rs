@@ -33,6 +33,9 @@ pub(crate) struct LoopInfo {
     pub exit_block: BlockId,
     pub label: Option<String>,
     pub scope_depth: usize,
+    /// Number of slots in the loop's tracker. Break takes the first
+    /// N values from the active tracker to thread to the exit block.
+    pub tracker_len: usize,
 }
 
 pub(crate) enum HirRef<'a> {
@@ -70,6 +73,9 @@ pub(crate) struct ScopeFrame {
     /// @none values (trivial types) that must also be threaded through
     /// block params across control flow boundaries (loops, if/else).
     pub none_values: Vec<ValueId>,
+    /// All tracked values in insertion order — used by `all_live_tracked()`
+    /// to produce a consistent ordering across control flow boundaries.
+    pub all_values: Vec<(ValueId, Ownership)>,
 }
 
 /// Snapshot of the scope stack + local_map for save/restore across
@@ -78,6 +84,7 @@ pub(crate) struct ScopeFrame {
 pub(crate) struct ScopeSnapshot {
     pub scopes: Vec<Vec<ValueId>>,
     pub none_scopes: Vec<Vec<ValueId>>,
+    pub all_scopes: Vec<Vec<(ValueId, Ownership)>>,
     pub local_map: HashMap<HirLocalId, ValueId>,
     pub tracker: LiveTracker,
 }
@@ -183,18 +190,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.current_block = Some(entry);
         self.push_scope();
 
-        // Create ValueIds for all HIR locals (params first)
-        for (i, (hir_id, local)) in locals.iter().enumerate() {
+        // Only pre-allocate function parameters. Non-param locals get their
+        // ValueId when their let-statement or pattern binding fires.
+        // This prevents orphan ValueIds (with no defining instruction) from
+        // leaking through scope snapshots across match/if-let boundaries.
+        for (i, (hir_id, _local)) in locals.iter().enumerate() {
+            if i >= params_len { break; }
             let ty = self.resolve_local_type(*hir_id);
             let ownership = self.ownership_for(ty);
             let val = self.alloc_value(ty, ownership);
             self.local_map.insert(*hir_id, val);
-            if i < params_len {
-                if ownership == Ownership::Owned {
-                    self.track_owned(val);
-                } else if ownership == Ownership::None {
-                    self.track_none(val);
-                }
+            if ownership == Ownership::Owned {
+                self.track_owned(val);
+            } else if ownership == Ownership::None {
+                self.track_none(val);
             }
         }
         self.body.param_count = params_len;
@@ -283,11 +292,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.ctx.module.ty_arena.error()
     }
 
-    pub fn map_local(&self, hir_id: HirLocalId) -> ValueId {
-        self.local_map
-            .get(&hir_id)
-            .copied()
-            .unwrap_or_else(|| panic!("ICE: HIR local {:?} has no OSSA mapping", hir_id))
+    pub fn map_local(&mut self, hir_id: HirLocalId) -> ValueId {
+        if let Some(&val) = self.local_map.get(&hir_id) {
+            return val;
+        }
+        // Lazy allocation for locals referenced before their let-statement
+        // (e.g. deinit of an uninitialized local, closure captures).
+        let ty = self.resolve_local_type(hir_id);
+        let ownership = self.ownership_for(ty);
+        let val = self.alloc_value(ty, ownership);
+        self.local_map.insert(hir_id, val);
+        val
     }
 
     pub fn is_copy_type(&self, ty: TyId) -> bool {
@@ -339,18 +354,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn push_scope(&mut self) {
-        self.scope_stack.push(ScopeFrame { owned_values: Vec::new(), none_values: Vec::new() });
+        self.scope_stack.push(ScopeFrame {
+            owned_values: Vec::new(),
+            none_values: Vec::new(),
+            all_values: Vec::new(),
+        });
     }
 
     pub fn track_owned(&mut self, value: ValueId) {
         if let Some(frame) = self.scope_stack.last_mut() {
             frame.owned_values.push(value);
+            frame.all_values.push((value, Ownership::Owned));
         }
     }
 
     pub fn track_none(&mut self, value: ValueId) {
         if let Some(frame) = self.scope_stack.last_mut() {
             frame.none_values.push(value);
+            frame.all_values.push((value, Ownership::None));
         }
     }
 
@@ -359,10 +380,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         for scope in self.scope_stack.iter_mut().rev() {
             if let Some(pos) = scope.owned_values.iter().position(|&v| v == value) {
                 scope.owned_values.remove(pos);
+                scope.all_values.retain(|&(v, _)| v != value);
                 return;
             }
             if let Some(pos) = scope.none_values.iter().position(|&v| v == value) {
                 scope.none_values.remove(pos);
+                scope.all_values.retain(|&(v, _)| v != value);
                 return;
             }
         }
@@ -424,16 +447,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// All values that need threading through block params: @owned + @none locals.
+    /// Uses insertion order (via `all_values`) so that the ordering is consistent
+    /// across nested control flow boundaries.
     pub fn all_live_tracked(&self) -> Vec<(ValueId, TyId, Ownership)> {
         self.scope_stack
             .iter()
             .flat_map(|s| {
-                s.owned_values.iter()
-                    .map(|&v| (v, self.body.value(v).ty, Ownership::Owned))
-                    .chain(
-                        s.none_values.iter()
-                            .map(|&v| (v, self.body.value(v).ty, Ownership::None))
-                    )
+                s.all_values.iter()
+                    .map(|&(v, own)| (v, self.body.value(v).ty, own))
             })
             .collect()
     }
@@ -480,6 +501,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         ScopeSnapshot {
             scopes: self.scope_stack.iter().map(|s| s.owned_values.clone()).collect(),
             none_scopes: self.scope_stack.iter().map(|s| s.none_values.clone()).collect(),
+            all_scopes: self.scope_stack.iter().map(|s| s.all_values.clone()).collect(),
             local_map: self.local_map.clone(),
             tracker: self.tracker.clone(),
         }
@@ -493,6 +515,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             frame.owned_values = snapshot.scopes[i].clone();
             if let Some(none) = snapshot.none_scopes.get(i) {
                 frame.none_values = none.clone();
+            }
+            if let Some(all) = snapshot.all_scopes.get(i) {
+                frame.all_values = all.clone();
             }
         }
         self.local_map = snapshot.local_map.clone();
@@ -511,6 +536,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             for none_val in scope.none_values.iter_mut() {
                 if let Some(pos) = old_vals.iter().position(|&v| v == *none_val) {
                     *none_val = new_vals[pos];
+                }
+            }
+            for entry in scope.all_values.iter_mut() {
+                if let Some(pos) = old_vals.iter().position(|&v| v == entry.0) {
+                    entry.0 = new_vals[pos];
                 }
             }
         }

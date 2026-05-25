@@ -132,8 +132,25 @@ pub fn compile_inst(
         InstKind::Discriminant { result, operand } => {
             let base = fc.get_value(builder, *operand);
             let operand_ty = fc.body.values[operand.index()].ty;
+            let repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let disc_width = discriminant_width(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
-            let val = builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0));
+            let val = match repr {
+                TypeRepr::Scalar(_) => {
+                    // Scalar enum: the value IS the discriminant, just narrow
+                    let actual = builder.func.dfg.value_type(base);
+                    if actual == disc_width {
+                        base
+                    } else if actual.bytes() > disc_width.bytes() {
+                        builder.ins().ireduce(disc_width, base)
+                    } else {
+                        builder.ins().uextend(disc_width, base)
+                    }
+                }
+                _ => {
+                    // Aggregate enum: load discriminant from offset 0
+                    builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0))
+                }
+            };
             fc.map_value(builder, *result, val);
         }
 
@@ -959,8 +976,11 @@ fn compile_resolved_call(
             }
             PassMode::ByRef => {
                 let actual_ty = builder.func.dfg.value_type(val);
-                if actual_ty != ptr_ty {
-                    // Value is a scalar but we need a pointer; spill to stack
+                if repr.is_scalar() || actual_ty != ptr_ty {
+                    // Scalar values must be spilled to the stack so the
+                    // callee receives a pointer. On 64-bit targets, i64
+                    // scalars have the same Cranelift type as pointers,
+                    // so we check the MIR repr to detect them.
                     let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
                     mem::store_to_repr(builder, repr, slot, val);
                     call_args.push(slot);

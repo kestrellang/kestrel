@@ -109,11 +109,15 @@ impl OssaBodyCtx<'_, '_> {
 
     pub fn lower_loop(&mut self, body: &HirBlock, label: Option<&str>) -> ValueId {
         let saved_tracker = self.tracker.clone();
+        let saved_snapshot = self.snapshot_scope();
         self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
         let initial_args = self.tracker.values();
+        let descs = self.tracker.descs();
 
-        let (header_block, header_params) = self.new_block_with_params(&self.tracker.descs());
-        let exit_block = self.new_block();
+        let (header_block, header_params) = self.new_block_with_params(&descs);
+        // Exit block gets the same params as the header so that values
+        // live before the loop are properly threaded through break sites.
+        let (exit_block, exit_params) = self.new_block_with_params(&descs);
 
         if !self.is_terminated() {
             for &v in &initial_args {
@@ -126,7 +130,6 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&initial_args, &header_params);
         // initial_args were consumed before the jump, so rebind won't
         // find them in scope. Track the header params fresh.
-        let descs = self.tracker.descs();
         for (i, &param) in header_params.iter().enumerate() {
             if descs[i].1 == Ownership::Owned {
                 self.track_owned(param);
@@ -141,15 +144,13 @@ impl OssaBodyCtx<'_, '_> {
             exit_block,
             label: label.map(|s| s.to_string()),
             scope_depth,
+            tracker_len: self.tracker.len(),
         });
 
         self.push_scope();
         let _ = self.lower_hir_block(body);
 
         if !self.is_terminated() {
-            // Tracker has the current versions of header values,
-            // updated by nested if/match merges via rebind_scope_values
-            // and by variable reassignment via tracker.rebind.
             let back_edge_vals = self.tracker.values();
             self.destroy_scope_except(&back_edge_vals);
             self.pop_scope();
@@ -163,7 +164,12 @@ impl OssaBodyCtx<'_, '_> {
 
         self.loop_stack.pop();
         self.switch_to(exit_block);
+        // Restore scope/local_map to the pre-loop state so that
+        // rebind_scope_values can find the initial_args values.
+        self.restore_scope(&saved_snapshot);
+        self.rebind_scope_values(&initial_args, &exit_params);
         self.tracker = saved_tracker;
+        self.tracker.rebind(&initial_args, &exit_params);
         self.emit_literal(Immediate::unit())
     }
 
@@ -175,20 +181,16 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(info) = self.find_loop(label) {
             let exit = info.exit_block;
             let depth = info.scope_depth;
-            // Destroy inner scopes (loop body down to loop scope)
-            self.destroy_scopes_to_depth(depth, &[]);
-            // Destroy outer tracked values — the break exits the block,
-            // so these values won't be cleaned up by normal scope exit.
-            // The verifier checks each block independently: values
-            // defined here must be consumed before the terminator.
-            let outer_to_destroy: Vec<ValueId> = self.scope_stack[..depth]
-                .iter()
-                .flat_map(|s| s.owned_values.iter().rev().copied())
-                .collect();
-            for value in outer_to_destroy {
-                self.push_inst(kestrel_mir_3::inst::InstKind::DestroyValue { operand: value });
-            }
-            self.emit_jump(exit, vec![]);
+            let tracker_len = info.tracker_len;
+            // The active tracker (possibly the loop's or a nested if's)
+            // starts with the loop's tracked values in its first N slots.
+            // These are the values that need to be threaded to the exit block.
+            let all_vals = self.tracker.values();
+            let exit_vals: Vec<ValueId> = all_vals[..tracker_len.min(all_vals.len())].to_vec();
+            // Destroy inner scopes (loop body + any nested ones),
+            // keeping the values we're threading to the exit block.
+            self.destroy_scopes_to_depth(depth, &exit_vals);
+            self.emit_jump(exit, exit_vals);
         }
         self.emit_literal(Immediate::unit())
     }
@@ -218,37 +220,6 @@ impl OssaBodyCtx<'_, '_> {
             Some(label) => self.loop_stack.iter().rev()
                 .find(|l| l.label.as_deref() == Some(label)),
             None => self.loop_stack.last(),
-        }
-    }
-
-    /// Get the current version of each value in `original`. The values
-    /// may have been rebound during arm lowering (via assign).
-    pub(crate) fn current_live_matching(&self, original: &[ValueId]) -> Vec<ValueId> {
-        original.iter().map(|&orig| {
-            // Check if the value is still tracked in any scope
-            for scope in self.scope_stack.iter().rev() {
-                if scope.owned_values.contains(&orig) {
-                    return orig;
-                }
-            }
-            // Value was consumed during the arm — it's no longer live.
-            // The arm must have destroyed it, so we need to handle this.
-            // For now, return the original — the verifier will catch
-            // any inconsistency.
-            orig
-        }).collect()
-    }
-
-    pub(crate) fn collect_current_for(&self, header_params: &[ValueId]) -> Vec<ValueId> {
-        let all_tracked = self.all_live_tracked();
-        if all_tracked.len() >= header_params.len() {
-            all_tracked[..header_params.len()].iter().map(|&(v, _, _)| v).collect()
-        } else {
-            let mut vals: Vec<_> = all_tracked.iter().map(|&(v, _, _)| v).collect();
-            while vals.len() < header_params.len() {
-                vals.push(header_params[vals.len()]);
-            }
-            vals
         }
     }
 
