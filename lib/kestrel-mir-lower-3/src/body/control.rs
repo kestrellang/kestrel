@@ -27,32 +27,25 @@ impl OssaBodyCtx<'_, '_> {
         let result_ty = self.resolve_expr_type(expr_id);
         let result_ownership = self.ownership_for(result_ty);
 
-        // Snapshot live @owned values AFTER condition eval, right before branch
-        let live_before: Vec<(ValueId, TyId)> = self.all_live_owned();
-        let live_vals: Vec<ValueId> = live_before.iter().map(|&(v, _)| v).collect();
-        let arm_descs: Vec<(TyId, Ownership)> = live_before
-            .iter()
-            .map(|&(_, ty)| (ty, Ownership::Owned))
-            .collect();
+        // Save outer tracker, set new one for this region
+        let saved_tracker = self.tracker.clone();
+        self.tracker = super::LiveTracker::from_live(&self.all_live_owned());
+        let live_vals = self.tracker.values();
+        let descs = self.tracker.descs();
 
-        // Arm blocks receive live @owned values as params
-        let (then_block, then_params) = self.new_block_with_params(&arm_descs);
-        let (else_block, else_params) = self.new_block_with_params(&arm_descs);
-
-        // Merge block: [result, ...live_owned]
+        let (then_block, then_params) = self.new_block_with_params(&descs);
+        let (else_block, else_params) = self.new_block_with_params(&descs);
         let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, result_ownership)];
-        merge_descs.extend(&arm_descs);
+        merge_descs.extend(&descs);
         let (merge_block, merge_param_vals) = self.new_block_with_params(&merge_descs);
         let result_param = merge_param_vals[0];
 
-        // Branch forwards live values to both arms (consumes them from bb0)
         self.emit_branch(
             cond_val,
             then_block, live_vals.clone(),
             else_block, live_vals.clone(),
         );
 
-        // Save scope state before arms — both arms start from the same state
         let snapshot = self.snapshot_scope();
 
         // -- Then arm --
@@ -63,7 +56,7 @@ impl OssaBodyCtx<'_, '_> {
         if !self.is_terminated() {
             self.destroy_scope_except(&[then_val]);
             let mut args = vec![then_val];
-            args.extend(self.collect_outer_live(snapshot.scopes.len()));
+            args.extend(self.tracker.values());
             self.emit_jump(merge_block, args);
         }
         self.pop_scope();
@@ -78,18 +71,18 @@ impl OssaBodyCtx<'_, '_> {
             if !self.is_terminated() {
                 self.destroy_scope_except(&[else_val]);
                 let mut args = vec![else_val];
-                args.extend(self.collect_outer_live(snapshot.scopes.len()));
+                args.extend(self.tracker.values());
                 self.emit_jump(merge_block, args);
             }
         } else {
             let unit = self.emit_literal(Immediate::unit());
             let mut args = vec![unit];
-            args.extend(self.collect_outer_live(snapshot.scopes.len()));
+            args.extend(self.tracker.values());
             self.emit_jump(merge_block, args);
         }
         self.pop_scope();
 
-        // -- Merge: rebind to merge block params --
+        // -- Merge --
         self.restore_scope(&snapshot);
         self.switch_to(merge_block);
         let merge_live = &merge_param_vals[1..];
@@ -98,6 +91,9 @@ impl OssaBodyCtx<'_, '_> {
             self.track_owned(result_param);
         }
 
+        // Restore outer tracker with current values propagated
+        self.tracker = saved_tracker;
+        self.tracker.rebind(&live_vals, merge_live);
         result_param
     }
 
@@ -106,28 +102,22 @@ impl OssaBodyCtx<'_, '_> {
     // ================================================================
 
     pub fn lower_loop(&mut self, body: &HirBlock, label: Option<&str>) -> ValueId {
-        let live_owned = self.all_live_owned();
+        let saved_tracker = self.tracker.clone();
+        self.tracker = super::LiveTracker::from_live(&self.all_live_owned());
+        let initial_args = self.tracker.values();
 
-        let param_descs: Vec<_> = live_owned
-            .iter()
-            .map(|&(_, ty)| (ty, Ownership::Owned))
-            .collect();
-        let (header_block, header_params) = self.new_block_with_params(&param_descs);
+        let (header_block, header_params) = self.new_block_with_params(&self.tracker.descs());
         let exit_block = self.new_block();
 
-        let initial_args: Vec<ValueId> = live_owned.iter().map(|&(v, _)| v).collect();
         if !self.is_terminated() {
-            // Consume the values being forwarded to header
             for &v in &initial_args {
                 self.consume(v);
             }
             self.emit_jump(header_block, initial_args.clone());
         }
 
-        // Switch to header — the block params are the new owners
         self.switch_to(header_block);
         self.rebind_scope_values(&initial_args, &header_params);
-        // Track the header params as the new owned values
         for &param in &header_params {
             self.track_owned(param);
         }
@@ -145,18 +135,20 @@ impl OssaBodyCtx<'_, '_> {
 
         if !self.is_terminated() {
             self.exit_scope();
-            let current_vals = self.collect_current_for(&header_params);
-            // Consume the values being forwarded back to header
-            for &v in &current_vals {
+            // Tracker has the current versions of header values,
+            // updated by nested if/match merges via rebind_scope_values.
+            let back_edge_vals = self.tracker.values();
+            for &v in &back_edge_vals {
                 self.consume(v);
             }
-            self.emit_jump(header_block, current_vals);
+            self.emit_jump(header_block, back_edge_vals);
         } else {
             self.pop_scope();
         }
 
         self.loop_stack.pop();
         self.switch_to(exit_block);
+        self.tracker = saved_tracker;
         self.emit_literal(Immediate::unit())
     }
 

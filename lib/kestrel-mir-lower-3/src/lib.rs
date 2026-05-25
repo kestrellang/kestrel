@@ -375,14 +375,15 @@ mod tests {
                     else { format!("other: {}", &e.message[..e.message.len().min(60)]) }
                 }).collect();
 
-                static DUMP_CATS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
-                let seen = DUMP_CATS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+                static DUMP_CATS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, usize>>> = std::sync::OnceLock::new();
+                let seen = DUMP_CATS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
                 let mut lock = seen.lock().unwrap();
                 for cat in &cats_seen {
-                    if !lock.contains(cat) && body.blocks.len() <= 10 {
-                        lock.insert(cat.clone());
-                        eprintln!("\n--- EXAMPLE [{}]: {} ({} blocks, {} errors) ---",
-                            cat, func.name, body.blocks.len(), errors.len());
+                    let count = lock.entry(cat.clone()).or_insert(0);
+                    if *count < 2 && body.blocks.len() <= 10 {
+                        *count += 1;
+                        eprintln!("\n--- EXAMPLE [{}] #{}: {} ({} blocks, {} errors) ---",
+                            cat, count, func.name, body.blocks.len(), errors.len());
                         eprintln!("{}", kestrel_mir_3::display::display_body(body, &mir));
                         for e in &errors {
                             eprintln!("  ERR {:?} inst={:?}: {}", e.block, e.inst, e.message);

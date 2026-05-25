@@ -75,6 +75,48 @@ pub(crate) struct ScopeFrame {
 pub(crate) struct ScopeSnapshot {
     pub scopes: Vec<Vec<ValueId>>,
     pub local_map: HashMap<HirLocalId, ValueId>,
+    pub tracker: LiveTracker,
+}
+
+/// Tracks a fixed set of @owned values across control flow merges.
+///
+/// Created at the entry of an if/match with the current live @owned values.
+/// The slot count never changes — only the current ValueId per slot updates
+/// when values are rebound at block boundaries. This ensures the merge block
+/// always receives the correct number of arguments, regardless of what values
+/// are created or consumed during arm execution.
+#[derive(Clone)]
+pub(crate) struct LiveTracker {
+    slots: Vec<(ValueId, TyId)>,
+}
+
+impl LiveTracker {
+    pub fn from_live(live: &[(ValueId, TyId)]) -> Self {
+        Self { slots: live.to_vec() }
+    }
+
+    /// Current values to forward as block args.
+    pub fn values(&self) -> Vec<ValueId> {
+        self.slots.iter().map(|&(v, _)| v).collect()
+    }
+
+    /// Type descriptors for creating block params.
+    pub fn descs(&self) -> Vec<(TyId, Ownership)> {
+        self.slots.iter().map(|&(_, ty)| (ty, Ownership::Owned)).collect()
+    }
+
+    /// Update slots when entering a new block whose params replace old values.
+    pub fn rebind(&mut self, old: &[ValueId], new: &[ValueId]) {
+        for slot in &mut self.slots {
+            if let Some(pos) = old.iter().position(|&v| v == slot.0) {
+                slot.0 = new[pos];
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
 }
 
 pub(crate) struct OssaBodyCtx<'a, 'w> {
@@ -89,6 +131,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub local_map: HashMap<HirLocalId, ValueId>,
     pub loop_stack: Vec<LoopInfo>,
     pub scope_stack: Vec<ScopeFrame>,
+    /// Shared tracker for threading @owned values through control flow.
+    /// Updated by rebind_scope_values, saved/restored with snapshots.
+    pub tracker: LiveTracker,
     pub temp_counter: u32,
     pub current_span: Option<Span>,
 }
@@ -114,6 +159,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             local_map: HashMap::new(),
             loop_stack: Vec::new(),
             scope_stack: Vec::new(),
+            tracker: LiveTracker::from_live(&[]),
             temp_counter: 0,
             current_span: None,
         }
@@ -361,7 +407,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// Collect live @owned values from outer scopes (below `depth`).
-    /// Used by if/match arms to forward outer values to merge blocks.
     pub fn collect_outer_live(&self, depth: usize) -> Vec<ValueId> {
         self.scope_stack[..depth]
             .iter()
@@ -370,23 +415,54 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
-    /// Save scope stack + local_map for restoration between parallel arms.
+    /// Find the current scope-tracked values that correspond to the given
+    /// original values. Works by matching position: for each original value,
+    /// finds the value at the same scope frame + index position.
+    ///
+    /// This handles the case where nested if/match rebound values via
+    /// merge block params — the scope positions stay stable but the
+    /// ValueIds change.
+    pub fn find_current_versions(&self, originals: &[ValueId]) -> Vec<ValueId> {
+        // Build a flat list of all scope values in order
+        let flat: Vec<ValueId> = self.scope_stack
+            .iter()
+            .flat_map(|s| &s.owned_values)
+            .copied()
+            .collect();
+
+        if flat.len() >= originals.len() {
+            // Take the first N values — they correspond positionally
+            flat[..originals.len()].to_vec()
+        } else {
+            // Fewer values than expected — pad with originals as fallback
+            let mut result = flat;
+            while result.len() < originals.len() {
+                result.push(originals[result.len()]);
+            }
+            result
+        }
+    }
+
+    /// Save scope stack + local_map + tracker for restoration between parallel arms.
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
             scopes: self.scope_stack.iter().map(|s| s.owned_values.clone()).collect(),
             local_map: self.local_map.clone(),
+            tracker: self.tracker.clone(),
         }
     }
 
-    /// Restore scope stack + local_map from a snapshot.
+    /// Restore scope stack + local_map + tracker from a snapshot.
     pub fn restore_scope(&mut self, snapshot: &ScopeSnapshot) {
         for (frame, saved) in self.scope_stack.iter_mut().zip(snapshot.scopes.iter()) {
             frame.owned_values = saved.clone();
         }
         self.local_map = snapshot.local_map.clone();
+        self.tracker = snapshot.tracker.clone();
     }
 
-    /// Replace scope-tracked values when entering a loop header.
+    /// Replace scope-tracked values when entering a new block.
+    /// Updates scope stack, local_map, AND the shared LiveTracker.
     pub fn rebind_scope_values(&mut self, old_vals: &[ValueId], new_vals: &[ValueId]) {
         for scope in self.scope_stack.iter_mut() {
             for owned in scope.owned_values.iter_mut() {
@@ -395,12 +471,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             }
         }
-        // Also update local_map entries that point to old values
         for (_, val) in self.local_map.iter_mut() {
             if let Some(pos) = old_vals.iter().position(|&v| v == *val) {
                 *val = new_vals[pos];
             }
         }
+        self.tracker.rebind(old_vals, new_vals);
     }
 
     // ================================================================
@@ -489,6 +565,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_struct(&mut self, ty: TyId, fields: Vec<(FieldIdx, ValueId)>) -> ValueId {
         let ownership = self.ownership_for(ty);
         let result = self.alloc_value(ty, ownership);
+        for &(_, v) in &fields {
+            if self.body.value(v).ownership == Ownership::Owned {
+                self.consume(v);
+            }
+        }
         self.push_inst(InstKind::Struct { result, ty, fields });
         if ownership == Ownership::Owned {
             self.track_owned(result);
@@ -499,6 +580,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_tuple(&mut self, ty: TyId, elements: Vec<ValueId>) -> ValueId {
         let ownership = self.ownership_for(ty);
         let result = self.alloc_value(ty, ownership);
+        for &v in &elements {
+            if self.body.value(v).ownership == Ownership::Owned {
+                self.consume(v);
+            }
+        }
         self.push_inst(InstKind::Tuple { result, elements });
         if ownership == Ownership::Owned {
             self.track_owned(result);
@@ -509,6 +595,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_enum_variant(&mut self, enum_ty: TyId, variant: VariantIdx, payload: Vec<ValueId>) -> ValueId {
         let ownership = self.ownership_for(enum_ty);
         let result = self.alloc_value(enum_ty, ownership);
+        for &v in &payload {
+            if self.body.value(v).ownership == Ownership::Owned {
+                self.consume(v);
+            }
+        }
         self.push_inst(InstKind::Enum { result, enum_ty, variant, payload });
         if ownership == Ownership::Owned {
             self.track_owned(result);

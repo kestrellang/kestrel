@@ -8,7 +8,7 @@ use kestrel_hir::ty::HirTy;
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
-use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
+use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, Ownership, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
 use crate::ty::lower_type;
@@ -413,8 +413,14 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         self.emit_call_void(callee, call_args);
-        // Load the initialized value from the stack slot
-        self.emit_load(self_addr, result_ty)
+        // Take the initialized value from the stack slot.
+        // Use Take (not Load) so non-trivial types get @owned ownership.
+        let ownership = self.ownership_for(result_ty);
+        if ownership == Ownership::Owned {
+            self.emit_take(self_addr, result_ty)
+        } else {
+            self.emit_load(self_addr, result_ty)
+        }
     }
 
     fn lower_indirect_call(

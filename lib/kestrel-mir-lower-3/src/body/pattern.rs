@@ -39,18 +39,13 @@ impl OssaBodyCtx<'_, '_> {
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
-        // Snapshot live @owned values after scrutinee eval
-        let live_before: Vec<(ValueId, TyId)> = self.all_live_owned();
-        let live_vals: Vec<ValueId> = live_before.iter().map(|&(v, _)| v).collect();
-        let arm_descs: Vec<(TyId, Ownership)> = live_before
-            .iter()
-            .map(|&(_, ty)| (ty, Ownership::Owned))
-            .collect();
+        let saved_tracker = self.tracker.clone();
+        self.tracker = super::LiveTracker::from_live(&self.all_live_owned());
+        let live_vals = self.tracker.values();
 
-        // Merge block: [result, ...live_owned]
         let ownership = self.ownership_for(result_ty);
         let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, ownership)];
-        merge_descs.extend(&arm_descs);
+        merge_descs.extend(self.tracker.descs());
         let (join_block, join_params) = self.new_block_with_params(&merge_descs);
         let result_param = join_params[0];
 
@@ -65,15 +60,8 @@ impl OssaBodyCtx<'_, '_> {
         let snapshot = self.snapshot_scope();
 
         self.emit_decision_tree_threaded(
-            &tree,
-            scrutinee_val,
-            scrutinee_ty,
-            arms,
-            result_ty,
+            &tree, scrutinee_val, scrutinee_ty, arms, result_ty,
             join_block,
-            &live_vals,
-            &arm_descs,
-            &snapshot,
         );
 
         // Continue from merge block
@@ -84,6 +72,10 @@ impl OssaBodyCtx<'_, '_> {
         if ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
+
+        // Restore outer tracker with values propagated through the match
+        self.tracker = saved_tracker;
+        self.tracker.rebind(&live_vals, merge_live);
         result_param
     }
 
@@ -97,41 +89,31 @@ impl OssaBodyCtx<'_, '_> {
         arms: &[HirMatchArm],
         result_ty: TyId,
         join_block: kestrel_mir_3::BlockId,
-        live_vals: &[ValueId],
-        arm_descs: &[(TyId, Ownership)],
-        snapshot: &super::ScopeSnapshot,
     ) {
         match tree {
             DecisionTree::Switch {
-                path,
-                ty,
-                cases,
-                default,
+                path, ty, cases, default,
             } => {
                 let (test_val, _test_ty) =
                     self.apply_access_path(scrutinee, scrutinee_ty, path);
 
-                // Single case — no switch needed, just fall through
                 if cases.len() == 1 && default.is_none() {
-                    let (_, subtree) = &cases[0];
                     self.emit_decision_tree_threaded(
-                        subtree, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                        live_vals, arm_descs, snapshot,
+                        &cases[0].1, scrutinee, scrutinee_ty, arms, result_ty,
+                        join_block,
                     );
                     return;
                 }
 
-                // Snapshot before branching so each arm starts fresh
                 let branch_snapshot = self.snapshot_scope();
-                let current_live: Vec<ValueId> = self.collect_outer_live(self.scope_stack.len());
-                // Compute descriptors from current live set (may differ from
-                // arm_descs if extractions consumed values since match entry)
+                let current_live: Vec<ValueId> = self.all_live_owned()
+                    .iter().map(|&(v, _)| v).collect();
                 let local_descs: Vec<(TyId, Ownership)> = current_live
                     .iter()
                     .map(|&v| (self.body.value(v).ty, Ownership::Owned))
                     .collect();
 
-                // Boolean branch optimization
+                // Boolean branch
                 if cases.len() == 2
                     && matches!(&cases[0].0, Constructor::True)
                     && matches!(&cases[1].0, Constructor::False)
@@ -147,33 +129,29 @@ impl OssaBodyCtx<'_, '_> {
                     self.switch_to(true_block);
                     self.rebind_scope_values(&current_live, &true_params);
                     self.emit_decision_tree_threaded(
-                        &cases[0].1, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                        live_vals, arm_descs, snapshot,
+                        &cases[0].1, scrutinee, scrutinee_ty, arms, result_ty,
+                        join_block,
                     );
 
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(false_block);
                     self.rebind_scope_values(&current_live, &false_params);
                     self.emit_decision_tree_threaded(
-                        &cases[1].1, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                        live_vals, arm_descs, snapshot,
+                        &cases[1].1, scrutinee, scrutinee_ty, arms, result_ty,
+                        join_block,
                     );
                     return;
                 }
 
                 // String literal chain
-                if cases
-                    .iter()
-                    .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
-                {
+                if cases.iter().any(|(c, _)| matches!(c, Constructor::StringLiteral(_))) {
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     for (ctor, subtree) in cases.iter() {
-                        let Constructor::StringLiteral(lit) = ctor else {
-                            continue;
-                        };
+                        let Constructor::StringLiteral(lit) = ctor else { continue };
                         let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
                         let str_snapshot = self.snapshot_scope();
-                        let str_live: Vec<ValueId> = self.collect_outer_live(self.scope_stack.len());
+                        let str_live: Vec<ValueId> = self.all_live_owned()
+                            .iter().map(|&(v, _)| v).collect();
                         let str_descs: Vec<(TyId, Ownership)> = str_live
                             .iter()
                             .map(|&v| (self.body.value(v).ty, Ownership::Owned))
@@ -189,8 +167,8 @@ impl OssaBodyCtx<'_, '_> {
                         self.switch_to(hit_block);
                         self.rebind_scope_values(&str_live, &hit_params);
                         self.emit_decision_tree_threaded(
-                            subtree, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                            live_vals, arm_descs, snapshot,
+                            subtree, scrutinee, scrutinee_ty, arms, result_ty,
+                            join_block,
                         );
 
                         self.restore_scope(&str_snapshot);
@@ -199,8 +177,8 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     if let Some(def_tree) = default {
                         self.emit_decision_tree_threaded(
-                            def_tree, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                            live_vals, arm_descs, snapshot,
+                            def_tree, scrutinee, scrutinee_ty, arms, result_ty,
+                            join_block,
                         );
                     } else {
                         self.emit_panic("match failure: non-exhaustive string patterns");
@@ -208,66 +186,53 @@ impl OssaBodyCtx<'_, '_> {
                     return;
                 }
 
-                // General switch — create case blocks with live-value params
+                // General switch
                 let discriminant = self.emit_discriminant(test_val);
 
                 let mut switch_arms: Vec<SwitchArm> = Vec::with_capacity(cases.len());
-                let mut case_blocks_with_params = Vec::with_capacity(cases.len());
+                let mut case_blocks = Vec::with_capacity(cases.len());
                 for (ctor, _) in cases.iter() {
                     let pattern = constructor_to_switch_case(self, ctor);
                     let (block, params) = self.new_block_with_params(&local_descs);
                     switch_arms.push(SwitchArm {
-                        pattern,
-                        target: block,
-                        args: current_live.clone(),
+                        pattern, target: block, args: current_live.clone(),
                     });
-                    case_blocks_with_params.push((block, params));
+                    case_blocks.push((block, params));
                 }
-
-                let default_with_params = default.as_ref().map(|_| {
+                let default_block = default.as_ref().map(|_| {
                     let (block, params) = self.new_block_with_params(&local_descs);
                     switch_arms.push(SwitchArm {
-                        pattern: SwitchCase::Wildcard,
-                        target: block,
-                        args: current_live.clone(),
+                        pattern: SwitchCase::Wildcard, target: block, args: current_live.clone(),
                     });
                     (block, params)
                 });
 
                 self.emit_switch(discriminant, switch_arms);
 
-                // Emit each case's subtree
                 for (i, ((_, subtree), (block_id, params))) in
-                    cases.iter().zip(case_blocks_with_params.iter()).enumerate()
+                    cases.iter().zip(case_blocks.iter()).enumerate()
                 {
-                    if i > 0 {
-                        self.restore_scope(&branch_snapshot);
-                    }
+                    if i > 0 { self.restore_scope(&branch_snapshot); }
                     self.switch_to(*block_id);
                     self.rebind_scope_values(&current_live, params);
                     self.emit_decision_tree_threaded(
-                        subtree, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                        live_vals, arm_descs, snapshot,
+                        subtree, scrutinee, scrutinee_ty, arms, result_ty,
+                        join_block,
                     );
                 }
 
-                if let (Some(def_tree), Some((def_block, def_params))) =
-                    (default, default_with_params)
-                {
+                if let (Some(def_tree), Some((def_block, def_params))) = (default, default_block) {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(def_block);
                     self.rebind_scope_values(&current_live, &def_params);
                     self.emit_decision_tree_threaded(
-                        def_tree, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                        live_vals, arm_descs, snapshot,
+                        def_tree, scrutinee, scrutinee_ty, arms, result_ty,
+                        join_block,
                     );
                 }
             }
 
-            DecisionTree::Success {
-                arm_index,
-                bindings,
-            } => {
+            DecisionTree::Success { arm_index, bindings } => {
                 self.push_scope();
                 self.emit_bindings(bindings, scrutinee, scrutinee_ty);
                 if let Some(arm) = arms.get(*arm_index) {
@@ -275,26 +240,22 @@ impl OssaBodyCtx<'_, '_> {
                     if !self.is_terminated() {
                         self.destroy_scope_except(&[body_val]);
                         let mut args = vec![body_val];
-                        args.extend(self.collect_outer_live(snapshot.scopes.len()));
+                        args.extend(self.tracker.values());
                         self.emit_jump(join_block, args);
                     }
                 }
                 self.pop_scope();
             }
 
-            DecisionTree::Guard {
-                arm_index,
-                bindings,
-                success,
-                failure,
-            } => {
+            DecisionTree::Guard { arm_index, bindings, success, failure } => {
                 self.push_scope();
                 self.emit_bindings(bindings, scrutinee, scrutinee_ty);
                 if let Some(arm) = arms.get(*arm_index) {
                     if let Some(guard_expr) = arm.guard {
                         let guard_val = self.lower_expr(guard_expr);
                         let guard_snapshot = self.snapshot_scope();
-                        let guard_live: Vec<ValueId> = self.collect_outer_live(self.scope_stack.len());
+                        let guard_live: Vec<ValueId> = self.all_live_owned()
+                            .iter().map(|&(v, _)| v).collect();
                         let guard_descs: Vec<(TyId, Ownership)> = guard_live
                             .iter()
                             .map(|&v| (self.body.value(v).ty, Ownership::Owned))
@@ -310,8 +271,8 @@ impl OssaBodyCtx<'_, '_> {
                         self.switch_to(success_block);
                         self.rebind_scope_values(&guard_live, &success_params);
                         self.emit_decision_tree_threaded(
-                            success, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                            live_vals, arm_descs, snapshot,
+                            success, scrutinee, scrutinee_ty, arms, result_ty,
+                            join_block,
                         );
 
                         self.restore_scope(&guard_snapshot);
@@ -319,14 +280,14 @@ impl OssaBodyCtx<'_, '_> {
                         self.rebind_scope_values(&guard_live, &failure_params);
                         self.pop_scope();
                         self.emit_decision_tree_threaded(
-                            failure, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                            live_vals, arm_descs, snapshot,
+                            failure, scrutinee, scrutinee_ty, arms, result_ty,
+                            join_block,
                         );
                         return;
                     } else {
                         self.emit_decision_tree_threaded(
-                            success, scrutinee, scrutinee_ty, arms, result_ty, join_block,
-                            live_vals, arm_descs, snapshot,
+                            success, scrutinee, scrutinee_ty, arms, result_ty,
+                            join_block,
                         );
                     }
                 }

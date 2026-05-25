@@ -23,7 +23,7 @@ use kestrel_mir_3::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir_3::value::{Ownership, ValueDef};
 use kestrel_mir_3::{
-    FieldIdx, MirTy, Op, ParamConvention, TyId, ValueId,
+    FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId,
 };
 
 use super::{LoopInfo, OssaBodyCtx, ScopeFrame};
@@ -35,6 +35,7 @@ struct SavedState {
     local_map: HashMap<HirLocalId, ValueId>,
     loop_stack: Vec<LoopInfo>,
     scope_stack: Vec<ScopeFrame>,
+    tracker: super::LiveTracker,
     func_idx: usize,
     temp_counter: u32,
     in_protocol_extension: bool,
@@ -189,6 +190,7 @@ impl OssaBodyCtx<'_, '_> {
             local_map: std::mem::replace(&mut self.local_map, closure_local_map),
             loop_stack: std::mem::take(&mut self.loop_stack),
             scope_stack: std::mem::take(&mut self.scope_stack),
+            tracker: std::mem::replace(&mut self.tracker, super::LiveTracker::from_live(&[])),
             func_idx: self.func_idx,
             temp_counter: self.temp_counter,
             in_protocol_extension: self.in_protocol_extension,
@@ -261,6 +263,7 @@ impl OssaBodyCtx<'_, '_> {
         self.local_map = saved.local_map;
         self.loop_stack = saved.loop_stack;
         self.scope_stack = saved.scope_stack;
+        self.tracker = saved.tracker;
         self.func_idx = saved.func_idx;
         self.temp_counter = saved.temp_counter;
         self.in_protocol_extension = saved.in_protocol_extension;
@@ -284,11 +287,13 @@ impl OssaBodyCtx<'_, '_> {
                 let use_val = self.emit_value_use(mir_val);
                 captures.push(use_val);
             } else {
-                // Ref capture: take the address via RefToPtr
+                // Ref capture: copy value into a stack slot, capture the address.
                 let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
-                let borrow = self.emit_begin_borrow(mir_val);
-                let ptr = self.emit_op1(Op::RefToPtr, borrow, ptr_ty);
-                captures.push(ptr);
+                let one = self.emit_literal(Immediate::i64(1));
+                let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
+                let copy = self.emit_copy_value(mir_val);
+                self.emit_store_init(addr, copy);
+                captures.push(addr);
             }
         }
 
