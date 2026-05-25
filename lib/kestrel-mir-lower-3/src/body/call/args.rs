@@ -211,8 +211,19 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         for (i, conv) in conventions.iter().enumerate() {
-            if i < call_args.len() {
-                call_args[i].convention = *conv;
+            if i < call_args.len() && call_args[i].convention != *conv {
+                let old_val = call_args[i].value;
+                let old_conv = call_args[i].convention;
+                if matches!(old_conv, ParamConvention::Borrow | ParamConvention::MutBorrow) {
+                    if let Some(source) = self.body.value(old_val).borrow_source {
+                        self.emit_end_borrow(old_val);
+                        call_args[i] = self.prepare_call_arg(source, *conv);
+                    } else {
+                        call_args[i].convention = *conv;
+                    }
+                } else {
+                    call_args[i].convention = *conv;
+                }
             }
         }
     }
