@@ -3,7 +3,7 @@
 //! Ported from MIR-2 `literal.rs` into OSSA form:
 //! - Returns `ValueId` instead of `Operand`
 //! - Uses `emit_literal(imm)` for constants
-//! - Init calls go through `emit_uninit` → `emit_call_void` → `emit_load`
+//! - Init calls use StackAlloc (not Uninit) → `emit_call_void` → `emit_take`/`emit_load`
 //! - Stack buffer ops use `emit_op1` / `emit_op2`
 
 use kestrel_ast_builder::{Callable, NodeKind};
@@ -12,7 +12,7 @@ use kestrel_hir::body::{HirDictEntry, HirExprId, HirLiteral};
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::function::FunctionKind;
-use kestrel_mir_3::{Immediate, IntBits, MirTy, Op, ParamConvention, Signedness, TyId, ValueId};
+use kestrel_mir_3::{Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId};
 
 use super::OssaBodyCtx;
 use crate::ty::resolve_callable_types;
@@ -125,8 +125,12 @@ impl OssaBodyCtx<'_, '_> {
             call_args.push(self.prepare_call_arg(arg, ParamConvention::Borrow));
         }
         self.emit_call_void(callee, call_args);
-        // Load the initialized value out of the pointer
-        self.emit_load(self_ptr, result_ty)
+        let ownership = self.ownership_for(result_ty);
+        if ownership == Ownership::Owned {
+            self.emit_take(self_ptr, result_ty)
+        } else {
+            self.emit_load(self_ptr, result_ty)
+        }
     }
 
     // ================================================================
@@ -191,17 +195,25 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_op2(Op::PtrWrite(element_ty), elem_ptr, elem_val, unit_ty);
         }
 
-        // Call init(&mut self, ptr, count)
+        // Call init(&mut self, ptr, count) — StackAlloc (not Uninit) since
+        // the opaque init call can't satisfy Uninit's sub-field tracking.
         self.ctx.register_name(init_entity);
         let callee = Callee::direct_with_args(init_entity, type_args, None);
-        let self_val = self.emit_uninit(result_ty);
+        let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
+        let one = self.emit_literal(Immediate::i64(1));
+        let self_val = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
         let call_args = vec![
-            self.prepare_call_arg(self_val, ParamConvention::MutBorrow),
+            CallArg { value: self_val, convention: ParamConvention::MutBorrow },
             CallArg { value: ptr, convention: ParamConvention::Consuming },
             CallArg { value: count, convention: ParamConvention::Consuming },
         ];
         self.emit_call_void(callee, call_args);
-        Some(self.emit_load(self_val, result_ty))
+        let ownership = self.ownership_for(result_ty);
+        if ownership == Ownership::Owned {
+            Some(self.emit_take(self_val, result_ty))
+        } else {
+            Some(self.emit_load(self_val, result_ty))
+        }
     }
 
     // ================================================================
@@ -273,17 +285,25 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_op2(Op::PtrWrite(pair_ty), elem_ptr, pair, unit_ty);
         }
 
-        // Call init(&mut self, ptr, count)
+        // Call init(&mut self, ptr, count) — StackAlloc (not Uninit) since
+        // the opaque init call can't satisfy Uninit's sub-field tracking.
         self.ctx.register_name(init_entity);
         let callee = Callee::direct_with_args(init_entity, type_args, None);
-        let self_val = self.emit_uninit(result_ty);
+        let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
+        let one = self.emit_literal(Immediate::i64(1));
+        let self_val = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
         let call_args = vec![
-            self.prepare_call_arg(self_val, ParamConvention::MutBorrow),
+            CallArg { value: self_val, convention: ParamConvention::MutBorrow },
             CallArg { value: ptr, convention: ParamConvention::Consuming },
             CallArg { value: count, convention: ParamConvention::Consuming },
         ];
         self.emit_call_void(callee, call_args);
-        Some(self.emit_load(self_val, result_ty))
+        let ownership = self.ownership_for(result_ty);
+        if ownership == Ownership::Owned {
+            Some(self.emit_take(self_val, result_ty))
+        } else {
+            Some(self.emit_load(self_val, result_ty))
+        }
     }
 
     // ================================================================

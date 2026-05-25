@@ -453,7 +453,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// Restore scope stack + local_map + tracker from a snapshot.
+    /// Truncates extra frames that may remain from terminated arms.
     pub fn restore_scope(&mut self, snapshot: &ScopeSnapshot) {
+        self.scope_stack.truncate(snapshot.scopes.len());
         for (frame, saved) in self.scope_stack.iter_mut().zip(snapshot.scopes.iter()) {
             frame.owned_values = saved.clone();
         }
@@ -719,10 +721,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     ) -> ValueId {
         let ownership = self.ownership_for(result_ty);
         let result = self.alloc_value(result_ty, ownership);
-        let borrows: Vec<ValueId> = args.iter()
+        // Collect @guaranteed values from args AND callee for EndBorrow
+        let mut borrows: Vec<ValueId> = args.iter()
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
             .map(|a| a.value)
             .collect();
+        if let Some(cv) = callee.value() {
+            if self.body.value(cv).ownership == Ownership::Guaranteed {
+                borrows.push(cv);
+            }
+        }
         self.push_inst(InstKind::Call {
             result: Some(result),
             callee,
@@ -745,10 +753,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     /// Emit a void call (no result).
     pub fn emit_call_void(&mut self, callee: Callee, args: Vec<CallArg>) {
-        let borrows: Vec<ValueId> = args.iter()
+        let mut borrows: Vec<ValueId> = args.iter()
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
             .map(|a| a.value)
             .collect();
+        if let Some(cv) = callee.value() {
+            if self.body.value(cv).ownership == Ownership::Guaranteed {
+                borrows.push(cv);
+            }
+        }
         self.push_inst(InstKind::Call {
             result: None,
             callee,

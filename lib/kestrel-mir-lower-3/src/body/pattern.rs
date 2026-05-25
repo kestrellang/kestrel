@@ -95,7 +95,7 @@ impl OssaBodyCtx<'_, '_> {
                 path, ty, cases, default,
             } => {
                 let (test_val, _test_ty) =
-                    self.apply_access_path(scrutinee, scrutinee_ty, path);
+                    self.apply_access_path(scrutinee, scrutinee_ty, path, false);
 
                 if cases.len() == 1 && default.is_none() {
                     self.emit_decision_tree_threaded(
@@ -236,7 +236,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.push_scope();
                 self.emit_bindings(bindings, scrutinee, scrutinee_ty);
                 if let Some(arm) = arms.get(*arm_index) {
-                    let body_val = self.lower_expr(arm.body);
+                    let mut body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
                         self.destroy_scope_except(&[body_val]);
                         let mut args = vec![body_val];
@@ -302,9 +302,10 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Emit SSA bindings for a matched arm.
     ///
-    /// Each binding's access path is applied to the scrutinee to extract
-    /// the bound sub-value via SSA instructions. For @owned types, we
-    /// copy the extracted value so the binding has its own lifetime.
+    /// Each binding's access path is applied to the scrutinee via consuming
+    /// extraction — the result has the correct ownership (@owned for
+    /// non-trivial types). For @owned results, we copy so the binding
+    /// has its own lifetime independent of the scrutinee.
     fn emit_bindings(
         &mut self,
         bindings: &[Binding],
@@ -314,11 +315,9 @@ impl OssaBodyCtx<'_, '_> {
         for binding in bindings {
             let hir_local = binding.local_id;
             let (extracted, _) =
-                self.apply_access_path(scrutinee, scrutinee_ty, &binding.path);
+                self.apply_access_path(scrutinee, scrutinee_ty, &binding.path, true);
 
-            // Lower the binding's type to get the MIR type
-            let local_ty = lower_resolved_ty(self.ctx, &binding.ty);
-            let ownership = self.ownership_for(local_ty);
+            let ownership = self.body.value(extracted).ownership;
 
             // For @owned types, copy the extracted value so the binding
             // owns its own value. For @none types, use directly.
@@ -347,79 +346,97 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Apply an access path to a value, emitting SSA extraction instructions.
     ///
-    /// Walks the path elements and emits `StructExtract`, `TupleExtract`,
-    /// or `EnumPayload` instructions as needed. Returns the extracted value
-    /// and its type.
+    /// When `consuming` is false (navigation): all extractions produce @none
+    /// results — non-consuming projections that peek at structure without
+    /// taking ownership. The scrutinee stays live for scope/tracker cleanup.
     ///
-    /// For Downcast elements (enum variant navigation), the actual extraction
-    /// happens on the subsequent Field access via `EnumPayload`. A bare
-    /// Downcast without a following Field just tracks the variant context.
+    /// When `consuming` is true (binding): extractions use the standard
+    /// emit_* methods which produce @owned results for non-trivial types
+    /// and consume @owned operands.
     fn apply_access_path(
         &mut self,
         value: ValueId,
         value_ty: TyId,
         path: &[PathElement],
+        consuming: bool,
     ) -> (ValueId, TyId) {
         let mut current = value;
         let mut current_ty = value_ty;
-        // Track pending downcast: when we see Downcast(name), record the
-        // variant so the next Field element uses EnumPayload instead of
-        // StructExtract.
         let mut pending_downcast: Option<(String, VariantIdx)> = None;
 
         for elem in path {
             match elem {
                 PathElement::Field(name) => {
                     if let Some((_, variant_idx)) = pending_downcast.take() {
-                        // After a Downcast, Field accesses extract from
-                        // the enum variant's payload via EnumPayload.
                         let (field_idx, field_ty) =
                             self.resolve_enum_payload_field(current_ty, variant_idx, name);
-                        current = self.emit_enum_payload(
-                            current, variant_idx, field_idx, field_ty,
-                        );
+                        if consuming {
+                            current = self.emit_enum_payload(
+                                current, variant_idx, field_idx, field_ty,
+                            );
+                        } else {
+                            let result = self.alloc_value(field_ty, Ownership::None);
+                            self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
+                                result, operand: current, variant: variant_idx, field: field_idx,
+                            });
+                            current = result;
+                        }
                         current_ty = field_ty;
                     } else {
-                        // Regular struct field extraction
                         let (field_idx, field_ty) =
                             self.resolve_struct_field(current_ty, name);
-                        current = self.emit_struct_extract(current, field_idx, field_ty);
+                        if consuming {
+                            current = self.emit_struct_extract(current, field_idx, field_ty);
+                        } else {
+                            let result = self.alloc_value(field_ty, Ownership::None);
+                            self.push_inst(kestrel_mir_3::inst::InstKind::StructExtract {
+                                result, operand: current, field: field_idx,
+                            });
+                            current = result;
+                        }
                         current_ty = field_ty;
                     }
                 }
                 PathElement::Index(i) => {
                     if let Some((_, variant_idx)) = pending_downcast.take() {
-                        // After a Downcast, Index extracts from the enum
-                        // variant's payload (same as Downcast + Field but
-                        // positional instead of named).
                         let field_idx = FieldIdx::new(*i);
                         let field_ty = self.resolve_enum_payload_field_by_index(
                             current_ty, variant_idx, field_idx,
                         );
-                        current = self.emit_enum_payload(
-                            current, variant_idx, field_idx, field_ty,
-                        );
+                        if consuming {
+                            current = self.emit_enum_payload(
+                                current, variant_idx, field_idx, field_ty,
+                            );
+                        } else {
+                            let result = self.alloc_value(field_ty, Ownership::None);
+                            self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
+                                result, operand: current, variant: variant_idx, field: field_idx,
+                            });
+                            current = result;
+                        }
                         current_ty = field_ty;
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
-                        current = self.emit_tuple_extract(current, *i as u32, elem_ty);
+                        if consuming {
+                            current = self.emit_tuple_extract(current, *i as u32, elem_ty);
+                        } else {
+                            let result = self.alloc_value(elem_ty, Ownership::None);
+                            self.push_inst(kestrel_mir_3::inst::InstKind::TupleExtract {
+                                result, operand: current, index: *i as u32,
+                            });
+                            current = result;
+                        }
                         current_ty = elem_ty;
                     }
                 }
                 PathElement::Downcast(variant_name) => {
-                    // Record the variant for the next Field element.
-                    // The scrutinee value stays the same — discriminant
-                    // testing already happened in the switch.
                     let entity = self.ty_entity(current_ty);
                     let variant_idx = entity
                         .and_then(|e| self.ctx.resolve_variant_idx(e, variant_name))
                         .unwrap_or(VariantIdx::new(0));
                     pending_downcast = Some((variant_name.clone(), variant_idx));
                 }
-                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => {
-                    // Array rest patterns — not yet supported in OSSA.
-                    // Keep current value unchanged.
-                }
+                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => {}
             }
         }
         (current, current_ty)

@@ -29,4 +29,12 @@ impl Callee {
     pub fn direct_with_args(func: Entity, type_args: Vec<TyId>, self_type: Option<TyId>) -> Self {
         Self::Direct { func, type_args, self_type }
     }
+
+    /// Extract the ValueId for indirect callees (Thin/Thick).
+    pub fn value(&self) -> Option<ValueId> {
+        match self {
+            Self::Thin(v) | Self::Thick(v) => Some(*v),
+            _ => None,
+        }
+    }
 }

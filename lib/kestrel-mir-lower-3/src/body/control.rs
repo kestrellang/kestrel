@@ -118,6 +118,8 @@ impl OssaBodyCtx<'_, '_> {
 
         self.switch_to(header_block);
         self.rebind_scope_values(&initial_args, &header_params);
+        // initial_args were consumed before the jump, so rebind won't
+        // find them in scope. track_owned adds the header params fresh.
         for &param in &header_params {
             self.track_owned(param);
         }
@@ -160,9 +162,12 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(info) = self.find_loop(label) {
             let exit = info.exit_block;
             let depth = info.scope_depth;
-            // Destroy all scopes from current down to (and including) loop scope
+            // Destroy inner scopes (loop body down to loop scope)
             self.destroy_scopes_to_depth(depth, &[]);
-            // Collect and destroy values in scopes above the loop (outer owned)
+            // Destroy outer tracked values — the break exits the block,
+            // so these values won't be cleaned up by normal scope exit.
+            // The verifier checks each block independently: values
+            // defined here must be consumed before the terminator.
             let outer_to_destroy: Vec<ValueId> = self.scope_stack[..depth]
                 .iter()
                 .flat_map(|s| s.owned_values.iter().rev().copied())
