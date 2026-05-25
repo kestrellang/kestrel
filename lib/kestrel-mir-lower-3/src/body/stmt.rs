@@ -20,8 +20,13 @@ impl OssaBodyCtx<'_, '_> {
             HirStmt::Let { local, value, .. } => {
                 if let Some(init_expr) = value {
                     let init_val = self.lower_expr(*init_expr);
-                    // Rebind this HIR local to the init value
                     self.local_map.insert(*local, init_val);
+                    // Track @none values in scope so they get threaded
+                    // through block params across control flow boundaries
+                    let ownership = self.body.value(init_val).ownership;
+                    if ownership == kestrel_mir_3::value::Ownership::None {
+                        self.track_none(init_val);
+                    }
                 }
             }
             HirStmt::Expr { expr, .. } => {

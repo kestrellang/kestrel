@@ -483,15 +483,14 @@ impl OssaBodyCtx<'_, '_> {
         match target_expr {
             HirExpr::Local(hir_local, _) => {
                 let old_val = self.local_map.get(&hir_local).copied();
-                // Destroy the old value if it was @owned
                 if let Some(old) = old_val {
                     let ownership = self.body.value(old).ownership;
                     if ownership == kestrel_mir_3::value::Ownership::Owned {
                         self.emit_destroy_value(old);
-                        // Keep the tracker in sync so merge jumps use the
-                        // new value instead of the destroyed one.
-                        self.tracker.rebind(&[old], &[rhs]);
                     }
+                    // Keep the tracker in sync so merge/back-edge jumps use the
+                    // new value instead of the old one (applies to both @owned and @none).
+                    self.tracker.rebind(&[old], &[rhs]);
                 }
                 self.local_map.insert(hir_local, rhs);
             }

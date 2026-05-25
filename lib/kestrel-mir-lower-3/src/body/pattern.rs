@@ -40,7 +40,7 @@ impl OssaBodyCtx<'_, '_> {
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
         let saved_tracker = self.tracker.clone();
-        self.tracker = super::LiveTracker::from_live(&self.all_live_owned());
+        self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
         let live_vals = self.tracker.values();
 
         let ownership = self.ownership_for(result_ty);
@@ -106,11 +106,11 @@ impl OssaBodyCtx<'_, '_> {
                 }
 
                 let branch_snapshot = self.snapshot_scope();
-                let current_live: Vec<ValueId> = self.all_live_owned()
-                    .iter().map(|&(v, _)| v).collect();
+                let current_live: Vec<ValueId> = self.all_live_tracked()
+                    .iter().map(|&(v, _, _)| v).collect();
                 let local_descs: Vec<(TyId, Ownership)> = current_live
                     .iter()
-                    .map(|&v| (self.body.value(v).ty, Ownership::Owned))
+                    .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                     .collect();
 
                 // Boolean branch
@@ -150,11 +150,11 @@ impl OssaBodyCtx<'_, '_> {
                         let Constructor::StringLiteral(lit) = ctor else { continue };
                         let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
                         let str_snapshot = self.snapshot_scope();
-                        let str_live: Vec<ValueId> = self.all_live_owned()
-                            .iter().map(|&(v, _)| v).collect();
+                        let str_live: Vec<ValueId> = self.all_live_tracked()
+                            .iter().map(|&(v, _, _)| v).collect();
                         let str_descs: Vec<(TyId, Ownership)> = str_live
                             .iter()
-                            .map(|&v| (self.body.value(v).ty, Ownership::Owned))
+                            .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                             .collect();
                         let (hit_block, hit_params) = self.new_block_with_params(&str_descs);
                         let (miss_block, miss_params) = self.new_block_with_params(&str_descs);
@@ -257,11 +257,11 @@ impl OssaBodyCtx<'_, '_> {
                     if let Some(guard_expr) = arm.guard {
                         let guard_val = self.lower_expr(guard_expr);
                         let guard_snapshot = self.snapshot_scope();
-                        let guard_live: Vec<ValueId> = self.all_live_owned()
-                            .iter().map(|&(v, _)| v).collect();
+                        let guard_live: Vec<ValueId> = self.all_live_tracked()
+                            .iter().map(|&(v, _, _)| v).collect();
                         let guard_descs: Vec<(TyId, Ownership)> = guard_live
                             .iter()
-                            .map(|&v| (self.body.value(v).ty, Ownership::Owned))
+                            .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                             .collect();
                         let (success_block, success_params) = self.new_block_with_params(&guard_descs);
                         let (failure_block, failure_params) = self.new_block_with_params(&guard_descs);

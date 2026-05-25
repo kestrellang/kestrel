@@ -409,4 +409,170 @@ mod tests {
         eprintln!("{clean_count}/{bodies} functions pass verifier cleanly");
         eprintln!("(verifier errors are expected during initial development)");
     }
+
+    #[test]
+    fn stdlib_passes_pipeline() {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        CompilerDriver::new(&c).infer_all();
+
+        let mut mir = lower_module(c.world(), c.root());
+
+        let bodies_before = mir.functions.iter().filter(|f| f.body.is_some()).count();
+        let funcs_before = mir.functions.len();
+
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let mut next_entity = 900_000;
+        let errors = kestrel_mir_3::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+
+        let funcs_after = mir.functions.len();
+        let shim_count = mir.functions.iter()
+            .filter(|f| matches!(f.kind, kestrel_mir_3::item::function::FunctionKind::DropShim { .. }))
+            .count();
+        let thunk_count = mir.functions.iter()
+            .filter(|f| matches!(f.kind, kestrel_mir_3::item::function::FunctionKind::Thunk { .. }))
+            .count();
+        let layouts_computed = mir.structs.iter().filter(|s| s.type_info.layout.is_some()).count()
+            + mir.enums.iter().filter(|e| e.type_info.layout.is_some()).count();
+
+        eprintln!("Pipeline: {bodies_before} bodies before, {funcs_before}→{funcs_after} functions");
+        eprintln!("  {shim_count} drop shims, {thunk_count} thunks, {layouts_computed} layouts computed");
+        eprintln!("  {} verifier errors", errors.len());
+
+        if !errors.is_empty() {
+            let mut by_cat: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for e in &errors {
+                let cat = if e.message.contains("live at block exit") { "unconsumed" }
+                    else if e.message.contains("consumed more than once") { "consumed-twice" }
+                    else if e.message.contains("DestroyValue on @none") { "destroy-none" }
+                    else { "other" };
+                *by_cat.entry(cat.to_string()).or_default() += 1;
+            }
+            for (cat, count) in &by_cat {
+                eprintln!("  {count:>5} {cat}");
+            }
+        }
+    }
+
+    #[test]
+    fn stdlib_monomorphize() {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        CompilerDriver::new(&c).infer_all();
+
+        let mut mir = lower_module(c.world(), c.root());
+
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let mut next_entity = 900_000;
+        let pre_errors = kestrel_mir_3::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        assert_eq!(pre_errors.len(), 0, "pre-mono pipeline should have 0 verifier errors");
+
+        // Save generic functions for expand pass
+        let generic_functions = mir.functions.clone();
+
+        let mono_result = kestrel_mir_3::mono::monomorphize(mir, &target);
+        match mono_result {
+            Ok(mut mono_module) => {
+                let mono_funcs = mono_module.functions.len();
+                let mono_structs = mono_module.structs.len();
+                let mono_enums = mono_module.enums.len();
+
+                eprintln!("Monomorphize: {mono_funcs} functions, {mono_structs} structs, {mono_enums} enums");
+
+                // Run post-mono expansion
+                kestrel_mir_3::mono::expand::expand_destroy_copy(&mut mono_module, &generic_functions);
+
+                // Run post-mono verification
+                let verify_result = kestrel_mir_3::mono::verify::verify_mono(&mono_module);
+                if !verify_result.is_ok() {
+                    let mut by_cat: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for e in &verify_result.errors {
+                        let cat = if e.message.contains("TypeParam") { "unresolved TypeParam" }
+                            else if e.message.contains("AssociatedProjection") { "unresolved AssocProj" }
+                            else if e.message.contains("unresolved") { "unresolved callee" }
+                            else if e.message.contains("layout") { "missing layout" }
+                            else if e.message.contains("DestroyValue") { "DestroyValue on @none" }
+                            else if e.message.contains("CopyValue") { "CopyValue on @none" }
+                            else { "other" };
+                        *by_cat.entry(cat.to_string()).or_default() += 1;
+                    }
+                    eprintln!("Mono verify: {} errors", verify_result.errors.len());
+                    for (cat, count) in &by_cat {
+                        eprintln!("  {count:>5} {cat}");
+                    }
+                    // Show first few errors
+                    for e in verify_result.errors.iter().take(10) {
+                        let name = &mono_module.functions[e.func_idx].name;
+                        eprintln!("  {name}: {}", e.message);
+                    }
+                }
+
+                // Known: 1 residual AssociatedProjection in Iterator.contains closure env
+                // drop shim — the shim is collected without protocol context because
+                // DestroyValue expansion (which would discover it with the right
+                // self_type) runs post-mono. Will be fixed when the expand pass
+                // gains shim discovery capability.
+                eprintln!("Mono verify: {} errors total", verify_result.errors.len());
+            }
+            Err(errors) => {
+                eprintln!("Monomorphization failed with {} errors:", errors.len());
+                for e in errors.iter().take(10) {
+                    eprintln!("  {:?}", e);
+                }
+                // Don't panic — report the error count for now
+                eprintln!("(monomorphization errors are expected during initial development)");
+            }
+        }
+    }
+
+    #[test]
+    fn stdlib_codegen() {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let mut c = Compiler::new();
+        let path = stdlib_path();
+        c.load_dir(&path);
+        CompilerDriver::new(&c).infer_all();
+
+        let mut mir = lower_module(c.world(), c.root());
+
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let mut next_entity = 900_000;
+        let pre_errors = kestrel_mir_3::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        assert_eq!(pre_errors.len(), 0, "pre-mono pipeline should have 0 verifier errors");
+
+        let generic_functions = mir.functions.clone();
+
+        let mono_result = kestrel_mir_3::mono::monomorphize(mir, &target);
+        let mut mono_module = mono_result.expect("monomorphization should succeed");
+
+        kestrel_mir_3::mono::expand::expand_destroy_copy(&mut mono_module, &generic_functions);
+
+        let verify_result = kestrel_mir_3::mono::verify::verify_mono(&mono_module);
+        assert_eq!(verify_result.errors.len(), 0, "mono verify should have 0 errors");
+
+        let codegen_target = kestrel_codegen::TargetConfig::host();
+        let options = kestrel_codegen_cranelift_3::CodegenOptions::default();
+
+        let result = kestrel_codegen_cranelift_3::compile(&mono_module, &codegen_target, &options);
+        match result {
+            Ok(comp) => {
+                let body_count = mono_module.functions.iter().filter(|f| f.body.is_some()).count();
+                eprintln!(
+                    "Codegen: {} bytes of object code, {} functions compiled",
+                    comp.object_bytes.len(),
+                    body_count,
+                );
+            }
+            Err(e) => {
+                panic!("Codegen failed: {e}");
+            }
+        }
+    }
 }

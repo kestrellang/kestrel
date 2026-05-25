@@ -67,6 +67,9 @@ impl std::ops::Deref for TypedRef<'_> {
 
 pub(crate) struct ScopeFrame {
     pub owned_values: Vec<ValueId>,
+    /// @none values (trivial types) that must also be threaded through
+    /// block params across control flow boundaries (loops, if/else).
+    pub none_values: Vec<ValueId>,
 }
 
 /// Snapshot of the scope stack + local_map for save/restore across
@@ -74,6 +77,7 @@ pub(crate) struct ScopeFrame {
 #[derive(Clone)]
 pub(crate) struct ScopeSnapshot {
     pub scopes: Vec<Vec<ValueId>>,
+    pub none_scopes: Vec<Vec<ValueId>>,
     pub local_map: HashMap<HirLocalId, ValueId>,
     pub tracker: LiveTracker,
 }
@@ -87,22 +91,22 @@ pub(crate) struct ScopeSnapshot {
 /// are created or consumed during arm execution.
 #[derive(Clone)]
 pub(crate) struct LiveTracker {
-    slots: Vec<(ValueId, TyId)>,
+    slots: Vec<(ValueId, TyId, Ownership)>,
 }
 
 impl LiveTracker {
-    pub fn from_live(live: &[(ValueId, TyId)]) -> Self {
+    pub fn from_live(live: &[(ValueId, TyId, Ownership)]) -> Self {
         Self { slots: live.to_vec() }
     }
 
     /// Current values to forward as block args.
     pub fn values(&self) -> Vec<ValueId> {
-        self.slots.iter().map(|&(v, _)| v).collect()
+        self.slots.iter().map(|&(v, _, _)| v).collect()
     }
 
     /// Type descriptors for creating block params.
     pub fn descs(&self) -> Vec<(TyId, Ownership)> {
-        self.slots.iter().map(|&(_, ty)| (ty, Ownership::Owned)).collect()
+        self.slots.iter().map(|&(_, ty, ownership)| (ty, ownership)).collect()
     }
 
     /// Update slots when entering a new block whose params replace old values.
@@ -185,9 +189,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let ownership = self.ownership_for(ty);
             let val = self.alloc_value(ty, ownership);
             self.local_map.insert(*hir_id, val);
-            // Track @owned params so they get destroyed at function exit
-            if i < params_len && ownership == Ownership::Owned {
-                self.track_owned(val);
+            if i < params_len {
+                if ownership == Ownership::Owned {
+                    self.track_owned(val);
+                } else if ownership == Ownership::None {
+                    self.track_none(val);
+                }
             }
         }
         self.body.param_count = params_len;
@@ -332,7 +339,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn push_scope(&mut self) {
-        self.scope_stack.push(ScopeFrame { owned_values: Vec::new() });
+        self.scope_stack.push(ScopeFrame { owned_values: Vec::new(), none_values: Vec::new() });
     }
 
     pub fn track_owned(&mut self, value: ValueId) {
@@ -341,11 +348,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    pub fn track_none(&mut self, value: ValueId) {
+        if let Some(frame) = self.scope_stack.last_mut() {
+            frame.none_values.push(value);
+        }
+    }
+
     /// Mark a value as consumed — removes from scope tracking.
     pub fn consume(&mut self, value: ValueId) {
         for scope in self.scope_stack.iter_mut().rev() {
             if let Some(pos) = scope.owned_values.iter().position(|&v| v == value) {
                 scope.owned_values.remove(pos);
+                return;
+            }
+            if let Some(pos) = scope.none_values.iter().position(|&v| v == value) {
+                scope.none_values.remove(pos);
                 return;
             }
         }
@@ -406,6 +423,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
+    /// All values that need threading through block params: @owned + @none locals.
+    pub fn all_live_tracked(&self) -> Vec<(ValueId, TyId, Ownership)> {
+        self.scope_stack
+            .iter()
+            .flat_map(|s| {
+                s.owned_values.iter()
+                    .map(|&v| (v, self.body.value(v).ty, Ownership::Owned))
+                    .chain(
+                        s.none_values.iter()
+                            .map(|&v| (v, self.body.value(v).ty, Ownership::None))
+                    )
+            })
+            .collect()
+    }
+
     /// Collect live @owned values from outer scopes (below `depth`).
     pub fn collect_outer_live(&self, depth: usize) -> Vec<ValueId> {
         self.scope_stack[..depth]
@@ -447,6 +479,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
             scopes: self.scope_stack.iter().map(|s| s.owned_values.clone()).collect(),
+            none_scopes: self.scope_stack.iter().map(|s| s.none_values.clone()).collect(),
             local_map: self.local_map.clone(),
             tracker: self.tracker.clone(),
         }
@@ -456,8 +489,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Truncates extra frames that may remain from terminated arms.
     pub fn restore_scope(&mut self, snapshot: &ScopeSnapshot) {
         self.scope_stack.truncate(snapshot.scopes.len());
-        for (frame, saved) in self.scope_stack.iter_mut().zip(snapshot.scopes.iter()) {
-            frame.owned_values = saved.clone();
+        for (i, frame) in self.scope_stack.iter_mut().enumerate() {
+            frame.owned_values = snapshot.scopes[i].clone();
+            if let Some(none) = snapshot.none_scopes.get(i) {
+                frame.none_values = none.clone();
+            }
         }
         self.local_map = snapshot.local_map.clone();
         self.tracker = snapshot.tracker.clone();
@@ -470,6 +506,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             for owned in scope.owned_values.iter_mut() {
                 if let Some(pos) = old_vals.iter().position(|&v| v == *owned) {
                     *owned = new_vals[pos];
+                }
+            }
+            for none_val in scope.none_values.iter_mut() {
+                if let Some(pos) = old_vals.iter().position(|&v| v == *none_val) {
+                    *none_val = new_vals[pos];
                 }
             }
         }

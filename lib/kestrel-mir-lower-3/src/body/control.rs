@@ -29,7 +29,7 @@ impl OssaBodyCtx<'_, '_> {
 
         // Save outer tracker, set new one for this region
         let saved_tracker = self.tracker.clone();
-        self.tracker = super::LiveTracker::from_live(&self.all_live_owned());
+        self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
         let live_vals = self.tracker.values();
         let descs = self.tracker.descs();
 
@@ -109,7 +109,7 @@ impl OssaBodyCtx<'_, '_> {
 
     pub fn lower_loop(&mut self, body: &HirBlock, label: Option<&str>) -> ValueId {
         let saved_tracker = self.tracker.clone();
-        self.tracker = super::LiveTracker::from_live(&self.all_live_owned());
+        self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
         let initial_args = self.tracker.values();
 
         let (header_block, header_params) = self.new_block_with_params(&self.tracker.descs());
@@ -125,9 +125,14 @@ impl OssaBodyCtx<'_, '_> {
         self.switch_to(header_block);
         self.rebind_scope_values(&initial_args, &header_params);
         // initial_args were consumed before the jump, so rebind won't
-        // find them in scope. track_owned adds the header params fresh.
-        for &param in &header_params {
-            self.track_owned(param);
+        // find them in scope. Track the header params fresh.
+        let descs = self.tracker.descs();
+        for (i, &param) in header_params.iter().enumerate() {
+            if descs[i].1 == Ownership::Owned {
+                self.track_owned(param);
+            } else {
+                self.track_none(param);
+            }
         }
 
         let scope_depth = self.scope_stack.len();
@@ -235,11 +240,11 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     pub(crate) fn collect_current_for(&self, header_params: &[ValueId]) -> Vec<ValueId> {
-        let all_owned = self.all_live_owned();
-        if all_owned.len() >= header_params.len() {
-            all_owned[..header_params.len()].iter().map(|&(v, _)| v).collect()
+        let all_tracked = self.all_live_tracked();
+        if all_tracked.len() >= header_params.len() {
+            all_tracked[..header_params.len()].iter().map(|&(v, _, _)| v).collect()
         } else {
-            let mut vals: Vec<_> = all_owned.iter().map(|&(v, _)| v).collect();
+            let mut vals: Vec<_> = all_tracked.iter().map(|&(v, _, _)| v).collect();
             while vals.len() < header_params.len() {
                 vals.push(header_params[vals.len()]);
             }
@@ -248,11 +253,11 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     fn collect_current_for_values(&self, expected: &[ValueId]) -> Vec<ValueId> {
-        let all_owned = self.all_live_owned();
-        if all_owned.len() >= expected.len() {
-            all_owned[..expected.len()].iter().map(|&(v, _)| v).collect()
+        let all_tracked = self.all_live_tracked();
+        if all_tracked.len() >= expected.len() {
+            all_tracked[..expected.len()].iter().map(|&(v, _, _)| v).collect()
         } else {
-            let mut vals: Vec<_> = all_owned.iter().map(|&(v, _)| v).collect();
+            let mut vals: Vec<_> = all_tracked.iter().map(|&(v, _, _)| v).collect();
             while vals.len() < expected.len() {
                 vals.push(expected[vals.len()]);
             }

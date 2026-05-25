@@ -975,6 +975,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-codegen-cranelift-3"
+version = "0.16.0"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-module",
+ "cranelift-native",
+ "cranelift-object",
+ "indexmap",
+ "kestrel-codegen",
+ "kestrel-hecs",
+ "kestrel-mir-3",
+ "target-lexicon 0.12.16",
+]
+
+[[package]]
 name = "kestrel-compiler"
 version = "0.16.0"
 dependencies = [
@@ -1179,6 +1195,8 @@ dependencies = [
  "indexmap",
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-codegen",
+ "kestrel-codegen-cranelift-3",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",

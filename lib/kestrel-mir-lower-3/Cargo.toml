@@ -25,3 +25,5 @@ smallvec = { workspace = true }
 [dev-dependencies]
 kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-codegen-cranelift-3 = { path = "../kestrel-codegen-cranelift-3" }
