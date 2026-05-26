@@ -499,6 +499,7 @@ impl OssaBodyCtx<'_, '_> {
                 let field_name = name.as_str_or_empty().to_string();
                 let base_val = self.lower_expr(base);
                 let base_ty = self.resolve_expr_type(base);
+                let base_addr = self.emit_begin_mut_borrow(base_val);
                 let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
                     kestrel_mir_3::MirTy::Named { entity, .. } => Some(*entity),
                     _ => None,
@@ -506,8 +507,9 @@ impl OssaBodyCtx<'_, '_> {
                 let field_idx = struct_entity
                     .and_then(|e| self.ctx.resolve_field_idx(e, &field_name))
                     .unwrap_or(kestrel_mir_3::FieldIdx::new(0));
-                let addr = self.emit_field_addr(base_val, base_ty, field_idx);
+                let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                 self.emit_store_init(addr, rhs);
+                self.emit_end_mut_borrow(base_addr);
             }
             _ => {}
         }
