@@ -42,13 +42,13 @@ public protocol NegateOperatorProtocol {
 @builtin(.EqualsOperatorProtocol)
 public protocol EqualsOperatorProtocol {
     @builtin(.EqualsOperatorMethod)
-    func isEqual(to rhs: Self) -> lang.i1
+    func equal(to rhs: Self) -> lang.i1
 }
 
 @builtin(.NotEqualsOperatorProtocol)
 public protocol NotEqualsOperatorProtocol {
     @builtin(.NotEqualsOperatorMethod)
-    func isNotEqual(to rhs: Self) -> lang.i1
+    func notEqual(to rhs: Self) -> lang.i1
 }
 
 @builtin(.LessThanOperatorProtocol)

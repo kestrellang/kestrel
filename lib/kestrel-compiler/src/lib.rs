@@ -402,6 +402,11 @@ impl Compiler {
         let mut next_entity = self.world().entity_count() as u32;
         let errors = kestrel_mir_3::passes::run_pipeline(&mut mir, &target, &mut next_entity);
         if !errors.is_empty() {
+            if std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok() {
+                for e in errors.iter().take(10) {
+                    eprintln!("  OSSA verify: {:?} inst {:?}: {}", e.block, e.inst, e.message);
+                }
+            }
             return Err(kestrel_codegen_cranelift_3::CodegenError::Unsupported(
                 format!("OSSA verification failed with {} error(s)", errors.len()),
             ));
@@ -431,9 +436,6 @@ impl Compiler {
         let generic_functions = mir.functions.clone();
 
         let mut mono = kestrel_mir_3::mono::monomorphize(mir, &target).map_err(|errs| {
-            for e in &errs {
-                eprintln!("mono error: {}", e);
-            }
             kestrel_codegen_cranelift_3::CodegenError::Unsupported(format!(
                 "monomorphization failed with {} error(s)", errs.len(),
             ))
@@ -442,7 +444,7 @@ impl Compiler {
         kestrel_mir_3::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
         let mono_verify = kestrel_mir_3::mono::verify::verify_mono(&mono);
-        if !mono_verify.is_ok() {
+        if !mono_verify.is_ok() && std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok() {
             eprintln!("warning: {} post-mono verification error(s) (non-fatal)", mono_verify.errors.len());
         }
 

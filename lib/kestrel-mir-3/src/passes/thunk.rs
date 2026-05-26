@@ -120,8 +120,10 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
             ));
             body.param_count += 1;
 
-            let convention = param.convention;
-            forward_args.push(CallArg { value: val, convention });
+            // The thunk receives params as Consuming (by-value for scalars).
+            // Forward args must also be Consuming so compile_resolved_call
+            // spills scalars to stack when the target expects ByRef (Borrow).
+            forward_args.push(CallArg { value: val, convention: ParamConvention::Consuming });
         }
 
         let callee = Callee::direct_with_args(*target, forward_type_args, None);

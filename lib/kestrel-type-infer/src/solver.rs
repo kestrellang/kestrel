@@ -920,8 +920,8 @@ fn is_known_primitive_method(family: PrimitiveFamily, name: &str) -> bool {
                 | "divide"
                 | "modulo"
                 | "negate"
-                | "isEqual"
-                | "isNotEqual"
+                | "equal"
+                | "notEqual"
                 | "lessThan"
                 | "lessThanOrEqual"
                 | "greaterThan"
@@ -940,8 +940,8 @@ fn is_known_primitive_method(family: PrimitiveFamily, name: &str) -> bool {
                 | "multiply"
                 | "divide"
                 | "negate"
-                | "isEqual"
-                | "isNotEqual"
+                | "equal"
+                | "notEqual"
                 | "lessThan"
                 | "lessThanOrEqual"
                 | "greaterThan"
@@ -950,13 +950,13 @@ fn is_known_primitive_method(family: PrimitiveFamily, name: &str) -> bool {
         PrimitiveFamily::Bool => {
             matches!(
                 name,
-                "logicalAnd" | "logicalOr" | "logicalNot" | "isEqual" | "isNotEqual"
+                "logicalAnd" | "logicalOr" | "logicalNot" | "equal" | "notEqual"
             )
         },
         PrimitiveFamily::String => {
             matches!(
                 name,
-                "length" | "isEmpty" | "isEqual" | "isNotEqual" | "unsafePtr"
+                "length" | "isEmpty" | "equal" | "notEqual" | "unsafePtr"
             )
         },
     }

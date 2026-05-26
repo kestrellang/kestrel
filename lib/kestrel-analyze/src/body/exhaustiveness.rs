@@ -132,7 +132,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 MatchSource::WhileLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E308", &mut diags);
                 },
-                MatchSource::Guard => {
+                MatchSource::Guard | MatchSource::GuardLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E309", &mut diags);
                 },
                 // Desugared matches whose arm shape is synthetic and always

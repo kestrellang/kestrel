@@ -23,12 +23,12 @@ public protocol Equal[Other = Self] {
 
     /// Returns the equality result as `Output` — typically `Bool`.
     @builtin(.EqualsOperatorMethod)
-    func isEqual(to other: Other) -> Output
+    func equal(to other: Other) -> Output
 }
 
 /// Raw protocol backing the `!=` operator.
 ///
-/// `Equatable` provides a default `isNotEqual` derived from `isEqual`, so
+/// `Equatable` provides a default `notEqual` derived from `equal`, so
 /// conforming to `Equatable` is enough for both `==` and `!=`.
 @builtin(.NotEqualsOperatorProtocol)
 public protocol NotEqual[Other = Self] {
@@ -36,7 +36,7 @@ public protocol NotEqual[Other = Self] {
 
     /// Returns the inequality result as `Output` — typically `Bool`.
     @builtin(.NotEqualsOperatorMethod)
-    func isNotEqual(to other: Other) -> Output
+    func notEqual(to other: Other) -> Output
 }
 
 /// Raw protocol backing the `<` operator.

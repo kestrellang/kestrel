@@ -56,8 +56,11 @@ pub enum MatchSource {
     IfLet,
     /// Desugared from `while let p = v { ... }`.
     WhileLet,
-    /// Desugared from `guard <condition> else { ... }` or `guard let p = v else { ... }`.
+    /// Desugared from `guard <condition> else { ... }` (bool-only, no pattern bindings).
     Guard,
+    /// CPS-desugared from `guard let p = v else { ... }`: pattern arm = continuation,
+    /// wildcard arm = else body (must diverge).
+    GuardLet,
     /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
     ForLoop,
     /// Desugared from `let <pattern> = expr;`.
@@ -589,13 +592,13 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     (
         BinaryOp::Eq,
         Builtin::EqualsOperatorProtocol,
-        "isEqual",
+        "equal",
         Some("to"),
     ),
     (
         BinaryOp::Ne,
         Builtin::NotEqualsOperatorProtocol,
-        "isNotEqual",
+        "notEqual",
         Some("to"),
     ),
     (

@@ -6,10 +6,10 @@ pub mod literal;
 pub mod pattern;
 pub mod stmt;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirBlock, HirBody, HirExprId};
+use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir_3::block::BlockParam;
 use kestrel_mir_3::body::OssaBody;
@@ -76,6 +76,8 @@ pub(crate) struct ScopeFrame {
     /// All tracked values in insertion order — used by `all_live_tracked()`
     /// to produce a consistent ordering across control flow boundaries.
     pub all_values: Vec<(ValueId, Ownership)>,
+    /// Stack-allocated var locals needing DestroyAddr on scope exit.
+    pub var_addrs: Vec<(ValueId, TyId)>,
 }
 
 /// Snapshot of the scope stack + local_map for save/restore across
@@ -140,6 +142,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub body: OssaBody,
     pub current_block: Option<BlockId>,
     pub local_map: HashMap<HirLocalId, ValueId>,
+    /// Locals using address semantics (MutBorrow params, var locals).
+    /// Reads go through Load, field assignments use the address directly.
+    pub var_locals: HashSet<HirLocalId>,
     pub loop_stack: Vec<LoopInfo>,
     pub scope_stack: Vec<ScopeFrame>,
     /// Shared tracker for threading @owned values through control flow.
@@ -168,6 +173,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             body: OssaBody::new(),
             current_block: None,
             local_map: HashMap::new(),
+            var_locals: HashSet::new(),
             loop_stack: Vec::new(),
             scope_stack: Vec::new(),
             tracker: LiveTracker::from_live(&[]),
@@ -194,13 +200,26 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // ValueId when their let-statement or pattern binding fires.
         // This prevents orphan ValueIds (with no defining instruction) from
         // leaking through scope snapshots across match/if-let boundaries.
+        // Check param conventions from the MIR function def.
+        // MutBorrow params (mutating self, mutating args) receive an address
+        // and need var_locals treatment — reads go through Load, field
+        // assignments use the address directly.
+        let param_conventions: Vec<ParamConvention> = self.ctx.module.functions
+            .get(self.func_idx)
+            .map(|f| f.params.iter().map(|p| p.convention).collect())
+            .unwrap_or_default();
+
         for (i, (hir_id, _local)) in locals.iter().enumerate() {
             if i >= params_len { break; }
             let ty = self.resolve_local_type(*hir_id);
             let ownership = self.ownership_for(ty);
             let val = self.alloc_value(ty, ownership);
             self.local_map.insert(*hir_id, val);
-            if ownership == Ownership::Owned {
+            let is_mut_borrow = param_conventions.get(i)
+                .is_some_and(|c| *c == ParamConvention::MutBorrow);
+            if is_mut_borrow {
+                self.var_locals.insert(*hir_id);
+            } else if ownership == Ownership::Owned {
                 self.track_owned(val);
             } else if ownership == Ownership::None {
                 self.track_none(val);
@@ -358,7 +377,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             owned_values: Vec::new(),
             none_values: Vec::new(),
             all_values: Vec::new(),
+            var_addrs: Vec::new(),
         });
+    }
+
+    pub fn track_var(&mut self, address: ValueId, content_ty: TyId) {
+        if let Some(frame) = self.scope_stack.last_mut() {
+            frame.var_addrs.push((address, content_ty));
+        }
     }
 
     pub fn track_owned(&mut self, value: ValueId) {
@@ -394,8 +420,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn destroy_scope(&mut self) {
         if let Some(scope) = self.scope_stack.last() {
             let to_destroy: Vec<ValueId> = scope.owned_values.iter().rev().copied().collect();
+            let var_addrs: Vec<_> = scope.var_addrs.iter().rev().copied().collect();
             for value in to_destroy {
                 self.push_inst(InstKind::DestroyValue { operand: value });
+            }
+            for (address, ty) in var_addrs {
+                if self.ownership_for(ty) == Ownership::Owned {
+                    self.push_inst(InstKind::DestroyAddr { address, ty });
+                }
             }
         }
     }
@@ -432,6 +464,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if !keep.contains(&value) {
                     self.body.block_mut(self.current_block.unwrap()).insts.push(
                         Instruction::new(InstKind::DestroyValue { operand: value }),
+                    );
+                }
+            }
+            for &(address, ty) in scope.var_addrs.iter().rev() {
+                if kestrel_mir_3::body::ownership_for_type(ty, &self.ctx.module.ty_arena, &self.ctx.module) == Ownership::Owned {
+                    self.body.block_mut(self.current_block.unwrap()).insts.push(
+                        Instruction::new(InstKind::DestroyAddr { address, ty }),
                     );
                 }
             }
@@ -574,6 +613,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
+        let ownership = self.body.value(operand).ownership;
+        if ownership == Ownership::None {
+            // @none values are trivially copyable — no CopyValue needed
+            return operand;
+        }
         let ty = self.body.value(operand).ty;
         let result = self.alloc_value(ty, Ownership::Owned);
         self.push_inst(InstKind::CopyValue { result, operand });
@@ -610,6 +654,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let ty = self.body.value(operand).ty;
         let result = self.alloc_guaranteed(ty, operand);
         self.push_inst(InstKind::BeginMutBorrow { result, operand });
+        result
+    }
+
+    pub fn emit_begin_mut_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
+        let result = self.alloc_guaranteed(ty, address);
+        self.push_inst(InstKind::BeginMutBorrowAddr { result, address, ty });
         result
     }
 
@@ -681,31 +731,47 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_struct_extract(&mut self, operand: ValueId, field: FieldIdx, result_ty: TyId) -> ValueId {
-        let ownership = self.ownership_for(result_ty);
-        let result = self.alloc_value(result_ty, ownership);
-        self.push_inst(InstKind::StructExtract { result, operand, field });
-        // Extraction from @owned aggregate consumes it (OSSA rule)
-        if self.body.value(operand).ownership == Ownership::Owned {
-            self.consume(operand);
+        let operand_ownership = self.body.value(operand).ownership;
+        let natural_ownership = self.ownership_for(result_ty);
+        // Extracting from @guaranteed: owned fields become @guaranteed
+        // (borrow propagation), trivial fields stay @none.
+        if operand_ownership == Ownership::Guaranteed && natural_ownership == Ownership::Owned {
+            let result = self.alloc_guaranteed(result_ty, operand);
+            self.push_inst(InstKind::StructExtract { result, operand, field });
+            result
+        } else {
+            let result = self.alloc_value(result_ty, natural_ownership);
+            self.push_inst(InstKind::StructExtract { result, operand, field });
+            if operand_ownership == Ownership::Owned {
+                self.consume(operand);
+            }
+            if natural_ownership == Ownership::Owned {
+                self.track_owned(result);
+            }
+            result
         }
-        if ownership == Ownership::Owned {
-            self.track_owned(result);
-        }
-        result
     }
 
     pub fn emit_tuple_extract(&mut self, operand: ValueId, index: u32, result_ty: TyId) -> ValueId {
-        let ownership = self.ownership_for(result_ty);
-        let result = self.alloc_value(result_ty, ownership);
-        self.push_inst(InstKind::TupleExtract { result, operand, index });
-        // Extraction from @owned aggregate consumes it (OSSA rule)
-        if self.body.value(operand).ownership == Ownership::Owned {
-            self.consume(operand);
+        let operand_ownership = self.body.value(operand).ownership;
+        let natural_ownership = self.ownership_for(result_ty);
+        // Extracting from @guaranteed: owned fields become @guaranteed
+        // (borrow propagation), trivial fields stay @none.
+        if operand_ownership == Ownership::Guaranteed && natural_ownership == Ownership::Owned {
+            let result = self.alloc_guaranteed(result_ty, operand);
+            self.push_inst(InstKind::TupleExtract { result, operand, index });
+            result
+        } else {
+            let result = self.alloc_value(result_ty, natural_ownership);
+            self.push_inst(InstKind::TupleExtract { result, operand, index });
+            if operand_ownership == Ownership::Owned {
+                self.consume(operand);
+            }
+            if natural_ownership == Ownership::Owned {
+                self.track_owned(result);
+            }
+            result
         }
-        if ownership == Ownership::Owned {
-            self.track_owned(result);
-        }
-        result
     }
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
@@ -747,11 +813,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_load(&mut self, address: ValueId, ty: TyId) -> ValueId {
-        // Load always produces @none per OSSA spec (only valid for trivial types).
-        // For non-trivial types from opaque init calls, we still use Load
-        // but the result is @none — the caller must handle ownership tracking
-        // if needed. This is a pragmatic choice: init calls write through
-        // a pointer, and the verifier doesn't track StackAlloc init state.
         let result = self.alloc_value(ty, Ownership::None);
         self.push_inst(InstKind::Load { result, address });
         result
@@ -892,6 +953,59 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     // ================================================================
+    // Var-local address access
+    // ================================================================
+
+    /// Walk a chain of HirExpr::Field nodes to find a root var local.
+    /// If found, emit a chain of FieldAddr instructions and return the
+    /// final address. Returns None if the root isn't addressable.
+    pub fn try_field_addr_chain(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        let expr = self.hir.exprs[expr_id].clone();
+        match expr {
+            kestrel_hir::body::HirExpr::Local(hir_local, _) => {
+                if self.var_locals.contains(&hir_local) {
+                    self.local_map.get(&hir_local).copied()
+                } else {
+                    None
+                }
+            }
+            kestrel_hir::body::HirExpr::Field { base, name, .. } => {
+                let base_addr = self.try_field_addr_chain(base)?;
+                let base_ty = self.resolve_expr_type(base);
+                let field_name = name.as_str_or_empty();
+                let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
+                    MirTy::Named { entity, .. } => Some(*entity),
+                    _ => None,
+                };
+                let field_idx = struct_entity
+                    .and_then(|e| self.ctx.resolve_field_idx(e, field_name))
+                    .unwrap_or(FieldIdx::new(0));
+                Some(self.emit_field_addr(base_addr, base_ty, field_idx))
+            }
+            _ => None,
+        }
+    }
+
+    /// If `expr_id` resolves to a var local (possibly through a field chain),
+    /// return its address.
+    pub fn try_var_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        self.try_field_addr_chain(expr_id)
+    }
+
+    /// Resolve an expression to a value suitable for borrowing — returns the
+    /// original value without copying. For non-local expressions, falls back
+    /// to lower_expr (which may copy).
+    pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
+        let expr = self.hir.exprs[expr_id].clone();
+        match &expr {
+            HirExpr::Local(hir_local, _) if !self.var_locals.contains(hir_local) => {
+                self.map_local(*hir_local)
+            }
+            _ => self.lower_expr(expr_id),
+        }
+    }
+
+    // ================================================================
     // Value transfer: the OSSA copy/move decision
     // ================================================================
 
@@ -904,6 +1018,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             Ownership::Owned => self.emit_copy_value(value),
             Ownership::Guaranteed => value,
         }
+    }
+
+    /// Prepare a call argument from an HIR expression, respecting var locals.
+    /// For MutBorrow on var locals / MutBorrow params, emits BeginMutBorrowAddr
+    /// so mutations write through to the original storage.
+    pub fn prepare_call_arg_for_expr(&mut self, expr_id: HirExprId, convention: ParamConvention) -> CallArg {
+        if convention == ParamConvention::MutBorrow {
+            if let Some(addr) = self.try_var_addr(expr_id) {
+                let ty = self.resolve_expr_type(expr_id);
+                let borrow = self.emit_begin_mut_borrow_addr(addr, ty);
+                return CallArg { value: borrow, convention };
+            }
+        }
+        let val = self.lower_expr(expr_id);
+        self.prepare_call_arg(val, convention)
     }
 
     /// Prepare a value for a call argument with a given convention.

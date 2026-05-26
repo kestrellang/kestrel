@@ -69,7 +69,11 @@ impl Immediate {
                 FloatBits::F64 => arena.f64(),
             },
             ImmediateKind::BoolLiteral(_) => arena.bool(),
-            ImmediateKind::StringLiteral(_) | ImmediateKind::StringPointer(_) => arena.str_ty(),
+            ImmediateKind::StringLiteral(_) => arena.str_ty(),
+            ImmediateKind::StringPointer(_) => {
+                let i8 = arena.i8();
+                arena.pointer(i8)
+            }
             ImmediateKind::Unit => arena.unit(),
             ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => *ty,
             ImmediateKind::FloatInfinity(bits) | ImmediateKind::FloatNan(bits) => match bits {

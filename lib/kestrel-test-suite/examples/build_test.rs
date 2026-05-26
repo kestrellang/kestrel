@@ -66,13 +66,13 @@ fn main() {
         std::process::exit(1);
     }
 
-    let options = kestrel_codegen_cranelift_2::CodegenOptions {
+    let options = kestrel_codegen_cranelift_3::CodegenOptions {
         libraries,
         ..Default::default()
     };
     tc.compiler()
-        .compile_and_link2(Path::new(&out_path), &options)
-        .expect("compile_and_link2 failed");
+        .compile_and_link3(Path::new(&out_path), &options)
+        .expect("compile_and_link3 failed");
 
     eprintln!("built: {}", out_path);
 }

@@ -17,6 +17,7 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
+use kestrel_mir_3::value::Ownership;
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
 use super::{OssaBodyCtx, expr_span};
@@ -61,9 +62,20 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
 
             HirExpr::Local(hir_local, _) => {
-                let val = self.map_local(*hir_local);
-                // Return a use of the local: copies @owned, passes through @none
-                self.emit_value_use(val)
+                if self.var_locals.contains(hir_local) {
+                    // MutBorrow param or var local: load from address
+                    let addr = self.map_local(*hir_local);
+                    let ty = self.resolve_local_type(*hir_local);
+                    let ownership = self.ownership_for(ty);
+                    if ownership == kestrel_mir_3::value::Ownership::Owned {
+                        self.emit_copy_addr(addr, ty)
+                    } else {
+                        self.emit_load(addr, ty)
+                    }
+                } else {
+                    let val = self.map_local(*hir_local);
+                    self.emit_value_use(val)
+                }
             }
 
             HirExpr::Tuple { elements, .. } => {
@@ -80,9 +92,16 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             HirExpr::TupleIndex { base, index, .. } => {
-                let base_val = self.lower_expr(*base);
+                let base_val = self.lower_expr_for_borrow(*base);
                 let result_ty = self.resolve_expr_type(expr_id);
-                self.emit_tuple_extract(base_val, *index, result_ty)
+                if self.body.value(base_val).ownership == Ownership::Owned {
+                    let borrow = self.emit_begin_borrow(base_val);
+                    let field = self.emit_tuple_extract(borrow, *index, result_ty);
+                    self.emit_end_borrow(borrow);
+                    field
+                } else {
+                    self.emit_tuple_extract(base_val, *index, result_ty)
+                }
             }
 
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
@@ -293,15 +312,17 @@ impl OssaBodyCtx<'_, '_> {
             return self.emit_call_returning(callee, vec![arg], result_ty);
         }
 
-        // Static stored field → global ref
+        // Static stored field → global ref + load
         if is_static {
             let static_entity = resolved.unwrap();
             self.ctx.register_name(static_entity);
-            return self.emit_global_ref(static_entity);
+            let addr = self.emit_global_ref(static_entity);
+            let ty = self.resolve_expr_type(expr_id);
+            return self.emit_load(addr, ty);
         }
 
-        // Stored field → StructExtract
-        let base_val = self.lower_expr(base);
+        // Stored field → StructExtract (borrow-based when base is @owned)
+        let base_val = self.lower_expr_for_borrow(base);
         let base_ty = self.resolve_expr_type(base);
         let result_ty = self.resolve_expr_type(expr_id);
 
@@ -309,14 +330,19 @@ impl OssaBodyCtx<'_, '_> {
             MirTy::Named { entity, .. } => Some(*entity),
             _ => None,
         };
-        if let Some(se) = struct_entity {
-            if let Some(idx) = self.ctx.resolve_field_idx(se, field_name) {
-                return self.emit_struct_extract(base_val, idx, result_ty);
-            }
+
+        let field_idx = struct_entity
+            .and_then(|se| self.ctx.resolve_field_idx(se, field_name))
+            .unwrap_or(FieldIdx::new(0));
+
+        if self.body.value(base_val).ownership == Ownership::Owned {
+            let borrow = self.emit_begin_borrow(base_val);
+            let field = self.emit_struct_extract(borrow, field_idx, result_ty);
+            self.emit_end_borrow(borrow);
+            field
+        } else {
+            self.emit_struct_extract(base_val, field_idx, result_ty)
         }
-        // Fallback: field not found in lowered structs (generic type, etc.)
-        // Use index 0 as placeholder — resolved during monomorphization
-        self.emit_struct_extract(base_val, FieldIdx::new(0), result_ty)
     }
 
     // ================================================================
@@ -366,8 +392,10 @@ impl OssaBodyCtx<'_, '_> {
                     let callee = Callee::direct_with_args(entity, vec![], None);
                     self.emit_call_returning(callee, vec![], result_ty)
                 } else {
-                    // Static stored field
-                    self.emit_global_ref(entity)
+                    // Static stored field → load through global ref
+                    let addr = self.emit_global_ref(entity);
+                    let ty = self.resolve_expr_type(expr_id);
+                    self.emit_load(addr, ty)
                 }
             }
             Some(NodeKind::TypeParameter | NodeKind::TypeAlias) => {
@@ -477,29 +505,31 @@ impl OssaBodyCtx<'_, '_> {
             return result;
         }
 
-        // Simple stored assignment: rebind the local in local_map
+        // Simple stored assignment
         let rhs = self.lower_expr(value);
         let target_expr = self.hir.exprs[target].clone();
         match target_expr {
             HirExpr::Local(hir_local, _) => {
-                let old_val = self.local_map.get(&hir_local).copied();
-                if let Some(old) = old_val {
-                    let ownership = self.body.value(old).ownership;
-                    if ownership == kestrel_mir_3::value::Ownership::Owned {
-                        self.emit_destroy_value(old);
+                if self.var_locals.contains(&hir_local) {
+                    let addr = self.local_map[&hir_local];
+                    self.emit_store_assign(addr, rhs);
+                } else {
+                    let old_val = self.local_map.get(&hir_local).copied();
+                    if let Some(old) = old_val {
+                        let ownership = self.body.value(old).ownership;
+                        if ownership == kestrel_mir_3::value::Ownership::Owned {
+                            self.emit_destroy_value(old);
+                        }
+                        self.tracker.rebind(&[old], &[rhs]);
                     }
-                    // Keep the tracker in sync so merge/back-edge jumps use the
-                    // new value instead of the old one (applies to both @owned and @none).
-                    self.tracker.rebind(&[old], &[rhs]);
+                    self.local_map.insert(hir_local, rhs);
                 }
-                self.local_map.insert(hir_local, rhs);
             }
             HirExpr::Field { ref base, ref name, .. } => {
                 let base = *base;
                 let field_name = name.as_str_or_empty().to_string();
-                let base_val = self.lower_expr(base);
                 let base_ty = self.resolve_expr_type(base);
-                let base_addr = self.emit_begin_mut_borrow(base_val);
+
                 let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
                     kestrel_mir_3::MirTy::Named { entity, .. } => Some(*entity),
                     _ => None,
@@ -507,9 +537,25 @@ impl OssaBodyCtx<'_, '_> {
                 let field_idx = struct_entity
                     .and_then(|e| self.ctx.resolve_field_idx(e, &field_name))
                     .unwrap_or(kestrel_mir_3::FieldIdx::new(0));
-                let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-                self.emit_store_init(addr, rhs);
-                self.emit_end_mut_borrow(base_addr);
+
+                if let Some(base_addr) = self.try_field_addr_chain(base) {
+                    let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(field_addr, rhs);
+                } else {
+                    let base_val = self.lower_expr(base);
+                    let base_addr = self.emit_begin_mut_borrow(base_val);
+                    let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_init(addr, rhs);
+                    self.emit_end_mut_borrow(base_addr);
+                }
+            }
+            HirExpr::Def(entity, _, _) => {
+                // Static stored field: `MyCounter._count = v`
+                if self.ctx.world.get::<kestrel_ast_builder::Static>(entity).is_some() {
+                    self.ctx.register_name(entity);
+                    let addr = self.emit_global_ref(entity);
+                    self.emit_store_assign(addr, rhs);
+                }
             }
             _ => {}
         }
@@ -712,11 +758,13 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_call_void(callee, call_args);
         } else {
             let receiver_ty = self.resolve_expr_type(callee_expr);
-            let receiver_val = self.lower_expr(callee_expr);
             let type_args = self.resolve_type_args(target_id);
 
+            // Use prepare_call_arg_for_expr to get the var address directly
+            // (via try_var_addr) instead of lower_expr which emits CopyAddr —
+            // a shallow copy that breaks COW refcounting.
             let mut call_args = vec![
-                self.prepare_call_arg(receiver_val, ParamConvention::MutBorrow),
+                self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow),
             ];
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
@@ -825,18 +873,23 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
-        // In OSSA, we lower the receiver and extract the field to get
-        // a value we can pass as MutBorrow to the setter.
-        let receiver_val = self.lower_expr(receiver);
-        let field_val = self.emit_struct_extract(receiver_val, field_idx, field_ty);
-
+        // Get the receiver's field address directly via try_var_addr + field_addr,
+        // then MutBorrow the field. Avoids shallow CopyAddr that breaks COW refcounting.
         let subscript_args: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a.value)).collect();
         let rhs = self.lower_expr(value_id);
         let type_args = self.resolve_type_args(target_id);
 
-        let mut call_args = vec![
-            self.prepare_call_arg(field_val, ParamConvention::MutBorrow),
-        ];
+        let field_arg = if let Some(recv_addr) = self.try_var_addr(receiver) {
+            let field_addr = self.emit_field_addr(recv_addr, receiver_ty, field_idx);
+            let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
+            CallArg { value: borrow, convention: ParamConvention::MutBorrow }
+        } else {
+            let receiver_val = self.lower_expr(receiver);
+            let field_val = self.emit_struct_extract(receiver_val, field_idx, field_ty);
+            self.prepare_call_arg(field_val, ParamConvention::MutBorrow)
+        };
+
+        let mut call_args = vec![field_arg];
         for v in subscript_args {
             call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
         }

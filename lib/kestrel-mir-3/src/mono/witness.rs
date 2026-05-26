@@ -593,7 +593,7 @@ mod tests {
 
         let mut witness = WitnessDef::new(proto, i64);
         witness.add_method(WitnessMethodBinding::new(
-            WitnessMethodKey::simple("equals"),
+            WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             impl_func,
             vec![],
         ));
@@ -606,7 +606,7 @@ mod tests {
             &witnesses,
             &protocols,
             proto,
-            &WitnessMethodKey::simple("equals"),
+            &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
         )
         .unwrap();
@@ -628,7 +628,7 @@ mod tests {
 
         let mut witness = WitnessDef::new(proto, pattern);
         witness.add_method(WitnessMethodBinding::new(
-            WitnessMethodKey::simple("equals"),
+            WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             impl_func,
             vec![],
         ));
@@ -641,7 +641,7 @@ mod tests {
             &witnesses,
             &protocols,
             proto,
-            &WitnessMethodKey::simple("equals"),
+            &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             concrete,
         )
         .unwrap();
@@ -666,7 +666,7 @@ mod tests {
         // Witness is for Comparable but has the Equatable method
         let mut witness = WitnessDef::new(comparable, i64);
         witness.add_method(WitnessMethodBinding::new(
-            WitnessMethodKey::simple("equals"),
+            WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             impl_func,
             vec![],
         ));
@@ -678,7 +678,7 @@ mod tests {
             &witnesses,
             &protocols,
             equatable,
-            &WitnessMethodKey::simple("equals"),
+            &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
         );
         assert!(result.is_ok());
@@ -697,7 +697,7 @@ mod tests {
             &witnesses,
             &protocols,
             proto,
-            &WitnessMethodKey::simple("equals"),
+            &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
         );
         assert!(result.is_err());

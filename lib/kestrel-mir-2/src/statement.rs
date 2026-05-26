@@ -463,8 +463,8 @@ mod tests {
 
     #[test]
     fn witness_key_equality() {
-        let a = WitnessMethodKey::simple("equals");
-        let b = WitnessMethodKey::simple("equals");
+        let a = WitnessMethodKey::new("isEqual", vec![Some("to".into())]);
+        let b = WitnessMethodKey::new("isEqual", vec![Some("to".into())]);
         assert_eq!(a, b);
     }
 

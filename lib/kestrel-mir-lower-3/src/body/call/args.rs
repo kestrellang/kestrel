@@ -23,10 +23,9 @@ impl OssaBodyCtx<'_, '_> {
         args.iter()
             .enumerate()
             .map(|(i, arg)| {
-                let val = self.lower_expr(arg.value);
                 let conv = conventions.get(offset + i).copied()
                     .unwrap_or(ParamConvention::Borrow);
-                self.prepare_call_arg(val, conv)
+                self.prepare_call_arg_for_expr(arg.value, conv)
             })
             .collect()
     }

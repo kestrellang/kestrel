@@ -43,9 +43,11 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
         self.inner = box;
     }
 
-    /// Read access — no clone, no refcount check.
+    /// Read access — clones the value so the caller gets an independent
+    /// copy. getValue() returns a raw bitwise copy from the heap; cloning
+    /// ensures owned resources (byte buffers, etc.) are properly duplicated.
     public func read() -> T {
-        self.inner.getValue()
+        self.inner.getValue().clone()
     }
 
     /// Write access — clones storage if shared, then returns the

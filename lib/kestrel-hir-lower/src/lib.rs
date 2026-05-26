@@ -102,20 +102,18 @@ impl QueryFn for LowerBody {
             }
         }
 
-        // Lower all top-level statements, prepending param destructure stmts
-        let mut statements: Vec<_> = param_desugar_stmts;
-        statements.extend(
-            ast_body
-                .statements
-                .iter()
-                .map(|&id| lower.lower_stmt(ast_body, id)),
+        // Lower all top-level statements via lower_block_stmts so that
+        // guard-let CPS transformation applies at the function body level.
+        let body_block = lower.lower_block_stmts(
+            ast_body, &ast_body.statements, ast_body.tail_expr,
         );
+        let mut statements: Vec<_> = param_desugar_stmts;
+        statements.extend(body_block.stmts);
 
         // Lower tail expression.
         // For effectful inits, wrap the tail (or synthesize one) in .Some(()) / .Ok(())
         // so the implicit fall-through returns the success wrapper around unit.
-        let tail_expr = if let Some(id) = ast_body.tail_expr {
-            let lowered = lower.lower_expr(ast_body, id);
+        let tail_expr = if let Some(lowered) = body_block.tail_expr {
             if let Some(wrapped) = lower.wrap_init_success_value(Span::synthetic(0)) {
                 // Effectful init: emit the original tail as a statement, return the wrapper
                 let stmt = lower.alloc_stmt(HirStmt::Expr {

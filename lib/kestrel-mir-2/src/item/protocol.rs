@@ -82,12 +82,12 @@ mod tests {
     fn protocol_with_method() {
         let mut def = ProtocolDef::new(Entity::from_raw(1), "Equatable");
         def.methods.push(ProtocolMethodDef::new(
-            "equals",
+            "isEqual",
             vec![("other".into(), TyId::new(0))],
             TyId::new(1), // Bool
         ));
         assert_eq!(def.methods.len(), 1);
-        assert_eq!(def.methods[0].name, "equals");
+        assert_eq!(def.methods[0].name, "isEqual");
     }
 
     #[test]

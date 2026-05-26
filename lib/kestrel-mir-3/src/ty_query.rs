@@ -64,6 +64,9 @@ pub fn copy_behavior(
                             if is_cloneable_protocol(module, *protocol) {
                                 return CopyBehavior::Clone(*protocol);
                             }
+                            if is_copyable_protocol(module, *protocol) {
+                                return CopyBehavior::Bitwise;
+                            }
                         }
                         WhereConstraint::NotImplements {
                             type_param,
@@ -138,3 +141,4 @@ pub fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
 pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
     module.protocols.iter().find(|p| p.name.ends_with("Cloneable")).map(|p| p.entity)
 }
+

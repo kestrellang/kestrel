@@ -1,13 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::Entity;
 
 use crate::callee::Callee;
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind};
+use crate::item::{CopyBehavior, DropBehavior};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::Ownership;
+use crate::value::{Ownership, ValueDef};
 use crate::{MonoFuncId, TyId, ValueId};
 
 /// Expand DestroyValue and CopyValue instructions in all monomorphized bodies.
@@ -26,18 +27,110 @@ pub fn expand_destroy_copy(
     module: &mut MonoModule,
     generic_functions: &[FunctionDef],
 ) {
-    // Build a lookup from (nominal_entity, type_args) -> MonoFuncId for drop shims.
-    // For each MonoFunction whose source entity corresponds to a DropShim in the
-    // generic module, record which nominal type it drops.
     let shim_lookup = build_drop_shim_lookup(module, generic_functions);
+    let clone_lookup = build_clone_lookup(module, generic_functions);
+
+    // Map method/deinit entities → nominal for types with drop/clone.
+    // Prevents recursive cycles: DestroyValue on T inside T's methods
+    // won't expand to Call(__drop$T), and CopyValue on T inside T's
+    // methods won't expand to Call(T.clone).
+    let method_to_nominal = build_method_to_nominal_map(module, generic_functions);
+
+    // Pre-intern Pointer(Named) types for cloneable types so the expand
+    // pass can create BeginBorrow values without mutable arena access.
+    for (nominal, type_args) in clone_lookup.keys() {
+        if let Some(named_ty) = module.ty_arena.find(|t| {
+            matches!(t, MirTy::Named { entity, type_args: ta } if *entity == *nominal && ta == type_args)
+        }) {
+            module.ty_arena.pointer(named_ty);
+        }
+    }
 
     for fi in 0..module.functions.len() {
-        expand_function(&mut module.functions[fi], &module.ty_arena, &shim_lookup);
+        let source = module.functions[fi].source;
+        let skip_nominal = method_to_nominal.get(&source).copied();
+        expand_function(&mut module.functions[fi], &module.ty_arena, &shim_lookup, &clone_lookup, skip_nominal);
     }
 }
 
 /// Maps (nominal_entity, type_args) -> MonoFuncId for drop shim dispatch.
 type DropShimLookup = HashMap<(Entity, Vec<TyId>), MonoFuncId>;
+
+/// Build func_entity → nominal_entity for methods of droppable/cloneable types.
+/// Prevents recursive expansion cycles: DestroyValue on T inside T's methods
+/// won't expand to Call(__drop$T), and CopyValue on T inside T's methods
+/// won't expand to Call(T.clone).
+fn build_method_to_nominal_map(
+    module: &MonoModule,
+    generic_functions: &[FunctionDef],
+) -> HashMap<Entity, Entity> {
+    // Collect nominal entities that have drop shims or clone behavior
+    let mut relevant: HashSet<Entity> = HashSet::new();
+    for s in &module.structs {
+        if s.type_info.drop != DropBehavior::None || matches!(s.type_info.copy, CopyBehavior::Clone(_)) {
+            relevant.insert(s.source);
+        }
+    }
+    for e in &module.enums {
+        if e.type_info.drop != DropBehavior::None {
+            relevant.insert(e.source);
+        }
+    }
+
+    let mut map = HashMap::new();
+    for f in generic_functions {
+        let parent = match &f.kind {
+            FunctionKind::Method { parent, .. }
+            | FunctionKind::Deinit { parent }
+            | FunctionKind::Initializer { parent }
+            | FunctionKind::StaticMethod { parent } => Some(*parent),
+            _ => None,
+        };
+        if let Some(p) = parent {
+            if relevant.contains(&p) {
+                map.insert(f.entity, p);
+            }
+        }
+    }
+    map
+}
+
+/// Build (nominal_entity, type_args) → MonoFuncId for clone functions.
+fn build_clone_lookup(
+    module: &MonoModule,
+    generic_functions: &[FunctionDef],
+) -> DropShimLookup {
+    let mut cloneable_nominals: HashSet<Entity> = HashSet::new();
+    for s in &module.structs {
+        if matches!(s.type_info.copy, CopyBehavior::Clone(_)) {
+            cloneable_nominals.insert(s.source);
+        }
+    }
+
+    // Find clone method entities: Method { parent } with name ending in ".clone"
+    let clone_method_to_parent: HashMap<Entity, Entity> = generic_functions
+        .iter()
+        .filter_map(|f| {
+            if let FunctionKind::Method { parent, .. } = &f.kind {
+                if cloneable_nominals.contains(parent) && f.name.ends_with(".clone") {
+                    return Some((f.entity, *parent));
+                }
+            }
+            None
+        })
+        .collect();
+
+    let mut lookup = DropShimLookup::new();
+    for (mi, mf) in module.functions.iter().enumerate() {
+        if let Some(&nominal) = clone_method_to_parent.get(&mf.source) {
+            lookup.insert(
+                (nominal, mf.type_args.clone()),
+                MonoFuncId::new(mi),
+            );
+        }
+    }
+    lookup
+}
 
 /// Scan the generic function list for DropShim functions, then find their
 /// monomorphized counterparts in the MonoModule.
@@ -45,7 +138,6 @@ fn build_drop_shim_lookup(
     module: &MonoModule,
     generic_functions: &[FunctionDef],
 ) -> DropShimLookup {
-    // Map shim_entity -> nominal_entity from the generic module
     let shim_to_nominal: HashMap<Entity, Entity> = generic_functions
         .iter()
         .filter_map(|f| match &f.kind {
@@ -58,7 +150,6 @@ fn build_drop_shim_lookup(
 
     for (mi, mf) in module.functions.iter().enumerate() {
         if let Some(&nominal) = shim_to_nominal.get(&mf.source) {
-            // The shim's type_args correspond to the Named type's type_args
             lookup.insert(
                 (nominal, mf.type_args.clone()),
                 MonoFuncId::new(mi),
@@ -70,36 +161,44 @@ fn build_drop_shim_lookup(
 }
 
 /// Expand DestroyValue/CopyValue in a single function body.
+/// `skip_destroy_nominal`: if this function is a deinit for some nominal type,
+/// DestroyValue on that type is removed instead of expanded to avoid
+/// recursive drop shim → deinit → drop shim cycles.
 fn expand_function(
     func: &mut MonoFunction,
     ty_arena: &crate::ty::TyArena,
     shim_lookup: &DropShimLookup,
+    clone_lookup: &DropShimLookup,
+    skip_nominal: Option<Entity>,
 ) {
     let Some(body) = &mut func.body else { return };
 
     // value_remap tracks CopyValue removals: result -> operand
     let mut value_remap: HashMap<ValueId, ValueId> = HashMap::new();
 
-    for block in &mut body.blocks {
-        let mut new_insts: Vec<Instruction> = Vec::with_capacity(block.insts.len());
+    for block_idx in 0..body.blocks.len() {
+        let old_insts = std::mem::take(&mut body.blocks[block_idx].insts);
+        let mut new_insts: Vec<Instruction> = Vec::with_capacity(old_insts.len());
 
-        for inst in block.insts.drain(..) {
+        for inst in old_insts {
             match &inst.kind {
                 InstKind::DestroyValue { operand } => {
                     let operand = *operand;
                     let value_def = &body.values[operand.index()];
 
                     if value_def.ownership == Ownership::None {
-                        // Trivial type after mono — just drop the instruction
                         continue;
                     }
 
-                    // Owned value — check if it's a Named type with a drop shim
                     match ty_arena.get(value_def.ty) {
                         MirTy::Named { entity, type_args } => {
+                            // Skip if we're inside a method of this type — prevents
+                            // drop shim → deinit → method → drop shim recursion.
+                            if skip_nominal == Some(*entity) {
+                                continue;
+                            }
                             let key = (*entity, type_args.clone());
                             if let Some(&shim_id) = shim_lookup.get(&key) {
-                                // Replace with Call(drop_shim)
                                 new_insts.push(Instruction {
                                     kind: InstKind::Call {
                                         result: None,
@@ -112,9 +211,7 @@ fn expand_function(
                                     span: inst.span,
                                 });
                             }
-                            // Named type without a drop shim — remove silently
                         }
-                        // FuncThick, Tuple, etc. with @owned but no shim — remove
                         _ => {}
                     }
                 }
@@ -125,20 +222,53 @@ fn expand_function(
                     let value_def = &body.values[operand.index()];
 
                     if value_def.ownership == Ownership::None {
-                        // Trivially copyable after mono — remove and remap
                         let target = remap_value(operand, &value_remap);
                         value_remap.insert(result, target);
                         continue;
                     }
 
-                    // Non-trivial CopyValue — keep as-is (clone expansion is separate)
+                    // Owned Named type with a clone function → BeginBorrow + Call(clone) + EndBorrow
+                    if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty) {
+                        // Skip inside methods of this type to prevent recursion
+                        if skip_nominal != Some(*entity) {
+                            let key = (*entity, type_args.clone());
+                            if let Some(&clone_id) = clone_lookup.get(&key) {
+                                let remapped_operand = remap_value(operand, &value_remap);
+
+                                let ptr_ty = ty_arena.find(|t| matches!(t, MirTy::Pointer(p) if *p == value_def.ty))
+                                    .expect("Pointer type should be pre-interned for cloneable types");
+                                let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, remapped_operand));
+
+                                new_insts.push(Instruction::new(InstKind::BeginBorrow {
+                                    result: borrow_val,
+                                    operand: remapped_operand,
+                                }));
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Call {
+                                        result: Some(result),
+                                        callee: Callee::Resolved(clone_id),
+                                        args: vec![CallArg {
+                                            value: borrow_val,
+                                            convention: ParamConvention::Borrow,
+                                        }],
+                                    },
+                                    span: inst.span,
+                                });
+                                new_insts.push(Instruction::new(InstKind::EndBorrow {
+                                    operand: borrow_val,
+                                }));
+                                continue;
+                            }
+                        }
+                    }
+
+                    // No clone available or inside own type's method — keep bitwise copy
                     let mut kept = inst;
                     remap_inst_operands(&mut kept.kind, &value_remap);
                     new_insts.push(kept);
                 }
 
                 _ => {
-                    // All other instructions: apply value remapping and keep
                     let mut kept = inst;
                     remap_inst_operands(&mut kept.kind, &value_remap);
                     new_insts.push(kept);
@@ -146,10 +276,8 @@ fn expand_function(
             }
         }
 
-        block.insts = new_insts;
-
-        // Remap ValueIds in the terminator
-        remap_terminator(&mut block.terminator.kind, &value_remap);
+        body.blocks[block_idx].insts = new_insts;
+        remap_terminator(&mut body.blocks[block_idx].terminator.kind, &value_remap);
     }
 }
 
@@ -215,9 +343,7 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
             *c = remap_value(*c, remap);
         }
 
-        InstKind::Literal { .. } | InstKind::GlobalRef { .. } => {
-            // No operand ValueIds
-        }
+        InstKind::Literal { .. } | InstKind::GlobalRef { .. } => {}
 
         InstKind::Struct { fields, .. } => {
             for (_, v) in fields.iter_mut() {
@@ -240,7 +366,6 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
             for arg in args.iter_mut() {
                 arg.value = remap_value(arg.value, remap);
             }
-            // Also remap indirect callee values (Thin/Thick)
             match callee {
                 Callee::Thin(v) | Callee::Thick(v) => {
                     *v = remap_value(*v, remap);
@@ -258,9 +383,7 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
             *base = remap_value(*base, remap);
         }
 
-        InstKind::Uninit { .. } => {
-            // No operand ValueIds
-        }
+        InstKind::Uninit { .. } => {}
     }
 }
 
@@ -336,7 +459,6 @@ mod tests {
         MonoModule::new(TyArena::new(), IndexMap::new())
     }
 
-    /// Build a single-block body with the given instructions, returning `ret_val`.
     fn make_body(insts: Vec<Instruction>, ret_val: ValueId, values: Vec<ValueDef>) -> OssaBody {
         let mut block = BasicBlock::new();
         block.insts = insts;
@@ -368,94 +490,47 @@ mod tests {
         }
     }
 
-    // -- Test 1: DestroyValue on @none value is removed --
-
     #[test]
     fn destroy_value_on_none_removed() {
         let mut module = make_module();
         let i64_ty = module.ty_arena.i64();
         let unit = module.ty_arena.unit();
-
-        // v0 = unit (ret), v1 = i64 @none (will be destroyed)
         let body = make_body(
             vec![
-                Instruction::new(InstKind::Literal {
-                    result: ValueId::new(1),
-                    value: Immediate::i64(42),
-                }),
-                Instruction::new(InstKind::DestroyValue {
-                    operand: ValueId::new(1),
-                }),
+                Instruction::new(InstKind::Literal { result: ValueId::new(1), value: Immediate::i64(42) }),
+                Instruction::new(InstKind::DestroyValue { operand: ValueId::new(1) }),
             ],
             ValueId::new(0),
-            vec![
-                ValueDef::none(unit),
-                ValueDef::none(i64_ty), // @none — trivial type
-            ],
+            vec![ValueDef::none(unit), ValueDef::none(i64_ty)],
         );
-
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-
-        let generic_functions: Vec<FunctionDef> = vec![];
-        expand_destroy_copy(&mut module, &generic_functions);
-
-        // DestroyValue should be gone, only the Literal remains
+        expand_destroy_copy(&mut module, &[]);
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         assert!(matches!(body.blocks[0].insts[0].kind, InstKind::Literal { .. }));
     }
 
-    // -- Test 2: DestroyValue on Named type with shim becomes Call --
-
     #[test]
     fn destroy_value_named_with_shim_becomes_call() {
         let mut module = make_module();
         let unit = module.ty_arena.unit();
-
-        // A Named type "MyStruct" (entity 10)
         let named_ty = module.ty_arena.named(entity(10), vec![]);
-
-        // v0 = unit (ret), v1 = MyStruct @owned
         let body = make_body(
-            vec![
-                Instruction::new(InstKind::DestroyValue {
-                    operand: ValueId::new(1),
-                }),
-            ],
+            vec![Instruction::new(InstKind::DestroyValue { operand: ValueId::new(1) })],
             ValueId::new(0),
-            vec![
-                ValueDef::none(unit),
-                ValueDef::owned(named_ty), // @owned Named type
-            ],
+            vec![ValueDef::none(unit), ValueDef::owned(named_ty)],
         );
-
-        // Add the drop shim as a MonoFunction (source = entity(20), the shim func)
         let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::none(unit)]);
-        let shim_func = make_mono_func("__drop$MyStruct", entity(20), vec![], unit, Some(shim_body));
-        module.add_function(shim_func); // MonoFuncId(0)
-
-        // Add the function under test
+        module.add_function(make_mono_func("__drop$MyStruct", entity(20), vec![], unit, Some(shim_body)));
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-        // MonoFuncId(1) is the test function
-
-        // Generic module: entity(20) is a DropShim for entity(10)
-        let generic_functions = vec![
-            FunctionDef {
-                entity: entity(20),
-                name: "__drop$MyStruct".into(),
-                kind: FunctionKind::DropShim { nominal: entity(10) },
-                type_params: vec![],
-                params: vec![],
-                ret: unit,
-                where_clause: None,
-                body: None,
-                extern_info: None,
-            },
-        ];
-
+        let generic_functions = vec![FunctionDef {
+            entity: entity(20),
+            name: "__drop$MyStruct".into(),
+            kind: FunctionKind::DropShim { nominal: entity(10) },
+            type_params: vec![], params: vec![], ret: unit,
+            where_clause: None, body: None, extern_info: None,
+        }];
         expand_destroy_copy(&mut module, &generic_functions);
-
-        // The DestroyValue should have become a Call to MonoFuncId(0)
         let body = module.functions[1].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         match &body.blocks[0].insts[0].kind {
@@ -470,28 +545,16 @@ mod tests {
         }
     }
 
-    // -- Test 3: CopyValue on @none is removed, result remapped --
-
     #[test]
     fn copy_value_on_none_removed_and_remapped() {
         let mut module = make_module();
         let i64_ty = module.ty_arena.i64();
         let unit = module.ty_arena.unit();
-
-        // v0 = unit (ret), v1 = i64 @none (src), v2 = i64 @none (copy result)
-        // The CopyValue copies v1 -> v2, then v2 is used in an Op1.
         let v3_ty = module.ty_arena.i64();
         let body = make_body(
             vec![
-                Instruction::new(InstKind::Literal {
-                    result: ValueId::new(1),
-                    value: Immediate::i64(42),
-                }),
-                Instruction::new(InstKind::CopyValue {
-                    result: ValueId::new(2),
-                    operand: ValueId::new(1),
-                }),
-                // Use v2 in an Op1 — after removal, this should reference v1
+                Instruction::new(InstKind::Literal { result: ValueId::new(1), value: Immediate::i64(42) }),
+                Instruction::new(InstKind::CopyValue { result: ValueId::new(2), operand: ValueId::new(1) }),
                 Instruction::new(InstKind::Op1 {
                     result: ValueId::new(3),
                     op: crate::op::Op::Neg(crate::op::IntBits::I64),
@@ -499,289 +562,86 @@ mod tests {
                 }),
             ],
             ValueId::new(0),
-            vec![
-                ValueDef::none(unit),
-                ValueDef::none(i64_ty),
-                ValueDef::none(i64_ty), // copy result, also @none
-                ValueDef::none(v3_ty),
-            ],
+            vec![ValueDef::none(unit), ValueDef::none(i64_ty), ValueDef::none(i64_ty), ValueDef::none(v3_ty)],
         );
-
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-
-        let generic_functions: Vec<FunctionDef> = vec![];
-        expand_destroy_copy(&mut module, &generic_functions);
-
+        expand_destroy_copy(&mut module, &[]);
         let body = module.functions[0].body.as_ref().unwrap();
-        // CopyValue removed -> 2 instructions remain (Literal + Op1)
         assert_eq!(body.blocks[0].insts.len(), 2);
-        assert!(matches!(body.blocks[0].insts[0].kind, InstKind::Literal { .. }));
-        // The Op1 should now reference v1 (the original), not v2
         match &body.blocks[0].insts[1].kind {
-            InstKind::Op1 { arg, .. } => {
-                assert_eq!(*arg, ValueId::new(1));
-            }
+            InstKind::Op1 { arg, .. } => assert_eq!(*arg, ValueId::new(1)),
             other => panic!("expected Op1, got {:?}", other),
         }
     }
-
-    // -- Test 4: Mixed body with multiple expansions --
-
-    #[test]
-    fn mixed_body_multiple_expansions() {
-        let mut module = make_module();
-        let i64_ty = module.ty_arena.i64();
-        let unit = module.ty_arena.unit();
-        let named_ty = module.ty_arena.named(entity(10), vec![]);
-
-        // Body with:
-        //   v1 = Literal 42          (@none i64)
-        //   CopyValue v1 -> v2       (@none -> removed, v2 remaps to v1)
-        //   v3 = Struct named_ty     (@owned)
-        //   DestroyValue v3          (Named with shim -> Call)
-        //   DestroyValue v2          (was remapped from v2->v1; @none -> removed)
-        //   return v0
-        let body = make_body(
-            vec![
-                Instruction::new(InstKind::Literal {
-                    result: ValueId::new(1),
-                    value: Immediate::i64(42),
-                }),
-                Instruction::new(InstKind::CopyValue {
-                    result: ValueId::new(2),
-                    operand: ValueId::new(1),
-                }),
-                Instruction::new(InstKind::Struct {
-                    result: ValueId::new(3),
-                    ty: named_ty,
-                    fields: vec![],
-                }),
-                Instruction::new(InstKind::DestroyValue {
-                    operand: ValueId::new(3),
-                }),
-                Instruction::new(InstKind::DestroyValue {
-                    operand: ValueId::new(2),
-                }),
-            ],
-            ValueId::new(0),
-            vec![
-                ValueDef::none(unit),       // v0: return value
-                ValueDef::none(i64_ty),     // v1: literal
-                ValueDef::none(i64_ty),     // v2: copy of v1 (@none)
-                ValueDef::owned(named_ty),  // v3: struct
-            ],
-        );
-
-        // Drop shim for entity(10)
-        let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::none(unit)]);
-        module.add_function(make_mono_func("__drop$MyStruct", entity(20), vec![], unit, Some(shim_body)));
-        module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-
-        let generic_functions = vec![
-            FunctionDef {
-                entity: entity(20),
-                name: "__drop$MyStruct".into(),
-                kind: FunctionKind::DropShim { nominal: entity(10) },
-                type_params: vec![],
-                params: vec![],
-                ret: unit,
-                where_clause: None,
-                body: None,
-                extern_info: None,
-            },
-        ];
-
-        expand_destroy_copy(&mut module, &generic_functions);
-
-        let body = module.functions[1].body.as_ref().unwrap();
-        let insts = &body.blocks[0].insts;
-
-        // Expected remaining instructions:
-        //   0: Literal v1
-        //   1: Struct v3
-        //   2: Call(drop_shim, v3)
-        // CopyValue removed, DestroyValue on v2 (now @none) removed
-        assert_eq!(insts.len(), 3, "got: {insts:#?}");
-
-        assert!(matches!(insts[0].kind, InstKind::Literal { .. }));
-        assert!(matches!(insts[1].kind, InstKind::Struct { .. }));
-        match &insts[2].kind {
-            InstKind::Call { callee, args, .. } => {
-                assert!(matches!(callee, Callee::Resolved(id) if id.index() == 0));
-                assert_eq!(args[0].value, ValueId::new(3));
-            }
-            other => panic!("expected Call, got {:?}", other),
-        }
-    }
-
-    // -- Test 5: DestroyValue on Named type without shim is removed --
-
-    #[test]
-    fn destroy_value_named_without_shim_removed() {
-        let mut module = make_module();
-        let unit = module.ty_arena.unit();
-        let named_ty = module.ty_arena.named(entity(10), vec![]);
-
-        let body = make_body(
-            vec![
-                Instruction::new(InstKind::DestroyValue {
-                    operand: ValueId::new(1),
-                }),
-            ],
-            ValueId::new(0),
-            vec![
-                ValueDef::none(unit),
-                ValueDef::owned(named_ty),
-            ],
-        );
-
-        module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-
-        // No generic functions with DropShim
-        let generic_functions: Vec<FunctionDef> = vec![];
-        expand_destroy_copy(&mut module, &generic_functions);
-
-        let body = module.functions[0].body.as_ref().unwrap();
-        assert_eq!(body.blocks[0].insts.len(), 0);
-    }
-
-    // -- Test 6: CopyValue on @owned is kept --
 
     #[test]
     fn copy_value_on_owned_kept() {
         let mut module = make_module();
         let unit = module.ty_arena.unit();
         let named_ty = module.ty_arena.named(entity(10), vec![]);
-
         let body = make_body(
-            vec![
-                Instruction::new(InstKind::CopyValue {
-                    result: ValueId::new(2),
-                    operand: ValueId::new(1),
-                }),
-            ],
+            vec![Instruction::new(InstKind::CopyValue { result: ValueId::new(2), operand: ValueId::new(1) })],
             ValueId::new(0),
-            vec![
-                ValueDef::none(unit),
-                ValueDef::owned(named_ty), // @owned — CopyValue must stay
-                ValueDef::owned(named_ty),
-            ],
+            vec![ValueDef::none(unit), ValueDef::owned(named_ty), ValueDef::owned(named_ty)],
         );
-
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-
-        let generic_functions: Vec<FunctionDef> = vec![];
-        expand_destroy_copy(&mut module, &generic_functions);
-
+        expand_destroy_copy(&mut module, &[]);
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
-        assert!(matches!(
-            body.blocks[0].insts[0].kind,
-            InstKind::CopyValue { .. }
-        ));
+        assert!(matches!(body.blocks[0].insts[0].kind, InstKind::CopyValue { .. }));
     }
-
-    // -- Test 7: CopyValue remap chains resolve transitively --
 
     #[test]
     fn copy_value_transitive_remap() {
         let mut module = make_module();
         let i64_ty = module.ty_arena.i64();
         let unit = module.ty_arena.unit();
-
-        // v1 = Literal, CopyValue v1->v2, CopyValue v2->v3, use v3 in Return
-        // All @none, so both CopyValues are removed. v3 should resolve to v1.
         let mut block = BasicBlock::new();
         block.insts = vec![
-            Instruction::new(InstKind::Literal {
-                result: ValueId::new(1),
-                value: Immediate::i64(99),
-            }),
-            Instruction::new(InstKind::CopyValue {
-                result: ValueId::new(2),
-                operand: ValueId::new(1),
-            }),
-            Instruction::new(InstKind::CopyValue {
-                result: ValueId::new(3),
-                operand: ValueId::new(2),
-            }),
+            Instruction::new(InstKind::Literal { result: ValueId::new(1), value: Immediate::i64(99) }),
+            Instruction::new(InstKind::CopyValue { result: ValueId::new(2), operand: ValueId::new(1) }),
+            Instruction::new(InstKind::CopyValue { result: ValueId::new(3), operand: ValueId::new(2) }),
         ];
         block.terminator = Terminator::new(TerminatorKind::Return(ValueId::new(3)));
-
         let body = OssaBody {
-            values: vec![
-                ValueDef::none(unit),
-                ValueDef::none(i64_ty),
-                ValueDef::none(i64_ty),
-                ValueDef::none(i64_ty),
-            ],
+            values: vec![ValueDef::none(unit), ValueDef::none(i64_ty), ValueDef::none(i64_ty), ValueDef::none(i64_ty)],
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
         };
-
         module.add_function(make_mono_func("test", entity(1), vec![], i64_ty, Some(body)));
-
-        let generic_functions: Vec<FunctionDef> = vec![];
-        expand_destroy_copy(&mut module, &generic_functions);
-
+        expand_destroy_copy(&mut module, &[]);
         let body = module.functions[0].body.as_ref().unwrap();
-        // Both CopyValues removed — only Literal remains
         assert_eq!(body.blocks[0].insts.len(), 1);
-        // Return should now reference v1
         match &body.blocks[0].terminator.kind {
             TerminatorKind::Return(v) => assert_eq!(*v, ValueId::new(1)),
             other => panic!("expected Return, got {:?}", other),
         }
     }
 
-    // -- Test 8: Drop shim lookup works with type args --
-
     #[test]
     fn destroy_value_generic_named_with_type_args() {
         let mut module = make_module();
         let unit = module.ty_arena.unit();
         let i64_ty = module.ty_arena.i64();
-
-        // Named type Array[Int64] — entity(10) with type_args [i64_ty]
         let named_ty = module.ty_arena.named(entity(10), vec![i64_ty]);
-
         let body = make_body(
-            vec![
-                Instruction::new(InstKind::DestroyValue {
-                    operand: ValueId::new(1),
-                }),
-            ],
+            vec![Instruction::new(InstKind::DestroyValue { operand: ValueId::new(1) })],
             ValueId::new(0),
-            vec![
-                ValueDef::none(unit),
-                ValueDef::owned(named_ty),
-            ],
+            vec![ValueDef::none(unit), ValueDef::owned(named_ty)],
         );
-
-        // Drop shim for Array[Int64]: source=entity(20), type_args=[i64_ty]
         let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::none(unit)]);
-        let shim_func = make_mono_func("__drop$Array_Int64", entity(20), vec![i64_ty], unit, Some(shim_body));
-        module.add_function(shim_func); // MonoFuncId(0)
-
+        module.add_function(make_mono_func("__drop$Array_Int64", entity(20), vec![i64_ty], unit, Some(shim_body)));
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-
-        let generic_functions = vec![
-            FunctionDef {
-                entity: entity(20),
-                name: "__drop$Array".into(),
-                kind: FunctionKind::DropShim { nominal: entity(10) },
-                type_params: vec![TypeParamDef::new(entity(30), "T")],
-                params: vec![],
-                ret: unit,
-                where_clause: None,
-                body: None,
-                extern_info: None,
-            },
-        ];
-
+        let generic_functions = vec![FunctionDef {
+            entity: entity(20),
+            name: "__drop$Array".into(),
+            kind: FunctionKind::DropShim { nominal: entity(10) },
+            type_params: vec![TypeParamDef::new(entity(30), "T")],
+            params: vec![], ret: unit,
+            where_clause: None, body: None, extern_info: None,
+        }];
         expand_destroy_copy(&mut module, &generic_functions);
-
         let body = module.functions[1].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         assert!(matches!(

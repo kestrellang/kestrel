@@ -1446,18 +1446,116 @@ impl LowerCtx<'_> {
     /// Lower an AST block to an HIR block.
     pub(crate) fn lower_block(&mut self, body: &AstBody, block: &AstBlock) -> HirBlock {
         self.push_scope();
-
-        let stmts: Vec<HirStmtId> = block
-            .stmts
-            .iter()
-            .map(|&id| self.lower_stmt(body, id))
-            .collect();
-
-        let tail_expr = block.tail_expr.map(|id| self.lower_expr(body, id));
-
+        let result = self.lower_block_stmts(body, &block.stmts, block.tail_expr);
         self.pop_scope();
+        result
+    }
 
-        HirBlock { stmts, tail_expr }
+    /// Lower a sequence of statements + optional tail expression.
+    /// Detects `guard let` and CPS-transforms: the remaining block becomes the
+    /// match arm's body so pattern bindings stay in scope under OSSA.
+    /// Chained `guard let`s nest naturally via recursion.
+    pub(crate) fn lower_block_stmts(
+        &mut self,
+        body: &AstBody,
+        stmts: &[StmtId],
+        tail_expr: Option<ExprId>,
+    ) -> HirBlock {
+        use kestrel_ast::ast_body::{AstStmt, IfCondition};
+
+        for (i, &stmt_id) in stmts.iter().enumerate() {
+            let is_guard_let = matches!(
+                &body.stmts[stmt_id],
+                AstStmt::Guard { conditions, .. }
+                    if conditions.len() == 1
+                    && matches!(&conditions[0], IfCondition::Let { .. })
+            );
+            if !is_guard_let { continue; }
+
+            let AstStmt::Guard { conditions, else_body, span } = &body.stmts[stmt_id] else {
+                unreachable!();
+            };
+            let IfCondition::Let { pattern, value } = &conditions[0] else {
+                unreachable!();
+            };
+
+            // Lower preceding statements normally
+            let prev: Vec<HirStmtId> = stmts[..i]
+                .iter()
+                .map(|&id| self.lower_stmt(body, id))
+                .collect();
+
+            // CPS: wrap remaining stmts + tail as the pattern arm body
+            let match_expr = self.lower_guard_let_cps(
+                body, *pattern, *value, else_body,
+                &stmts[i + 1..], tail_expr, span,
+            );
+
+            return HirBlock { stmts: prev, tail_expr: Some(match_expr) };
+        }
+
+        // No guard-let found — lower everything normally
+        let lowered: Vec<HirStmtId> = stmts.iter().map(|&id| self.lower_stmt(body, id)).collect();
+        let tail = tail_expr.map(|id| self.lower_expr(body, id));
+        HirBlock { stmts: lowered, tail_expr: tail }
+    }
+
+    /// CPS-desugar `guard let <pattern> = <value> else { <else_body> }`:
+    /// ```text
+    /// match value {
+    ///     pattern => { <remaining stmts + tail> }
+    ///     _       => { <else_body> }
+    /// }
+    /// ```
+    fn lower_guard_let_cps(
+        &mut self,
+        body: &AstBody,
+        pattern: PatId,
+        value: ExprId,
+        else_body: &AstBlock,
+        remaining_stmts: &[StmtId],
+        tail_expr: Option<ExprId>,
+        span: &Span,
+    ) -> HirExprId {
+        let scrutinee = self.lower_expr(body, value);
+        let pat = self.lower_pat(body, pattern);
+
+        // Continuation: remaining stmts + tail (recurses for chained guards)
+        let continuation = self.lower_block_stmts(body, remaining_stmts, tail_expr);
+        let cont_body = self.hir_block_to_expr(continuation, span);
+
+        // Else body (must diverge)
+        let else_block = self.lower_block(body, else_body);
+        let else_arm_body = self.hir_block_to_expr(else_block, span);
+
+        let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+
+        self.alloc_expr(HirExpr::Match {
+            scrutinee,
+            arms: vec![
+                HirMatchArm { pattern: pat, guard: None, body: cont_body },
+                HirMatchArm { pattern: wildcard, guard: None, body: else_arm_body },
+            ],
+            source: MatchSource::GuardLet,
+            span: span.clone(),
+        })
+    }
+
+    /// Convert an HirBlock into a single HirExprId.
+    fn hir_block_to_expr(&mut self, block: HirBlock, span: &Span) -> HirExprId {
+        if block.stmts.is_empty() {
+            block.tail_expr.unwrap_or_else(|| {
+                self.alloc_expr(HirExpr::Tuple {
+                    elements: Vec::new(),
+                    span: span.clone(),
+                })
+            })
+        } else {
+            self.alloc_expr(HirExpr::Block {
+                body: block,
+                span: span.clone(),
+            })
+        }
     }
 
     /// Validate break/continue: must be inside a loop, and label (if any) must be in scope.

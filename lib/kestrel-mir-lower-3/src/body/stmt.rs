@@ -18,15 +18,33 @@ impl OssaBodyCtx<'_, '_> {
 
         match &stmt {
             HirStmt::Let { local, value, .. } => {
+                let is_var = self.hir.locals[*local].is_mut;
                 if let Some(init_expr) = value {
                     let init_val = self.lower_expr(*init_expr);
-                    self.local_map.insert(*local, init_val);
-                    // Track @none values in scope so they get threaded
-                    // through block params across control flow boundaries
-                    let ownership = self.body.value(init_val).ownership;
-                    if ownership == kestrel_mir_3::value::Ownership::None {
-                        self.track_none(init_val);
+                    if is_var {
+                        // var locals are stack-allocated: Uninit + StoreInit.
+                        // local_map holds the address; reads go through Load,
+                        // field assignments use FieldAddr directly.
+                        let ty = self.resolve_local_type(*local);
+                        let addr = self.emit_uninit(ty);
+                        self.emit_store_init(addr, init_val);
+                        self.local_map.insert(*local, addr);
+                        self.var_locals.insert(*local);
+                        self.track_var(addr, ty);
+                    } else {
+                        self.local_map.insert(*local, init_val);
+                        let ownership = self.body.value(init_val).ownership;
+                        if ownership == kestrel_mir_3::value::Ownership::None {
+                            self.track_none(init_val);
+                        }
                     }
+                } else if is_var {
+                    // var with no initializer: allocate stack slot, leave uninit.
+                    let ty = self.resolve_local_type(*local);
+                    let addr = self.emit_uninit(ty);
+                    self.local_map.insert(*local, addr);
+                    self.var_locals.insert(*local);
+                    self.track_var(addr, ty);
                 }
             }
             HirStmt::Expr { expr, .. } => {
@@ -43,8 +61,15 @@ impl OssaBodyCtx<'_, '_> {
                 local: Some(hir_local),
                 ..
             } => {
-                let val = self.map_local(*hir_local);
-                self.emit_destroy_value(val);
+                if self.var_locals.contains(hir_local) {
+                    // var local: destroy the value at the address, not the address itself
+                    let addr = self.map_local(*hir_local);
+                    let ty = self.resolve_local_type(*hir_local);
+                    self.push_inst(kestrel_mir_3::inst::InstKind::DestroyAddr { address: addr, ty });
+                } else {
+                    let val = self.map_local(*hir_local);
+                    self.emit_destroy_value(val);
+                }
             }
             HirStmt::Deinit { local: None, .. } => {
                 // Unresolved deinit — nothing to do

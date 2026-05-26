@@ -76,12 +76,12 @@ mod tests {
     fn witness_with_method() {
         let mut def = WitnessDef::new(Entity::from_raw(1), TyId::new(0));
         def.add_method(WitnessMethodBinding::new(
-            WitnessMethodKey::simple("equals"),
+            WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             Entity::from_raw(10),
             vec![],
         ));
         assert_eq!(def.methods.len(), 1);
-        assert_eq!(def.methods[0].key.name, "equals");
+        assert_eq!(def.methods[0].key.name, "isEqual");
     }
 
     #[test]

@@ -1074,7 +1074,7 @@ mod tests {
         // Witness: Int64: Equatable
         let mut witness = WitnessDef::new(proto, i64);
         witness.add_method(WitnessMethodBinding::new(
-            WitnessMethodKey::simple("equals"),
+            WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             impl_func_entity,
             vec![],
         ));
@@ -1082,7 +1082,7 @@ mod tests {
         // The implementing function
         let impl_func = FunctionDef {
             entity: impl_func_entity,
-            name: "Int64.equals".into(),
+            name: "Int64.isEqual".into(),
             kind: FunctionKind::Free,
             type_params: vec![],
             params: vec![],
@@ -1100,7 +1100,7 @@ mod tests {
                 dest: None,
                 callee: Callee::Witness {
                     protocol: proto,
-                    method: WitnessMethodKey::simple("equals"),
+                    method: WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
                     self_type: i64,
                     method_type_args: vec![],
                 },

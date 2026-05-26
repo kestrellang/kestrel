@@ -18,6 +18,7 @@ kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
 kestrel-codegen-cranelift-2 = { path = "lib/kestrel-codegen-cranelift-2" }
 kestrel-codegen-cranelift-3 = { path = "lib/kestrel-codegen-cranelift-3" }
 kestrel-mir-2 = { path = "lib/kestrel-mir-2" }
+kestrel-mir-3 = { path = "lib/kestrel-mir-3" }
 codespan-reporting = { workspace = true }
 clap = { workspace = true }
 

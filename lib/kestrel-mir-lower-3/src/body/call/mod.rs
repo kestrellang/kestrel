@@ -87,41 +87,32 @@ impl OssaBodyCtx<'_, '_> {
             return self.emit_call_returning(callee, call_args, result_ty);
         }
 
-        // Resolve conventions before lowering args
-        let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(resolved) {
+        // Collect conventions early (needed for arg lowering), but defer
+        // callee construction until after the field-subscript rewrite which
+        // may update receiver_ty.
+        let protocol_method = self.ctx.is_protocol_method(resolved);
+        let (conventions, witness_key) = if let Some(protocol) = protocol_method {
             self.ctx.register_name(protocol);
             let key = self.ctx.witness_method_key(resolved);
             let convs = self.collect_witness_conventions(protocol, &key);
-            let callee = Callee::Witness {
-                protocol,
-                method: key,
-                self_type: receiver_ty,
-                method_type_args,
-            };
-            (convs, callee)
+            (convs, Some(key))
         } else {
             self.ctx.register_name(resolved);
             let convs = self.collect_conventions(resolved);
-            let mut type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
-            if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == resolved) {
-                type_args.truncate(mir_func.type_params.len());
-            }
-            let callee = Callee::direct_with_args(resolved, type_args, None);
-            (convs, callee)
+            (convs, None)
         };
 
         let mut call_args = if is_static {
             self.lower_call_args(args, &conventions, 0)
         } else {
-            let receiver_val = self.lower_expr(receiver_expr);
             let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg(receiver_val, recv_conv);
+            let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
             let mut a = vec![receiver_arg];
             a.extend(self.lower_call_args(args, &conventions, 1));
             a
         };
 
-        // Field-subscript rewrite
+        // Field-subscript rewrite — may update receiver_ty
         if let Some(&field_entity) = self.typed.as_ref().and_then(|t| t.field_subscripts.get(&expr_id)) {
             let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
             let (new_receiver_ty, new_args) =
@@ -129,6 +120,22 @@ impl OssaBodyCtx<'_, '_> {
             receiver_ty = new_receiver_ty;
             call_args = new_args;
         }
+
+        // Build callee with the (possibly updated) receiver_ty
+        let callee = if let Some(protocol) = protocol_method {
+            Callee::Witness {
+                protocol,
+                method: witness_key.unwrap(),
+                self_type: receiver_ty,
+                method_type_args,
+            }
+        } else {
+            let mut type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
+            if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == resolved) {
+                type_args.truncate(mir_func.type_params.len());
+            }
+            Callee::direct_with_args(resolved, type_args, None)
+        };
 
         let conv_offset = if is_static { 0 } else { 1 };
         self.expand_default_args(&mut call_args, resolved, args.len(), &conventions, conv_offset);
@@ -227,9 +234,8 @@ impl OssaBodyCtx<'_, '_> {
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
-        let receiver_val = self.lower_expr(receiver_expr);
         let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
-        let receiver_arg = self.prepare_call_arg(receiver_val, recv_conv);
+        let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
         let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args, &conventions, 1));
 
@@ -332,9 +338,8 @@ impl OssaBodyCtx<'_, '_> {
         let conv_offset = if has_receiver { 1 } else { 0 };
         let mut call_args = self.lower_call_args(args, &conventions, conv_offset);
         if has_receiver {
-            let receiver_val = self.lower_expr(callee_expr);
             let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg(receiver_val, recv_conv);
+            let receiver_arg = self.prepare_call_arg_for_expr(callee_expr, recv_conv);
             call_args.insert(0, receiver_arg);
         }
 

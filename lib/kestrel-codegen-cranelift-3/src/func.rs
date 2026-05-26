@@ -65,7 +65,7 @@ pub fn compile_function(
     let ptr_ty = ctx.ptr_ty;
 
     let mut cl_func = ir::Function::with_name_signature(
-        ir::UserFuncName::user(0, func_idx as u32),
+        ir::UserFuncName::user(0, func_id.as_u32()),
         sig.clone(),
     );
 

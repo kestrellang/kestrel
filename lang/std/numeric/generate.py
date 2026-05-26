@@ -453,20 +453,20 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         }}'''
         sign_prefix = '''
         if isNegative {
-            result.appendChar('-')
+            result.append(char: '-')
         } else if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }'''
     else:
         sign_handling = '''
         let isNegative = false;'''
         sign_prefix = '''
         if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }'''
 
     return f'''    // Formattable
@@ -1617,11 +1617,11 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendChar('-')
+                result.append(char: '-')
             } else if options.sign == .Always {
-                result.appendChar('+')
+                result.append(char: '+')
             } else if options.sign == .Space {
-                result.appendChar(' ')
+                result.append(char: ' ')
             }
         }
         if trimTrailingZeros {
@@ -1670,7 +1670,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
 
         result.append(number);
         if suffixPercent {
-            result.appendChar('%')
+            result.append(char: '%')
         }
 
         _writePadded(into: writer, result, options)

@@ -8,7 +8,8 @@ use kestrel_mir_3::{MirTy, SubstMap, TyId, TypeParamDef, WitnessMethodKey, subst
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
 use kestrel_name_res::extensions::ExtensionsFor;
 use kestrel_name_res::{
-    ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers, TypeMemberSource, TypeMembersByName,
+    ExtensionTargetEntity, ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers,
+    TypeMemberSource, TypeMembersByName,
 };
 
 use crate::context::LowerCtx;
@@ -179,7 +180,9 @@ fn lower_witnesses_for_type(
                 .filter(|tm| {
                     matches!(
                         tm.source,
-                        TypeMemberSource::Direct | TypeMemberSource::Extension(_)
+                        TypeMemberSource::Direct
+                            | TypeMemberSource::Extension(_)
+                            | TypeMemberSource::ProtocolExtension { .. }
                     )
                 })
                 .map(|tm| tm.entity)
@@ -205,6 +208,38 @@ fn lower_witnesses_for_type(
                     impl_type_arg_tys.clone(),
                 ));
                 continue;
+            }
+
+            // Conformance-providing protocol extension: when a blanket like
+            // `extend Equatable: NotEqual[Self]` provides the conformance,
+            // search the extension's children for the method implementation.
+            // Only applies when the extension targets a protocol, not a concrete type.
+            let source_is_protocol_ext = matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension))
+                && *source != type_entity
+                && ctx.query.query(ExtensionTargetEntity { extension: *source, root: ctx.root })
+                    .is_some_and(|target| matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol)));
+            if source_is_protocol_ext {
+                let ext_children: Vec<Entity> = ctx.world.children_of(*source).to_vec();
+                let ext_impl = if method_name.ends_with(".set") {
+                    find_setter_among(ctx, &ext_children)
+                } else {
+                    find_impl_among(
+                        ctx,
+                        &ext_children,
+                        lookup_name,
+                        Some(&method_key.labels),
+                        None,
+                    )
+                };
+                if let Some(impl_func) = ext_impl {
+                    ctx.register_name(impl_func);
+                    witness.add_method(WitnessMethodBinding::new(
+                        method_key.clone(),
+                        impl_func,
+                        impl_type_arg_tys.clone(),
+                    ));
+                    continue;
+                }
             }
 
             // Protocol extension default

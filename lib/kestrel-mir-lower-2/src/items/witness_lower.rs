@@ -179,7 +179,9 @@ fn lower_witnesses_for_type(
                 .filter(|tm| {
                     matches!(
                         tm.source,
-                        TypeMemberSource::Direct | TypeMemberSource::Extension(_)
+                        TypeMemberSource::Direct
+                            | TypeMemberSource::Extension(_)
+                            | TypeMemberSource::ProtocolExtension { .. }
                     )
                 })
                 .map(|tm| tm.entity)

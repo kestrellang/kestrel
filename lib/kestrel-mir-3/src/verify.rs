@@ -371,7 +371,11 @@ impl<'a> BlockVerifier<'a> {
                     }
                     *st = InitState::Init;
                 }
-                _ => {}
+                AddrKind::SubField { .. } => {
+                    // Whole store on sub-field tracked address (e.g. var local
+                    // initialized with a complete struct value) — all fields init.
+                    *ak = AddrKind::Whole(InitState::Init);
+                }
             }
         }
         if let Some(msg) = err_msg {

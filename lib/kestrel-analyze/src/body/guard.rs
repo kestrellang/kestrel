@@ -47,9 +47,8 @@ impl BodyCheck for GuardDivergenceAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
-        // Check each guard-let-originated statement
+        // Check guard-originated If statements (non-let guards)
         for &stmt_id in &cx.hir.guard_stmts {
-            // The desugared form is: HirStmt::Expr { HirExpr::If { then: empty, else: body } }
             let HirStmt::Expr { expr, .. } = &cx.hir.stmts[stmt_id] else {
                 continue;
             };
@@ -59,31 +58,41 @@ impl BodyCheck for GuardDivergenceAnalyzer {
             let Some(else_block) = else_body else {
                 continue;
             };
-
-            // Check if the else block diverges
             if !block_diverges(cx.hir, else_block) {
-                // Point at the non-diverging value expression inside the else
-                // block (the tail expression or last statement), not the whole
-                // guard-let statement — this lines the diagnostic up with the
-                // code the user needs to change.
                 let span = non_diverging_span(cx.hir, else_block)
                     .unwrap_or_else(|| util::stmt_span(cx.hir, stmt_id));
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[0].id,
-                    severity: DESCRIPTORS[0].default_severity,
-                    message: "guard else block must diverge (return, break, continue, or throw)"
-                        .into(),
-                    labels: vec![DiagLabel {
-                        span,
-                        message: "else block does not diverge".into(),
-                        is_primary: true,
-                    }],
-                    notes: vec![],
-                });
+                diags.push(guard_diverge_diagnostic(span));
+            }
+        }
+
+        // Check CPS guard-let Match expressions (MatchSource::GuardLet).
+        // The wildcard arm (last arm) is the else body that must diverge.
+        for (_, expr) in cx.hir.exprs.iter() {
+            if let HirExpr::Match { arms, source: MatchSource::GuardLet, .. } = expr {
+                if let Some(else_arm) = arms.last() {
+                    if !expr_diverges(cx.hir, else_arm.body) {
+                        let arm_span = util::expr_span(cx.hir, else_arm.body);
+                        diags.push(guard_diverge_diagnostic(arm_span));
+                    }
+                }
             }
         }
 
         diags
+    }
+}
+
+fn guard_diverge_diagnostic(span: kestrel_span::Span) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[0].id,
+        severity: DESCRIPTORS[0].default_severity,
+        message: "guard else block must diverge (return, break, continue, or throw)".into(),
+        labels: vec![DiagLabel {
+            span,
+            message: "else block does not diverge".into(),
+            is_primary: true,
+        }],
+        notes: vec![],
     }
 }
 

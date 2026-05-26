@@ -17,6 +17,22 @@ use crate::ty::{MirTy, TyArena};
 use crate::value::Ownership;
 use crate::{BlockId, MirModule, TyId, ValueId};
 
+/// Pretty-print the entire MIR module — all functions with bodies.
+pub fn display_module(module: &MirModule) -> String {
+    let mut out = String::new();
+    for (i, func) in module.functions.iter().enumerate() {
+        if let Some(body) = &func.body {
+            if i > 0 {
+                out.push('\n');
+            }
+            writeln!(out, "; function: {}", func.name).unwrap();
+            out.push_str(&display_body(body, module));
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Pretty-print an entire OSSA body to a string.
 pub fn display_body(body: &OssaBody, module: &MirModule) -> String {
     let mut out = String::new();
