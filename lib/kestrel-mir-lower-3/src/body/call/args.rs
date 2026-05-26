@@ -11,15 +11,33 @@ use crate::body::{HirRef, OssaBodyCtx, TypedRef};
 use crate::ty::{lower_resolved_ty, lower_type, resolve_type_annotation};
 
 impl OssaBodyCtx<'_, '_> {
-    /// Lower call args to Vec<CallArg> with default conventions.
-    /// Copyable types default to Borrow; non-copyable to Borrow.
-    /// Convention overrides happen in `apply_conventions`.
+    /// Lower call args with the callee's resolved conventions.
+    /// `offset` skips receiver slots in `conventions` (e.g. 1 if
+    /// conventions[0] is the receiver, and `args` are the non-receiver params).
+    pub(crate) fn lower_call_args(
+        &mut self,
+        args: &[HirCallArg],
+        conventions: &[ParamConvention],
+        offset: usize,
+    ) -> Vec<CallArg> {
+        args.iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                let val = self.lower_expr(arg.value);
+                let conv = conventions.get(offset + i).copied()
+                    .unwrap_or(ParamConvention::Borrow);
+                self.prepare_call_arg(val, conv)
+            })
+            .collect()
+    }
+
+    /// Lower call args with Borrow convention for all params.
+    /// Used for indirect/closure calls where the callee's conventions
+    /// aren't known at the call site.
     pub(crate) fn lower_call_args_default(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
         args.iter()
             .map(|arg| {
                 let val = self.lower_expr(arg.value);
-                // Default: pass by borrow. apply_conventions will override
-                // based on the callee's declared param conventions.
                 self.prepare_call_arg(val, ParamConvention::Borrow)
             })
             .collect()
@@ -27,11 +45,15 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Fill in missing default arguments by inline-lowering each default
     /// expression into the current function body.
+    /// `conventions` and `conv_offset` index into the callee's param
+    /// conventions so defaults get the right Borrow/Consuming treatment.
     pub(crate) fn expand_default_args(
         &mut self,
         call_args: &mut Vec<CallArg>,
         callee_entity: Entity,
         explicit_count: usize,
+        conventions: &[ParamConvention],
+        conv_offset: usize,
     ) {
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return;
@@ -45,10 +67,12 @@ impl OssaBodyCtx<'_, '_> {
             .filter_map(|p| p.default_entity)
             .collect();
 
-        for default_entity in defaults {
+        for (di, default_entity) in defaults.into_iter().enumerate() {
             let param_ty = resolve_type_annotation(self.ctx, default_entity);
             let default_val = self.lower_default_arg_inline(default_entity, param_ty);
-            let arg = self.prepare_call_arg(default_val, ParamConvention::Borrow);
+            let conv = conventions.get(conv_offset + explicit_count + di).copied()
+                .unwrap_or(ParamConvention::Borrow);
+            let arg = self.prepare_call_arg(default_val, conv);
             call_args.push(arg);
         }
     }
@@ -96,46 +120,8 @@ impl OssaBodyCtx<'_, '_> {
         result
     }
 
-    /// Apply calling conventions from the callee's declared param types.
-    /// Rewrites each CallArg's convention and re-inserts borrows as needed.
-    pub(crate) fn apply_conventions(
-        &mut self,
-        call_args: &mut Vec<CallArg>,
-        callee_entity: Entity,
-    ) {
-        // Collect conventions from the FunctionDef or ECS
-        let conventions = self.collect_conventions(callee_entity);
-        if conventions.is_empty() {
-            return;
-        }
-
-        for (i, conv) in conventions.iter().enumerate() {
-            if i >= call_args.len() {
-                break;
-            }
-            if call_args[i].convention != *conv {
-                // End existing borrow if we need to change convention
-                let old_val = call_args[i].value;
-                let old_conv = call_args[i].convention;
-
-                // If old convention was a borrow, end it first
-                if matches!(old_conv, ParamConvention::Borrow | ParamConvention::MutBorrow) {
-                    // The borrow source is the original value — find it
-                    if let Some(source) = self.body.value(old_val).borrow_source {
-                        self.emit_end_borrow(old_val);
-                        // Re-prepare with new convention
-                        call_args[i] = self.prepare_call_arg(source, *conv);
-                    } else {
-                        call_args[i].convention = *conv;
-                    }
-                } else {
-                    call_args[i].convention = *conv;
-                }
-            }
-        }
-    }
-
-    fn collect_conventions(&self, callee_entity: Entity) -> Vec<ParamConvention> {
+    /// Look up param conventions for a callee from its FunctionDef or ECS Callable.
+    pub(crate) fn collect_conventions(&self, callee_entity: Entity) -> Vec<ParamConvention> {
         // Try MIR FunctionDef first
         if let Some(callee) = self.ctx.module.functions.iter().find(|f| f.entity == callee_entity) {
             if callee.extern_info.is_some() {
@@ -176,18 +162,17 @@ impl OssaBodyCtx<'_, '_> {
         convs
     }
 
-    /// Apply param modes for witness calls from the protocol method's conventions.
-    pub(crate) fn apply_witness_conventions(
-        &mut self,
-        call_args: &mut Vec<CallArg>,
+    /// Look up param conventions for a witness (protocol method) call.
+    pub(crate) fn collect_witness_conventions(
+        &self,
         protocol: Entity,
         method: &WitnessMethodKey,
-    ) {
+    ) -> Vec<ParamConvention> {
         let Some(method_entity) = self.find_protocol_method_entity(protocol, method) else {
-            return;
+            return Vec::new();
         };
         let Some(callable) = self.ctx.world.get::<Callable>(method_entity) else {
-            return;
+            return Vec::new();
         };
 
         let mut conventions = Vec::new();
@@ -209,23 +194,7 @@ impl OssaBodyCtx<'_, '_> {
             };
             conventions.push(conv);
         }
-
-        for (i, conv) in conventions.iter().enumerate() {
-            if i < call_args.len() && call_args[i].convention != *conv {
-                let old_val = call_args[i].value;
-                let old_conv = call_args[i].convention;
-                if matches!(old_conv, ParamConvention::Borrow | ParamConvention::MutBorrow) {
-                    if let Some(source) = self.body.value(old_val).borrow_source {
-                        self.emit_end_borrow(old_val);
-                        call_args[i] = self.prepare_call_arg(source, *conv);
-                    } else {
-                        call_args[i].convention = *conv;
-                    }
-                } else {
-                    call_args[i].convention = *conv;
-                }
-            }
-        }
+        conventions
     }
 
     pub(crate) fn find_protocol_method_entity(

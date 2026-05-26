@@ -61,27 +61,9 @@ impl OssaBodyCtx<'_, '_> {
         let is_static = resolved_entity
             .is_some_and(|e| self.ctx.world.get::<Static>(e).is_some());
 
-        let mut call_args = if is_static {
-            self.lower_call_args_default(args)
-        } else {
-            let receiver_val = self.lower_expr(receiver_expr);
-            let receiver_arg = self.prepare_call_arg(receiver_val, ParamConvention::Borrow);
-            let mut a = vec![receiver_arg];
-            a.extend(self.lower_call_args_default(args));
-            a
-        };
-
         let Some(resolved) = resolved_entity else {
             return self.emit_literal(Immediate::error());
         };
-
-        // Field-subscript rewrite
-        if let Some(&field_entity) = self.typed.as_ref().and_then(|t| t.field_subscripts.get(&expr_id)) {
-            let (new_receiver_ty, new_args) =
-                self.rewrite_field_subscript(receiver_ty, call_args, field_entity, method_name);
-            receiver_ty = new_receiver_ty;
-            call_args = new_args;
-        }
 
         let method_type_args = if let Some(hir_args) = hir_type_args {
             let inferred = self.resolve_type_args(expr_id);
@@ -94,37 +76,62 @@ impl OssaBodyCtx<'_, '_> {
             self.resolve_type_args(expr_id)
         };
 
-        // Function-typed receiver: indirect call
+        // Function-typed receiver: indirect call (all Borrow by ABI)
         if matches!(self.ctx.module.ty_arena.get(receiver_ty), MirTy::FuncThick { .. } | MirTy::FuncThin { .. }) {
-            let receiver_arg = call_args.remove(0);
+            let receiver_val = self.lower_expr(receiver_expr);
+            let call_args = self.lower_call_args_default(args);
             let callee = match self.ctx.module.ty_arena.get(receiver_ty) {
-                MirTy::FuncThin { .. } => Callee::Thin(receiver_arg.value),
-                _ => Callee::Thick(receiver_arg.value),
+                MirTy::FuncThin { .. } => Callee::Thin(receiver_val),
+                _ => Callee::Thick(receiver_val),
             };
             return self.emit_call_returning(callee, call_args, result_ty);
         }
 
-        self.expand_default_args(&mut call_args, resolved, args.len());
-
-        let callee = if let Some(protocol) = self.ctx.is_protocol_method(resolved) {
+        // Resolve conventions before lowering args
+        let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(resolved) {
             self.ctx.register_name(protocol);
             let key = self.ctx.witness_method_key(resolved);
-            self.apply_witness_conventions(&mut call_args, protocol, &key);
-            Callee::Witness {
+            let convs = self.collect_witness_conventions(protocol, &key);
+            let callee = Callee::Witness {
                 protocol,
                 method: key,
                 self_type: receiver_ty,
                 method_type_args,
-            }
+            };
+            (convs, callee)
         } else {
             self.ctx.register_name(resolved);
-            self.apply_conventions(&mut call_args, resolved);
+            let convs = self.collect_conventions(resolved);
             let mut type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
             if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == resolved) {
                 type_args.truncate(mir_func.type_params.len());
             }
-            Callee::direct_with_args(resolved, type_args, None)
+            let callee = Callee::direct_with_args(resolved, type_args, None);
+            (convs, callee)
         };
+
+        let mut call_args = if is_static {
+            self.lower_call_args(args, &conventions, 0)
+        } else {
+            let receiver_val = self.lower_expr(receiver_expr);
+            let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+            let receiver_arg = self.prepare_call_arg(receiver_val, recv_conv);
+            let mut a = vec![receiver_arg];
+            a.extend(self.lower_call_args(args, &conventions, 1));
+            a
+        };
+
+        // Field-subscript rewrite
+        if let Some(&field_entity) = self.typed.as_ref().and_then(|t| t.field_subscripts.get(&expr_id)) {
+            let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+            let (new_receiver_ty, new_args) =
+                self.rewrite_field_subscript(receiver_ty, call_args, field_entity, method_name, recv_conv);
+            receiver_ty = new_receiver_ty;
+            call_args = new_args;
+        }
+
+        let conv_offset = if is_static { 0 } else { 1 };
+        self.expand_default_args(&mut call_args, resolved, args.len(), &conventions, conv_offset);
 
         self.emit_call_returning(callee, call_args, result_ty)
     }
@@ -135,6 +142,7 @@ impl OssaBodyCtx<'_, '_> {
         mut call_args: Vec<CallArg>,
         field_entity: Entity,
         field_name: &str,
+        receiver_convention: ParamConvention,
     ) -> (TyId, Vec<CallArg>) {
         let recv_entity = match self.ctx.module.ty_arena.get(receiver_ty) {
             MirTy::Named { entity, .. } => *entity,
@@ -172,11 +180,11 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(source) = self.body.value(old_receiver).borrow_source {
                     self.emit_end_borrow(old_receiver);
                     let field_val = self.emit_struct_extract(source, field_idx, field_ty);
-                    let field_arg = self.prepare_call_arg(field_val, ParamConvention::Borrow);
+                    let field_arg = self.prepare_call_arg(field_val, receiver_convention);
                     call_args[0] = field_arg;
                 } else {
                     let field_val = self.emit_struct_extract(old_receiver, field_idx, field_ty);
-                    let field_arg = self.prepare_call_arg(field_val, ParamConvention::Borrow);
+                    let field_arg = self.prepare_call_arg(field_val, receiver_convention);
                     call_args[0] = field_arg;
                 }
                 return (field_ty, call_args);
@@ -192,7 +200,7 @@ impl OssaBodyCtx<'_, '_> {
             let callee = Callee::direct_with_args(field_entity, type_args, None);
             let old_receiver = call_args.remove(0);
             let getter_result = self.emit_call_returning(callee, vec![old_receiver], field_ty);
-            let field_arg = self.prepare_call_arg(getter_result, ParamConvention::Borrow);
+            let field_arg = self.prepare_call_arg(getter_result, receiver_convention);
             call_args.insert(0, field_arg);
             return (field_ty, call_args);
         }
@@ -211,22 +219,23 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
-        let receiver_val = self.lower_expr(receiver_expr);
-
-        let receiver_arg = self.prepare_call_arg(receiver_val, ParamConvention::Borrow);
-        let mut call_args = vec![receiver_arg];
-        call_args.extend(self.lower_call_args_default(args));
 
         self.ctx.register_name(protocol);
         let method_type_args = self.resolve_type_args(expr_id);
         let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
         let method_key = WitnessMethodKey::new(method_name, labels);
 
-        if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
-            self.expand_default_args(&mut call_args, method_entity, args.len());
-        }
+        let conventions = self.collect_witness_conventions(protocol, &method_key);
 
-        self.apply_witness_conventions(&mut call_args, protocol, &method_key);
+        let receiver_val = self.lower_expr(receiver_expr);
+        let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+        let receiver_arg = self.prepare_call_arg(receiver_val, recv_conv);
+        let mut call_args = vec![receiver_arg];
+        call_args.extend(self.lower_call_args(args, &conventions, 1));
+
+        if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
+            self.expand_default_args(&mut call_args, method_entity, args.len(), &conventions, 1);
+        }
 
         let callee = Callee::Witness {
             protocol,
@@ -288,34 +297,26 @@ impl OssaBodyCtx<'_, '_> {
         let has_receiver = self.ctx.world.get::<Callable>(entity)
             .is_some_and(|c| c.receiver.is_some());
 
-        let mut call_args = self.lower_call_args_default(args);
-        if has_receiver {
-            let receiver_ty = self.resolve_expr_type(callee_expr);
-            let receiver_val = self.lower_expr(callee_expr);
-            let receiver_arg = self.prepare_call_arg(receiver_val, ParamConvention::Borrow);
-            call_args.insert(0, receiver_arg);
-        }
-
-        self.expand_default_args(&mut call_args, entity, args.len());
-
-        let callee = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
+        // Resolve conventions and build callee before lowering args
+        let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
             self.ctx.register_name(protocol);
             let key = self.ctx.witness_method_key(entity);
+            let convs = self.collect_witness_conventions(protocol, &key);
             let self_type = if key.name == "init" {
                 result_ty
             } else {
                 self.resolve_expr_type(callee_expr)
             };
-            self.apply_witness_conventions(&mut call_args, protocol, &key);
-            Callee::Witness {
+            let callee = Callee::Witness {
                 protocol,
                 method: key,
                 self_type,
                 method_type_args: type_args,
-            }
+            };
+            (convs, callee)
         } else {
-            self.apply_conventions(&mut call_args, entity);
-            if has_receiver {
+            let convs = self.collect_conventions(entity);
+            let callee = if has_receiver {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
                 let mut ta = self.prepend_receiver_type_args(receiver_ty, type_args);
                 if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == entity) {
@@ -324,8 +325,20 @@ impl OssaBodyCtx<'_, '_> {
                 Callee::direct_with_args(entity, ta, None)
             } else {
                 Callee::direct_with_args(entity, type_args, None)
-            }
+            };
+            (convs, callee)
         };
+
+        let conv_offset = if has_receiver { 1 } else { 0 };
+        let mut call_args = self.lower_call_args(args, &conventions, conv_offset);
+        if has_receiver {
+            let receiver_val = self.lower_expr(callee_expr);
+            let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+            let receiver_arg = self.prepare_call_arg(receiver_val, recv_conv);
+            call_args.insert(0, receiver_arg);
+        }
+
+        self.expand_default_args(&mut call_args, entity, args.len(), &conventions, conv_offset);
 
         self.emit_call_returning(callee, call_args, result_ty)
     }
@@ -384,37 +397,36 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
         result_ty: TyId,
     ) -> ValueId {
-        // Allocate stack space for self (StackAlloc, not Uninit — opaque init
-        // calls can't satisfy Uninit's sub-field tracking requirements).
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
         let self_addr = self.emit_op1(kestrel_mir_3::Op::StackAlloc(result_ty), one, ptr_ty);
 
-        let mut call_args = vec![CallArg {
-            value: self_addr,
-            convention: ParamConvention::MutBorrow,
-        }];
-        call_args.extend(self.lower_call_args_default(args));
-        self.expand_default_args(&mut call_args, entity, args.len());
-
-        let callee = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
+        let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
             self.ctx.register_name(protocol);
             let key = self.ctx.witness_method_key(entity);
-            self.apply_witness_conventions(&mut call_args, protocol, &key);
-            Callee::Witness {
+            let convs = self.collect_witness_conventions(protocol, &key);
+            let callee = Callee::Witness {
                 protocol,
                 method: key,
                 self_type: result_ty,
                 method_type_args: type_args,
-            }
+            };
+            (convs, callee)
         } else {
-            self.apply_conventions(&mut call_args, entity);
-            Callee::direct_with_args(entity, type_args, None)
+            let convs = self.collect_conventions(entity);
+            let callee = Callee::direct_with_args(entity, type_args, None);
+            (convs, callee)
         };
 
+        // Self arg is the stack-allocated output pointer (always MutBorrow).
+        let mut call_args = vec![CallArg {
+            value: self_addr,
+            convention: ParamConvention::MutBorrow,
+        }];
+        call_args.extend(self.lower_call_args(args, &conventions, 1));
+        self.expand_default_args(&mut call_args, entity, args.len(), &conventions, 1);
+
         self.emit_call_void(callee, call_args);
-        // Take the initialized value from the stack slot.
-        // Use Take (not Load) so non-trivial types get @owned ownership.
         let ownership = self.ownership_for(result_ty);
         if ownership == Ownership::Owned {
             self.emit_take(self_addr, result_ty)

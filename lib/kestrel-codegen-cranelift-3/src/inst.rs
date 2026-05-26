@@ -1192,7 +1192,17 @@ fn compile_thick_call(
         let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
         let val = fc.get_value(builder, call_arg.value);
         match pass {
-            PassMode::ByVal(_) => call_args.push(val),
+            PassMode::ByVal(expected_ty) => {
+                // MIR lowering prepares indirect-call args as Borrow (pointer),
+                // but FuncThick type says Consuming (by-val for scalars).
+                // Load through the pointer when the arg was passed by-ref.
+                if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
+                    let loaded = builder.ins().load(expected_ty, MemFlags::new(), val, Offset32::new(0));
+                    call_args.push(loaded);
+                } else {
+                    call_args.push(val);
+                }
+            }
             PassMode::ByRef => call_args.push(val),
             PassMode::Zst => {}
         }

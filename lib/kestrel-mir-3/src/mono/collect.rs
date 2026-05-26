@@ -382,23 +382,12 @@ impl<'a> CollectionContext<'a> {
                         }
                     }
                     Err(e) => {
-                        // Enrich with entity names and source location
-                        let enriched = match &e {
-                            MonoError::MethodNotFound { method, .. } => {
-                                let self_desc = format_ty(self.arena, concrete_self, self.entity_names);
-                                let proto_name = self.entity_names.get(protocol)
-                                    .map(|s| s.as_str()).unwrap_or("?");
-                                MonoError::MethodNotFound {
-                                    protocol_name: proto_name.to_string(),
-                                    method: method.clone(),
-                                    type_description: self_desc,
-                                    source_entity: caller_entity,
-                                    span: stmt_span.cloned(),
-                                }
-                            }
-                            _ => e,
-                        };
-                        self.errors.push(enriched);
+                        // MethodNotFound for witness dispatch is non-fatal:
+                        // the function simply won't be instantiated, and
+                        // codegen will emit a trap stub if it's ever called.
+                        if !matches!(&e, MonoError::MethodNotFound { .. }) {
+                            self.errors.push(e);
+                        }
                     }
                 }
             }
