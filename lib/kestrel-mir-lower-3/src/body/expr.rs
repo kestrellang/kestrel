@@ -178,6 +178,7 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     ret_val
                 };
+                self.drain_deferred_borrows();
                 self.destroy_scopes_to_depth(0, &[ret_val]);
                 self.emit_ret(ret_val);
                 self.emit_literal(Immediate::unit())

@@ -187,6 +187,13 @@ public struct Pointer[T]: Equatable, Hashable {
         lang.ptr_read(self._raw)
     }
 
+    /// Borrows the pointee in place and passes it to `body`. The pointee
+    /// is never copied or cloned — `T.deinit` does not run. Use this
+    /// to extract fields from heap-allocated structs without triggering
+    /// resource cleanup on a temporary clone.
+    public func with[R](body: (T) -> R) -> R {
+        body(lang.ptr_read(self._raw))
+    }
 
     /// Writes `value` through the pointer. Same safety preconditions as
     /// `pointee.set`.

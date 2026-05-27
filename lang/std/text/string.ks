@@ -197,9 +197,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
 
     // Helper accessors for storage fields
     private func ptr() -> Pointer[UInt8] {
-        // Read just the ptr field without creating a temporary StringStorage
-        // whose deinit would free the buffer.
-        self.storage.valuePtr().asRaw().cast[Pointer[UInt8]]().read()
+        self.storage.valuePtr().with { (storage) in storage.ptr }
     }
     private func len() -> Int64 { self.storage.read().len }
     private func cap() -> Int64 { self.storage.read().cap }

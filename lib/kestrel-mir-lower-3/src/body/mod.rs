@@ -141,6 +141,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// Shared tracker for threading @owned values through control flow.
     /// Updated by rebind_scope_values, saved/restored with snapshots.
     pub tracker: LiveTracker,
+    /// @guaranteed values from PtrRead that need EndBorrow after the
+    /// enclosing call completes. Drained by emit_call_returning.
+    pub deferred_end_borrows: Vec<ValueId>,
     pub temp_counter: u32,
     pub current_span: Option<Span>,
 }
@@ -168,6 +171,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             loop_stack: Vec::new(),
             scope_stack: Vec::new(),
             tracker: LiveTracker::from_live(&[]),
+            deferred_end_borrows: Vec::new(),
             temp_counter: 0,
             current_span: None,
         }
@@ -254,6 +258,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     } else {
                         value
                     };
+                    self.drain_deferred_borrows();
                     let prev = self.current_span.replace(tail_span);
                     self.destroy_scopes_to_depth(0, &[value]);
                     self.set_terminator(TerminatorKind::Return(value));
@@ -550,7 +555,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_end_borrow(&mut self, operand: ValueId) {
+        self.deferred_end_borrows.retain(|&v| v != operand);
         self.push_inst(InstKind::EndBorrow { operand });
+
+    }
+
+    /// EndBorrow all deferred borrows (from PtrRead etc.).
+    pub fn drain_deferred_borrows(&mut self) {
+        let borrows: Vec<ValueId> = self.deferred_end_borrows.drain(..).collect();
+        for v in borrows {
+            self.push_inst(InstKind::EndBorrow { operand: v });
+        }
     }
 
     pub fn emit_begin_mut_borrow(&mut self, operand: ValueId) -> ValueId {
@@ -779,6 +794,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         for borrow_val in borrows {
             self.emit_end_borrow(borrow_val);
         }
+        self.drain_deferred_borrows();
         // Never-returning calls terminate the block — destroy all live values first
         if matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Never) {
             self.destroy_scopes_to_depth(0, &[]);
@@ -823,6 +839,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn set_terminator(&mut self, kind: TerminatorKind) {
+        self.drain_deferred_borrows();
         let term = Terminator { kind, span: self.current_span.clone() };
         if let Some(block_id) = self.current_block {
             self.body.block_mut(block_id).terminator = term;
