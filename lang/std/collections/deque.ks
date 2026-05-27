@@ -202,7 +202,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// Reads the ring-buffer head offset from the COW storage.
     fileprivate func head() -> Int64 { self.storage.read().head }
     /// Reads the raw element pointer from the COW storage.
-    fileprivate func rawPtr() -> Pointer[T] { self.storage.read().ptr }
+    fileprivate func rawPtr() -> Pointer[T] { self.storage.valuePtr().with { (s) in s.ptr } }
 
     // ========================================================================
     // CONSTRUCTORS

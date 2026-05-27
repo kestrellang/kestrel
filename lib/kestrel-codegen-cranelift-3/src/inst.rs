@@ -174,8 +174,10 @@ pub fn compile_inst(
             let result_is_guaranteed = fc.body.values[result.index()].ownership
                 == kestrel_mir_3::value::Ownership::Guaranteed;
             if result_is_guaranteed {
-                // @guaranteed PtrRead: pass the address through without loading.
-                // CopyValue downstream handles the actual load/clone.
+                // @guaranteed PtrRead: resolve_scalar loads through @guaranteed
+                // indirection, giving the actual pointer value (heap address).
+                // The result represents "data lives at this address" — downstream
+                // struct_extract computes field offsets, CopyValue loads from it.
                 let a = fc.resolve_scalar(builder, *arg);
                 fc.map_value(builder, *result, a);
             } else {

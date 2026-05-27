@@ -905,8 +905,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     _ => None,
                 };
                 let field_idx = struct_entity
-                    .and_then(|e| self.ctx.resolve_field_idx(e, field_name))
-                    .unwrap_or(FieldIdx::new(0));
+                    .and_then(|e| self.ctx.resolve_field_idx(e, field_name))?;
                 Some(self.emit_field_addr(base_addr, base_ty, field_idx))
             }
             _ => None,

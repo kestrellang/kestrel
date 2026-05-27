@@ -219,7 +219,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     fileprivate var storage: CowBox[ArrayStorage[T]]
 
     /// Returns the raw element pointer. Internal helper for storage access.
-    fileprivate func ptr() -> Pointer[T] { self.storage.read().ptr }
+    fileprivate func ptr() -> Pointer[T] { self.storage.valuePtr().with { (s) in s.ptr } }
     /// Returns the element count from the storage. Internal helper.
     fileprivate func len() -> Int64 { self.storage.read().len }
     /// Returns the buffer capacity from the storage. Internal helper.
