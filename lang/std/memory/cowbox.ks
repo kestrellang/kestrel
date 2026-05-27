@@ -33,7 +33,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
 
     /// @name From Value
     /// Allocates fresh storage holding `value` with refcount 1.
-    public init(value: T) {
+    public init(consuming value: T) {
         self.inner = RcBox(value);
     }
 
@@ -65,6 +65,13 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
     /// local as moved (Dead) — prevents double-free of shared buffers.
     public func setValue(consuming value: T) {
         self.inner.setValue(value)
+    }
+
+    /// Returns a pointer to the wrapped value on the heap, bypassing
+    /// the clone that `read()` / `getValue()` would create. Use this
+    /// to read individual scalar fields without triggering `T.deinit`.
+    public func valuePtr() -> Pointer[T] {
+        self.inner.valuePtr()
     }
 
     /// Returns `true` when no other clone shares this storage.

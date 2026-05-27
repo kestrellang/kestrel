@@ -96,23 +96,22 @@ struct ArrayStorage[T]: Cloneable {
     /// let copy = storage.clone();
     /// ```
     func clone() -> ArrayStorage[T] {
-        if self.len == 0 {
+        if self.cap == 0 {
             return ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
                 cap: 0
             )
         }
-        let layout = Layout.array[T](self.len);
+        let layout = Layout.array[T](self.cap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            // Copy elements
             for i in 0..<self.len {
                 newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
             }
-            ArrayStorage(ptr: newPtr, len: self.len, cap: self.len)
+            ArrayStorage(ptr: newPtr, len: self.len, cap: self.cap)
         } else {
             fatalError("ArrayStorage clone allocation failed")
         }

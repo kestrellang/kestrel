@@ -100,23 +100,26 @@ struct StringStorage: Cloneable {
         self.cap = cap;
     }
 
-    /// Allocates a new exact-fit buffer and copies the bytes.
+    /// Allocates a new buffer and copies the bytes.
     ///
     /// Used when COW detects shared storage and a mutation is about to
-    /// happen. The clone has `cap == len` regardless of the source's
-    /// capacity to avoid carrying slack into copies.
+    /// happen. Preserves an allocated buffer even when `len == 0` so
+    /// that a grow → write sequence doesn't lose the buffer through a
+    /// clone chain (CopyValue on Named types expands to clone calls).
     func clone() -> StringStorage {
-        if self.len == 0 {
+        if self.cap == 0 {
             return StringStorage(
                 ptr: Pointer[UInt8].nullPointer(),
                 len: 0,
                 cap: 0
             )
         }
-        let layout = Layout.array[UInt8](self.len);
+        let layout = Layout.array[UInt8](self.cap);
         let newPtr = _textAlloc(layout);
-        _memcpyBytes(dst: newPtr, src: self.ptr, n: self.len);
-        StringStorage(ptr: newPtr, len: self.len, cap: self.len)
+        if self.len > 0 {
+            _memcpyBytes(dst: newPtr, src: self.ptr, n: self.len);
+        }
+        StringStorage(ptr: newPtr, len: self.len, cap: self.cap)
     }
 
     /// Frees the buffer if any was allocated.
@@ -193,7 +196,11 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     private var storage: CowBox[StringStorage]
 
     // Helper accessors for storage fields
-    private func ptr() -> Pointer[UInt8] { self.storage.read().ptr }
+    private func ptr() -> Pointer[UInt8] {
+        // Read just the ptr field without creating a temporary StringStorage
+        // whose deinit would free the buffer.
+        self.storage.valuePtr().asRaw().cast[Pointer[UInt8]]().read()
+    }
     private func len() -> Int64 { self.storage.read().len }
     private func cap() -> Int64 { self.storage.read().cap }
 

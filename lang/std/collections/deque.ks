@@ -48,7 +48,7 @@ struct DequeStorage[T]: Cloneable {
     /// Returns an empty storage with a null pointer when `len == 0`.
     /// Panics if allocation fails.
     func clone() -> DequeStorage[T] {
-        if self.len == 0 {
+        if self.cap == 0 {
             return DequeStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
@@ -56,7 +56,7 @@ struct DequeStorage[T]: Cloneable {
                 head: 0
             )
         }
-        let layout = Layout.array[T](self.len);
+        let layout = Layout.array[T](self.cap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
@@ -66,7 +66,7 @@ struct DequeStorage[T]: Cloneable {
                 if phys >= self.cap { phys = phys - self.cap; }
                 newPtr.offset(by: i).write(self.ptr.offset(by: phys).read());
             }
-            DequeStorage(ptr: newPtr, len: self.len, cap: self.len, head: 0)
+            DequeStorage(ptr: newPtr, len: self.len, cap: self.cap, head: 0)
         } else {
             fatalError("DequeStorage clone allocation failed")
         }

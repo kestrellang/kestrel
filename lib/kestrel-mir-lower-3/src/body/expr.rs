@@ -15,7 +15,7 @@
 use kestrel_ast_builder::{Callable, NodeKind, Settable};
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir_3::callee::Callee;
-use kestrel_mir_3::inst::CallArg;
+use kestrel_mir_3::inst::{CallArg, InstKind};
 use kestrel_mir_3::item::witness::WitnessMethodKey;
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
@@ -321,7 +321,6 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Stored field → StructExtract (borrow-based when base is @owned)
-        let base_val = self.lower_expr_for_borrow(base);
         let base_ty = self.resolve_expr_type(base);
         let result_ty = self.resolve_expr_type(expr_id);
 
@@ -334,6 +333,7 @@ impl OssaBodyCtx<'_, '_> {
             .and_then(|se| self.ctx.resolve_field_idx(se, field_name))
             .unwrap_or(FieldIdx::new(0));
 
+        let base_val = self.lower_expr_for_borrow(base);
         self.emit_struct_extract(base_val, field_idx, result_ty)
     }
 

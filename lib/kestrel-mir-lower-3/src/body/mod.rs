@@ -540,6 +540,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
+    /// Borrow directly from an address (e.g. a mutable self parameter).
+    /// Avoids the copy_addr + begin_borrow pattern which creates an @owned
+    /// copy whose destruction runs drop shims (breaking refcount for RcBox etc.)
+    pub fn emit_begin_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
+        let result = self.alloc_guaranteed(ty, address);
+        self.push_inst(InstKind::BeginBorrowAddr { result, address, ty });
+        result
+    }
+
     pub fn emit_end_borrow(&mut self, operand: ValueId) {
         self.push_inst(InstKind::EndBorrow { operand });
     }
@@ -711,9 +720,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_copy_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
-        let result = self.alloc_value(ty, Ownership::Owned);
-        self.push_inst(InstKind::CopyAddr { result, address, ty });
-        self.track_owned(result);
+        // Borrow the address, then CopyValue to get an @owned clone.
+        // CopyValue goes through the expand pass → proper clone for Named
+        // types (e.g. RcBox refcount bump), balancing the later DestroyValue.
+        let borrow = self.emit_begin_borrow_addr(address, ty);
+        let result = self.emit_copy_value(borrow);
+        self.emit_end_borrow(borrow);
         result
     }
 
@@ -942,6 +954,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if let Some(addr) = self.try_var_addr(expr_id) {
                 let ty = self.resolve_expr_type(expr_id);
                 let borrow = self.emit_begin_mut_borrow_addr(addr, ty);
+                return CallArg { value: borrow, convention };
+            }
+        }
+        if convention == ParamConvention::Borrow {
+            if let Some(addr) = self.try_var_addr(expr_id) {
+                let ty = self.resolve_expr_type(expr_id);
+                let borrow = self.emit_begin_borrow_addr(addr, ty);
                 return CallArg { value: borrow, convention };
             }
         }

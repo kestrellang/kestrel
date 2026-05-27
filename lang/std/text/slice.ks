@@ -171,7 +171,10 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     // -- Internal helpers ----------------------------------------------------
 
     func _rawPtr() -> Pointer[UInt8] {
-        self.source.getValue().ptr
+        // Read just the ptr field from the heap without creating a temporary
+        // StringStorage whose deinit would free the buffer.
+        // StringStorage layout: [ptr: Pointer[UInt8], len: Int64, cap: Int64]
+        self.source.valuePtr().asRaw().cast[Pointer[UInt8]]().read()
     }
 
     func _readByte(at offset: Int64) -> UInt8 {

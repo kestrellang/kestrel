@@ -58,7 +58,7 @@ public struct RcBox[T]: Cloneable {
     /// # Errors
     ///
     /// Panics with `"RcBox allocation failed"` on allocation failure.
-    public init(value: T) {
+    public init(consuming value: T) {
         let layout: Layout = Layout.of[RcBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
         let result: RawPointer? = allocator.allocate(layout);
@@ -81,6 +81,15 @@ public struct RcBox[T]: Cloneable {
     /// snapshot, not a live reference.
     public func getValue() -> T {
         self.ptr.read().value
+    }
+
+    /// Returns a pointer to the wrapped value on the heap. The pointer
+    /// is valid as long as the RcBox (and its storage) is alive. Use
+    /// this to read individual fields without creating a full `T` clone
+    /// whose deinit would free owned resources prematurely.
+    public func valuePtr() -> Pointer[T] {
+        let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
+        self.ptr.asRaw().offset(by: valueOffset).cast[T]()
     }
 
     /// Overwrites the wrapped value in place. Safe only when this is the
