@@ -139,7 +139,13 @@ fn build_clone_lookup(
     for (mi, mf) in module.functions.iter().enumerate() {
         if let Some(&nominal) = clone_func_to_parent.get(&mf.source) {
             if bitwise_nominals.contains(&nominal) {
+                if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                    eprintln!("[clone_lookup] SKIPPED (bitwise): {} source={:?} nominal={:?} type_args={:?}", mf.name, mf.source, nominal, mf.type_args);
+                }
                 continue;
+            }
+            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                eprintln!("[clone_lookup] ADDED: {} source={:?} nominal={:?} type_args={:?}", mf.name, mf.source, nominal, mf.type_args);
             }
             lookup.insert(
                 (nominal, mf.type_args.clone()),
@@ -324,7 +330,7 @@ fn expand_function(
                             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                                 let found = clone_lookup.get(&key).is_some();
                                 if !found {
-                                    eprintln!("[expand] CopyValue on Named {entity:?} — NOT in clone_lookup (type_args={})", type_args.len());
+                                    eprintln!("[expand] CopyValue on Named {entity:?} — NOT in clone_lookup (type_args={:?})", type_args);
                                 }
                             }
                             if let Some(&clone_id) = clone_lookup.get(&key) {
