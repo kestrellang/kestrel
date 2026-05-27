@@ -1,12 +1,8 @@
-// Cryptographically secure random number generator backed by the OS.
-
-module uuid.secure_random
+module crypto.random
 
 import std.memory.(RawPointer, Pointer)
 import std.numeric.(UInt64, UInt8, Int64, RandomNumberGenerator)
 
-// arc4random_buf fills a buffer with cryptographically secure random bytes.
-// Available on macOS (libc) and Linux (libbsd or glibc 2.36+).
 @extern(.C, mangleName: "arc4random_buf")
 func arc4random_buf(consuming buf: RawPointer, consuming nbytes: Int64)
 
@@ -21,7 +17,6 @@ func arc4random_buf(consuming buf: RawPointer, consuming nbytes: Int64)
 /// ```
 /// var rng = SecureRandom();
 /// let a = rng.nextUInt64();
-/// let b = rng.nextUInt64();  // independent of a
 /// ```
 public struct SecureRandom: RandomNumberGenerator {
     public init() {}
@@ -32,4 +27,11 @@ public struct SecureRandom: RandomNumberGenerator {
         arc4random_buf(Pointer(to: value).asRaw(), 8);
         value
     }
+}
+
+/// Fills an array with cryptographically secure random bytes.
+public func randomBytes(count count: Int64) -> Array[UInt8] {
+    var buf = Array[UInt8](repeating: 0, count: count);
+    arc4random_buf(buf.asSlice().pointer.asRaw(), count);
+    return buf;
 }

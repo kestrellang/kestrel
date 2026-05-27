@@ -72,6 +72,10 @@ impl TypeCache {
         }
     }
 
+    pub fn cached_repr(&self, ty: TyId) -> Option<TypeRepr> {
+        self.reprs.get(ty.index()).copied().flatten()
+    }
+
     pub fn repr(&mut self, ty: TyId, arena: &TyArena, module: &MonoModule) -> TypeRepr {
         if let Some(cached) = self.reprs[ty.index()] {
             return cached;

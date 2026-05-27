@@ -43,6 +43,13 @@ public protocol Digest {
     /// The size of the digest output in bytes.
     static var digestSize: Int64 { get }
 
+    /// The internal block size in bytes. Used by HMAC and other
+    /// constructions built on top of hash functions.
+    static var blockSize: Int64 { get }
+
+    /// Creates a fresh hasher with initial state.
+    init()
+
     /// Feeds data into the hash function.
     mutating func update[S](bytes: S) where S: Slice[UInt8]
 

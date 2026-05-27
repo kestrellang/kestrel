@@ -131,7 +131,7 @@ fn compile_branch(
     else_block: kestrel_mir_3::BlockId,
     else_args: &[ValueId],
 ) -> Result<(), CodegenError> {
-    let cond_val = fc.get_value(builder, condition);
+    let cond_val = fc.resolve_scalar(builder, condition);
     let cmp = builder.ins().icmp_imm(IntCC::NotEqual, cond_val, 0);
 
     let then_cl = fc.block_map[then_block.index()];
@@ -155,7 +155,7 @@ fn compile_switch(
     discriminant: ValueId,
     cases: &[kestrel_mir_3::terminator::SwitchArm],
 ) -> Result<(), CodegenError> {
-    let disc_val = fc.get_value(builder, discriminant);
+    let disc_val = fc.resolve_scalar(builder, discriminant);
 
     // Determine discriminant width from the value's type
     let disc_ty = fc.body.values[discriminant.index()].ty;

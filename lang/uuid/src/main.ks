@@ -5,7 +5,7 @@ module uuid
 import std.numeric.(UInt32, UInt64, Int64, RandomNumberGenerator)
 import std.text.(String, StringBuilder, Char, CharsView, Formattable, FormatOptions)
 import std.core.(Equatable, Hashable, Hasher, Matchable, Bool)
-import uuid.secure_random.(SecureRandom)
+import crypto.random.(SecureRandom)
 
 /// A universally unique identifier (RFC 9562).
 ///

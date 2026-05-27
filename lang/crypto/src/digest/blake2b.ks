@@ -21,6 +21,7 @@ public struct BLAKE2b: Digest {
     var outputLen: Int64;
 
     public static var digestSize: Int64 { 32 }
+    public static var blockSize: Int64 { 128 }
 
     public init() {
         self.outputLen = 32;

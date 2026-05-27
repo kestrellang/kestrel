@@ -16,6 +16,7 @@ public struct SHA256: Digest {
     var totalLen: UInt64;
 
     public static var digestSize: Int64 { 32 }
+    public static var blockSize: Int64 { 64 }
 
     public init() {
         self.state = [

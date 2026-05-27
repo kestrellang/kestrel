@@ -143,6 +143,11 @@ Available packages:
 | [kestrel/http](https://kestrel-lang.com/flock/kestrel/http) | Shared HTTP types |
 | [kestrel/plume](https://kestrel-lang.com/flock/kestrel/plume) | Template engine |
 | [kestrel/talon-sqlite](https://kestrel-lang.com/flock/kestrel/talon-sqlite) | SQLite Wrapper |
+| [kestrel/uuid](https://kestrel-lang.com/flock/kestrel/kestrel/uuid) | UUID Type |
+| [kestrel/html-builder](https://kestrel-lang.com/flock/kestrel/kestrel/html-builder) | HTML DSL |
+| [kestrel/sdl](https://kestrel-lang.com/flock/kestrel/kestrel/sdl) | SDL Bindings |
+| [kestrel/crypto](https://kestrel-lang.com/flock/kestrel/kestrel/crypto) | Crypto primitives |
+| [kestrel/datetime](https://kestrel-lang.com/flock/kestrel/kestrel/datetime) | Datetime library |
 
 Also included: **Jessup** (toolchain version manager, like rustup).
 

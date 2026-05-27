@@ -37,6 +37,20 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
         })
     }
 
+    /// Get the scalar value for a MIR ValueId. If the value is @guaranteed
+    /// and the type is a scalar, loads from the ByRef pointer first.
+    pub fn resolve_scalar(&mut self, builder: &mut FunctionBuilder, id: ValueId) -> Value {
+        let val = self.get_value(builder, id);
+        let vd = &self.body.values[id.index()];
+        if vd.ownership == kestrel_mir_3::value::Ownership::Guaranteed {
+            let repr = self.ctx.tc.repr(vd.ty, &self.ctx.module.ty_arena, self.ctx.module);
+            if let crate::ty::TypeRepr::Scalar(t) = repr {
+                return builder.ins().load(t, ir::MemFlags::new(), val, ir::immediates::Offset32::new(0));
+            }
+        }
+        val
+    }
+
     pub fn map_value(&mut self, _builder: &mut FunctionBuilder, id: ValueId, val: Value) {
         self.value_map.insert(id, val);
     }

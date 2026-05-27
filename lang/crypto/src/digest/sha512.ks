@@ -16,6 +16,7 @@ public struct SHA512: Digest {
     var totalLen: UInt64;
 
     public static var digestSize: Int64 { 64 }
+    public static var blockSize: Int64 { 128 }
 
     public init() {
         self.state = [

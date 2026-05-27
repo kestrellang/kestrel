@@ -199,7 +199,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .get(self.func_idx)
             .map(|f| f.params.iter().map(|p| p.convention).collect())
             .unwrap_or_default();
-
         for (i, (hir_id, _local)) in locals.iter().enumerate() {
             if i >= params_len { break; }
             let ty = self.resolve_local_type(*hir_id);
@@ -674,11 +673,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_store_init(&mut self, address: ValueId, value: ValueId) {
+        let value = if self.body.value(value).ownership == Ownership::Guaranteed {
+            self.emit_copy_value(value)
+        } else { value };
         self.push_inst(InstKind::StoreInit { address, value });
         self.consume(value);
     }
 
     pub fn emit_store_assign(&mut self, address: ValueId, value: ValueId) {
+        let value = if self.body.value(value).ownership == Ownership::Guaranteed {
+            self.emit_copy_value(value)
+        } else { value };
         self.push_inst(InstKind::StoreAssign { address, value });
         self.consume(value);
     }

@@ -18,6 +18,7 @@ public struct MD5: Digest {
     var totalLen: UInt64;
 
     public static var digestSize: Int64 { 16 }
+    public static var blockSize: Int64 { 64 }
 
     public init() {
         self.state = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];

@@ -27,7 +27,7 @@ pub fn compile_inst(
     match kind {
         // -- Value lifecycle --
         InstKind::MoveValue { result, operand } => {
-            let val = fc.get_value(builder, *operand);
+            let val = fc.resolve_scalar(builder, *operand);
             fc.map_value(builder, *result, val);
         }
 
@@ -35,12 +35,18 @@ pub fn compile_inst(
             let val = fc.get_value(builder, *operand);
             let ty = fc.body.values[result.index()].ty;
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let operand_is_guaranteed = fc.body.values[operand.index()].ownership
+                == kestrel_mir_3::value::Ownership::Guaranteed;
             match repr {
                 TypeRepr::Aggregate { size, align } => {
                     let ptr_ty = fc.ctx.ptr_ty;
                     let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
                     mem::copy_aggregate(builder, size, slot, val);
                     fc.map_value(builder, *result, slot);
+                }
+                TypeRepr::Scalar(t) if operand_is_guaranteed => {
+                    let loaded = builder.ins().load(t, MemFlags::new(), val, Offset32::new(0));
+                    fc.map_value(builder, *result, loaded);
                 }
                 _ => {
                     fc.map_value(builder, *result, val);
@@ -124,14 +130,9 @@ pub fn compile_inst(
 
         InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
             let addr = fc.get_value(builder, *address);
-            let mut val = fc.get_value(builder, *value);
+            let val = fc.resolve_scalar(builder, *value);
             let ty = fc.body.values[value.index()].ty;
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            if fc.body.values[value.index()].ownership == kestrel_mir_3::value::Ownership::Guaranteed {
-                if let TypeRepr::Scalar(t) = repr {
-                    val = builder.ins().load(t, MemFlags::new(), val, Offset32::new(0));
-                }
-            }
             mem::store_to_repr(builder, repr, addr, val);
         }
 
@@ -144,8 +145,14 @@ pub fn compile_inst(
             let base = fc.get_value(builder, *operand);
             let operand_ty = fc.body.values[operand.index()].ty;
             let repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let is_guaranteed = fc.body.values[operand.index()].ownership
+                == kestrel_mir_3::value::Ownership::Guaranteed;
             let disc_width = discriminant_width(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
             let val = match repr {
+                TypeRepr::Scalar(_) if is_guaranteed => {
+                    // @guaranteed scalar enum: base is a pointer, load the value first
+                    builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0))
+                }
                 TypeRepr::Scalar(_) => {
                     // Scalar enum: the value IS the discriminant, just narrow
                     let actual = builder.func.dfg.value_type(base);
@@ -167,22 +174,22 @@ pub fn compile_inst(
 
         // -- Computation --
         InstKind::Op1 { result, op, arg } => {
-            let a = fc.get_value(builder, *arg);
+            let a = fc.resolve_scalar(builder, *arg);
             let val = compile_op1(fc, builder, *op, a)?;
             fc.map_value(builder, *result, val);
         }
 
         InstKind::Op2 { result, op, lhs, rhs } => {
-            let l = fc.get_value(builder, *lhs);
-            let r = fc.get_value(builder, *rhs);
+            let l = fc.resolve_scalar(builder, *lhs);
+            let r = fc.resolve_scalar(builder, *rhs);
             let val = compile_op2(fc, builder, *op, l, r)?;
             fc.map_value(builder, *result, val);
         }
 
         InstKind::Op3 { result, op, a, b, c } => {
-            let va = fc.get_value(builder, *a);
-            let vb = fc.get_value(builder, *b);
-            let vc = fc.get_value(builder, *c);
+            let va = fc.resolve_scalar(builder, *a);
+            let vb = fc.resolve_scalar(builder, *b);
+            let vc = fc.resolve_scalar(builder, *c);
             let val = compile_op3(builder, *op, va, vb, vc)?;
             fc.map_value(builder, *result, val);
         }
@@ -516,12 +523,12 @@ fn compile_struct(
         TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
-                return Ok(fc.get_value(builder, fields[0].1));
+                return Ok(fc.resolve_scalar(builder, fields[0].1));
             }
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::zero_memory(builder, slot, repr.size());
             for &(field_idx, value_id) in fields {
-                let val = fc.get_value(builder, value_id);
+                let val = fc.resolve_scalar(builder, value_id);
                 let offset = struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
                 let field_ty = struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
                 let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -534,7 +541,7 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             for &(field_idx, value_id) in fields {
-                let val = fc.get_value(builder, value_id);
+                let val = fc.resolve_scalar(builder, value_id);
                 let offset = struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
                 let field_ty = struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
                 let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -575,7 +582,7 @@ fn compile_tuple(
     mem::zero_memory(builder, slot, layout.size);
 
     for (i, &elem_id) in elements.iter().enumerate() {
-        let val = fc.get_value(builder, elem_id);
+        let val = fc.resolve_scalar(builder, elem_id);
         let offset = layout.field_offsets[i];
         let repr = fc.ctx.tc.repr(elem_tys[i], &fc.ctx.module.ty_arena, fc.ctx.module);
         let dest = if offset != 0 {
@@ -652,7 +659,7 @@ fn store_variant_payload(
             if let Some(Layout::Enum(el)) = &e.type_info.layout {
                 if let Some(vl) = el.variant_layouts.get(variant.index()) {
                     for (i, &value_id) in payload.iter().enumerate() {
-                        let val = fc.get_value(builder, value_id);
+                        let val = fc.resolve_scalar(builder, value_id);
                         let field_offset = vl.field_offsets.get(i).copied().unwrap_or_else(|| {
                             panic!("ICE: enum variant field offset missing for field {i}")
                         });
@@ -688,7 +695,7 @@ fn compile_array(
     mem::zero_memory(builder, slot, total_size);
 
     for (i, &value_id) in elements.iter().enumerate() {
-        let val = fc.get_value(builder, value_id);
+        let val = fc.resolve_scalar(builder, value_id);
         let offset = i as u64 * elem_size;
         let dest = if offset != 0 {
             builder.ins().iadd_imm(slot, offset as i64)
@@ -747,7 +754,7 @@ fn compile_apply_partial(
     let env_ptr = if env_size > 0 {
         let env_slot = mem::alloc_stack_slot(builder, env_size, env_align, ptr_ty);
         for (i, &cap_id) in captures.iter().enumerate() {
-            let val = fc.get_value(builder, cap_id);
+            let val = fc.resolve_scalar(builder, cap_id);
             let (repr, offset) = capture_reprs[i];
             let dest = if offset != 0 {
                 builder.ins().iadd_imm(env_slot, offset as i64)
@@ -786,17 +793,21 @@ fn compile_struct_extract(
     let field_ty = struct_field_type(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
     let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
-    // Single-field scalar newtype: value IS the field.
-    // When the operand is @guaranteed (borrowed), `base` is a pointer — load first.
+    // @guaranteed operands are always pointers (Option B invariant).
+    // Return the field address — CopyValue handles the load.
+    if is_borrowed {
+        let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
+        let addr = if offset != 0 {
+            builder.ins().iadd_imm(base, offset as i64)
+        } else {
+            base
+        };
+        return Ok(addr);
+    }
+
+    // @owned: single-field scalar newtype — value IS the field.
     if let TypeRepr::Scalar(base_cl) = operand_repr {
         if let TypeRepr::Scalar(field_cl) = field_repr {
-            if is_borrowed {
-                let loaded = builder.ins().load(base_cl, MemFlags::new(), base, Offset32::new(0));
-                if base_cl == field_cl {
-                    return Ok(loaded);
-                }
-                return Ok(builder.ins().bitcast(field_cl, MemFlags::new(), loaded));
-            }
             if base_cl == field_cl {
                 return Ok(base);
             }
@@ -804,6 +815,7 @@ fn compile_struct_extract(
         }
     }
 
+    // @owned aggregate: compute field offset and load.
     let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
     let addr = if offset != 0 {
         builder.ins().iadd_imm(base, offset as i64)
@@ -821,17 +833,21 @@ fn compile_tuple_extract(
 ) -> Result<Value, CodegenError> {
     let base = fc.get_value(builder, operand);
     let operand_ty = fc.body.values[operand.index()].ty;
+    let is_borrowed = fc.body.values[operand.index()].ownership == kestrel_mir_3::value::Ownership::Guaranteed;
     let arena = &fc.ctx.module.ty_arena;
 
     if let MirTy::Tuple(elems) = arena.get(operand_ty) {
         let elems = elems.clone();
         let (offset, elem_ty) = tuple_elem_offset(&mut fc.ctx.tc, arena, fc.ctx.module, &elems, index);
-        let elem_repr = fc.ctx.tc.repr(elem_ty, arena, fc.ctx.module);
         let addr = if offset != 0 {
             builder.ins().iadd_imm(base, offset as i64)
         } else {
             base
         };
+        if is_borrowed {
+            return Ok(addr);
+        }
+        let elem_repr = fc.ctx.tc.repr(elem_ty, arena, fc.ctx.module);
         Ok(mem::load_from_repr(builder, elem_repr, addr, fc.ctx.ptr_ty))
     } else {
         Err(CodegenError::Unsupported("TupleExtract on non-tuple".into()))
@@ -847,6 +863,7 @@ fn compile_enum_payload(
 ) -> Result<Value, CodegenError> {
     let base = fc.get_value(builder, operand);
     let operand_ty = fc.body.values[operand.index()].ty;
+    let is_borrowed = fc.body.values[operand.index()].ownership == kestrel_mir_3::value::Ownership::Guaranteed;
     let arena = &fc.ctx.module.ty_arena;
 
     if let MirTy::Named { entity, type_args } = arena.get(operand_ty) {
@@ -858,9 +875,12 @@ fn compile_enum_payload(
                 if let Some(vl) = el.variant_layouts.get(variant.index()) {
                     let field_offset = vl.field_offsets[field.index()];
                     let total_offset = payload_offset + field_offset;
+                    let addr = builder.ins().iadd_imm(base, total_offset as i64);
+                    if is_borrowed {
+                        return Ok(addr);
+                    }
                     let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
                     let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-                    let addr = builder.ins().iadd_imm(base, total_offset as i64);
                     return Ok(mem::load_from_repr(builder, field_repr, addr, fc.ctx.ptr_ty));
                 }
             }
@@ -983,14 +1003,27 @@ fn compile_resolved_call(
         let repr = fc.ctx.tc.repr(param.ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         let pass = abi::param_pass_mode(param.convention, repr, ptr_ty);
         let val = fc.get_value(builder, call_arg.value);
+        let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
+            == kestrel_mir_3::value::Ownership::Guaranteed;
 
         match pass {
             PassMode::ByVal(expected_ty) => {
-                let actual_ty = builder.func.dfg.value_type(val);
-                let val = if actual_ty != expected_ty && actual_ty == ptr_ty {
-                    builder.ins().load(expected_ty, MemFlags::new(), val, Offset32::new(0))
+                // @guaranteed scalars are pointers; load the value for by-val passing.
+                let val = if arg_is_guaranteed {
+                    let arg_ty = fc.body.values[call_arg.value.index()].ty;
+                    let arg_repr = fc.ctx.tc.repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                    if let TypeRepr::Scalar(t) = arg_repr {
+                        builder.ins().load(t, MemFlags::new(), val, Offset32::new(0))
+                    } else {
+                        val
+                    }
                 } else {
-                    val
+                    let actual_ty = builder.func.dfg.value_type(val);
+                    if actual_ty != expected_ty && actual_ty == ptr_ty {
+                        builder.ins().load(expected_ty, MemFlags::new(), val, Offset32::new(0))
+                    } else {
+                        val
+                    }
                 };
                 call_args.push(val);
             }
@@ -998,6 +1031,9 @@ fn compile_resolved_call(
                 if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
                     // Borrow/MutBorrow args always go through BeginBorrow
                     // in the lowerer, so the value is already an address.
+                    call_args.push(val);
+                } else if arg_is_guaranteed {
+                    // @guaranteed pointer is already an address — pass directly
                     call_args.push(val);
                 } else {
                     // Consuming arg passed by-ref: spill scalar to stack.
@@ -1106,8 +1142,23 @@ fn compile_thin_call(
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
         let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
         let val = fc.get_value(builder, call_arg.value);
+        let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
+            == kestrel_mir_3::value::Ownership::Guaranteed;
         match pass {
-            PassMode::ByVal(_) => call_args.push(val),
+            PassMode::ByVal(expected_ty) => {
+                let val = if arg_is_guaranteed {
+                    let arg_ty = fc.body.values[call_arg.value.index()].ty;
+                    let arg_repr = fc.ctx.tc.repr(arg_ty, arena, fc.ctx.module);
+                    if let TypeRepr::Scalar(t) = arg_repr {
+                        builder.ins().load(t, MemFlags::new(), val, Offset32::new(0))
+                    } else {
+                        val
+                    }
+                } else {
+                    val
+                };
+                call_args.push(val);
+            }
             PassMode::ByRef => call_args.push(val),
             PassMode::Zst => {}
         }
@@ -1211,12 +1262,20 @@ fn compile_thick_call(
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
         let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
         let val = fc.get_value(builder, call_arg.value);
+        let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
+            == kestrel_mir_3::value::Ownership::Guaranteed;
         match pass {
             PassMode::ByVal(expected_ty) => {
-                // MIR lowering prepares indirect-call args as Borrow (pointer),
-                // but FuncThick type says Consuming (by-val for scalars).
-                // Load through the pointer when the arg was passed by-ref.
-                if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
+                if arg_is_guaranteed {
+                    let arg_ty = fc.body.values[call_arg.value.index()].ty;
+                    let arg_repr = fc.ctx.tc.repr(arg_ty, arena, fc.ctx.module);
+                    let loaded = if let TypeRepr::Scalar(t) = arg_repr {
+                        builder.ins().load(t, MemFlags::new(), val, Offset32::new(0))
+                    } else {
+                        val
+                    };
+                    call_args.push(loaded);
+                } else if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
                     let loaded = builder.ins().load(expected_ty, MemFlags::new(), val, Offset32::new(0));
                     call_args.push(loaded);
                 } else {

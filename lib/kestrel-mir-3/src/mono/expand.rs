@@ -8,7 +8,7 @@ use crate::item::function::{FunctionDef, FunctionKind};
 use crate::item::{CopyBehavior, DropBehavior};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::ValueDef;
+use crate::value::{Ownership, ValueDef};
 use crate::{MonoFuncId, TyId, ValueId};
 
 /// Expand DestroyValue and CopyValue instructions in all monomorphized bodies.
@@ -281,10 +281,14 @@ fn expand_function(
                         }
                     }
 
-                    // Non-Named type (primitives, pointers, etc.) — trivially copyable,
-                    // remap result to operand (alias). Named types without clone keep
-                    // the bitwise CopyValue for codegen.
-                    if !matches!(ty_arena.get(value_def.ty), MirTy::Named { .. }) {
+                    // @guaranteed operands are ByRef pointers — CopyValue must be
+                    // preserved so codegen loads from the pointer (Option B invariant).
+                    // Non-Named @owned types alias trivially.
+                    if value_def.ownership == Ownership::Guaranteed {
+                        let mut kept = inst;
+                        remap_inst_operands(&mut kept.kind, &value_remap);
+                        new_insts.push(kept);
+                    } else if !matches!(ty_arena.get(value_def.ty), MirTy::Named { .. }) {
                         let target = remap_value(operand, &value_remap);
                         value_remap.insert(result, target);
                     } else {
