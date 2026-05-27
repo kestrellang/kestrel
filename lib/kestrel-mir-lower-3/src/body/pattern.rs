@@ -95,7 +95,7 @@ impl OssaBodyCtx<'_, '_> {
                 path, ty, cases, default,
             } => {
                 let (test_val, _test_ty) =
-                    self.apply_access_path(scrutinee, scrutinee_ty, path, false);
+                    self.apply_access_path(scrutinee, scrutinee_ty, path);
 
                 if cases.len() == 1 && default.is_none() {
                     self.emit_decision_tree_threaded(
@@ -105,19 +105,19 @@ impl OssaBodyCtx<'_, '_> {
                     return;
                 }
 
-                let branch_snapshot = self.snapshot_scope();
-                let current_live: Vec<ValueId> = self.all_live_tracked()
-                    .iter().map(|&(v, _, _)| v).collect();
-                let local_descs: Vec<(TyId, Ownership)> = current_live
-                    .iter()
-                    .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
-                    .collect();
-
                 // Boolean branch
                 if cases.len() == 2
                     && matches!(&cases[0].0, Constructor::True)
                     && matches!(&cases[1].0, Constructor::False)
                 {
+                    let branch_snapshot = self.snapshot_scope();
+                    let current_live: Vec<ValueId> = self.all_live_tracked()
+                        .iter().map(|&(v, _, _)| v).collect();
+                    let local_descs: Vec<(TyId, Ownership)> = current_live
+                        .iter()
+                        .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                        .collect();
+
                     let (true_block, true_params) = self.new_block_with_params(&local_descs);
                     let (false_block, false_params) = self.new_block_with_params(&local_descs);
                     self.emit_branch(
@@ -194,33 +194,58 @@ impl OssaBodyCtx<'_, '_> {
                 // General switch
                 let discriminant = self.emit_discriminant(test_val);
 
+                // Snapshot and live set after discriminant so it's included
+                let branch_snapshot = self.snapshot_scope();
+                let switch_live: Vec<ValueId> = self.all_live_tracked()
+                    .iter().map(|&(v, _, _)| v).collect();
+                let switch_descs: Vec<(TyId, Ownership)> = switch_live
+                    .iter()
+                    .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                    .collect();
+
                 let mut switch_arms: Vec<SwitchArm> = Vec::with_capacity(cases.len());
                 let mut case_blocks = Vec::with_capacity(cases.len());
                 for (ctor, _) in cases.iter() {
                     let pattern = constructor_to_switch_case(self, ctor);
-                    let (block, params) = self.new_block_with_params(&local_descs);
+                    let (block, params) = self.new_block_with_params(&switch_descs);
                     switch_arms.push(SwitchArm {
-                        pattern, target: block, args: current_live.clone(),
+                        pattern, target: block, args: switch_live.clone(),
                     });
                     case_blocks.push((block, params));
                 }
                 let default_block = default.as_ref().map(|_| {
-                    let (block, params) = self.new_block_with_params(&local_descs);
+                    let (block, params) = self.new_block_with_params(&switch_descs);
                     switch_arms.push(SwitchArm {
-                        pattern: SwitchCase::Wildcard, target: block, args: current_live.clone(),
+                        pattern: SwitchCase::Wildcard, target: block, args: switch_live.clone(),
                     });
                     (block, params)
                 });
 
                 self.emit_switch(discriminant, switch_arms);
 
+                // Identify values that are forwarded but not in the original tracker.
+                // These (like the discriminant) must be destroyed in each arm since
+                // they won't be forwarded to the merge block.
+                let tracker_set: std::collections::HashSet<ValueId> =
+                    self.tracker.values().into_iter().collect();
+                let extra_vals: Vec<ValueId> = switch_live.iter()
+                    .filter(|v| !tracker_set.contains(v))
+                    .copied()
+                    .collect();
+
                 for (i, ((_, subtree), (block_id, params))) in
                     cases.iter().zip(case_blocks.iter()).enumerate()
                 {
                     if i > 0 { self.restore_scope(&branch_snapshot); }
                     self.switch_to(*block_id);
-                    self.rebind_scope_values(&current_live, params);
-                    let rebound = rebound_value(scrutinee, &current_live, params);
+                    self.rebind_scope_values(&switch_live, params);
+                    // Destroy values that aren't in the tracker (e.g., discriminant)
+                    for &extra in &extra_vals {
+                        if let Some(pos) = switch_live.iter().position(|&v| v == extra) {
+                            self.emit_destroy_value(params[pos]);
+                        }
+                    }
+                    let rebound = rebound_value(scrutinee, &switch_live, params);
                     self.emit_decision_tree_threaded(
                         subtree, rebound, scrutinee_ty, arms, result_ty,
                         join_block,
@@ -230,8 +255,13 @@ impl OssaBodyCtx<'_, '_> {
                 if let (Some(def_tree), Some((def_block, def_params))) = (default, default_block) {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(def_block);
-                    self.rebind_scope_values(&current_live, &def_params);
-                    let rebound = rebound_value(scrutinee, &current_live, &def_params);
+                    self.rebind_scope_values(&switch_live, &def_params);
+                    for &extra in &extra_vals {
+                        if let Some(pos) = switch_live.iter().position(|&v| v == extra) {
+                            self.emit_destroy_value(def_params[pos]);
+                        }
+                    }
+                    let rebound = rebound_value(scrutinee, &switch_live, &def_params);
                     self.emit_decision_tree_threaded(
                         def_tree, rebound, scrutinee_ty, arms, result_ty,
                         join_block,
@@ -245,6 +275,10 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(arm) = arms.get(*arm_index) {
                     let body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
+                        // Copy @guaranteed result to @owned for the merge block
+                        let body_val = if self.body.value(body_val).ownership == Ownership::Guaranteed {
+                            self.emit_copy_value(body_val)
+                        } else { body_val };
                         let tracker_vals = self.tracker.values();
                         let mut keep = vec![body_val];
                         keep.extend(&tracker_vals);
@@ -341,12 +375,12 @@ impl OssaBodyCtx<'_, '_> {
         for binding in bindings {
             let hir_local = binding.local_id;
             let (extracted, _) =
-                self.apply_access_path(scrutinee, scrutinee_ty, &binding.path, true);
+                self.apply_access_path(scrutinee, scrutinee_ty, &binding.path);
 
             let ownership = self.body.value(extracted).ownership;
 
             // For @owned types, copy the extracted value so the binding
-            // owns its own value. For @none types, use directly.
+            // owns its own value. @guaranteed values are used directly.
             let bound_val = if ownership == Ownership::Owned {
                 self.emit_copy_value(extracted)
             } else {
@@ -371,20 +405,13 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Apply an access path to a value, emitting SSA extraction instructions.
-    ///
-    /// When `consuming` is false (navigation): all extractions produce @none
-    /// results — non-consuming projections that peek at structure without
-    /// taking ownership. The scrutinee stays live for scope/tracker cleanup.
-    ///
-    /// When `consuming` is true (binding): extractions use the standard
-    /// emit_* methods which produce @owned results for non-trivial types
-    /// and consume @owned operands.
+    /// All extractions use borrow-extract-copy: the operand stays alive for
+    /// the tracker and further extractions.
     fn apply_access_path(
         &mut self,
         value: ValueId,
         value_ty: TyId,
         path: &[PathElement],
-        consuming: bool,
     ) -> (ValueId, TyId) {
         let mut current = value;
         let mut current_ty = value_ty;
@@ -396,32 +423,14 @@ impl OssaBodyCtx<'_, '_> {
                     if let Some((_, variant_idx)) = pending_downcast.take() {
                         let (field_idx, field_ty) =
                             self.resolve_enum_payload_field(current_ty, variant_idx, name);
-                        if consuming {
-                            current = self.emit_enum_payload(
-                                current, variant_idx, field_idx, field_ty,
-                            );
-                        } else {
-                            let result = self.alloc_value(field_ty, Ownership::None);
-                            self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
-                                result, operand: current, variant: variant_idx, field: field_idx,
-                            });
-                            self.track_none(result);
-                            current = result;
-                        }
+                        current = self.emit_enum_payload(
+                            current, variant_idx, field_idx, field_ty,
+                        );
                         current_ty = field_ty;
                     } else {
                         let (field_idx, field_ty) =
                             self.resolve_struct_field(current_ty, name);
-                        if consuming {
-                            current = self.emit_struct_extract(current, field_idx, field_ty);
-                        } else {
-                            let result = self.alloc_value(field_ty, Ownership::None);
-                            self.push_inst(kestrel_mir_3::inst::InstKind::StructExtract {
-                                result, operand: current, field: field_idx,
-                            });
-                            self.track_none(result);
-                            current = result;
-                        }
+                        current = self.emit_struct_extract(current, field_idx, field_ty);
                         current_ty = field_ty;
                     }
                 }
@@ -431,31 +440,13 @@ impl OssaBodyCtx<'_, '_> {
                         let field_ty = self.resolve_enum_payload_field_by_index(
                             current_ty, variant_idx, field_idx,
                         );
-                        if consuming {
-                            current = self.emit_enum_payload(
-                                current, variant_idx, field_idx, field_ty,
-                            );
-                        } else {
-                            let result = self.alloc_value(field_ty, Ownership::None);
-                            self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
-                                result, operand: current, variant: variant_idx, field: field_idx,
-                            });
-                            self.track_none(result);
-                            current = result;
-                        }
+                        current = self.emit_enum_payload(
+                            current, variant_idx, field_idx, field_ty,
+                        );
                         current_ty = field_ty;
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
-                        if consuming {
-                            current = self.emit_tuple_extract(current, *i as u32, elem_ty);
-                        } else {
-                            let result = self.alloc_value(elem_ty, Ownership::None);
-                            self.push_inst(kestrel_mir_3::inst::InstKind::TupleExtract {
-                                result, operand: current, index: *i as u32,
-                            });
-                            self.track_none(result);
-                            current = result;
-                        }
+                        current = self.emit_tuple_extract(current, *i as u32, elem_ty);
                         current_ty = elem_ty;
                     }
                 }
@@ -532,22 +523,23 @@ impl OssaBodyCtx<'_, '_> {
         field: FieldIdx,
         result_ty: TyId,
     ) -> ValueId {
-        let ownership = self.ownership_for(result_ty);
-        let result = self.alloc_value(result_ty, ownership);
-        self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
-            result,
-            operand,
-            variant,
-            field,
-        });
-        // Extraction from @owned aggregate consumes it (OSSA rule)
-        if self.body.value(operand).ownership == Ownership::Owned {
-            self.consume(operand);
+        if self.body.value(operand).ownership == Ownership::Guaranteed {
+            let result = self.alloc_guaranteed(result_ty, operand);
+            self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
+                result, operand, variant, field,
+            });
+            result
+        } else {
+            // Borrow → extract (@guaranteed) → copy (@owned). Operand stays alive.
+            let borrow = self.emit_begin_borrow(operand);
+            let field_ref = self.alloc_guaranteed(result_ty, borrow);
+            self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
+                result: field_ref, operand: borrow, variant, field,
+            });
+            let result = self.emit_copy_value(field_ref);
+            self.emit_end_borrow(borrow);
+            result
         }
-        if ownership == kestrel_mir_3::Ownership::Owned {
-            self.track_owned(result);
-        }
-        result
     }
 
     // ================================================================

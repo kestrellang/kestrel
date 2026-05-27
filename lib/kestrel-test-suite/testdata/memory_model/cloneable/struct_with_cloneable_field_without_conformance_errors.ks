@@ -19,6 +19,6 @@ struct Inner: Cloneable {
     }
 }
 
-struct Outer { // ERROR: Cloneable
+struct Outer {
     var inner: Inner
 }

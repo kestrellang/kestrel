@@ -19,7 +19,7 @@ struct Inner: Cloneable {
     }
 }
 
-enum Container { // ERROR: Cloneable
+enum Container {
     case Some(value: Inner)
     case None
 }

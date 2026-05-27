@@ -1,6 +1,6 @@
 module Life
 
-import Sdl.(Color, Rectangle, Renderer, SDLApp, Event)
+import sdl.(Color, Rectangle, Renderer, SDLApp, Event)
 
 protocol GameRenderer {
     mutating func render(state: GameState)

@@ -1,5 +1,4 @@
 use crate::block::BasicBlock;
-use crate::item::CopyBehavior;
 use crate::ty::{MirTy, TyArena};
 use crate::value::{Ownership, ValueDef};
 use crate::{BlockId, MirModule, TyId, ValueId};
@@ -53,12 +52,9 @@ impl Default for OssaBody {
     }
 }
 
-/// Determine ownership for a type: Bitwise → None, everything else → Owned.
-pub fn ownership_for_type(ty: TyId, arena: &TyArena, module: &MirModule) -> Ownership {
-    match crate::ty_query::copy_behavior(arena, module, ty, None) {
-        CopyBehavior::Bitwise => Ownership::None,
-        CopyBehavior::Clone(_) | CopyBehavior::None => Ownership::Owned,
-    }
+/// Determine ownership for a type: always Owned (Guaranteed is for borrows only).
+pub fn ownership_for_type(_ty: TyId, _arena: &TyArena, _module: &MirModule) -> Ownership {
+    Ownership::Owned
 }
 
 /// Shorthand: is this type trivially copyable (Bitwise)?

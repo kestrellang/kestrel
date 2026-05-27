@@ -125,6 +125,10 @@ struct DumpArgs {
     /// Source files (.ks) to process.
     #[arg(required = true)]
     files: Vec<String>,
+
+    /// Filter output to functions whose name contains this substring.
+    #[arg(long = "function", short = 'f')]
+    function_filter: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -272,7 +276,11 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
                 eprintln!("error: {e}");
                 ExitCode::FAILURE
             })?;
-            print!("{}", kestrel_mir_3::display::display_module(&mir));
+            if let Some(ref filter) = args.function_filter {
+                print!("{}", kestrel_mir_3::display::display_module_filtered(&mir, filter));
+            } else {
+                print!("{}", kestrel_mir_3::display::display_module(&mir));
+            }
         },
         DumpKind::Mir1 => {
             let mir = lower_with_ownership(compiler.world(), compiler.root());

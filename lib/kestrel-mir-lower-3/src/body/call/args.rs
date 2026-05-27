@@ -8,7 +8,7 @@ use kestrel_mir_3::{Immediate, MirTy, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::InferBody;
 
 use crate::body::{HirRef, OssaBodyCtx, TypedRef};
-use crate::ty::{lower_resolved_ty, lower_type, resolve_type_annotation};
+use crate::ty::{lower_type, resolve_type_annotation};
 
 impl OssaBodyCtx<'_, '_> {
     /// Lower call args with the callee's resolved conventions.
@@ -278,7 +278,7 @@ impl OssaBodyCtx<'_, '_> {
         expr_id: HirExprId,
         callee_expr: HirExprId,
     ) -> Vec<TyId> {
-        let parent = if let Some(func_def) = self.ctx.module.functions.iter().find(|f| f.entity == func_entity) {
+        let _parent = if let Some(func_def) = self.ctx.module.functions.iter().find(|f| f.entity == func_entity) {
             if func_def.type_params.is_empty() {
                 return Vec::new();
             }

@@ -13,7 +13,7 @@ use kestrel_mir_3::item::function::{
     CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, ReceiverConvention,
     WhereClause, WhereConstraint,
 };
-use kestrel_mir_3::{MirTy, ParamConvention, TyId, TypeParamDef, ValueId};
+use kestrel_mir_3::{ParamConvention, TyId, TypeParamDef, ValueId};
 use kestrel_name_res::resolve_type::{ResolveTypePath, TypeResolution};
 
 use crate::context::LowerCtx;

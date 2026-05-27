@@ -8,6 +8,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use kestrel_hecs::Entity;
+use kestrel_span::Span;
+
 use crate::body::OssaBody;
 use crate::inst::InstKind;
 use crate::terminator::TerminatorKind;
@@ -25,16 +28,27 @@ pub struct VerifyError {
     /// Instruction index within the block, or None for block-level errors.
     pub inst: Option<u32>,
     pub message: String,
+    /// Source span from the instruction that triggered the error.
+    pub span: Option<Span>,
+    /// Name of the function being verified.
+    pub func_name: String,
+    /// Entity of the function being verified (for DeclSpan fallback).
+    pub entity: Entity,
 }
 
 /// Verify that `body` satisfies OSSA ownership rules.
 ///
 /// Returns an empty vec on success, or a list of every violation found.
-pub fn verify_ossa(body: &OssaBody, module: &MirModule) -> Vec<VerifyError> {
+pub fn verify_ossa(
+    body: &OssaBody,
+    module: &MirModule,
+    func_name: &str,
+    entity: Entity,
+) -> Vec<VerifyError> {
     let mut errors = Vec::new();
 
     // Check 1: ValueId uniqueness — every value defined exactly once.
-    check_value_uniqueness(body, &mut errors);
+    check_value_uniqueness(body, func_name, entity, &mut errors);
 
     // Forward BFS walk from the entry block.
     let mut visited = HashSet::new();
@@ -45,7 +59,7 @@ pub fn verify_ossa(body: &OssaBody, module: &MirModule) -> Vec<VerifyError> {
         if !visited.insert(block_id) {
             continue;
         }
-        verify_block(body, module, block_id, &mut errors);
+        verify_block(body, module, block_id, func_name, entity, &mut errors);
 
         // Enqueue successors.
         let block = body.block(block_id);
@@ -63,7 +77,12 @@ pub fn verify_ossa(body: &OssaBody, module: &MirModule) -> Vec<VerifyError> {
 // Check 1: ValueId uniqueness
 // ---------------------------------------------------------------------------
 
-fn check_value_uniqueness(body: &OssaBody, errors: &mut Vec<VerifyError>) {
+fn check_value_uniqueness(
+    body: &OssaBody,
+    func_name: &str,
+    entity: Entity,
+    errors: &mut Vec<VerifyError>,
+) {
     // Map from ValueId -> (block that defined it).
     let mut definitions: HashMap<ValueId, BlockId> = HashMap::new();
 
@@ -80,6 +99,9 @@ fn check_value_uniqueness(body: &OssaBody, errors: &mut Vec<VerifyError>) {
                         "value {:?} defined as block param in {:?} but already defined in {:?}",
                         param.value, block_id, prev_block,
                     ),
+                    span: None,
+                    func_name: func_name.to_string(),
+                    entity,
                 });
             } else {
                 definitions.insert(param.value, block_id);
@@ -97,6 +119,9 @@ fn check_value_uniqueness(body: &OssaBody, errors: &mut Vec<VerifyError>) {
                             "value {:?} defined by instruction {} in {:?} but already defined in {:?}",
                             result, inst_idx, block_id, prev_block,
                         ),
+                        span: inst.span.clone(),
+                        func_name: func_name.to_string(),
+                        entity,
                     });
                 } else {
                     definitions.insert(result, block_id);
@@ -142,6 +167,8 @@ struct BlockVerifier<'a> {
     body: &'a OssaBody,
     _module: &'a MirModule,
     block_id: BlockId,
+    func_name: &'a str,
+    entity: Entity,
 
     /// Tracks @owned values: Live or Consumed.
     owned: HashMap<ValueId, ValueState>,
@@ -149,18 +176,26 @@ struct BlockVerifier<'a> {
     borrows: HashMap<ValueId, BorrowInfo>,
     /// Address init states.
     addrs: HashMap<ValueId, AddrKind>,
-    /// Maps a FieldAddr result → (base_addr, field_idx).
+    /// Maps a FieldAddr result -> (base_addr, field_idx).
     field_addr_map: HashMap<ValueId, (ValueId, FieldIdx)>,
 
     errors: Vec<VerifyError>,
 }
 
 impl<'a> BlockVerifier<'a> {
-    fn new(body: &'a OssaBody, module: &'a MirModule, block_id: BlockId) -> Self {
+    fn new(
+        body: &'a OssaBody,
+        module: &'a MirModule,
+        block_id: BlockId,
+        func_name: &'a str,
+        entity: Entity,
+    ) -> Self {
         Self {
             body,
             _module: module,
             block_id,
+            func_name,
+            entity,
             owned: HashMap::new(),
             borrows: HashMap::new(),
             addrs: HashMap::new(),
@@ -170,10 +205,20 @@ impl<'a> BlockVerifier<'a> {
     }
 
     fn err(&mut self, inst: Option<u32>, message: String) {
+        let span = inst.and_then(|i| {
+            self.body
+                .block(self.block_id)
+                .insts
+                .get(i as usize)
+                .and_then(|inst| inst.span.clone())
+        });
         self.errors.push(VerifyError {
             block: self.block_id,
             inst,
             message,
+            span,
+            func_name: self.func_name.to_string(),
+            entity: self.entity,
         });
     }
 
@@ -438,11 +483,6 @@ impl<'a> BlockVerifier<'a> {
         match kind {
             // -- Value lifecycle --
             InstKind::CopyValue { result, operand } => {
-                // Check 10: CopyValue must NOT appear on @none values.
-                let op_ownership = self.body.value(*operand).ownership;
-                if op_ownership == Ownership::None {
-                    self.err(idx, format!("CopyValue on @none value {:?}", operand));
-                }
                 self.assert_readable(*operand, idx);
                 self.define_owned(*result);
             }
@@ -451,17 +491,11 @@ impl<'a> BlockVerifier<'a> {
                 self.define_owned(*result);
             }
             InstKind::DestroyValue { operand } => {
-                // Check 10: DestroyValue must NOT appear on @none values.
-                let op_ownership = self.body.value(*operand).ownership;
-                if op_ownership == Ownership::None {
-                    self.err(idx, format!("DestroyValue on @none value {:?}", operand));
-                }
                 self.try_consume(*operand, idx);
             }
 
             // -- Borrowing --
             InstKind::BeginBorrow { result, operand } => {
-                // Allowed on @none values too — codegen needs the address.
                 self.assert_live(*operand, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*operand);
                 self.borrows.insert(*result, BorrowInfo { source, is_mut: false });
@@ -479,8 +513,9 @@ impl<'a> BlockVerifier<'a> {
             }
 
             // -- Memory access --
-            InstKind::Load { result: _, address } => {
+            InstKind::Load { result, address } => {
                 self.addr_require_init(*address, idx);
+                self.define_owned(*result);
             }
             InstKind::CopyAddr { result: _, address, .. } => {
                 self.addr_require_init(*address, idx);
@@ -524,37 +559,41 @@ impl<'a> BlockVerifier<'a> {
                 self.addr_set_uninit(*address, idx);
             }
 
-            // -- Discriminant (non-consuming read) --
-            InstKind::Discriminant { result: _, operand } => {
+            // -- Discriminant (non-consuming read, produces @owned i32) --
+            InstKind::Discriminant { result, operand } => {
                 self.assert_readable(*operand, idx);
+                self.define_owned(*result);
             }
 
-            // -- Computation (check 9: operands must be @none) --
-            InstKind::Op1 { result: _, op: _, arg } => {
-                let ownership = self.body.value(*arg).ownership;
-                if ownership != Ownership::None {
-                    self.err(idx, format!("Op1 operand {:?} is not @none", arg));
-                }
+            // -- Computation (non-consuming reads of scalar operands) --
+            InstKind::Op1 { result, op: _, arg } => {
+                self.assert_readable(*arg, idx);
+                self.define_owned(*result);
             }
-            InstKind::Op2 { result: _, op: _, lhs, rhs } => {
-                for v in [lhs, rhs] {
-                    let ownership = self.body.value(*v).ownership;
-                    if ownership != Ownership::None {
-                        self.err(idx, format!("Op2 operand {:?} is not @none", v));
-                    }
+            InstKind::Op2 { result, op, lhs, rhs } => {
+                self.assert_readable(*lhs, idx);
+                if matches!(op, crate::Op::PtrWrite(_)) {
+                    // PtrWrite moves the rhs into the destination address.
+                    self.try_consume(*rhs, idx);
+                } else {
+                    self.assert_readable(*rhs, idx);
                 }
+                self.define_owned(*result);
             }
-            InstKind::Op3 { result: _, op: _, a, b, c } => {
-                for v in [a, b, c] {
-                    let ownership = self.body.value(*v).ownership;
-                    if ownership != Ownership::None {
-                        self.err(idx, format!("Op3 operand {:?} is not @none", v));
-                    }
-                }
+            InstKind::Op3 { result, op: _, a, b, c } => {
+                self.assert_readable(*a, idx);
+                self.assert_readable(*b, idx);
+                self.assert_readable(*c, idx);
+                self.define_owned(*result);
             }
 
-            // -- Constants (no ownership implications) --
-            InstKind::Literal { .. } | InstKind::GlobalRef { .. } => {}
+            // -- Constants --
+            InstKind::Literal { result, .. } => {
+                self.define_owned(*result);
+            }
+            InstKind::GlobalRef { result, .. } => {
+                self.define_owned(*result);
+            }
 
             // -- Aggregate construction: operands that are @owned are consumed --
             InstKind::Struct { result, fields, .. } => {
@@ -640,13 +679,14 @@ impl<'a> BlockVerifier<'a> {
                             self.try_consume(arg.value, idx);
                         }
                         ParamConvention::Borrow | ParamConvention::MutBorrow => {
-                            // Not consumed; the value must be live.
                             self.assert_live(arg.value, idx);
                         }
                     }
                 }
                 if let Some(r) = result {
-                    if self.body.value(*r).ownership == Ownership::Owned {
+                    let ty = self.body.value(*r).ty;
+                    let is_never = matches!(self._module.ty_arena.get(ty), crate::ty::MirTy::Never);
+                    if self.body.value(*r).ownership == Ownership::Owned && !is_never {
                         self.define_owned(*r);
                     }
                 }
@@ -665,7 +705,7 @@ impl<'a> BlockVerifier<'a> {
 
             // -- Address projection --
             InstKind::FieldAddr { result, base, field, .. } => {
-                // If the base is sub-field tracked, record the mapping.
+                self.define_owned(*result);
                 if self.addrs.contains_key(base) {
                     self.field_addr_map.insert(*result, (*base, *field));
                 }
@@ -673,6 +713,7 @@ impl<'a> BlockVerifier<'a> {
 
             // -- Uninit: creates sub-field tracking --
             InstKind::Uninit { result, ty } => {
+                self.define_owned(*result);
                 // Look up how many fields this type has.
                 let field_count = self.struct_field_count(*ty);
                 if let Some(count) = field_count {
@@ -756,6 +797,19 @@ impl<'a> BlockVerifier<'a> {
             }
         }
 
+        // Check condition/discriminant liveness BEFORE consuming forwarded values,
+        // because the condition/discriminant may itself be forwarded as a block arg
+        // (which is the canonical way to consume it).
+        match term {
+            TerminatorKind::Branch { condition, .. } => {
+                self.assert_live(*condition, None);
+            }
+            TerminatorKind::Switch { discriminant, .. } => {
+                self.assert_live(*discriminant, None);
+            }
+            _ => {}
+        }
+
         // Consume forwarded @owned values.
         for v in &forwarded {
             if self.body.value(*v).ownership == Ownership::Owned {
@@ -769,17 +823,6 @@ impl<'a> BlockVerifier<'a> {
             if self.body.value(*v).ownership == Ownership::Owned {
                 self.try_consume(*v, None);
             }
-        }
-
-        // Also check that the condition/discriminant in Branch/Switch is live.
-        match term {
-            TerminatorKind::Branch { condition, .. } => {
-                self.assert_live(*condition, None);
-            }
-            TerminatorKind::Switch { discriminant, .. } => {
-                self.assert_live(*discriminant, None);
-            }
-            _ => {}
         }
 
         // Check 2: every @owned value must be Consumed or forwarded by now.
@@ -828,9 +871,11 @@ fn verify_block(
     body: &OssaBody,
     module: &MirModule,
     block_id: BlockId,
+    func_name: &str,
+    entity: Entity,
     errors: &mut Vec<VerifyError>,
 ) {
-    let verifier = BlockVerifier::new(body, module, block_id);
+    let verifier = BlockVerifier::new(body, module, block_id, func_name, entity);
     let block_errors = verifier.verify();
     errors.extend(block_errors);
 }
@@ -848,7 +893,6 @@ mod tests {
     use crate::inst::CallArg;
     use crate::item::struct_def::{FieldDef, StructDef};
     use crate::item::{CopyBehavior, TypeInfo};
-    use kestrel_hecs::Entity;
 
     /// Helper: create an OssaBuilder with a Named struct type whose CopyBehavior
     /// is None (so it gets Ownership::Owned).
@@ -879,7 +923,7 @@ mod tests {
 
     fn run_verify(b: OssaBuilder) -> Vec<VerifyError> {
         let (body, module) = b.finish();
-        verify_ossa(&body, &module)
+        verify_ossa(&body, &module, "test", Entity::from_raw(0))
     }
 
     // -----------------------------------------------------------------------
@@ -888,7 +932,6 @@ mod tests {
 
     #[test]
     fn valid_trivial_return_unit() {
-        // func f() { return () }
         let mut b = OssaBuilder::new("test");
         let _unit_ty = b.unit();
         let unit_val = b.emit_literal(Immediate::unit());
@@ -900,15 +943,12 @@ mod tests {
 
     #[test]
     fn valid_owned_copy_and_destroy() {
-        // func f(x: Owned) -> Owned { let y = copy x; destroy x; return y }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
-        // Entry block param: x is @owned.
         let entry = b.current_block();
         let x = b.new_value(owned_ty, Ownership::Owned);
-        b.body().blocks[entry.index()].params.len(); // no-op read
-        // Manually add block param.
+        b.body().blocks[entry.index()].params.len();
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
@@ -928,7 +968,6 @@ mod tests {
 
     #[test]
     fn valid_borrow_around_call() {
-        // func f(x: Owned) { let b = begin_borrow x; call foo(b); end_borrow b; destroy x; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -961,16 +1000,13 @@ mod tests {
 
     #[test]
     fn valid_branch_with_forwarded_owned() {
-        // func f(x: Owned, cond: Bool) { branch cond -> bb1(x), bb2(x) }
-        // bb1(y: Owned) { destroy y; return () }
-        // bb2(z: Owned) { destroy z; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
         let bool_ty = b.bool();
 
         let entry = b.current_block();
         let x = b.new_value(owned_ty, Ownership::Owned);
-        let cond = b.new_value(bool_ty, Ownership::None);
+        let cond = b.new_value(bool_ty, Ownership::Owned);
         {
             let body = b.body_mut();
             let blk = body.block_mut(entry);
@@ -978,24 +1014,30 @@ mod tests {
                 value: x, ty: owned_ty, ownership: Ownership::Owned,
             });
             blk.params.push(crate::block::BlockParam {
-                value: cond, ty: bool_ty, ownership: Ownership::None,
+                value: cond, ty: bool_ty, ownership: Ownership::Owned,
             });
         }
 
-        let (bb1, bb1_params) = b.new_block_with_params(&[(owned_ty, Ownership::Owned)]);
-        let (bb2, bb2_params) = b.new_block_with_params(&[(owned_ty, Ownership::Owned)]);
+        let (bb1, bb1_params) = b.new_block_with_params(&[
+            (owned_ty, Ownership::Owned),
+            (bool_ty, Ownership::Owned),
+        ]);
+        let (bb2, bb2_params) = b.new_block_with_params(&[
+            (owned_ty, Ownership::Owned),
+            (bool_ty, Ownership::Owned),
+        ]);
 
-        b.emit_branch(cond, bb1, vec![x], bb2, vec![x]);
+        b.emit_branch(cond, bb1, vec![x, cond], bb2, vec![x, cond]);
 
-        // bb1: destroy y; return ()
         b.switch_to(bb1);
         b.emit_destroy_value(bb1_params[0]);
+        b.emit_destroy_value(bb1_params[1]);
         let unit1 = b.emit_literal(Immediate::unit());
         b.emit_return(unit1);
 
-        // bb2: destroy z; return ()
         b.switch_to(bb2);
         b.emit_destroy_value(bb2_params[0]);
+        b.emit_destroy_value(bb2_params[1]);
         let unit2 = b.emit_literal(Immediate::unit());
         b.emit_return(unit2);
 
@@ -1009,7 +1051,6 @@ mod tests {
 
     #[test]
     fn error_unconsumed_owned_param() {
-        // func f(x: Owned) { return () } — x is never consumed
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1036,8 +1077,6 @@ mod tests {
 
     #[test]
     fn error_unconsumed_owned_instruction_result() {
-        // func f(x: Owned) { let y = copy x; destroy x; return () }
-        // — y is never consumed
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1066,7 +1105,6 @@ mod tests {
 
     #[test]
     fn error_unconsumed_owned_call_result() {
-        // func f() { let r = call foo() -> Owned; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1094,7 +1132,6 @@ mod tests {
 
     #[test]
     fn error_double_destroy() {
-        // func f(x: Owned) { destroy x; destroy x; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1122,7 +1159,6 @@ mod tests {
 
     #[test]
     fn error_move_then_destroy() {
-        // func f(x: Owned) { let y = move x; destroy x; destroy y; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1136,7 +1172,7 @@ mod tests {
         }
 
         let y = b.emit_move_value(x);
-        b.emit_destroy_value(x); // double consume
+        b.emit_destroy_value(x);
         b.emit_destroy_value(y);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1151,7 +1187,6 @@ mod tests {
 
     #[test]
     fn error_double_consume_via_struct() {
-        // func f(x: Owned) { let s = struct(x); destroy x; destroy s; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1164,7 +1199,6 @@ mod tests {
             });
         }
 
-        // Build a struct that wraps the owned value — this consumes x.
         let wrapper_entity = b.fresh_entity();
         let wrapper_ty = b.named(wrapper_entity, vec![]);
         let mut wrapper_def = StructDef::new(wrapper_entity, "Wrapper");
@@ -1173,7 +1207,7 @@ mod tests {
         b.add_struct(wrapper_def);
 
         let s = b.emit_struct(wrapper_ty, vec![(FieldIdx::new(0), x)]);
-        b.emit_destroy_value(x); // x already consumed by struct
+        b.emit_destroy_value(x);
         b.emit_destroy_value(s);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1192,7 +1226,6 @@ mod tests {
 
     #[test]
     fn error_use_after_destroy() {
-        // func f(x: Owned) { destroy x; let y = copy x; destroy y; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1206,7 +1239,7 @@ mod tests {
         }
 
         b.emit_destroy_value(x);
-        let y = b.emit_copy_value(x); // use after consume
+        let y = b.emit_copy_value(x);
         b.emit_destroy_value(y);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1221,7 +1254,6 @@ mod tests {
 
     #[test]
     fn error_use_after_move() {
-        // func f(x: Owned) { let y = move x; begin_borrow x; ... }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1235,7 +1267,7 @@ mod tests {
         }
 
         let _y = b.emit_move_value(x);
-        let borrow = b.emit_begin_borrow(x); // x is consumed, this is use-after-consume
+        let borrow = b.emit_begin_borrow(x);
         b.emit_end_borrow(borrow);
         b.emit_destroy_value(_y);
         let unit = b.emit_literal(Immediate::unit());
@@ -1251,7 +1283,6 @@ mod tests {
 
     #[test]
     fn error_use_after_consume_in_call() {
-        // func f(x: Owned) { call foo(consuming x); let y = copy x; destroy y; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1270,7 +1301,7 @@ mod tests {
             vec![CallArg { value: x, convention: ParamConvention::Consuming }],
             None,
         );
-        let y = b.emit_copy_value(x); // x consumed by call
+        let y = b.emit_copy_value(x);
         b.emit_destroy_value(y);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1289,8 +1320,6 @@ mod tests {
 
     #[test]
     fn error_missing_end_borrow() {
-        // func f(x: Owned) { let b = begin_borrow x; destroy x; return () }
-        // — borrow never ended
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1304,7 +1333,6 @@ mod tests {
         }
 
         let _borrow = b.emit_begin_borrow(x);
-        // Missing: b.emit_end_borrow(_borrow);
         b.emit_destroy_value(x);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1346,7 +1374,6 @@ mod tests {
 
     #[test]
     fn error_end_borrow_wrong_value() {
-        // Begin borrow on x, end borrow on something else — the original stays open.
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1366,9 +1393,7 @@ mod tests {
 
         let _borrow_x = b.emit_begin_borrow(x);
         let borrow_x2 = b.emit_begin_borrow(x2);
-        // End borrow_x2 but forget borrow_x.
         b.emit_end_borrow(borrow_x2);
-        // borrow_x is still open — error at block exit.
         b.emit_destroy_value(x);
         b.emit_destroy_value(x2);
         let unit = b.emit_literal(Immediate::unit());
@@ -1388,7 +1413,6 @@ mod tests {
 
     #[test]
     fn error_consume_source_during_borrow() {
-        // func f(x: Owned) { let b = begin_borrow x; destroy x; end_borrow b; return () }
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1402,7 +1426,7 @@ mod tests {
         }
 
         let borrow = b.emit_begin_borrow(x);
-        b.emit_destroy_value(x); // error: x is borrowed
+        b.emit_destroy_value(x);
         b.emit_end_borrow(borrow);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1430,7 +1454,7 @@ mod tests {
         }
 
         let mb = b.emit_begin_mut_borrow(x);
-        b.emit_destroy_value(x); // error: x has active mut borrow
+        b.emit_destroy_value(x);
         b.emit_end_mut_borrow(mb);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1445,7 +1469,6 @@ mod tests {
 
     #[test]
     fn error_read_source_during_mut_borrow() {
-        // During a mut borrow, cannot even read the source.
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1459,7 +1482,7 @@ mod tests {
         }
 
         let mb = b.emit_begin_mut_borrow(x);
-        let _copy = b.emit_copy_value(x); // reading x during mut borrow
+        let _copy = b.emit_copy_value(x);
         b.emit_end_mut_borrow(mb);
         b.emit_destroy_value(_copy);
         b.emit_destroy_value(x);
@@ -1483,17 +1506,14 @@ mod tests {
         let mut b = OssaBuilder::new("test");
         let i64_ty = b.i64();
 
-        // Target block expects 2 params.
         let (target, _params) = b.new_block_with_params(&[
-            (i64_ty, Ownership::None),
-            (i64_ty, Ownership::None),
+            (i64_ty, Ownership::Owned),
+            (i64_ty, Ownership::Owned),
         ]);
 
-        // Jump with only 1 arg.
         let lit = b.emit_literal(Immediate::i64(42));
         b.emit_jump(target, vec![lit]);
 
-        // Target block returns.
         b.switch_to(target);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1511,7 +1531,7 @@ mod tests {
         let mut b = OssaBuilder::new("test");
         let i64_ty = b.i64();
 
-        let (target, _params) = b.new_block_with_params(&[(i64_ty, Ownership::None)]);
+        let (target, _params) = b.new_block_with_params(&[(i64_ty, Ownership::Owned)]);
 
         let lit1 = b.emit_literal(Immediate::i64(1));
         let lit2 = b.emit_literal(Immediate::i64(2));
@@ -1534,8 +1554,16 @@ mod tests {
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
-        // Target expects @none.
-        let (target, _params) = b.new_block_with_params(&[(owned_ty, Ownership::None)]);
+        let target = b.new_block();
+        let guaranteed_param = b.new_guaranteed_value(owned_ty, ValueId::new(0));
+        {
+            let body = b.body_mut();
+            body.block_mut(target).params.push(crate::block::BlockParam {
+                value: guaranteed_param,
+                ty: owned_ty,
+                ownership: Ownership::Guaranteed,
+            });
+        }
 
         let entry = b.current_block();
         let x = b.new_value(owned_ty, Ownership::Owned);
@@ -1546,7 +1574,6 @@ mod tests {
             });
         }
 
-        // Forward @owned value to @none param — ownership mismatch.
         b.emit_jump(target, vec![x]);
 
         b.switch_to(target);
@@ -1562,156 +1589,11 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Category 8: CopyValue on @none -> error
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn error_copy_value_on_none() {
-        let mut b = OssaBuilder::new("test");
-        let i64_ty = b.i64();
-        let lit = b.emit_literal(Immediate::i64(42)); // @none
-
-        // Manually emit CopyValue on the @none literal.
-        let result = b.new_value(i64_ty, Ownership::Owned);
-        {
-            let cur = b.current_block();
-            let blk = b.body_mut().block_mut(cur);
-            blk.insts.push(crate::inst::Instruction::new(InstKind::CopyValue {
-                result,
-                operand: lit,
-            }));
-        }
-        b.emit_destroy_value(result);
-        let unit = b.emit_literal(Immediate::unit());
-        b.emit_return(unit);
-
-        let errors = run_verify(b);
-        assert!(
-            errors.iter().any(|e| e.message.contains("CopyValue on @none")),
-            "expected CopyValue on @none error, got: {:?}",
-            errors,
-        );
-    }
-
-    #[test]
-    fn error_copy_value_on_none_bool() {
-        let mut b = OssaBuilder::new("test");
-        let bool_ty = b.bool();
-        let lit = b.emit_literal(Immediate::bool(true)); // @none
-
-        let result = b.new_value(bool_ty, Ownership::Owned);
-        {
-            let cur = b.current_block();
-            let blk = b.body_mut().block_mut(cur);
-            blk.insts.push(crate::inst::Instruction::new(InstKind::CopyValue {
-                result,
-                operand: lit,
-            }));
-        }
-        b.emit_destroy_value(result);
-        let unit = b.emit_literal(Immediate::unit());
-        b.emit_return(unit);
-
-        let errors = run_verify(b);
-        assert!(
-            errors.iter().any(|e| e.message.contains("CopyValue on @none")),
-            "expected CopyValue on @none error, got: {:?}",
-            errors,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Category 9: DestroyValue on @none -> error
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn error_destroy_value_on_none() {
-        let mut b = OssaBuilder::new("test");
-        let lit = b.emit_literal(Immediate::i64(42));
-
-        // Manually emit DestroyValue on @none.
-        {
-            let cur = b.current_block();
-            let blk = b.body_mut().block_mut(cur);
-            blk.insts.push(crate::inst::Instruction::new(InstKind::DestroyValue {
-                operand: lit,
-            }));
-        }
-
-        let unit = b.emit_literal(Immediate::unit());
-        b.emit_return(unit);
-
-        let errors = run_verify(b);
-        assert!(
-            errors.iter().any(|e| e.message.contains("DestroyValue on @none")),
-            "expected DestroyValue on @none error, got: {:?}",
-            errors,
-        );
-    }
-
-    #[test]
-    fn error_destroy_value_on_none_str() {
-        let mut b = OssaBuilder::new("test");
-        let lit = b.emit_literal(Immediate::string("hello"));
-
-        {
-            let cur = b.current_block();
-            let blk = b.body_mut().block_mut(cur);
-            blk.insts.push(crate::inst::Instruction::new(InstKind::DestroyValue {
-                operand: lit,
-            }));
-        }
-
-        let unit = b.emit_literal(Immediate::unit());
-        b.emit_return(unit);
-
-        let errors = run_verify(b);
-        assert!(
-            errors.iter().any(|e| e.message.contains("DestroyValue on @none")),
-            "expected DestroyValue on @none error, got: {:?}",
-            errors,
-        );
-    }
-
-    #[test]
-    fn error_begin_borrow_on_none() {
-        // BeginBorrow on a @none value should error.
-        let mut b = OssaBuilder::new("test");
-        let i64_ty = b.i64();
-        let lit = b.emit_literal(Immediate::i64(99));
-
-        // Manually emit BeginBorrow on @none.
-        let borrow_result = b.new_guaranteed_value(i64_ty, lit);
-        {
-            let cur = b.current_block();
-            let blk = b.body_mut().block_mut(cur);
-            blk.insts.push(crate::inst::Instruction::new(InstKind::BeginBorrow {
-                result: borrow_result,
-                operand: lit,
-            }));
-            blk.insts.push(crate::inst::Instruction::new(InstKind::EndBorrow {
-                operand: borrow_result,
-            }));
-        }
-
-        let unit = b.emit_literal(Immediate::unit());
-        b.emit_return(unit);
-
-        let errors = run_verify(b);
-        assert!(
-            errors.iter().any(|e| e.message.contains("BeginBorrow on @none")),
-            "expected BeginBorrow on @none error, got: {:?}",
-            errors,
-        );
-    }
-
-    // -----------------------------------------------------------------------
     // Category 10: Valid Uninit + FieldAddr + StoreInit + Take passes
     // -----------------------------------------------------------------------
 
     #[test]
     fn valid_uninit_field_store_take() {
-        // Allocate uninit, store both fields, then take.
         let mut b = OssaBuilder::new("test");
         let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
         let i64_ty = b.i64();
@@ -1727,6 +1609,9 @@ mod tests {
         b.emit_store_init(f1_addr, v1);
 
         let result = b.emit_take(addr, struct_ty);
+        b.emit_destroy_value(f0_addr);
+        b.emit_destroy_value(f1_addr);
+        b.emit_destroy_value(addr);
         b.emit_destroy_value(result);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1747,6 +1632,8 @@ mod tests {
         b.emit_store_init(f0_addr, v0);
 
         let result = b.emit_take(addr, struct_ty);
+        b.emit_destroy_value(f0_addr);
+        b.emit_destroy_value(addr);
         b.emit_destroy_value(result);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1757,7 +1644,6 @@ mod tests {
 
     #[test]
     fn valid_uninit_destroy_addr_all_fields() {
-        // Allocate uninit, store all fields, then destroy_addr (each field).
         let mut b = OssaBuilder::new("test");
         let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
         let i64_ty = b.i64();
@@ -1773,6 +1659,9 @@ mod tests {
 
         b.emit_destroy_addr(f0_addr, i64_ty);
         b.emit_destroy_addr(f1_addr, i64_ty);
+        b.emit_destroy_value(f0_addr);
+        b.emit_destroy_value(f1_addr);
+        b.emit_destroy_value(addr);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
 
@@ -1786,7 +1675,6 @@ mod tests {
 
     #[test]
     fn error_partial_init_take() {
-        // Allocate uninit with 2 fields, store only field 0, then take — field 1 uninit.
         let mut b = OssaBuilder::new("test");
         let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
         let i64_ty = b.i64();
@@ -1797,7 +1685,6 @@ mod tests {
         let v0 = b.emit_literal(Immediate::i64(10));
         b.emit_store_init(f0_addr, v0);
 
-        // Take without initializing field 1 — error.
         let result = b.emit_take(addr, struct_ty);
         b.emit_destroy_value(result);
         let unit = b.emit_literal(Immediate::unit());
@@ -1813,7 +1700,6 @@ mod tests {
 
     #[test]
     fn error_partial_init_take_three_fields() {
-        // 3-field struct, only fields 0 and 2 initialized.
         let mut b = OssaBuilder::new("test");
         let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 3);
         let i64_ty = b.i64();
@@ -1842,7 +1728,6 @@ mod tests {
 
     #[test]
     fn error_double_store_init_same_field() {
-        // Store the same field twice — second store_init on already-init field.
         let mut b = OssaBuilder::new("test");
         let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 1);
         let i64_ty = b.i64();
@@ -1853,7 +1738,7 @@ mod tests {
         let v1 = b.emit_literal(Immediate::i64(1));
         let v2 = b.emit_literal(Immediate::i64(2));
         b.emit_store_init(f0, v1);
-        b.emit_store_init(f0, v2); // already init
+        b.emit_store_init(f0, v2);
 
         let result = b.emit_take(addr, struct_ty);
         b.emit_destroy_value(result);
@@ -1874,7 +1759,6 @@ mod tests {
 
     #[test]
     fn valid_discriminant_nonconsuming() {
-        // Discriminant should not consume the operand.
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
 
@@ -1887,7 +1771,8 @@ mod tests {
             });
         }
 
-        let _disc = b.emit_discriminant(x);
+        let disc = b.emit_discriminant(x);
+        b.emit_destroy_value(disc);
         b.emit_destroy_value(x);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -1902,17 +1787,15 @@ mod tests {
 
     #[test]
     fn error_duplicate_value_definition() {
-        // Manually create a body with duplicate ValueId definitions.
         let mut b = OssaBuilder::new("test");
         let _i64_ty = b.i64();
         let lit = b.emit_literal(Immediate::i64(1));
 
-        // Emit another instruction that re-uses the same ValueId as its result.
         {
             let cur = b.current_block();
             let blk = b.body_mut().block_mut(cur);
             blk.insts.push(crate::inst::Instruction::new(InstKind::Literal {
-                result: lit, // duplicate!
+                result: lit,
                 value: Immediate::i64(2),
             }));
         }
@@ -1933,7 +1816,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn error_op2_with_owned_operand() {
+    fn valid_op2_with_guaranteed_operand() {
         let mut b = OssaBuilder::new("test");
         let (owned_ty, _) = make_owned_type(&mut b);
         let i64_ty = b.i64();
@@ -1947,30 +1830,29 @@ mod tests {
             });
         }
 
+        let borrow = b.emit_begin_borrow(x);
         let lit = b.emit_literal(Immediate::i64(1));
 
-        // Manually emit Op2 with an @owned operand.
-        let result = b.new_value(i64_ty, Ownership::None);
+        let result = b.new_value(i64_ty, Ownership::Owned);
         {
             let cur = b.current_block();
             let blk = b.body_mut().block_mut(cur);
             blk.insts.push(crate::inst::Instruction::new(InstKind::Op2 {
                 result,
                 op: crate::Op::Add(crate::IntBits::I64, crate::Signedness::Signed),
-                lhs: x,  // @owned — not @none!
+                lhs: borrow,
                 rhs: lit,
             }));
         }
 
+        b.emit_destroy_value(result);
+        b.emit_destroy_value(lit);
+        b.emit_end_borrow(borrow);
         b.emit_destroy_value(x);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
 
         let errors = run_verify(b);
-        assert!(
-            errors.iter().any(|e| e.message.contains("Op2 operand") && e.message.contains("not @none")),
-            "expected Op2 operand not @none error, got: {:?}",
-            errors,
-        );
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
     }
 }

@@ -224,18 +224,22 @@ fn generate_struct_shim(
         operand: self_val,
     }));
 
-    // 3. Destroy droppable fields
-    for &field_idx in fields {
-        let fv = field_vals[field_idx.index()];
-        let field_ty = struct_def.fields[field_idx.index()].ty;
-        insts.push(Instruction::new(InstKind::DestroyValue { operand: fv }));
-        if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
-            field_type_entities.push(*entity);
+    // 3. Destroy all fields — droppable fields trigger transitive drop shims,
+    //    non-droppable fields must still be consumed since all values are @owned.
+    let droppable_set: std::collections::HashSet<FieldIdx> = fields.iter().copied().collect();
+    for (i, fv) in field_vals.iter().enumerate() {
+        let fi = FieldIdx::new(i);
+        let field_ty = struct_def.fields[i].ty;
+        insts.push(Instruction::new(InstKind::DestroyValue { operand: *fv }));
+        if droppable_set.contains(&fi) {
+            if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
+                field_type_entities.push(*entity);
+            }
         }
     }
 
     // 4. Return unit
-    let unit_val = body.alloc_value(ValueDef::none(unit_ty));
+    let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
     insts.push(Instruction::new(InstKind::Literal {
         result: unit_val,
         value: Immediate::unit(),
@@ -320,7 +324,7 @@ fn generate_enum_shim(
     let i32_ty = module.ty_arena.find(|t| matches!(t, MirTy::I32))
         .unwrap_or_else(|| module.ty_arena.find(|t| matches!(t, MirTy::I8))
             .expect("integer type should be interned"));
-    let disc_val = body.alloc_value(ValueDef::none(i32_ty));
+    let disc_val = body.alloc_value(ValueDef::owned(i32_ty));
     entry_insts.push(Instruction::new(InstKind::Discriminant {
         result: disc_val,
         operand: self_val,
@@ -328,7 +332,7 @@ fn generate_enum_shim(
 
     // Exit block — returns unit
     let exit_block = body.alloc_block();
-    let exit_unit = body.alloc_value(ValueDef::none(unit_ty));
+    let exit_unit = body.alloc_value(ValueDef::owned(unit_ty));
     body.block_mut(exit_block).insts.push(Instruction::new(InstKind::Literal {
         result: exit_unit,
         value: Immediate::unit(),
@@ -336,26 +340,37 @@ fn generate_enum_shim(
     body.block_mut(exit_block).terminator =
         Terminator::new(TerminatorKind::Return(exit_unit));
 
-    // Build per-variant blocks
+    // Build per-variant blocks. Each arm receives both self and the discriminant
+    // as block args so both @owned values are consumed by forwarding.
     let mut switch_arms = Vec::new();
 
     for (variant_idx, field_indices) in variants {
         let variant_block = body.alloc_block();
 
-        // Variant block receives self via block param
+        // Variant block receives self and discriminant via block params
         let variant_self = body.alloc_value(ValueDef::owned(self_ty));
+        let variant_disc = body.alloc_value(ValueDef::owned(i32_ty));
         body.block_mut(variant_block).params.push(BlockParam {
             value: variant_self,
             ty: self_ty,
             ownership: Ownership::Owned,
         });
+        body.block_mut(variant_block).params.push(BlockParam {
+            value: variant_disc,
+            ty: i32_ty,
+            ownership: Ownership::Owned,
+        });
 
         let mut variant_insts = Vec::new();
 
-        // Destructure the enum for this variant. Force @owned for
-        // droppable fields (same reason as struct shims above).
+        // Destroy the forwarded discriminant — no longer needed.
+        variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: variant_disc }));
+
+        // Destructure the enum for this variant. All payload values are @owned
+        // since ownership_for_type always returns Owned.
         let case_def = &enum_def.cases[variant_idx.index()];
         let payload_count = case_def.payload_fields.len();
+        let droppable_set: std::collections::HashSet<FieldIdx> = field_indices.iter().copied().collect();
         let mut payload_vals = Vec::with_capacity(payload_count);
         for (i, pf) in case_def.payload_fields.iter().enumerate() {
             let fi = FieldIdx::new(i);
@@ -376,13 +391,16 @@ fn generate_enum_shim(
             variant: *variant_idx,
         }));
 
-        // Destroy droppable payload fields
-        for &field_idx in field_indices {
-            let pv = payload_vals[field_idx.index()];
-            let field_ty = case_def.payload_fields[field_idx.index()].ty;
-            variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: pv }));
-            if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
-                field_type_entities.push(*entity);
+        // Destroy all payload fields — droppable fields trigger transitive shims,
+        // non-droppable fields must still be consumed since all values are @owned.
+        for (i, pv) in payload_vals.iter().enumerate() {
+            let fi = FieldIdx::new(i);
+            let field_ty = case_def.payload_fields[i].ty;
+            variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: *pv }));
+            if droppable_set.contains(&fi) {
+                if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
+                    field_type_entities.push(*entity);
+                }
             }
         }
 
@@ -396,18 +414,27 @@ fn generate_enum_shim(
         switch_arms.push(SwitchArm {
             pattern: crate::SwitchCase::Variant(*variant_idx),
             target: variant_block,
-            args: vec![self_val],
+            args: vec![self_val, disc_val],
         });
     }
 
     // Wildcard block — consumes the enum value without field drops
     let wildcard_block = body.alloc_block();
     let wildcard_self = body.alloc_value(ValueDef::owned(self_ty));
+    let wildcard_disc = body.alloc_value(ValueDef::owned(i32_ty));
     body.block_mut(wildcard_block).params.push(BlockParam {
         value: wildcard_self,
         ty: self_ty,
         ownership: Ownership::Owned,
     });
+    body.block_mut(wildcard_block).params.push(BlockParam {
+        value: wildcard_disc,
+        ty: i32_ty,
+        ownership: Ownership::Owned,
+    });
+    body.block_mut(wildcard_block).insts.push(
+        Instruction::new(InstKind::DestroyValue { operand: wildcard_disc }),
+    );
     body.block_mut(wildcard_block).insts.push(
         Instruction::new(InstKind::DestroyValue { operand: wildcard_self }),
     );
@@ -419,7 +446,7 @@ fn generate_enum_shim(
     switch_arms.push(SwitchArm {
         pattern: crate::SwitchCase::Wildcard,
         target: wildcard_block,
-        args: vec![self_val],
+        args: vec![self_val, disc_val],
     });
 
     body.block_mut(entry).insts = entry_insts;
@@ -493,7 +520,7 @@ mod tests {
 
     fn verify_shim(module: &MirModule, func: &FunctionDef) {
         let body = func.body.as_ref().unwrap();
-        let errors = crate::verify::verify_ossa(body, module);
+        let errors = crate::verify::verify_ossa(body, module, &func.name, func.entity);
         assert!(errors.is_empty(), "verifier errors in {}: {:?}", func.name, errors);
     }
 

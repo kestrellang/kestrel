@@ -191,8 +191,9 @@ impl OssaBodyCtx<'_, '_> {
                 );
                 self.emit_op2(Op::PtrOffset, ptr, byte_offset, ptr_ty)
             };
-            // PtrWrite: store element at the computed pointer
+            // PtrWrite: store element at the computed pointer (consumes elem_val)
             self.emit_op2(Op::PtrWrite(element_ty), elem_ptr, elem_val, unit_ty);
+            self.consume(elem_val);
         }
 
         // Call init(&mut self, ptr, count) — StackAlloc (not Uninit) since
@@ -281,8 +282,9 @@ impl OssaBodyCtx<'_, '_> {
                 self.emit_op2(Op::PtrOffset, ptr, byte_offset, ptr_ty)
             };
 
-            // PtrWrite: store pair tuple at the computed pointer
+            // PtrWrite: store pair tuple at the computed pointer (consumes pair)
             self.emit_op2(Op::PtrWrite(pair_ty), elem_ptr, pair, unit_ty);
+            self.consume(pair);
         }
 
         // Call init(&mut self, ptr, count) — StackAlloc (not Uninit) since

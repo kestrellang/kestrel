@@ -1,38 +1,38 @@
 module notes.ui
 
 import quill.value.(Value)
-import notes.html.(
-    raw, text, nothing, el,
+import html.builder.(
+    raw, text, nothing, el, Document, Attr,
     div, span, h1, h2, p, anchor, button, form, label, input, textarea, select, option,
     spacer,
-    cls, id, href, attr, boolAttr,
-    hxGet, hxPost, hxPut, hxDelete, hxTarget, hxSwap, hxPushUrl, hxConfirm
+    cls, id, href, attr, boolAttr
 )
+import notes.html.(hxGet, hxPost, hxPut, hxDelete, hxTarget, hxSwap, hxPushUrl, hxConfirm)
 
-public func noteListView(notes: Array[Value], listTitle: String) -> String {
+public func noteListView(notes: Array[Value], listTitle: String) -> Document {
     let items = if notes.count == 0 { emptyState() } else { noteList(notes) };
     div {
         div([cls("note-list-header")]) {
             h1([cls("note-list-title")]) { text(listTitle) }
             + anchor([cls("btn btn-primary btn-sm"), href("/new")]) {
-                iconSized("plus", 14) + span { "New Note" }
+                iconSized("plus", 14) + span { text("New Note") }
             }
         }
         + items
     }
 }
 
-func noteList(notes: Array[Value]) -> String {
-    var cards = String(capacity: 4096);
+func noteList(notes: Array[Value]) -> Document {
+    var cards = Document(capacity: 4096);
     var i: Int64 = 0;
     while i < notes.count {
-        cards.append(noteCard(notes(unchecked: i)));
+        cards.append(other: noteCard(notes(unchecked: i)));
         i = i + 1
     };
     div([cls("note-list")]) { cards }
 }
 
-func noteCard(note: Value) -> String {
+func noteCard(note: Value) -> Document {
     let nid = getInt(note, "id");
     let noteTitle = getStr(note, "title");
     let noteBody = getStr(note, "body");
@@ -56,7 +56,7 @@ func noteCard(note: Value) -> String {
     }
 }
 
-public func noteDetailView(note: Value, folders: Array[Value]) -> String {
+public func noteDetailView(note: Value, folders: Array[Value]) -> Document {
     let nid = getInt(note, "id");
     let noteTitle = getStr(note, "title");
     let noteBody = getStr(note, "body");
@@ -70,7 +70,7 @@ public func noteDetailView(note: Value, folders: Array[Value]) -> String {
     }
 }
 
-func detailToolbar(nid: Int64, updatedAt: String, folderId: Int64, folders: Array[Value]) -> String {
+func detailToolbar(nid: Int64, updatedAt: String, folderId: Int64, folders: Array[Value]) -> Document {
     div([cls("editor-toolbar")]) {
         navButton("/", "/fragments/notes", "/", "arrow-left", "Back")
         + navButton("/note/\(nid)/edit", "/fragments/note/\(nid)/edit",
@@ -78,7 +78,7 @@ func detailToolbar(nid: Int64, updatedAt: String, folderId: Int64, folders: Arra
         + button([cls("btn btn-danger btn-sm"),
                   hxDelete("/fragments/note/\(nid)"), hxTarget("#content"),
                   hxSwap("innerHTML"), hxConfirm("Delete this note?")]) {
-            iconSized("trash-2", 14) + span { "Delete" }
+            iconSized("trash-2", 14) + span { text("Delete") }
         }
         + folderPicker(nid, folderId, folders)
         + spacer()
@@ -89,20 +89,29 @@ func detailToolbar(nid: Int64, updatedAt: String, folderId: Int64, folders: Arra
     }
 }
 
-func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> String {
-    let noneSelected = if currentFolderId == 0 { " selected" } else { "" };
-    var opts = "<option value=\"0\"\(noneSelected)>No folder</option>";
+func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> Document {
+    var opts = Document();
+    let noneAttrs = if currentFolderId == 0 {
+        [attr("value", "0"), boolAttr("selected")]
+    } else {
+        [attr("value", "0")]
+    };
+    opts.append(other: option(noneAttrs) { text("No folder") });
+
     var i: Int64 = 0;
     while i < folders.count {
         let folder = folders(unchecked: i);
         let fid = getInt(folder, "id");
         let name = getStr(folder, "name");
-        let sel = if fid == currentFolderId { " selected" } else { "" };
-        opts.append("<option value=\"\(fid)\"\(sel)>");
-        opts.append(text(name));
-        opts.append("</option>");
+        let optAttrs = if fid == currentFolderId {
+            [attr("value", "\(fid)"), boolAttr("selected")]
+        } else {
+            [attr("value", "\(fid)")]
+        };
+        opts.append(other: option(optAttrs) { text(name) });
         i = i + 1
     };
+
     select([cls("folder-picker"),
             attr("name", "folderId"),
             attr("hx-post", "/fragments/note/\(nid)/folder"),
@@ -111,7 +120,7 @@ func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> 
             attr("title", "Move to folder")]) { opts }
 }
 
-public func noteEditorView(note: Value?, folderId: Int64) -> String {
+public func noteEditorView(note: Value?, folderId: Int64) -> Document {
     let isNew = match note {
         .Some(n) => false,
         .None => true
@@ -142,7 +151,7 @@ public func noteEditorView(note: Value?, folderId: Int64) -> String {
                    attr("value", "\(folderId)")])
             + input([cls("editor-title"), attr("type", "text"), attr("name", "title"),
                      attr("placeholder", "Note title..."),
-                     attr("value", text(currentTitle)), boolAttr("required")])
+                     attr("value", currentTitle), boolAttr("required")])
             + textarea([cls("editor-body"), attr("name", "body"),
                         attr("placeholder", "Start writing..."),
                         attr("rows", "20")]) {
@@ -150,7 +159,7 @@ public func noteEditorView(note: Value?, folderId: Int64) -> String {
             }
             + div([attr("style", "margin-top:20px")]) {
                 button([cls("btn btn-primary"), attr("type", "submit")]) {
-                    iconSized(submitIcon, 14) + span { submitLabel }
+                    iconSized(submitIcon, 14) + span { text(submitLabel) }
                 }
             }
         }
@@ -158,20 +167,20 @@ public func noteEditorView(note: Value?, folderId: Int64) -> String {
 }
 
 func navButton(pageHref: String, fragmentUrl: String,
-               pushUrl: String, iconName: String, labelText: String) -> String {
+               pushUrl: String, iconName: String, labelText: String) -> Document {
     anchor([cls("btn btn-ghost btn-sm"), href(pageHref),
             hxGet(fragmentUrl), hxTarget("#content"),
             hxSwap("innerHTML"), hxPushUrl(pushUrl)]) {
-        iconSized(iconName, 14) + span { labelText }
+        iconSized(iconName, 14) + span { text(labelText) }
     }
 }
 
-func emptyState() -> String {
+func emptyState() -> Document {
     div([cls("empty")]) {
         iconSized("file-text", 48)
-        + div([cls("empty-text")]) { "No notes yet. Create one to get started." }
+        + div([cls("empty-text")]) { text("No notes yet. Create one to get started.") }
         + anchor([cls("btn btn-primary"), href("/new")]) {
-            iconSized("plus", 14) + span { "New Note" }
+            iconSized("plus", 14) + span { text("New Note") }
         }
     }
 }

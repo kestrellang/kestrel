@@ -13,6 +13,7 @@
 //! - `emit_apply_partial(entity, captures, ty) → ValueId`.
 
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
 use kestrel_hir::body::{
     HirBlock, HirClosureParam, HirExpr, HirExprId, HirStmt, HirStmtId,
@@ -33,6 +34,7 @@ struct SavedState {
     body: OssaBody,
     current_block: Option<kestrel_mir_3::BlockId>,
     local_map: HashMap<HirLocalId, ValueId>,
+    var_locals: HashSet<HirLocalId>,
     loop_stack: Vec<LoopInfo>,
     scope_stack: Vec<ScopeFrame>,
     tracker: super::LiveTracker,
@@ -143,7 +145,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Env param is the first ValueId (index 0) in the closure body
-        let env_val = closure_body.alloc_value(ValueDef::none(env_ty));
+        let env_val = closure_body.alloc_value(ValueDef::owned(env_ty));
         func_def.params.push(ParamDef::new("env", env_val, env_ty, ParamConvention::Consuming));
         closure_body.param_count += 1;
 
@@ -154,7 +156,7 @@ impl OssaBodyCtx<'_, '_> {
             let ownership = self.ownership_for(ty);
             let val = closure_body.alloc_value(match ownership {
                 Ownership::Owned => ValueDef::owned(ty),
-                _ => ValueDef::none(ty),
+                _ => ValueDef::owned(ty),
             });
             func_def.params.push(ParamDef::new(
                 &self.hir.locals[cp.local].name,
@@ -173,7 +175,7 @@ impl OssaBodyCtx<'_, '_> {
             let ownership = self.ownership_for(cap_ty);
             let val = closure_body.alloc_value(match ownership {
                 Ownership::Owned => ValueDef::owned(cap_ty),
-                _ => ValueDef::none(cap_ty),
+                _ => ValueDef::owned(cap_ty),
             });
             closure_local_map.insert(captured, val);
             capture_value_ids.push(val);
@@ -185,12 +187,13 @@ impl OssaBodyCtx<'_, '_> {
 
         // Save parent state
         let saved = SavedState {
-            body: std::mem::replace(&mut self.body, closure_body),
+            body: mem::replace(&mut self.body, closure_body),
             current_block: self.current_block.take(),
-            local_map: std::mem::replace(&mut self.local_map, closure_local_map),
-            loop_stack: std::mem::take(&mut self.loop_stack),
-            scope_stack: std::mem::take(&mut self.scope_stack),
-            tracker: std::mem::replace(&mut self.tracker, super::LiveTracker::from_live(&[])),
+            local_map: mem::replace(&mut self.local_map, closure_local_map),
+            var_locals: mem::take(&mut self.var_locals),
+            loop_stack: mem::take(&mut self.loop_stack),
+            scope_stack: mem::take(&mut self.scope_stack),
+            tracker: mem::replace(&mut self.tracker, super::LiveTracker::from_live(&[])),
             func_idx: self.func_idx,
             temp_counter: self.temp_counter,
             in_protocol_extension: self.in_protocol_extension,
@@ -206,8 +209,7 @@ impl OssaBodyCtx<'_, '_> {
         // StructExtract on the dereferenced env pointer.
         //
         // Ref-captures: env field is Pointer[T] — extract the pointer,
-        // then load through it to get the T value. The pointer is @none
-        // (Pointer is bitwise-trivial), so scope tracking ignores it.
+        // then load through it to get the T value.
         if env_struct_entity.is_some() {
             // Load the env struct value from the env pointer
             let env_struct_ty = match self.ctx.module.ty_arena.get(env_ty) {
@@ -216,38 +218,35 @@ impl OssaBodyCtx<'_, '_> {
             };
             let env_struct_val = self.emit_load(env_val, env_struct_ty);
 
+            // Borrow the env struct for multi-field extraction.
+            // Each extract from a borrow produces @guaranteed; we copy to get @owned.
+            let env_borrow = self.emit_begin_borrow(env_struct_val);
+
             for (i, &captured) in captured_locals.iter().enumerate() {
                 let capture_val = capture_value_ids[i];
                 let cap_ty = self.body.value(capture_val).ty;
                 let is_ref_capture = !self.is_copy_type(cap_ty);
                 let field_ty = if is_ref_capture {
-                    // Env stores Pointer[T] for ref captures
                     self.ctx.module.ty_arena.pointer(cap_ty)
                 } else {
                     cap_ty
                 };
 
-                // Extract field from env struct
-                let field_val = self.emit_struct_extract(env_struct_val, FieldIdx::new(i), field_ty);
+                // Extract from borrow → @guaranteed, then copy → @owned
+                let field_val = self.emit_struct_extract(env_borrow, FieldIdx::new(i), field_ty);
+                let owned_field = self.emit_copy_value(field_val);
 
                 if is_ref_capture {
-                    // field_val is Pointer[T] — load through it to get T
-                    let loaded = self.emit_load(field_val, cap_ty);
-                    // Rebind the local to the loaded value
+                    let loaded = self.emit_load(owned_field, cap_ty);
                     self.local_map.insert(captured, loaded);
+                    self.emit_destroy_value(owned_field);
                 } else {
-                    // field_val is T directly — rebind
-                    self.local_map.insert(captured, field_val);
-                }
-
-                // Track owned captures so they get cleaned up
-                let ownership = self.body.value(
-                    *self.local_map.get(&captured).unwrap()
-                ).ownership;
-                if ownership == Ownership::Owned {
-                    self.track_owned(*self.local_map.get(&captured).unwrap());
+                    self.local_map.insert(captured, owned_field);
                 }
             }
+
+            self.emit_end_borrow(env_borrow);
+            self.emit_destroy_value(env_struct_val);
         }
 
         // Lower closure body
@@ -258,9 +257,10 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Extract closure body and restore parent
-        let completed_body = std::mem::replace(&mut self.body, saved.body);
+        let completed_body = mem::replace(&mut self.body, saved.body);
         self.current_block = saved.current_block;
         self.local_map = saved.local_map;
+        self.var_locals = saved.var_locals;
         self.loop_stack = saved.loop_stack;
         self.scope_stack = saved.scope_stack;
         self.tracker = saved.tracker;

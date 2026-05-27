@@ -4,7 +4,6 @@ use crate::{TyId, ValueId};
 pub enum Ownership {
     Owned,
     Guaranteed,
-    None,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +24,4 @@ impl ValueDef {
         Self { ty, ownership: Ownership::Guaranteed, borrow_source: Some(source) }
     }
 
-    pub fn none(ty: TyId) -> Self {
-        Self { ty, ownership: Ownership::None, borrow_source: None }
-    }
 }

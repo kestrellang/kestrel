@@ -171,7 +171,7 @@ mod tests {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
                 }
-                let errors = kestrel_mir_3::verify::verify_ossa(body, &mir);
+                let errors = kestrel_mir_3::verify::verify_ossa(body, &mir, &func.name, func.entity);
                 if !errors.is_empty() {
                     total_errors += errors.len();
                     if error_funcs.len() < 15 {
@@ -202,14 +202,10 @@ mod tests {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
                 }
-                for err in kestrel_mir_3::verify::verify_ossa(body, &mir) {
+                for err in kestrel_mir_3::verify::verify_ossa(body, &mir, &func.name, func.entity) {
                     // Extract the error pattern (first word-ish)
                     let cat = if err.message.contains("EndBorrow on non-@guaranteed") {
                         "EndBorrow on non-@guaranteed"
-                    } else if err.message.contains("BeginBorrow on @none") {
-                        "BeginBorrow on @none"
-                    } else if err.message.contains("BeginMutBorrow on @none") {
-                        "BeginMutBorrow on @none"
                     } else if err.message.contains("consumed more than once") {
                         "consumed more than once"
                     } else if err.message.contains("unconsumed @owned") {
@@ -224,20 +220,12 @@ mod tests {
                         "unconsumed at block exit"
                     } else if err.message.contains("type mismatch") {
                         "type mismatch in block arg"
-                    } else if err.message.contains("CopyValue on @none") {
-                        "CopyValue on @none"
-                    } else if err.message.contains("DestroyValue on @none") {
-                        "DestroyValue on @none"
-                    } else if err.message.contains("BeginBorrow on @none") {
-                        "BeginBorrow on @none"
                     } else if err.message.contains("not live") || err.message.contains("not tracked") {
                         "value not live/tracked"
                     } else if err.message.contains("CopyValue") {
                         "CopyValue other"
                     } else if err.message.contains("DestroyValue") {
                         "DestroyValue other"
-                    } else if err.message.contains("Op1 operand") || err.message.contains("Op2 operand") {
-                        "Op operand not @none"
                     } else if err.message.contains("still active at block exit") {
                         "open borrow at block exit"
                     } else if err.message.contains("ownership mismatch") {
@@ -269,7 +257,7 @@ mod tests {
         for func in &mir.functions {
             if let Some(body) = &func.body {
                 if body.values.is_empty() || body.blocks.is_empty() { continue; }
-                let errors = kestrel_mir_3::verify::verify_ossa(body, &mir);
+                let errors = kestrel_mir_3::verify::verify_ossa(body, &mir, &func.name, func.entity);
                 if errors.is_empty() { continue; }
 
                 let has_unconsumed = errors.iter().any(|e| e.message.contains("live at block exit"));
@@ -345,7 +333,7 @@ mod tests {
         for func in &mir.functions {
             if let Some(body) = &func.body {
                 if body.values.is_empty() || body.blocks.is_empty() { continue; }
-                let errors = kestrel_mir_3::verify::verify_ossa(body, &mir);
+                let errors = kestrel_mir_3::verify::verify_ossa(body, &mir, &func.name, func.entity);
                 if errors.is_empty() { continue; }
 
                 let has_branch_unconsumed = errors.iter().any(|e| {
@@ -370,7 +358,6 @@ mod tests {
                     else if e.message.contains("Op1 operand") || e.message.contains("Op2 operand") { "op_not_none".into() }
                     else if e.message.contains("active borrow") { "consume_during_borrow".into() }
                     else if e.message.contains("passes") && e.message.contains("expects") { "arg_count".into() }
-                    else if e.message.contains("BeginBorrow on @none") { "borrow_none".into() }
                     else if e.message.contains("uninit") { "uninit_field".into() }
                     else { format!("other: {}", &e.message[..e.message.len().min(60)]) }
                 }).collect();
@@ -402,7 +389,7 @@ mod tests {
         let clean_count = mir.functions.iter().filter(|f| {
             let pass = f.body.as_ref().is_some_and(|b| {
                 !b.values.is_empty() && !b.blocks.is_empty()
-                    && kestrel_mir_3::verify::verify_ossa(b, &mir).is_empty()
+                    && kestrel_mir_3::verify::verify_ossa(b, &mir, &f.name, f.entity).is_empty()
             });
             pass
         }).count();
@@ -447,7 +434,6 @@ mod tests {
             for e in &errors {
                 let cat = if e.message.contains("live at block exit") { "unconsumed" }
                     else if e.message.contains("consumed more than once") { "consumed-twice" }
-                    else if e.message.contains("DestroyValue on @none") { "destroy-none" }
                     else { "other" };
                 *by_cat.entry(cat.to_string()).or_default() += 1;
             }
@@ -498,8 +484,6 @@ mod tests {
                             else if e.message.contains("AssociatedProjection") { "unresolved AssocProj" }
                             else if e.message.contains("unresolved") { "unresolved callee" }
                             else if e.message.contains("layout") { "missing layout" }
-                            else if e.message.contains("DestroyValue") { "DestroyValue on @none" }
-                            else if e.message.contains("CopyValue") { "CopyValue on @none" }
                             else { "other" };
                         *by_cat.entry(cat.to_string()).or_default() += 1;
                     }

@@ -1,0 +1,9 @@
+[package]
+name = "uuid"
+version = "0.1.0"
+description = "UUID generation and parsing for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]

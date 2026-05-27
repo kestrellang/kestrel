@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
-use crate::body::{self, OssaBody};
+use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::InstKind;
@@ -37,38 +37,6 @@ use crate::{FunctionIdx, MirModule, MonoFuncId, TyId};
 
 /// Check if a function needs self_type in its InstantiationKey.
 ///
-/// Protocol default methods have a first param typed as `TypeParam(protocol_entity)`
-/// which is NOT in the function's own type_params — they need self_type so
-/// `build_subst` can substitute the protocol's Self correctly.
-///
-/// Functions whose self_type is redundant (carries no information beyond what's
-/// already in type_args) can have self_type stripped to avoid duplicate
-/// instantiations with different self_type values but identical mangled names.
-fn func_needs_self_type(func: &FunctionDef, self_type: Option<TyId>, arena: &TyArena) -> bool {
-    // Protocol default methods: first param is TypeParam not in own type_params
-    let known_tps: std::collections::HashSet<Entity> =
-        func.type_params.iter().map(|tp| tp.entity).collect();
-    if let Some(first_param) = func.params.first() {
-        if let MirTy::TypeParam(e) = arena.get(first_param.ty) {
-            if !known_tps.contains(e) {
-                return true;
-            }
-        }
-    }
-
-    // Keep self_type when it carries generic type args (e.g., Array[Int64])
-    // that build_subst needs to map the parent struct's type params.
-    if let Some(st) = self_type {
-        if let MirTy::Named { type_args, .. } = arena.get(st) {
-            if !type_args.is_empty() {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
 /// Monomorphize a generic MirModule into a concrete MonoModule.
 pub fn monomorphize(
     module: MirModule,
@@ -300,25 +268,16 @@ fn monomorphize_body(
     }
 
     // Re-derive ownership after type substitution. Guaranteed values keep their
-    // ownership (they represent borrows), but Owned/None are re-derived from
-    // the concrete type: trivial types become None, non-trivial become Owned.
+    // ownership (they represent borrows); everything else becomes Owned.
     for value in &mut mono_body.values {
         if value.ownership != Ownership::Guaranteed {
-            value.ownership = if body::is_trivial(value.ty, arena) {
-                Ownership::None
-            } else {
-                Ownership::Owned
-            };
+            value.ownership = Ownership::Owned;
         }
     }
     for block in &mut mono_body.blocks {
         for param in &mut block.params {
             if param.ownership != Ownership::Guaranteed {
-                param.ownership = if body::is_trivial(param.ty, arena) {
-                    Ownership::None
-                } else {
-                    Ownership::Owned
-                };
+                param.ownership = Ownership::Owned;
             }
         }
     }
@@ -992,7 +951,7 @@ mod tests {
             body: Some(make_body(
                 vec![],
                 ret_val,
-                vec![ValueDef::none(unit)],
+                vec![ValueDef::owned(unit)],
             )),
             extern_info: None,
         };
@@ -1069,9 +1028,9 @@ mod tests {
                 vec![call_inst],
                 ret_val,
                 vec![
-                    ValueDef::none(unit),
-                    ValueDef::none(i64_ty),
-                    ValueDef::none(i64_ty),
+                    ValueDef::owned(unit),
+                    ValueDef::owned(i64_ty),
+                    ValueDef::owned(i64_ty),
                 ],
             )),
             extern_info: None,

@@ -82,12 +82,12 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         let entry = body.alloc_block();
         body.entry = entry;
 
-        // Env parameter — @none (pointer)
-        let env_val = body.alloc_value(ValueDef::none(env_ty));
+        // Env parameter — @owned (pointer)
+        let env_val = body.alloc_value(ValueDef::owned(env_ty));
         body.block_mut(entry).params.push(BlockParam {
             value: env_val,
             ty: env_ty,
-            ownership: Ownership::None,
+            ownership: Ownership::Owned,
         });
         thunk_def.params.push(ParamDef::new(
             "_env", env_val, env_ty, ParamConvention::Consuming,
@@ -131,13 +131,18 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
 
         let mut insts = Vec::new();
 
+        // Destroy unused env pointer (no captures)
+        if !needs_env {
+            insts.push(Instruction::new(InstKind::DestroyValue { operand: env_val }));
+        }
+
         if is_unit {
             insts.push(Instruction::new(InstKind::Call {
                 result: None,
                 callee,
                 args: forward_args,
             }));
-            let unit_val = body.alloc_value(ValueDef::none(unit_ty));
+            let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
             insts.push(Instruction::new(InstKind::Literal {
                 result: unit_val,
                 value: Immediate::unit(),
@@ -219,7 +224,7 @@ mod tests {
         }
 
         let unit_ty = module.ty_arena.unit();
-        let unit_val = body.alloc_value(ValueDef::none(unit_ty));
+        let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
         body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
             result: unit_val,
             value: Immediate::unit(),
@@ -228,7 +233,7 @@ mod tests {
             unit_val
         } else {
             // For non-unit returns, just return a literal (simplified for tests)
-            let rv = body.alloc_value(ValueDef::none(ret_ty));
+            let rv = body.alloc_value(ValueDef::owned(ret_ty));
             body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
                 result: rv,
                 value: Immediate::i64(0),
@@ -251,19 +256,19 @@ mod tests {
         let entry = body.alloc_block();
         body.entry = entry;
 
-        // ApplyPartial result — simplified as @none i64 for test purposes
+        // ApplyPartial result — simplified as @owned i64 for test purposes
         let thick_ty = module.ty_arena.intern(MirTy::FuncThick {
             params: vec![],
             ret: i64_ty,
         });
-        let result_val = body.alloc_value(ValueDef::none(thick_ty));
+        let result_val = body.alloc_value(ValueDef::owned(thick_ty));
         body.block_mut(entry).insts.push(Instruction::new(InstKind::ApplyPartial {
             result: result_val,
             func: target,
             captures: vec![],
         }));
 
-        let unit_val = body.alloc_value(ValueDef::none(unit_ty));
+        let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
         body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
             result: unit_val,
             value: Immediate::unit(),
@@ -333,20 +338,20 @@ mod tests {
             let entry = body.alloc_block();
             body.entry = entry;
 
-            let r1 = body.alloc_value(ValueDef::none(thick_ty));
+            let r1 = body.alloc_value(ValueDef::owned(thick_ty));
             body.block_mut(entry).insts.push(Instruction::new(InstKind::ApplyPartial {
                 result: r1,
                 func: target,
                 captures: vec![],
             }));
-            let r2 = body.alloc_value(ValueDef::none(thick_ty));
+            let r2 = body.alloc_value(ValueDef::owned(thick_ty));
             body.block_mut(entry).insts.push(Instruction::new(InstKind::ApplyPartial {
                 result: r2,
                 func: target,
                 captures: vec![],
             }));
 
-            let uv = body.alloc_value(ValueDef::none(unit_ty));
+            let uv = body.alloc_value(ValueDef::owned(unit_ty));
             body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
                 result: uv,
                 value: Immediate::unit(),

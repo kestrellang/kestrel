@@ -1,7 +1,6 @@
 module Life
 
-@extern(.C, mangleName: "Kestrel_MonotonicMs")
-func monotonicMs() -> Int64
+import sdl.(monotonicMs)
 
 struct Timer {
     var startMs: Int64

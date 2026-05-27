@@ -17,7 +17,6 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
-use kestrel_mir_3::value::Ownership;
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
 use super::{OssaBodyCtx, expr_span};
@@ -94,14 +93,7 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::TupleIndex { base, index, .. } => {
                 let base_val = self.lower_expr_for_borrow(*base);
                 let result_ty = self.resolve_expr_type(expr_id);
-                if self.body.value(base_val).ownership == Ownership::Owned {
-                    let borrow = self.emit_begin_borrow(base_val);
-                    let field = self.emit_tuple_extract(borrow, *index, result_ty);
-                    self.emit_end_borrow(borrow);
-                    field
-                } else {
-                    self.emit_tuple_extract(base_val, *index, result_ty)
-                }
+                self.emit_tuple_extract(base_val, *index, result_ty)
             }
 
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
@@ -217,7 +209,7 @@ impl OssaBodyCtx<'_, '_> {
     // Field access
     // ================================================================
 
-    fn lower_field_access(
+    pub(crate) fn lower_field_access(
         &mut self,
         expr_id: HirExprId,
         base: HirExprId,
@@ -335,14 +327,7 @@ impl OssaBodyCtx<'_, '_> {
             .and_then(|se| self.ctx.resolve_field_idx(se, field_name))
             .unwrap_or(FieldIdx::new(0));
 
-        if self.body.value(base_val).ownership == Ownership::Owned {
-            let borrow = self.emit_begin_borrow(base_val);
-            let field = self.emit_struct_extract(borrow, field_idx, result_ty);
-            self.emit_end_borrow(borrow);
-            field
-        } else {
-            self.emit_struct_extract(base_val, field_idx, result_ty)
-        }
+        self.emit_struct_extract(base_val, field_idx, result_ty)
     }
 
     // ================================================================
@@ -646,8 +631,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.emit_call_void(callee, vec![rhs_arg]);
             } else {
                 let receiver_ty = self.resolve_expr_type(base);
-                let base_val = self.lower_expr(base);
-                let receiver_arg = self.prepare_call_arg(base_val, ParamConvention::MutBorrow);
+                let receiver_arg = self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow);
                 let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
                 let callee = Callee::Witness {
                     protocol,
@@ -678,14 +662,13 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_call_void(callee, vec![rhs_arg]);
         } else {
             let receiver_ty = self.resolve_expr_type(base);
-            let base_val = self.lower_expr(base);
             let type_args = self.resolve_type_args(target_id);
             let type_args = self.prepend_receiver_type_args(receiver_ty, type_args);
 
             if let Some(protocol) = self.ctx.is_protocol_method(setter) {
                 self.ctx.register_name(protocol);
                 let key = self.ctx.witness_setter_key(setter);
-                let receiver_arg = self.prepare_call_arg(base_val, ParamConvention::MutBorrow);
+                let receiver_arg = self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow);
                 let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
                 let callee = Callee::Witness {
                     protocol,
@@ -695,7 +678,7 @@ impl OssaBodyCtx<'_, '_> {
                 };
                 self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);
             } else {
-                let receiver_arg = self.prepare_call_arg(base_val, ParamConvention::MutBorrow);
+                let receiver_arg = self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow);
                 let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
                 let callee = Callee::direct_with_args(setter, type_args, None);
                 self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);

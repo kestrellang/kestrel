@@ -2,6 +2,9 @@
 name = "sdl"
 version = "0.1.0"
 description = "SDL2 bindings for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
 
 [build]
 c-sources = ["sdl_helpers.c"]

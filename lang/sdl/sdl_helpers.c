@@ -4,23 +4,6 @@
 #include <stddef.h>
 #include <time.h>
 
-// Capture argv from the C runtime so Kestrel can read CLI args. The
-// constructor runs before main() on both glibc and dyld; both pass argc/argv
-// to constructors with this signature.
-static int g_argc = 0;
-static char** g_argv = NULL;
-__attribute__((constructor))
-static void Kestrel_CaptureArgs(int argc, char** argv, char** envp) {
-    (void)envp;
-    g_argc = argc;
-    g_argv = argv;
-}
-int32_t Kestrel_Argc(void) { return (int32_t)g_argc; }
-const char* Kestrel_GetArg(int32_t idx) {
-    if (idx < 0 || idx >= g_argc || g_argv == NULL) return NULL;
-    return g_argv[idx];
-}
-
 // Wraps SDL_GetTicks for use as an FPS clock. SDL_Init must have run.
 uint32_t Kestrel_GetTicks(void) { return SDL_GetTicks(); }
 
@@ -125,7 +108,7 @@ void Kestrel_DrawText(void* renderer, const char* text, int64_t x, int64_t y, in
         if (c > 127 || font_bits[(uint8_t)c][0] == 0 && c != ' ' && c != '1') {
             c = '?'; // Unknown
         }
-        
+
         for (int col = 0; col < 5; col++) {
             uint8_t bits = font_bits[(uint8_t)c][col];
             for (int row = 0; row < 7; row++) {

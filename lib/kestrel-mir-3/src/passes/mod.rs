@@ -1,3 +1,4 @@
+pub mod clone_shim;
 pub mod drop_fix;
 pub mod drop_shim;
 pub mod layout;
@@ -17,6 +18,7 @@ pub fn run_pipeline(
     drop_fix::fix_drop_behaviors(module);
     thunk::run_thunk_pass(module, next_entity);
     drop_shim::synthesize_drop_shims(module, next_entity);
+    clone_shim::synthesize_clone_shims(module, next_entity);
     layout::run_layout_pass(module, target);
 
     let mut errors = Vec::new();
@@ -25,7 +27,8 @@ pub fn run_pipeline(
             if body.values.is_empty() || body.blocks.is_empty() {
                 continue;
             }
-            errors.extend(crate::verify::verify_ossa(body, module));
+            let func_errors = crate::verify::verify_ossa(body, module, &func.name, func.entity);
+            errors.extend(func_errors);
         }
     }
     errors

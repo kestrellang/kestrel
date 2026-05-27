@@ -8,7 +8,7 @@ use kestrel_hir::ty::HirTy;
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
-use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, Ownership, ParamConvention, TyId, ValueId};
+use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
 use crate::ty::lower_type;
@@ -64,6 +64,33 @@ impl OssaBodyCtx<'_, '_> {
         let Some(resolved) = resolved_entity else {
             return self.emit_literal(Immediate::error());
         };
+
+        // Field-stored thick/thin function: lower as field access + indirect call.
+        // `self.predicate(arg)` where `predicate` is a struct field of function type.
+        let entity_kind = self.ctx.world.get::<NodeKind>(resolved).cloned();
+        if matches!(entity_kind, Some(NodeKind::Field)) {
+            let base_ty = self.resolve_expr_type(receiver_expr);
+            let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
+                MirTy::Named { entity, .. } => Some(*entity),
+                _ => None,
+            };
+            let field_info = struct_entity
+                .and_then(|se| self.ctx.resolve_field_idx(se, method_name).map(|idx| (se, idx)));
+            if let Some((se, field_idx)) = field_info {
+                if let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx) {
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::FuncThick { .. } | MirTy::FuncThin { .. }) {
+                        let base_val = self.lower_expr_for_borrow(receiver_expr);
+                        let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
+                        let call_args = self.lower_call_args_default(args);
+                        let callee = match self.ctx.module.ty_arena.get(field_ty) {
+                            MirTy::FuncThin { .. } => Callee::Thin(field_val),
+                            _ => Callee::Thick(field_val),
+                        };
+                        return self.emit_call_returning(callee, call_args, result_ty);
+                    }
+                }
+            }
+        }
 
         let method_type_args = if let Some(hir_args) = hir_type_args {
             let inferred = self.resolve_type_args(expr_id);
@@ -380,7 +407,7 @@ impl OssaBodyCtx<'_, '_> {
 
     fn emit_struct_construct(
         &mut self,
-        struct_entity: Entity,
+        _struct_entity: Entity,
         args: &[HirCallArg],
         result_ty: TyId,
     ) -> ValueId {

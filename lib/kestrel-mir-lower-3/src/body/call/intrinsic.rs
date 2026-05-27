@@ -1,7 +1,7 @@
 use kestrel_ast_builder::Intrinsic;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExprId};
-use kestrel_mir_3::{FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op, Signedness, TyId, ValueId};
+use kestrel_mir_3::{FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op, Signedness, ValueId};
 
 use crate::body::OssaBodyCtx;
 
@@ -283,7 +283,9 @@ pub(crate) fn try_intrinsic(
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
             let ptr = bctx.lower_expr(args.get(0)?.value);
-            let val = bctx.lower_expr(args.get(1)?.value);
+            // Consume the value — PtrWrite moves it into the destination address.
+            let val = bctx.lower_expr_for_consuming(args.get(1)?.value);
+            bctx.consume(val);
             return Some(bctx.emit_op2(Op::PtrWrite(ty_arg), ptr, val, result_ty));
         }
         "cast_ptr" => {

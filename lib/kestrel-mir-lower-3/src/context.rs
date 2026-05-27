@@ -68,6 +68,11 @@ impl<'w> LowerCtx<'w> {
         Some(FieldIdx::new(idx))
     }
 
+    pub fn resolve_field_ty(&self, struct_entity: Entity, field_idx: FieldIdx) -> Option<TyId> {
+        let def = self.module.structs.iter().find(|s| s.entity == struct_entity)?;
+        def.fields.get(field_idx.index()).map(|f| f.ty)
+    }
+
     /// Resolve an enum case name to its VariantIdx within a lowered EnumDef.
     pub fn resolve_variant_idx(
         &self,

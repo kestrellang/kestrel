@@ -134,21 +134,9 @@ pub fn compile_function(
             PassMode::ByRef => {
                 let ptr_val = block_params_entry[param_idx];
                 param_idx += 1;
-                let convention = func.params[i].convention;
-                // MutBorrow params are pointers the callee writes through.
-                // Keep the pointer as-is so FieldAddr/StoreInit work.
-                // Borrow params on scalars: load the scalar so OSSA ops
-                // (arithmetic, comparisons) work directly on the value.
-                if convention == kestrel_mir_3::ParamConvention::Borrow && repr.is_scalar() {
-                    if let TypeRepr::Scalar(t) = repr {
-                        let loaded = builder.ins().load(t, ir::MemFlags::new(), ptr_val, ir::immediates::Offset32::new(0));
-                        value_map.insert(value_id, loaded);
-                    } else {
-                        value_map.insert(value_id, ptr_val);
-                    }
-                } else {
-                    value_map.insert(value_id, ptr_val);
-                }
+                // ByRef params are always pointers — struct_extract and
+                // other instructions handle loading from the address.
+                value_map.insert(value_id, ptr_val);
             }
             PassMode::Zst => {
                 let zero = builder.ins().iconst(ptr_ty, 0);

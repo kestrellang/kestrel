@@ -54,6 +54,10 @@ impl OssaBodyCtx<'_, '_> {
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
+            // Copy @guaranteed result to @owned for the merge block
+            let then_val = if self.body.value(then_val).ownership == Ownership::Guaranteed {
+                self.emit_copy_value(then_val)
+            } else { then_val };
             let tracker_vals = self.tracker.values();
             let mut keep = vec![then_val];
             keep.extend(&tracker_vals);
@@ -72,6 +76,9 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
             if !self.is_terminated() {
+                let else_val = if self.body.value(else_val).ownership == Ownership::Guaranteed {
+                    self.emit_copy_value(else_val)
+                } else { else_val };
                 let tracker_vals = self.tracker.values();
                 let mut keep = vec![else_val];
                 keep.extend(&tracker_vals);
@@ -130,12 +137,8 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&initial_args, &header_params);
         // initial_args were consumed before the jump, so rebind won't
         // find them in scope. Track the header params fresh.
-        for (i, &param) in header_params.iter().enumerate() {
-            if descs[i].1 == Ownership::Owned {
-                self.track_owned(param);
-            } else {
-                self.track_none(param);
-            }
+        for &param in header_params.iter() {
+            self.track_owned(param);
         }
 
         let scope_depth = self.scope_stack.len();

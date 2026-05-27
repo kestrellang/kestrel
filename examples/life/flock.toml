@@ -6,4 +6,4 @@ source = "src"
 
 [dependencies]
 clutch = { path = "../../lang/clutch" }
-sdl = { path = "../sdl" }
+sdl = { path = "../../lang/sdl" }

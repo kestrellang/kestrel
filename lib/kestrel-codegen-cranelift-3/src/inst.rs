@@ -57,14 +57,20 @@ pub fn compile_inst(
         | InstKind::BeginMutBorrow { result, operand } => {
             let val = fc.get_value(builder, *operand);
             let operand_ty = fc.body.values[operand.index()].ty;
+            let is_guaranteed = fc.body.values[operand.index()].ownership
+                == kestrel_mir_3::value::Ownership::Guaranteed;
             let repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             match repr {
+                _ if is_guaranteed => {
+                    // @guaranteed values are already pointers (ByRef)
+                    fc.map_value(builder, *result, val);
+                }
                 TypeRepr::Aggregate { .. } | TypeRepr::Zst => {
-                    // Already a pointer
+                    // Aggregates are already pointers
                     fc.map_value(builder, *result, val);
                 }
                 TypeRepr::Scalar(_) => {
-                    // Spill scalar to stack to take its address
+                    // Spill @owned scalar to stack to take its address
                     let ptr_ty = fc.ctx.ptr_ty;
                     let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
                     builder.ins().store(MemFlags::new(), val, slot, Offset32::new(0));
@@ -118,9 +124,14 @@ pub fn compile_inst(
 
         InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
             let addr = fc.get_value(builder, *address);
-            let val = fc.get_value(builder, *value);
+            let mut val = fc.get_value(builder, *value);
             let ty = fc.body.values[value.index()].ty;
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            if fc.body.values[value.index()].ownership == kestrel_mir_3::value::Ownership::Guaranteed {
+                if let TypeRepr::Scalar(t) = repr {
+                    val = builder.ins().load(t, MemFlags::new(), val, Offset32::new(0));
+                }
+            }
             mem::store_to_repr(builder, repr, addr, val);
         }
 
@@ -770,13 +781,22 @@ fn compile_struct_extract(
     let base = fc.get_value(builder, operand);
     let operand_ty = fc.body.values[operand.index()].ty;
     let operand_repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let is_borrowed = fc.body.values[operand.index()].ownership == kestrel_mir_3::value::Ownership::Guaranteed;
 
     let field_ty = struct_field_type(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
     let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
-    // Single-field scalar newtype: value IS the field
+    // Single-field scalar newtype: value IS the field.
+    // When the operand is @guaranteed (borrowed), `base` is a pointer — load first.
     if let TypeRepr::Scalar(base_cl) = operand_repr {
         if let TypeRepr::Scalar(field_cl) = field_repr {
+            if is_borrowed {
+                let loaded = builder.ins().load(base_cl, MemFlags::new(), base, Offset32::new(0));
+                if base_cl == field_cl {
+                    return Ok(loaded);
+                }
+                return Ok(builder.ins().bitcast(field_cl, MemFlags::new(), loaded));
+            }
             if base_cl == field_cl {
                 return Ok(base);
             }

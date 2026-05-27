@@ -17,21 +17,6 @@ use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
 use crate::{FunctionIdx, TyId};
 
-fn format_ty(arena: &TyArena, ty: TyId, names: &IndexMap<Entity, String>) -> String {
-    match arena.get(ty) {
-        MirTy::Named { entity, type_args } => {
-            let name = names.get(entity).map(|s| s.as_str()).unwrap_or("?");
-            if type_args.is_empty() {
-                name.to_string()
-            } else {
-                let args: Vec<String> = type_args.iter().map(|&a| format_ty(arena, a, names)).collect();
-                format!("{name}[{}]", args.join(", "))
-            }
-        }
-        other => format!("{other:?}"),
-    }
-}
-
 // -- Collection result --
 
 pub struct CollectionResult {
@@ -245,12 +230,14 @@ impl<'a> CollectionContext<'a> {
                         self.scan_apply_partial(*func, &subst, parent_self);
                     }
                     InstKind::DestroyValue { operand } => {
-                        // Discover drop shim instantiations. The operand's type
-                        // may be generic; after substitution it becomes concrete
-                        // and we can find the matching drop shim.
                         let operand_ty = body.values[operand.index()].ty;
                         let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
                         self.discover_drop_shim(concrete_ty, parent_self);
+                    }
+                    InstKind::CopyValue { operand, .. } => {
+                        let operand_ty = body.values[operand.index()].ty;
+                        let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
+                        self.discover_clone_shim(concrete_ty, parent_self);
                     }
                     _ => {}
                 }
@@ -264,8 +251,8 @@ impl<'a> CollectionContext<'a> {
         callee: &Callee,
         subst: &SubstMap,
         parent_self: Option<TyId>,
-        caller_entity: Entity,
-        stmt_span: Option<&kestrel_span::Span>,
+        _caller_entity: Entity,
+        _stmt_span: Option<&kestrel_span::Span>,
     ) {
         match callee {
             Callee::Direct {
@@ -498,6 +485,27 @@ impl<'a> CollectionContext<'a> {
                 matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity)
             }) {
                 let key = InstantiationKey::new(shim.entity, type_args, parent_self);
+                if self.seen.insert(key.clone()) {
+                    self.queue.push_back(key);
+                }
+            }
+        }
+    }
+
+    /// If `ty` is a Named type with a clone shim, enqueue the shim instantiation.
+    fn discover_clone_shim(&mut self, ty: TyId, parent_self: Option<TyId>) {
+        if let MirTy::Named { entity, type_args } = self.arena.get(ty) {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            // Find clone shim or user clone method
+            let clone_func = self.functions.iter().find(|f| {
+                matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity)
+            }).or_else(|| self.functions.iter().find(|f| {
+                matches!(&f.kind, FunctionKind::Method { parent, .. } if *parent == entity)
+                    && f.name.ends_with(".clone")
+            }));
+            if let Some(func) = clone_func {
+                let key = InstantiationKey::new(func.entity, type_args, parent_self);
                 if self.seen.insert(key.clone()) {
                     self.queue.push_back(key);
                 }

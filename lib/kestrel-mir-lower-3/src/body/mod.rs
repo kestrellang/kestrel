@@ -15,8 +15,7 @@ use kestrel_mir_3::block::BlockParam;
 use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::{CallArg, InstKind, Instruction};
-use kestrel_mir_3::item::witness::WitnessMethodKey;
-use kestrel_mir_3::terminator::{SwitchArm, SwitchCase, Terminator, TerminatorKind};
+use kestrel_mir_3::terminator::{SwitchArm, Terminator, TerminatorKind};
 use kestrel_mir_3::value::{Ownership, ValueDef};
 use kestrel_mir_3::{
     BlockId, CopyBehavior, FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId,
@@ -69,13 +68,7 @@ impl std::ops::Deref for TypedRef<'_> {
 }
 
 pub(crate) struct ScopeFrame {
-    pub owned_values: Vec<ValueId>,
-    /// @none values (trivial types) that must also be threaded through
-    /// block params across control flow boundaries (loops, if/else).
-    pub none_values: Vec<ValueId>,
-    /// All tracked values in insertion order — used by `all_live_tracked()`
-    /// to produce a consistent ordering across control flow boundaries.
-    pub all_values: Vec<(ValueId, Ownership)>,
+    pub tracked_values: Vec<ValueId>,
     /// Stack-allocated var locals needing DestroyAddr on scope exit.
     pub var_addrs: Vec<(ValueId, TyId)>,
 }
@@ -85,8 +78,6 @@ pub(crate) struct ScopeFrame {
 #[derive(Clone)]
 pub(crate) struct ScopeSnapshot {
     pub scopes: Vec<Vec<ValueId>>,
-    pub none_scopes: Vec<Vec<ValueId>>,
-    pub all_scopes: Vec<Vec<(ValueId, Ownership)>>,
     pub local_map: HashMap<HirLocalId, ValueId>,
     pub tracker: LiveTracker,
 }
@@ -212,17 +203,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         for (i, (hir_id, _local)) in locals.iter().enumerate() {
             if i >= params_len { break; }
             let ty = self.resolve_local_type(*hir_id);
-            let ownership = self.ownership_for(ty);
-            let val = self.alloc_value(ty, ownership);
-            self.local_map.insert(*hir_id, val);
-            let is_mut_borrow = param_conventions.get(i)
-                .is_some_and(|c| *c == ParamConvention::MutBorrow);
-            if is_mut_borrow {
-                self.var_locals.insert(*hir_id);
-            } else if ownership == Ownership::Owned {
-                self.track_owned(val);
-            } else if ownership == Ownership::None {
-                self.track_none(val);
+            let convention = param_conventions.get(i).copied()
+                .unwrap_or(ParamConvention::Borrow);
+            match convention {
+                ParamConvention::MutBorrow => {
+                    let val = self.body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                    });
+                    self.local_map.insert(*hir_id, val);
+                    self.var_locals.insert(*hir_id);
+                }
+                ParamConvention::Borrow => {
+                    let val = self.body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                    });
+                    self.local_map.insert(*hir_id, val);
+                }
+                ParamConvention::Consuming => {
+                    let ownership = self.ownership_for(ty);
+                    let val = self.alloc_value(ty, ownership);
+                    self.local_map.insert(*hir_id, val);
+                    self.track_owned(val);
+                }
             }
         }
         self.body.param_count = params_len;
@@ -248,8 +254,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     self.current_span = prev;
                 }
             } else {
-                self.destroy_scopes_to_depth(0, &[]);
                 let unit = self.emit_literal(Immediate::unit());
+                self.destroy_scopes_to_depth(0, &[unit]);
                 self.set_terminator(TerminatorKind::Return(unit));
             }
         }
@@ -333,15 +339,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         )
     }
 
-    pub fn is_copy_or_clone_type(&self, ty: TyId) -> bool {
-        let wc = self.ctx.module.functions.get(self.func_idx)
-            .and_then(|f| f.where_clause.as_ref());
-        matches!(
-            kestrel_mir_3::ty_query::copy_behavior(&self.ctx.module.ty_arena, &self.ctx.module, ty, wc),
-            CopyBehavior::Bitwise | CopyBehavior::Clone(_)
-        )
-    }
-
     pub fn ownership_for(&self, ty: TyId) -> Ownership {
         kestrel_mir_3::body::ownership_for_type(ty, &self.ctx.module.ty_arena, &self.ctx.module)
     }
@@ -353,7 +350,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn alloc_value(&mut self, ty: TyId, ownership: Ownership) -> ValueId {
         let def = match ownership {
             Ownership::Owned => ValueDef::owned(ty),
-            Ownership::None => ValueDef::none(ty),
             Ownership::Guaranteed => panic!("use alloc_guaranteed for @guaranteed"),
         };
         self.body.alloc_value(def)
@@ -374,9 +370,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn push_scope(&mut self) {
         self.scope_stack.push(ScopeFrame {
-            owned_values: Vec::new(),
-            none_values: Vec::new(),
-            all_values: Vec::new(),
+            tracked_values: Vec::new(),
             var_addrs: Vec::new(),
         });
     }
@@ -388,53 +382,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn track_owned(&mut self, value: ValueId) {
-        if let Some(frame) = self.scope_stack.last_mut() {
-            frame.owned_values.push(value);
-            frame.all_values.push((value, Ownership::Owned));
+        if self.is_terminated() {
+            return;
         }
-    }
-
-    pub fn track_none(&mut self, value: ValueId) {
         if let Some(frame) = self.scope_stack.last_mut() {
-            frame.none_values.push(value);
-            frame.all_values.push((value, Ownership::None));
+            if !frame.tracked_values.contains(&value) {
+                frame.tracked_values.push(value);
+            }
         }
     }
 
     /// Mark a value as consumed — removes from scope tracking.
     pub fn consume(&mut self, value: ValueId) {
         for scope in self.scope_stack.iter_mut().rev() {
-            if let Some(pos) = scope.owned_values.iter().position(|&v| v == value) {
-                scope.owned_values.remove(pos);
-                scope.all_values.retain(|&(v, _)| v != value);
-                return;
-            }
-            if let Some(pos) = scope.none_values.iter().position(|&v| v == value) {
-                scope.none_values.remove(pos);
-                scope.all_values.retain(|&(v, _)| v != value);
+            if let Some(pos) = scope.tracked_values.iter().position(|&v| v == value) {
+                scope.tracked_values.remove(pos);
                 return;
             }
         }
-    }
-
-    pub fn destroy_scope(&mut self) {
-        if let Some(scope) = self.scope_stack.last() {
-            let to_destroy: Vec<ValueId> = scope.owned_values.iter().rev().copied().collect();
-            let var_addrs: Vec<_> = scope.var_addrs.iter().rev().copied().collect();
-            for value in to_destroy {
-                self.push_inst(InstKind::DestroyValue { operand: value });
-            }
-            for (address, ty) in var_addrs {
-                if self.ownership_for(ty) == Ownership::Owned {
-                    self.push_inst(InstKind::DestroyAddr { address, ty });
-                }
-            }
-        }
-    }
-
-    pub fn exit_scope(&mut self) {
-        self.destroy_scope();
-        self.scope_stack.pop();
     }
 
     pub fn pop_scope(&mut self) {
@@ -444,7 +409,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn destroy_scope_except(&mut self, keep: &[ValueId]) {
         if let Some(scope) = self.scope_stack.last_mut() {
             let mut surviving = Vec::new();
-            for &value in scope.owned_values.iter().rev() {
+            for &value in scope.tracked_values.iter().rev() {
                 if keep.contains(&value) {
                     surviving.push(value);
                 } else {
@@ -454,13 +419,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             }
             surviving.reverse();
-            scope.owned_values = surviving;
+            scope.tracked_values = surviving;
         }
     }
 
     pub fn destroy_scopes_to_depth(&mut self, target_depth: usize, keep: &[ValueId]) {
         for scope in self.scope_stack[target_depth..].iter().rev() {
-            for &value in scope.owned_values.iter().rev() {
+            for &value in scope.tracked_values.iter().rev() {
                 if !keep.contains(&value) {
                     self.body.block_mut(self.current_block.unwrap()).insts.push(
                         Instruction::new(InstKind::DestroyValue { operand: value }),
@@ -468,79 +433,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             }
             for &(address, ty) in scope.var_addrs.iter().rev() {
-                if kestrel_mir_3::body::ownership_for_type(ty, &self.ctx.module.ty_arena, &self.ctx.module) == Ownership::Owned {
-                    self.body.block_mut(self.current_block.unwrap()).insts.push(
-                        Instruction::new(InstKind::DestroyAddr { address, ty }),
-                    );
-                }
+                self.body.block_mut(self.current_block.unwrap()).insts.push(
+                    Instruction::new(InstKind::DestroyAddr { address, ty }),
+                );
             }
         }
     }
 
-    pub fn all_live_owned(&self) -> Vec<(ValueId, TyId)> {
-        self.scope_stack
-            .iter()
-            .flat_map(|s| &s.owned_values)
-            .map(|&v| (v, self.body.value(v).ty))
-            .collect()
-    }
-
-    /// All values that need threading through block params: @owned + @none locals.
-    /// Uses insertion order (via `all_values`) so that the ordering is consistent
-    /// across nested control flow boundaries.
+    /// All tracked values for threading through block params.
     pub fn all_live_tracked(&self) -> Vec<(ValueId, TyId, Ownership)> {
         self.scope_stack
             .iter()
             .flat_map(|s| {
-                s.all_values.iter()
-                    .map(|&(v, own)| (v, self.body.value(v).ty, own))
+                s.tracked_values.iter()
+                    .map(|&v| (v, self.body.value(v).ty, Ownership::Owned))
             })
             .collect()
-    }
-
-    /// Collect live @owned values from outer scopes (below `depth`).
-    pub fn collect_outer_live(&self, depth: usize) -> Vec<ValueId> {
-        self.scope_stack[..depth]
-            .iter()
-            .flat_map(|s| &s.owned_values)
-            .copied()
-            .collect()
-    }
-
-    /// Find the current scope-tracked values that correspond to the given
-    /// original values. Works by matching position: for each original value,
-    /// finds the value at the same scope frame + index position.
-    ///
-    /// This handles the case where nested if/match rebound values via
-    /// merge block params — the scope positions stay stable but the
-    /// ValueIds change.
-    pub fn find_current_versions(&self, originals: &[ValueId]) -> Vec<ValueId> {
-        // Build a flat list of all scope values in order
-        let flat: Vec<ValueId> = self.scope_stack
-            .iter()
-            .flat_map(|s| &s.owned_values)
-            .copied()
-            .collect();
-
-        if flat.len() >= originals.len() {
-            // Take the first N values — they correspond positionally
-            flat[..originals.len()].to_vec()
-        } else {
-            // Fewer values than expected — pad with originals as fallback
-            let mut result = flat;
-            while result.len() < originals.len() {
-                result.push(originals[result.len()]);
-            }
-            result
-        }
     }
 
     /// Save scope stack + local_map + tracker for restoration between parallel arms.
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
-            scopes: self.scope_stack.iter().map(|s| s.owned_values.clone()).collect(),
-            none_scopes: self.scope_stack.iter().map(|s| s.none_values.clone()).collect(),
-            all_scopes: self.scope_stack.iter().map(|s| s.all_values.clone()).collect(),
+            scopes: self.scope_stack.iter().map(|s| s.tracked_values.clone()).collect(),
             local_map: self.local_map.clone(),
             tracker: self.tracker.clone(),
         }
@@ -551,13 +465,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn restore_scope(&mut self, snapshot: &ScopeSnapshot) {
         self.scope_stack.truncate(snapshot.scopes.len());
         for (i, frame) in self.scope_stack.iter_mut().enumerate() {
-            frame.owned_values = snapshot.scopes[i].clone();
-            if let Some(none) = snapshot.none_scopes.get(i) {
-                frame.none_values = none.clone();
-            }
-            if let Some(all) = snapshot.all_scopes.get(i) {
-                frame.all_values = all.clone();
-            }
+            frame.tracked_values = snapshot.scopes[i].clone();
         }
         self.local_map = snapshot.local_map.clone();
         self.tracker = snapshot.tracker.clone();
@@ -567,19 +475,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Updates scope stack, local_map, AND the shared LiveTracker.
     pub fn rebind_scope_values(&mut self, old_vals: &[ValueId], new_vals: &[ValueId]) {
         for scope in self.scope_stack.iter_mut() {
-            for owned in scope.owned_values.iter_mut() {
-                if let Some(pos) = old_vals.iter().position(|&v| v == *owned) {
-                    *owned = new_vals[pos];
-                }
-            }
-            for none_val in scope.none_values.iter_mut() {
-                if let Some(pos) = old_vals.iter().position(|&v| v == *none_val) {
-                    *none_val = new_vals[pos];
-                }
-            }
-            for entry in scope.all_values.iter_mut() {
-                if let Some(pos) = old_vals.iter().position(|&v| v == entry.0) {
-                    entry.0 = new_vals[pos];
+            for val in scope.tracked_values.iter_mut() {
+                if let Some(pos) = old_vals.iter().position(|&v| v == *val) {
+                    *val = new_vals[pos];
                 }
             }
         }
@@ -596,6 +494,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn push_inst(&mut self, kind: InstKind) {
+        if self.is_terminated() {
+            return;
+        }
         let inst = match &self.current_span {
             Some(s) => Instruction::with_span(kind, s.clone()),
             None => Instruction::new(kind),
@@ -607,29 +508,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_literal(&mut self, imm: Immediate) -> ValueId {
         let ty = imm.ty(&mut self.ctx.module.ty_arena);
-        let result = self.alloc_value(ty, Ownership::None);
-        self.push_inst(InstKind::Literal { result, value: imm });
-        result
-    }
-
-    pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
-        let ownership = self.body.value(operand).ownership;
-        if ownership == Ownership::None {
-            // @none values are trivially copyable — no CopyValue needed
-            return operand;
-        }
-        let ty = self.body.value(operand).ty;
         let result = self.alloc_value(ty, Ownership::Owned);
-        self.push_inst(InstKind::CopyValue { result, operand });
+        self.push_inst(InstKind::Literal { result, value: imm });
         self.track_owned(result);
         result
     }
 
-    pub fn emit_move_value(&mut self, operand: ValueId) -> ValueId {
+    pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
         let ty = self.body.value(operand).ty;
         let result = self.alloc_value(ty, Ownership::Owned);
-        self.push_inst(InstKind::MoveValue { result, operand });
-        self.consume(operand);
+        self.push_inst(InstKind::CopyValue { result, operand });
         self.track_owned(result);
         result
     }
@@ -668,137 +556,120 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_op1(&mut self, op: Op, arg: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.alloc_value(result_ty, Ownership::None);
+        let result = self.alloc_value(result_ty, Ownership::Owned);
         self.push_inst(InstKind::Op1 { result, op, arg });
+        self.track_owned(result);
         result
     }
 
     pub fn emit_op2(&mut self, op: Op, lhs: ValueId, rhs: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.alloc_value(result_ty, Ownership::None);
+        let result = self.alloc_value(result_ty, Ownership::Owned);
         self.push_inst(InstKind::Op2 { result, op, lhs, rhs });
+        self.track_owned(result);
         result
     }
 
     pub fn emit_op3(&mut self, op: Op, a: ValueId, b: ValueId, c: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.alloc_value(result_ty, Ownership::None);
+        let result = self.alloc_value(result_ty, Ownership::Owned);
         self.push_inst(InstKind::Op3 { result, op, a, b, c });
+        self.track_owned(result);
         result
     }
 
     pub fn emit_struct(&mut self, ty: TyId, fields: Vec<(FieldIdx, ValueId)>) -> ValueId {
-        let ownership = self.ownership_for(ty);
-        let result = self.alloc_value(ty, ownership);
+        let result = self.alloc_value(ty, Ownership::Owned);
         for &(_, v) in &fields {
-            if self.body.value(v).ownership == Ownership::Owned {
-                self.consume(v);
-            }
+            self.consume(v);
         }
         self.push_inst(InstKind::Struct { result, ty, fields });
-        if ownership == Ownership::Owned {
-            self.track_owned(result);
-        }
+        self.track_owned(result);
         result
     }
 
     pub fn emit_tuple(&mut self, ty: TyId, elements: Vec<ValueId>) -> ValueId {
-        let ownership = self.ownership_for(ty);
-        let result = self.alloc_value(ty, ownership);
+        let result = self.alloc_value(ty, Ownership::Owned);
         for &v in &elements {
-            if self.body.value(v).ownership == Ownership::Owned {
-                self.consume(v);
-            }
+            self.consume(v);
         }
         self.push_inst(InstKind::Tuple { result, elements });
-        if ownership == Ownership::Owned {
-            self.track_owned(result);
-        }
+        self.track_owned(result);
         result
     }
 
     pub fn emit_enum_variant(&mut self, enum_ty: TyId, variant: VariantIdx, payload: Vec<ValueId>) -> ValueId {
-        let ownership = self.ownership_for(enum_ty);
-        let result = self.alloc_value(enum_ty, ownership);
+        let result = self.alloc_value(enum_ty, Ownership::Owned);
         for &v in &payload {
-            if self.body.value(v).ownership == Ownership::Owned {
-                self.consume(v);
-            }
+            self.consume(v);
         }
         self.push_inst(InstKind::Enum { result, enum_ty, variant, payload });
-        if ownership == Ownership::Owned {
-            self.track_owned(result);
-        }
+        self.track_owned(result);
         result
     }
 
     pub fn emit_struct_extract(&mut self, operand: ValueId, field: FieldIdx, result_ty: TyId) -> ValueId {
         let operand_ownership = self.body.value(operand).ownership;
-        let natural_ownership = self.ownership_for(result_ty);
-        // Extracting from @guaranteed: owned fields become @guaranteed
-        // (borrow propagation), trivial fields stay @none.
-        if operand_ownership == Ownership::Guaranteed && natural_ownership == Ownership::Owned {
+        if operand_ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
             self.push_inst(InstKind::StructExtract { result, operand, field });
             result
         } else {
-            let result = self.alloc_value(result_ty, natural_ownership);
-            self.push_inst(InstKind::StructExtract { result, operand, field });
-            if operand_ownership == Ownership::Owned {
-                self.consume(operand);
-            }
-            if natural_ownership == Ownership::Owned {
-                self.track_owned(result);
-            }
+            // Borrow → extract (@guaranteed) → copy (@owned). Operand stays alive
+            // for the tracker and further extractions.
+            let borrow = self.emit_begin_borrow(operand);
+            let field_ref = self.alloc_guaranteed(result_ty, borrow);
+            self.push_inst(InstKind::StructExtract { result: field_ref, operand: borrow, field });
+            let result = self.emit_copy_value(field_ref);
+            self.emit_end_borrow(borrow);
             result
         }
     }
 
     pub fn emit_tuple_extract(&mut self, operand: ValueId, index: u32, result_ty: TyId) -> ValueId {
         let operand_ownership = self.body.value(operand).ownership;
-        let natural_ownership = self.ownership_for(result_ty);
-        // Extracting from @guaranteed: owned fields become @guaranteed
-        // (borrow propagation), trivial fields stay @none.
-        if operand_ownership == Ownership::Guaranteed && natural_ownership == Ownership::Owned {
+        if operand_ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
             self.push_inst(InstKind::TupleExtract { result, operand, index });
             result
         } else {
-            let result = self.alloc_value(result_ty, natural_ownership);
-            self.push_inst(InstKind::TupleExtract { result, operand, index });
-            if operand_ownership == Ownership::Owned {
-                self.consume(operand);
-            }
-            if natural_ownership == Ownership::Owned {
-                self.track_owned(result);
-            }
+            // Borrow → extract (@guaranteed) → copy (@owned). Operand stays alive.
+            let borrow = self.emit_begin_borrow(operand);
+            let elem_ref = self.alloc_guaranteed(result_ty, borrow);
+            self.push_inst(InstKind::TupleExtract { result: elem_ref, operand: borrow, index });
+            let result = self.emit_copy_value(elem_ref);
+            self.emit_end_borrow(borrow);
             result
         }
     }
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
         let i32_ty = self.ctx.module.ty_arena.i32();
-        let result = self.alloc_value(i32_ty, Ownership::None);
+        let result = self.alloc_value(i32_ty, Ownership::Owned);
         self.push_inst(InstKind::Discriminant { result, operand });
+        self.track_owned(result);
         result
     }
 
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
         let i64_ty = self.ctx.module.ty_arena.i64();
-        let result = self.alloc_value(i64_ty, Ownership::None);
+        let result = self.alloc_value(i64_ty, Ownership::Owned);
         self.push_inst(InstKind::GlobalRef { result, entity });
+        self.track_owned(result);
         result
     }
 
     pub fn emit_uninit(&mut self, ty: TyId) -> ValueId {
         let ptr_ty = self.ctx.module.ty_arena.pointer(ty);
-        let result = self.alloc_value(ptr_ty, Ownership::None);
+        let result = self.alloc_value(ptr_ty, Ownership::Owned);
         self.push_inst(InstKind::Uninit { result, ty });
+        self.track_owned(result);
         result
     }
 
     pub fn emit_field_addr(&mut self, base: ValueId, ty: TyId, field: FieldIdx) -> ValueId {
         let ptr_ty = self.ctx.module.ty_arena.pointer(ty);
-        let result = self.alloc_value(ptr_ty, Ownership::None);
+        let result = self.alloc_value(ptr_ty, Ownership::Owned);
         self.push_inst(InstKind::FieldAddr { result, base, ty, field });
+        self.track_owned(result);
         result
     }
 
@@ -813,8 +684,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_load(&mut self, address: ValueId, ty: TyId) -> ValueId {
-        let result = self.alloc_value(ty, Ownership::None);
+        let result = self.alloc_value(ty, Ownership::Owned);
         self.push_inst(InstKind::Load { result, address });
+        self.track_owned(result);
         result
     }
 
@@ -834,6 +706,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_apply_partial(&mut self, func: Entity, captures: Vec<ValueId>, result_ty: TyId) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);
+        for &v in &captures {
+            self.consume(v);
+        }
         self.push_inst(InstKind::ApplyPartial { result, func, captures });
         self.track_owned(result);
         result
@@ -863,11 +738,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 borrows.push(cv);
             }
         }
+        // Consuming args are consumed by the call — remove from scope tracking
+        let consuming: Vec<ValueId> = args.iter()
+            .filter(|a| a.convention == ParamConvention::Consuming)
+            .map(|a| a.value)
+            .collect();
         self.push_inst(InstKind::Call {
             result: Some(result),
             callee,
             args,
         });
+        for v in consuming {
+            self.consume(v);
+        }
         for borrow_val in borrows {
             self.emit_end_borrow(borrow_val);
         }
@@ -877,9 +760,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.set_terminator(TerminatorKind::Panic("noreturn".to_string()));
             return result;
         }
-        if ownership == Ownership::Owned {
-            self.track_owned(result);
-        }
+        self.track_owned(result);
         result
     }
 
@@ -887,6 +768,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_call_void(&mut self, callee: Callee, args: Vec<CallArg>) {
         let mut borrows: Vec<ValueId> = args.iter()
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
+            .map(|a| a.value)
+            .collect();
+        // Consuming args are consumed by the call — remove from scope tracking
+        let consuming: Vec<ValueId> = args.iter()
+            .filter(|a| a.convention == ParamConvention::Consuming)
             .map(|a| a.value)
             .collect();
         if let Some(cv) = callee.value() {
@@ -899,6 +785,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             callee,
             args,
         });
+        for v in consuming {
+            self.consume(v);
+        }
         for borrow_val in borrows {
             self.emit_end_borrow(borrow_val);
         }
@@ -946,10 +835,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_panic(&mut self, msg: &str) {
         self.set_terminator(TerminatorKind::Panic(msg.to_string()));
-    }
-
-    pub fn emit_unreachable(&mut self) {
-        self.set_terminator(TerminatorKind::Unreachable);
     }
 
     // ================================================================
@@ -1005,16 +890,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// Lower an expression for a consuming context — moves ownership
+    /// instead of copying. For SSA locals, returns the value directly
+    /// and consumes it from scope (no bitwise copy_value). Var locals
+    /// and complex expressions fall back to lower_expr.
+    pub fn lower_expr_for_consuming(&mut self, expr_id: HirExprId) -> ValueId {
+        let expr = self.hir.exprs[expr_id].clone();
+        match &expr {
+            HirExpr::Local(hir_local, _) if !self.var_locals.contains(hir_local) => {
+                let val = self.map_local(*hir_local);
+                self.consume(val);
+                val
+            }
+            _ => self.lower_expr(expr_id),
+        }
+    }
+
     // ================================================================
     // Value transfer: the OSSA copy/move decision
     // ================================================================
 
     /// Transfer a value for use — conservative: always copies @owned.
     /// The copy_optimize pass will eliminate unnecessary copies later.
+    /// Transfer a value for use — copies @owned values.
     pub fn emit_value_use(&mut self, value: ValueId) -> ValueId {
         let ownership = self.body.value(value).ownership;
         match ownership {
-            Ownership::None => value,
             Ownership::Owned => self.emit_copy_value(value),
             Ownership::Guaranteed => value,
         }
@@ -1036,12 +937,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// Prepare a value for a call argument with a given convention.
-    /// @none values pass through directly — no borrow/copy needed.
     pub fn prepare_call_arg(&mut self, value: ValueId, convention: ParamConvention) -> CallArg {
-        let ownership = self.body.value(value).ownership;
         match convention {
             ParamConvention::Borrow => {
-                // Always emit BeginBorrow so codegen uniformly gets an address.
                 let borrow = self.emit_begin_borrow(value);
                 CallArg { value: borrow, convention }
             }
@@ -1050,13 +948,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 CallArg { value: borrow, convention }
             }
             ParamConvention::Consuming => {
-                if ownership == Ownership::Owned {
-                    let copy = self.emit_copy_value(value);
-                    self.consume(copy);
-                    CallArg { value: copy, convention }
-                } else {
-                    CallArg { value, convention }
-                }
+                let copy = self.emit_copy_value(value);
+                self.consume(copy);
+                CallArg { value: copy, convention }
             }
         }
     }

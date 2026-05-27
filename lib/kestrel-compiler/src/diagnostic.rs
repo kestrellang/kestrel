@@ -397,6 +397,61 @@ pub fn mono_verify_error_to_diagnostic(
         ])
 }
 
+// ===== MIR-3 diagnostics =====
+
+pub fn mir3_verify_error_to_diagnostic(
+    error: &kestrel_mir_3::verify::VerifyError,
+    world: &World,
+) -> Diagnostic<usize> {
+    let span = resolve_span(error.span.as_ref(), error.entity, world);
+
+    let location = match error.inst {
+        Some(i) => format!(" at bb{}[{}]", error.block.index(), i),
+        None => format!(" at bb{}", error.block.index()),
+    };
+
+    Diagnostic::bug()
+        .with_message(format!(
+            "internal compiler error: OSSA verify failed in '{}'{}: {}",
+            error.func_name, location, error.message
+        ))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range())
+                .with_message(&error.message),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
+}
+
+pub fn mir3_mono_verify_error_to_diagnostic(
+    error: &kestrel_mir_3::mono::verify::MonoVerifyError,
+    module: &kestrel_mir_3::mono::MonoModule,
+    world: &World,
+) -> Diagnostic<usize> {
+    let func = &module.functions[error.func_idx];
+    let span = resolve_span(error.span.as_ref(), func.source, world);
+
+    let location = match (error.block, error.inst) {
+        (Some(b), Some(i)) => format!(" at bb{}[{}]", b.index(), i),
+        (Some(b), None) => format!(" at bb{}", b.index()),
+        _ => String::new(),
+    };
+
+    Diagnostic::bug()
+        .with_message(format!(
+            "internal compiler error: post-mono verify failed in '{}'{}: {}",
+            func.name, location, error.message
+        ))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range())
+                .with_message(&error.message),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
+}
+
 // ===== File provider =====
 
 /// File provider backed by the ECS world.

@@ -1,7 +1,7 @@
 // Pretty-printer for OSSA IR bodies.
 //
 // Produces textual output like:
-//   bb0(%v0: @owned String, %v1: @none Int64):
+//   bb0(%v0: @owned String, %v1: @owned Int64):
 //       %v2 = copy_value %v0
 //       ...
 //       return %v2
@@ -19,9 +19,17 @@ use crate::{BlockId, MirModule, TyId, ValueId};
 
 /// Pretty-print the entire MIR module — all functions with bodies.
 pub fn display_module(module: &MirModule) -> String {
+    display_module_filtered(module, "")
+}
+
+/// Pretty-print functions whose name contains `filter` (empty = all).
+pub fn display_module_filtered(module: &MirModule, filter: &str) -> String {
     let mut out = String::new();
     for (i, func) in module.functions.iter().enumerate() {
         if let Some(body) = &func.body {
+            if !filter.is_empty() && !func.name.contains(filter) {
+                continue;
+            }
             if i > 0 {
                 out.push('\n');
             }
@@ -98,7 +106,6 @@ fn fmt_ownership(o: Ownership) -> &'static str {
     match o {
         Ownership::Owned => "@owned",
         Ownership::Guaranteed => "@guaranteed",
-        Ownership::None => "@none",
     }
 }
 
@@ -375,7 +382,14 @@ fn fmt_inst(out: &mut String, kind: &InstKind, body: &OssaBody, arena: &TyArena,
         // -- Calls --
         InstKind::Call { result, callee, args } => {
             let callee_str = fmt_callee(callee, arena, module);
-            let arg_strs: Vec<_> = args.iter().map(|a| fmt_value(a.value)).collect();
+            let arg_strs: Vec<_> = args.iter().map(|a| {
+                let conv = match a.convention {
+                    crate::ty::ParamConvention::Borrow => "@borrow ",
+                    crate::ty::ParamConvention::MutBorrow => "@mut_borrow ",
+                    crate::ty::ParamConvention::Consuming => "",
+                };
+                format!("{}{}", conv, fmt_value(a.value))
+            }).collect();
             match result {
                 Some(r) => {
                     write!(

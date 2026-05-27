@@ -65,7 +65,6 @@ impl OssaBuilder {
     pub fn new_value(&mut self, ty: TyId, ownership: Ownership) -> ValueId {
         let def = match ownership {
             Ownership::Owned => ValueDef::owned(ty),
-            Ownership::None => ValueDef::none(ty),
             Ownership::Guaranteed => panic!("use new_guaranteed_value for @guaranteed"),
         };
         self.body.alloc_value(def)
@@ -94,7 +93,6 @@ impl OssaBuilder {
         for &(ty, ownership) in params {
             let def = match ownership {
                 Ownership::Owned => ValueDef::owned(ty),
-                Ownership::None => ValueDef::none(ty),
                 Ownership::Guaranteed => panic!("use add_guaranteed_block_param for @guaranteed"),
             };
             let val = self.body.alloc_value(def);
@@ -159,7 +157,7 @@ impl OssaBuilder {
     }
 
     pub fn emit_load(&mut self, address: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.new_value(result_ty, Ownership::None);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::Load { result, address });
         result
     }
@@ -202,39 +200,39 @@ impl OssaBuilder {
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
         let i32_ty = self.i32();
-        let result = self.new_value(i32_ty, Ownership::None);
+        let result = self.new_value(i32_ty, Ownership::Owned);
         self.emit(InstKind::Discriminant { result, operand });
         result
     }
 
     pub fn emit_op1(&mut self, op: Op, arg: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.new_value(result_ty, Ownership::None);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::Op1 { result, op, arg });
         result
     }
 
     pub fn emit_op2(&mut self, op: Op, lhs: ValueId, rhs: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.new_value(result_ty, Ownership::None);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::Op2 { result, op, lhs, rhs });
         result
     }
 
     pub fn emit_op3(&mut self, op: Op, a: ValueId, b: ValueId, c: ValueId, result_ty: TyId) -> ValueId {
-        let result = self.new_value(result_ty, Ownership::None);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::Op3 { result, op, a, b, c });
         result
     }
 
     pub fn emit_literal(&mut self, value: Immediate) -> ValueId {
         let ty = value.ty(&mut self.module.ty_arena);
-        let result = self.new_value(ty, Ownership::None);
+        let result = self.new_value(ty, Ownership::Owned);
         self.emit(InstKind::Literal { result, value });
         result
     }
 
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
         let i64_ty = self.i64();
-        let result = self.new_value(i64_ty, Ownership::None);
+        let result = self.new_value(i64_ty, Ownership::Owned);
         self.emit(InstKind::GlobalRef { result, entity });
         result
     }
@@ -334,14 +332,14 @@ impl OssaBuilder {
 
     pub fn emit_field_addr(&mut self, base: ValueId, ty: TyId, field: FieldIdx) -> ValueId {
         let ptr_ty = self.pointer(ty);
-        let result = self.new_value(ptr_ty, Ownership::None);
+        let result = self.new_value(ptr_ty, Ownership::Owned);
         self.emit(InstKind::FieldAddr { result, base, ty, field });
         result
     }
 
     pub fn emit_uninit(&mut self, ty: TyId) -> ValueId {
         let ptr_ty = self.pointer(ty);
-        let result = self.new_value(ptr_ty, Ownership::None);
+        let result = self.new_value(ptr_ty, Ownership::Owned);
         self.emit(InstKind::Uninit { result, ty });
         result
     }

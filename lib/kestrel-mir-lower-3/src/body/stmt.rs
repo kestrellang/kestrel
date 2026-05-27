@@ -33,10 +33,6 @@ impl OssaBodyCtx<'_, '_> {
                         self.track_var(addr, ty);
                     } else {
                         self.local_map.insert(*local, init_val);
-                        let ownership = self.body.value(init_val).ownership;
-                        if ownership == kestrel_mir_3::value::Ownership::None {
-                            self.track_none(init_val);
-                        }
                     }
                 } else if is_var {
                     // var with no initializer: allocate stack slot, leave uninit.

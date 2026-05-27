@@ -3,7 +3,7 @@ use kestrel_hecs::Entity;
 
 use crate::item::function::ExternInfo;
 use crate::item::static_def::FileConstantData;
-use crate::item::{Layout, TypeInfo};
+use crate::item::TypeInfo;
 use crate::op::IntBits;
 use crate::ty::{ParamConvention, TyArena};
 use crate::{Immediate, MonoFuncId, TyId};

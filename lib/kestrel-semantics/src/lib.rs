@@ -645,15 +645,6 @@ fn nominal_copy_semantics_impl(
         };
     }
 
-    for (child, ty) in &child_types {
-        if hir_type_copy_semantics(ctx, ty, entity, root) == CopySemantics::Cloneable {
-            return CopySemanticsInfo {
-                semantics: CopySemantics::NotCopyable,
-                reason: CopySemanticsReason::CloneableChildRequiresConformance(*child),
-            };
-        }
-    }
-
     CopySemanticsInfo::copyable()
 }
 

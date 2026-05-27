@@ -41,6 +41,9 @@ pub enum FunctionKind {
     DropShim {
         nominal: Entity,
     },
+    CloneShim {
+        nominal: Entity,
+    },
     ModuleInit,
 }
 

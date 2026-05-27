@@ -22,7 +22,7 @@
 
 module Life
 
-import Sdl.(Event)
+import sdl.(Event)
 
 func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Config) where I: InputManager, R: GameRenderer {
     var state = GameState(fromConfig: cfg);

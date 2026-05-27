@@ -14,7 +14,6 @@ use kestrel_mir_3::item::function::{FunctionDef, FunctionKind};
 use kestrel_mir_3::item::static_def::{FileConstantData, StaticDef};
 use kestrel_mir_3::{MirTy, TyId};
 
-use crate::body;
 use crate::context::LowerCtx;
 use crate::ty::resolve_type_annotation;
 
@@ -116,7 +115,7 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
         );
         let tmp = body.alloc_value(match ownership {
             Ownership::Owned => ValueDef::owned(static_ty),
-            _ => ValueDef::none(static_ty),
+            _ => ValueDef::owned(static_ty),
         });
         body.block_mut(entry).insts.push(Instruction::new(InstKind::Call {
             result: Some(tmp),
@@ -126,7 +125,7 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
 
         // addr = global_ref static_entity
         let ptr_ty = ctx.module.ty_arena.pointer(static_ty);
-        let addr = body.alloc_value(ValueDef::none(ptr_ty));
+        let addr = body.alloc_value(ValueDef::owned(ptr_ty));
         body.block_mut(entry).insts.push(Instruction::new(
             InstKind::GlobalRef { result: addr, entity: static_entity },
         ));
@@ -135,10 +134,14 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
         body.block_mut(entry).insts.push(Instruction::new(
             InstKind::StoreInit { address: addr, value: tmp },
         ));
+        // Consume the address pointer (trivial — expand pass removes this)
+        body.block_mut(entry).insts.push(Instruction::new(
+            InstKind::DestroyValue { operand: addr },
+        ));
     }
 
     // return ()
-    let unit_val = body.alloc_value(ValueDef::none(unit_ty));
+    let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
     body.block_mut(entry).insts.push(Instruction::new(
         InstKind::Literal { result: unit_val, value: Immediate::unit() },
     ));
@@ -146,32 +149,6 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
 
     ctx.module.functions[func_idx].body = Some(body);
     func_idx
-}
-
-/// Prepend a call to the init function at the start of `main`'s entry block.
-fn inject_init_call_into_main(ctx: &mut LowerCtx, init_func_idx: usize) {
-    use kestrel_mir_3::callee::Callee;
-    use kestrel_mir_3::inst::{InstKind, Instruction};
-
-    let main_idx = ctx
-        .module
-        .functions
-        .iter()
-        .enumerate()
-        .find(|(_, f)| f.name.split('.').next_back() == Some("main"))
-        .map(|(i, _)| i);
-    let Some(main_idx) = main_idx else { return };
-
-    let init_entity = ctx.module.functions[init_func_idx].entity;
-    let main_func = &mut ctx.module.functions[main_idx];
-    let Some(body) = main_func.body.as_mut() else { return };
-
-    let call = Instruction::new(InstKind::Call {
-        result: None,
-        callee: Callee::direct(init_entity),
-        args: vec![],
-    });
-    body.block_mut(body.entry).insts.insert(0, call);
 }
 
 fn extract_file_constant(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<FileConstantData> {
