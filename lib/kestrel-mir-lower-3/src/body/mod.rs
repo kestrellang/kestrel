@@ -236,6 +236,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         self.body.param_count = params_len;
 
+        // Promote consuming params to var_locals so mutating method calls
+        // (e.g. self.next() in `consuming func collect()`) modify in place.
+        // Done after param_count is set so codegen maps params correctly.
+        for (i, (hir_id, _local)) in locals.iter().enumerate() {
+            if i >= params_len { break; }
+            let convention = param_conventions.get(i).copied()
+                .unwrap_or(ParamConvention::Borrow);
+            if convention == ParamConvention::Consuming {
+                let val = self.local_map[hir_id];
+                let ty = self.resolve_local_type(*hir_id);
+                let addr = self.emit_uninit(ty);
+                self.emit_store_init(addr, val);
+                self.consume(val);
+                self.local_map.insert(*hir_id, addr);
+                self.var_locals.insert(*hir_id);
+            }
+        }
+
         // Lower top-level statements
         for &stmt_id in &statements {
             self.lower_stmt(stmt_id);

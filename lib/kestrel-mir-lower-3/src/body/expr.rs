@@ -332,7 +332,10 @@ impl OssaBodyCtx<'_, '_> {
 
         let field_idx = struct_entity
             .and_then(|se| self.ctx.resolve_field_idx(se, field_name))
-            .unwrap_or(FieldIdx::new(0));
+            .unwrap_or_else(|| {
+                eprintln!("ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
+                FieldIdx::new(0)
+            });
 
         let base_val = self.lower_expr_for_borrow(base);
         self.emit_struct_extract(base_val, field_idx, result_ty)
@@ -529,7 +532,10 @@ impl OssaBodyCtx<'_, '_> {
                 };
                 let field_idx = struct_entity
                     .and_then(|e| self.ctx.resolve_field_idx(e, &field_name))
-                    .unwrap_or(kestrel_mir_3::FieldIdx::new(0));
+                    .unwrap_or_else(|| {
+                        eprintln!("ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
+                        kestrel_mir_3::FieldIdx::new(0)
+                    });
 
                 if let Some(base_addr) = self.try_field_addr_chain(base) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);

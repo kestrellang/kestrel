@@ -283,15 +283,28 @@ impl OssaBodyCtx<'_, '_> {
             let mir_val = self.map_local(hir_local);
             let cap_ty = self.resolve_local_type(hir_local);
             if self.is_copy_type(cap_ty) {
-                // Copy capture: use the value (copies if @owned)
-                let use_val = self.emit_value_use(mir_val);
-                captures.push(use_val);
+                // Copy capture: snapshot the value.
+                // Var locals are address-based — load the value from the address
+                // so the closure captures the value, not the raw address pointer.
+                if self.var_locals.contains(&hir_local) {
+                    let loaded = self.emit_copy_addr(mir_val, cap_ty);
+                    captures.push(loaded);
+                } else {
+                    let use_val = self.emit_value_use(mir_val);
+                    captures.push(use_val);
+                }
             } else {
                 // Ref capture: copy value into a stack slot, capture the address.
+                // Var locals are address-based — load first so we copy the value,
+                // not the raw address pointer.
                 let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
                 let one = self.emit_literal(Immediate::i64(1));
                 let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
-                let copy = self.emit_copy_value(mir_val);
+                let copy = if self.var_locals.contains(&hir_local) {
+                    self.emit_copy_addr(mir_val, cap_ty)
+                } else {
+                    self.emit_copy_value(mir_val)
+                };
                 self.emit_store_init(addr, copy);
                 captures.push(addr);
             }

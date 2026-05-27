@@ -1,14 +1,15 @@
 pub mod args;
 pub mod intrinsic;
 
-use kestrel_ast_builder::{Callable, Gettable, NodeKind, Static};
+use kestrel_ast_builder::{Callable, Gettable, InitEffect, NodeKind, Static};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_hir::ty::HirTy;
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
-use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId};
+use kestrel_mir_3::terminator::{SwitchArm, SwitchCase};
+use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx};
 
 use super::OssaBodyCtx;
 use crate::ty::lower_type;
@@ -429,6 +430,11 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
         result_ty: TyId,
     ) -> ValueId {
+        let init_effect = self.ctx.world.get::<InitEffect>(entity).cloned();
+        if init_effect.is_some() {
+            return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect.unwrap());
+        }
+
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
         let self_addr = self.emit_op1(kestrel_mir_3::Op::StackAlloc(result_ty), one, ptr_ty);
@@ -465,6 +471,159 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             self.emit_load(self_addr, result_ty)
         }
+    }
+
+    /// Failable/throwing init: the init body writes fields into `self` and
+    /// returns `Optional[()]` or `Result[(), E]`. The call site unwraps
+    /// `Optional[T]` → allocates `Pointer[T]`, calls the init, then branches
+    /// on the return discriminant to wrap the result.
+    fn emit_failable_init_call(
+        &mut self,
+        entity: Entity,
+        type_args: Vec<TyId>,
+        args: &[HirCallArg],
+        result_ty: TyId,
+        effect: InitEffect,
+    ) -> ValueId {
+        // result_ty is Optional[T] or Result[T, E]. Extract inner struct type.
+        let (inner_ty, enum_entity, success_name, failure_name) = match &effect {
+            InitEffect::Failable => {
+                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
+                    MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+                    _ => panic!("failable init result_ty must be Optional[T]"),
+                };
+                (inner, entity, "Some", "None")
+            }
+            InitEffect::Throwing => {
+                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
+                    MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+                    _ => panic!("throwing init result_ty must be Result[T, E]"),
+                };
+                (inner, entity, "Ok", "Err")
+            }
+        };
+
+        // Allocate self as Pointer[T], not Pointer[Optional[T]]
+        let ptr_ty = self.ctx.module.ty_arena.pointer(inner_ty);
+        let one = self.emit_literal(Immediate::i64(1));
+        let self_addr = self.emit_op1(kestrel_mir_3::Op::StackAlloc(inner_ty), one, ptr_ty);
+
+        // Build the init return type: Optional[()] or Result[(), E]
+        let unit_ty = self.ctx.module.ty_arena.unit();
+        let init_ret_ty = match &effect {
+            InitEffect::Failable => {
+                self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty])
+            }
+            InitEffect::Throwing => {
+                let err_ty = match self.ctx.module.ty_arena.get(result_ty) {
+                    MirTy::Named { type_args, .. } if type_args.len() >= 2 => type_args[1],
+                    _ => unit_ty,
+                };
+                self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty, err_ty])
+            }
+        };
+
+        let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_method_key(entity);
+            let convs = self.collect_witness_conventions(protocol, &key);
+            let callee = Callee::Witness {
+                protocol,
+                method: key,
+                self_type: inner_ty,
+                method_type_args: type_args,
+            };
+            (convs, callee)
+        } else {
+            let convs = self.collect_conventions(entity);
+            let callee = Callee::direct_with_args(entity, type_args, None);
+            (convs, callee)
+        };
+
+        let mut call_args = vec![CallArg {
+            value: self_addr,
+            convention: ParamConvention::MutBorrow,
+        }];
+        call_args.extend(self.lower_call_args(args, &conventions, 1));
+        self.expand_default_args(&mut call_args, entity, args.len(), &conventions, 1);
+
+        // Call returns Optional[()] or Result[(), E]
+        let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
+
+        // Resolve variant indices
+        let success_idx = self.ctx.resolve_variant_idx(enum_entity, success_name)
+            .unwrap_or(VariantIdx::new(0));
+        let failure_idx = self.ctx.resolve_variant_idx(enum_entity, failure_name)
+            .unwrap_or(VariantIdx::new(1));
+
+        // Extract discriminant as I32 for switching (same pattern as match lowering)
+        let disc = self.emit_discriminant(init_ret);
+
+        // Set up branching region — thread live values through both arms
+        let saved_tracker = self.tracker.clone();
+        self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
+        let live_vals = self.tracker.values();
+        let descs = self.tracker.descs();
+
+        let result_ownership = self.ownership_for(result_ty);
+        let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, result_ownership)];
+        merge_descs.extend(&descs);
+        let (success_block, success_params) = self.new_block_with_params(&descs);
+        let (failure_block, failure_params) = self.new_block_with_params(&descs);
+        let (merge_block, merge_param_vals) = self.new_block_with_params(&merge_descs);
+
+        self.emit_switch(disc, vec![
+            SwitchArm { pattern: SwitchCase::Variant(success_idx), target: success_block, args: live_vals.clone() },
+            SwitchArm { pattern: SwitchCase::Variant(failure_idx), target: failure_block, args: live_vals.clone() },
+        ]);
+
+        let snapshot = self.snapshot_scope();
+
+        // Find self_addr's position in live_vals so we can use the rebound version
+        let self_addr_pos = live_vals.iter().position(|&v| v == self_addr);
+
+        // -- Success: take self from the pointer, wrap in Some/Ok --
+        self.switch_to(success_block);
+        self.rebind_scope_values(&live_vals, &success_params);
+        let rebound_self_addr = self_addr_pos
+            .map(|pos| success_params[pos])
+            .unwrap_or(self_addr);
+        let self_val = self.emit_take(rebound_self_addr, inner_ty);
+        let wrapped = self.emit_enum_variant(result_ty, success_idx, vec![self_val]);
+        let tracker_vals = self.tracker.values();
+        let mut args = vec![wrapped];
+        args.extend(&tracker_vals);
+        self.emit_jump(merge_block, args);
+
+        // -- Failure: emit None/Err, destroy the uninitialized self allocation --
+        self.restore_scope(&snapshot);
+        self.switch_to(failure_block);
+        self.rebind_scope_values(&live_vals, &failure_params);
+        let none_val = if failure_name == "None" {
+            self.emit_enum_variant(result_ty, failure_idx, vec![])
+        } else {
+            // Throwing: extract error payload from init_ret and re-wrap
+            let unit = self.emit_literal(Immediate::unit());
+            self.emit_enum_variant(result_ty, failure_idx, vec![unit])
+        };
+        let tracker_vals = self.tracker.values();
+        let mut args = vec![none_val];
+        args.extend(&tracker_vals);
+        self.emit_jump(merge_block, args);
+
+        // -- Merge --
+        self.restore_scope(&snapshot);
+        self.switch_to(merge_block);
+        let merge_live = &merge_param_vals[1..];
+        self.rebind_scope_values(&live_vals, merge_live);
+        let result_param = merge_param_vals[0];
+        if result_ownership == Ownership::Owned {
+            self.track_owned(result_param);
+        }
+
+        self.tracker = saved_tracker;
+        self.tracker.rebind(&live_vals, merge_live);
+        result_param
     }
 
     fn lower_indirect_call(
