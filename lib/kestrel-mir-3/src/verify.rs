@@ -568,7 +568,12 @@ impl<'a> BlockVerifier<'a> {
             // -- Computation (non-consuming reads of scalar operands) --
             InstKind::Op1 { result, op: _, arg } => {
                 self.assert_readable(*arg, idx);
-                self.define_owned(*result);
+                if self.body.value(*result).ownership == Ownership::Owned {
+                    self.define_owned(*result);
+                } else {
+                    let source = self.body.value(*result).borrow_source.unwrap_or(*arg);
+                    self.borrows.insert(*result, BorrowInfo { source, is_mut: false });
+                }
             }
             InstKind::Op2 { result, op, lhs, rhs } => {
                 self.assert_readable(*lhs, idx);
@@ -833,9 +838,10 @@ impl<'a> BlockVerifier<'a> {
             .map(|(&v, _)| v)
             .collect();
         for v in unconsumed {
+            let vd = &self.body.values[v.index()];
             self.err(
                 None,
-                format!("@owned value {:?} is live at block exit but never consumed", v),
+                format!("@owned value {:?} is live at block exit but never consumed (ty={:?}, own={:?})", v, vd.ty, vd.ownership),
             );
         }
 

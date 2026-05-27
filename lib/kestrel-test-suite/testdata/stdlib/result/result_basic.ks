@@ -18,11 +18,11 @@ module Test
             // Test unwrap on Ok
             if ok.unwrap() != 42 { return 5 }
 
-            // Test unwrapOr on Ok (returns contained value)
-            if ok.unwrapOr(0) != 42 { return 6 }
+            // Test unwrap(or:) on Ok (returns contained value)
+            if ok.unwrap(or: 0) != 42 { return 6 }
 
-            // Test unwrapOr on Err (returns default)
-            if err.unwrapOr(0) != 0 { return 7 }
+            // Test unwrap(or:) on Err (returns default)
+            if err.unwrap(or: 0) != 0 { return 7 }
 
             // Test unwrapErr on Err
             if err.unwrapErr() != 99 { return 8 }

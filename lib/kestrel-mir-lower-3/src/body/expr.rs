@@ -170,7 +170,14 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     self.emit_literal(Immediate::unit())
                 };
-                // Destroy ALL scoped values (all scopes) before returning
+                // @guaranteed values can't be returned — copy to @owned first
+                let ret_val = if self.body.value(ret_val).ownership == kestrel_mir_3::value::Ownership::Guaranteed {
+                    let owned = self.emit_copy_value(ret_val);
+                    self.emit_end_borrow(ret_val);
+                    owned
+                } else {
+                    ret_val
+                };
                 self.destroy_scopes_to_depth(0, &[ret_val]);
                 self.emit_ret(ret_val);
                 self.emit_literal(Immediate::unit())

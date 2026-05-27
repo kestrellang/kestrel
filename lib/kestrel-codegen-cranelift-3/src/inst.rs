@@ -19,18 +19,23 @@ use crate::ty::{float_bits_to_cl, int_bits_to_cl, TypeCache, TypeRepr};
 use crate::{imm, mem};
 
 /// Returns true if the instruction diverges (call to a !-returning function).
+// Operand contract legend (enforced by verify_value_repr):
+//   VALUE  — the scalar/aggregate data itself (resolve_scalar)
+//   ADDR   — a memory address to load from / store to (get_value)
+//   RAW    — forwarded as-is, custom ownership handling inline
 pub fn compile_inst(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
     kind: &InstKind,
 ) -> Result<bool, CodegenError> {
     match kind {
-        // -- Value lifecycle --
+        // operand: VALUE → result: @owned value
         InstKind::MoveValue { result, operand } => {
             let val = fc.resolve_scalar(builder, *operand);
             fc.map_value(builder, *result, val);
         }
 
+        // operand: RAW (custom @guaranteed handling) → result: @owned value
         InstKind::CopyValue { result, operand } => {
             let val = fc.get_value(builder, *operand);
             let ty = fc.body.values[result.index()].ty;
@@ -54,11 +59,9 @@ pub fn compile_inst(
             }
         }
 
-        InstKind::DestroyValue { .. } => {
-            // Post-expand: should have been replaced with Call(shim) or removed.
-        }
+        InstKind::DestroyValue { .. } => {}
 
-        // -- Borrowing --
+        // operand: RAW (custom spill for @owned scalars) → result: ADDR
         InstKind::BeginBorrow { result, operand }
         | InstKind::BeginMutBorrow { result, operand } => {
             let val = fc.get_value(builder, *operand);
@@ -68,15 +71,12 @@ pub fn compile_inst(
             let repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             match repr {
                 _ if is_guaranteed => {
-                    // @guaranteed values are already pointers (ByRef)
                     fc.map_value(builder, *result, val);
                 }
                 TypeRepr::Aggregate { .. } | TypeRepr::Zst => {
-                    // Aggregates are already pointers
                     fc.map_value(builder, *result, val);
                 }
                 TypeRepr::Scalar(_) => {
-                    // Spill @owned scalar to stack to take its address
                     let ptr_ty = fc.ctx.ptr_ty;
                     let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
                     builder.ins().store(MemFlags::new(), val, slot, Offset32::new(0));
@@ -85,17 +85,16 @@ pub fn compile_inst(
             }
         }
 
-        InstKind::EndBorrow { .. } | InstKind::EndMutBorrow { .. } => {
-            // No-op at codegen
-        }
+        InstKind::EndBorrow { .. } | InstKind::EndMutBorrow { .. } => {}
 
+        // address: ADDR → result: ADDR
         InstKind::BeginBorrowAddr { result, address, .. }
         | InstKind::BeginMutBorrowAddr { result, address, .. } => {
             let addr = fc.get_value(builder, *address);
             fc.map_value(builder, *result, addr);
         }
 
-        // -- Memory access --
+        // address: ADDR → result: VALUE
         InstKind::Load { result, address } => {
             let addr = fc.get_value(builder, *address);
             let ty = fc.body.values[result.index()].ty;
@@ -104,6 +103,7 @@ pub fn compile_inst(
             fc.map_value(builder, *result, val);
         }
 
+        // address: ADDR → result: VALUE (copy of pointed-to data)
         InstKind::CopyAddr { result, address, ty } => {
             let addr = fc.get_value(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -121,6 +121,7 @@ pub fn compile_inst(
             }
         }
 
+        // address: ADDR → result: VALUE (destructive read)
         InstKind::Take { result, address, ty } => {
             let addr = fc.get_value(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -128,6 +129,7 @@ pub fn compile_inst(
             fc.map_value(builder, *result, val);
         }
 
+        // address: ADDR, value: VALUE → writes value to address
         InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
             let addr = fc.get_value(builder, *address);
             let val = fc.resolve_scalar(builder, *value);
@@ -136,11 +138,9 @@ pub fn compile_inst(
             mem::store_to_repr(builder, repr, addr, val);
         }
 
-        InstKind::DestroyAddr { .. } => {
-            // Post-expand: no-op
-        }
+        InstKind::DestroyAddr { .. } => {}
 
-        // -- Discriminant --
+        // operand: RAW (custom @guaranteed handling) → result: discriminant int
         InstKind::Discriminant { result, operand } => {
             let base = fc.get_value(builder, *operand);
             let operand_ty = fc.body.values[operand.index()].ty;
@@ -150,11 +150,9 @@ pub fn compile_inst(
             let disc_width = discriminant_width(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
             let val = match repr {
                 TypeRepr::Scalar(_) if is_guaranteed => {
-                    // @guaranteed scalar enum: base is a pointer, load the value first
                     builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0))
                 }
                 TypeRepr::Scalar(_) => {
-                    // Scalar enum: the value IS the discriminant, just narrow
                     let actual = builder.func.dfg.value_type(base);
                     if actual == disc_width {
                         base
@@ -165,20 +163,29 @@ pub fn compile_inst(
                     }
                 }
                 _ => {
-                    // Aggregate enum: load discriminant from offset 0
                     builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0))
                 }
             };
             fc.map_value(builder, *result, val);
         }
 
-        // -- Computation --
+        // arg: VALUE → result: @owned scalar (or @guaranteed for PtrRead)
         InstKind::Op1 { result, op, arg } => {
-            let a = fc.resolve_scalar(builder, *arg);
-            let val = compile_op1(fc, builder, *op, a)?;
-            fc.map_value(builder, *result, val);
+            let result_is_guaranteed = fc.body.values[result.index()].ownership
+                == kestrel_mir_3::value::Ownership::Guaranteed;
+            if result_is_guaranteed {
+                // @guaranteed PtrRead: pass the address through without loading.
+                // CopyValue downstream handles the actual load/clone.
+                let a = fc.resolve_scalar(builder, *arg);
+                fc.map_value(builder, *result, a);
+            } else {
+                let a = fc.resolve_scalar(builder, *arg);
+                let val = compile_op1(fc, builder, *op, a)?;
+                fc.map_value(builder, *result, val);
+            }
         }
 
+        // lhs, rhs: VALUE → result: @owned scalar
         InstKind::Op2 { result, op, lhs, rhs } => {
             let l = fc.resolve_scalar(builder, *lhs);
             let r = fc.resolve_scalar(builder, *rhs);
@@ -186,6 +193,7 @@ pub fn compile_inst(
             fc.map_value(builder, *result, val);
         }
 
+        // a, b, c: VALUE → result: @owned scalar
         InstKind::Op3 { result, op, a, b, c } => {
             let va = fc.resolve_scalar(builder, *a);
             let vb = fc.resolve_scalar(builder, *b);
@@ -194,12 +202,13 @@ pub fn compile_inst(
             fc.map_value(builder, *result, val);
         }
 
-        // -- Constants --
+        // result: @owned literal
         InstKind::Literal { result, value } => {
             let val = imm::compile_immediate(fc.ctx, builder, &value.kind)?;
             fc.map_value(builder, *result, val);
         }
 
+        // result: ADDR (global data pointer)
         InstKind::GlobalRef { result, entity } => {
             let ptr_ty = fc.ctx.ptr_ty;
             let data_id = fc.ctx.static_data.get(entity).ok_or_else(|| {
@@ -210,43 +219,49 @@ pub fn compile_inst(
             fc.map_value(builder, *result, addr);
         }
 
-        // -- Aggregate construction --
+        // fields: VALUE each → result: @owned aggregate/scalar
         InstKind::Struct { result, ty, fields } => {
             let val = compile_struct(fc, builder, *ty, fields)?;
             fc.map_value(builder, *result, val);
         }
 
+        // elements: VALUE each → result: @owned aggregate
         InstKind::Tuple { result, elements } => {
             let val = compile_tuple(fc, builder, elements)?;
             fc.map_value(builder, *result, val);
         }
 
+        // payload: VALUE each → result: @owned enum
         InstKind::Enum { result, enum_ty, variant, payload } => {
             let val = compile_enum(fc, builder, *enum_ty, *variant, payload)?;
             fc.map_value(builder, *result, val);
         }
 
+        // elements: VALUE each → result: @owned aggregate
         InstKind::Array { result, element_ty, elements } => {
             let val = compile_array(fc, builder, *element_ty, elements)?;
             fc.map_value(builder, *result, val);
         }
 
+        // captures: VALUE each → result: @owned closure pair
         InstKind::ApplyPartial { result, func, captures } => {
             let val = compile_apply_partial(fc, builder, *func, captures)?;
             fc.map_value(builder, *result, val);
         }
 
-        // -- Aggregate destructuring --
+        // operand: RAW (@guaranteed→ADDR, @owned→VALUE) → result: field value/addr
         InstKind::StructExtract { result, operand, field } => {
             let val = compile_struct_extract(fc, builder, *operand, *field)?;
             fc.map_value(builder, *result, val);
         }
 
+        // operand: RAW (@guaranteed→ADDR, @owned→VALUE) → result: element value/addr
         InstKind::TupleExtract { result, operand, index } => {
             let val = compile_tuple_extract(fc, builder, *operand, *index)?;
             fc.map_value(builder, *result, val);
         }
 
+        // operand: RAW (@guaranteed→ADDR, @owned→VALUE) → result: payload value/addr
         InstKind::EnumPayload { result, operand, variant, field } => {
             let val = compile_enum_payload(fc, builder, *operand, *variant, *field)?;
             fc.map_value(builder, *result, val);
@@ -264,7 +279,7 @@ pub fn compile_inst(
             compile_destructure_enum(fc, builder, results, *operand, *variant)?;
         }
 
-        // -- Address projection --
+        // base: ADDR → result: ADDR (offset into aggregate)
         InstKind::FieldAddr { result, base, ty, field } => {
             let base_val = fc.get_value(builder, *base);
             let offset = struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
@@ -276,7 +291,7 @@ pub fn compile_inst(
             fc.map_value(builder, *result, addr);
         }
 
-        // -- Special --
+        // result: ADDR (zero-initialized stack slot)
         InstKind::Uninit { result, ty } => {
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let ptr_ty = fc.ctx.ptr_ty;
@@ -298,7 +313,7 @@ pub fn compile_inst(
             }
         }
 
-        // -- Calls --
+        // args: per-convention (see compile_resolved_call) → result: return value
         InstKind::Call { result, callee, args } => {
             return compile_call(fc, builder, result.as_ref().copied(), callee, args);
         }

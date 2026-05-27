@@ -246,8 +246,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let tail_span = expr_span(&self.hir, tail);
                 let value = self.lower_expr(tail);
                 if !self.is_terminated() {
+                    // @guaranteed values can't be returned — copy to @owned first
+                    let value = if self.body.value(value).ownership == Ownership::Guaranteed {
+                        let owned = self.emit_copy_value(value);
+                        self.emit_end_borrow(value);
+                        owned
+                    } else {
+                        value
+                    };
                     let prev = self.current_span.replace(tail_span);
-                    // Destroy ALL scopes except the return value
                     self.destroy_scopes_to_depth(0, &[value]);
                     self.set_terminator(TerminatorKind::Return(value));
                     self.current_span = prev;
@@ -560,6 +567,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.track_owned(result);
         result
     }
+
 
     pub fn emit_op2(&mut self, op: Op, lhs: ValueId, rhs: ValueId, result_ty: TyId) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);

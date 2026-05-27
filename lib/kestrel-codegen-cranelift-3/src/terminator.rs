@@ -50,15 +50,20 @@ pub fn compile_terminator(
     term: &Terminator,
 ) -> Result<(), CodegenError> {
     match &term.kind {
+        // value: VALUE → return register or sret copy
         TerminatorKind::Return(value_id) => compile_return(fc, builder, *value_id),
+
+        // args: VALUE each → block params
         TerminatorKind::Jump { target, args } => {
             let block = fc.block_map[target.index()];
-            let cl_args: Vec<Value> = args.iter().map(|v| fc.get_value(builder, *v)).collect();
+            let cl_args: Vec<Value> = args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
             let coerced = coerce_block_args(builder, block, &cl_args);
             let ba = to_block_args(&coerced);
             builder.ins().jump(block, &ba);
             Ok(())
         }
+
+        // condition: VALUE (bool), then/else_args: VALUE each → block params
         TerminatorKind::Branch {
             condition,
             then_block,
@@ -66,6 +71,8 @@ pub fn compile_terminator(
             else_block,
             else_args,
         } => compile_branch(fc, builder, *condition, *then_block, then_args, *else_block, else_args),
+
+        // discriminant: VALUE (int/enum tag), case args: VALUE each → block params
         TerminatorKind::Switch { discriminant, cases } => {
             compile_switch(fc, builder, *discriminant, cases)
         }
@@ -90,7 +97,7 @@ fn compile_return(
 
     match ret_mode {
         ReturnMode::Direct(_t) => {
-            let val = fc.get_value(builder, value_id);
+            let val = fc.resolve_scalar(builder, value_id);
             if fc.is_main {
                 let final_val = match ret_repr {
                     TypeRepr::Scalar(st) if st == ir::types::I64 => val,
@@ -137,8 +144,8 @@ fn compile_branch(
     let then_cl = fc.block_map[then_block.index()];
     let else_cl = fc.block_map[else_block.index()];
 
-    let then_vals: Vec<Value> = then_args.iter().map(|v| fc.get_value(builder, *v)).collect();
-    let else_vals: Vec<Value> = else_args.iter().map(|v| fc.get_value(builder, *v)).collect();
+    let then_vals: Vec<Value> = then_args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
+    let else_vals: Vec<Value> = else_args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
     let then_coerced = coerce_block_args(builder, then_cl, &then_vals);
     let else_coerced = coerce_block_args(builder, else_cl, &else_vals);
     let then_ba = to_block_args(&then_coerced);
@@ -197,7 +204,7 @@ fn compile_switch(
     let wildcard = cases.iter().find(|arm| matches!(arm.pattern, SwitchCase::Wildcard));
     let wildcard_info = wildcard.map(|arm| {
         let cl_block = fc.block_map[arm.target.index()];
-        let cl_args: Vec<Value> = arm.args.iter().map(|v| fc.get_value(builder, *v)).collect();
+        let cl_args: Vec<Value> = arm.args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
         let coerced = coerce_block_args(builder, cl_block, &cl_args);
         (cl_block, coerced)
     });
@@ -219,7 +226,7 @@ fn compile_switch(
 
     for (i, arm) in concrete_cases.iter().enumerate() {
         let target = fc.block_map[arm.target.index()];
-        let raw_args: Vec<Value> = arm.args.iter().map(|v| fc.get_value(builder, *v)).collect();
+        let raw_args: Vec<Value> = arm.args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
         let target_args = coerce_block_args(builder, target, &raw_args);
         let is_last = i == concrete_cases.len() - 1;
 

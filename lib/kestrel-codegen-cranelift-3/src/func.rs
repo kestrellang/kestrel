@@ -51,8 +51,44 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
         val
     }
 
-    pub fn map_value(&mut self, _builder: &mut FunctionBuilder, id: ValueId, val: Value) {
+    pub fn map_value(&mut self, builder: &mut FunctionBuilder, id: ValueId, val: Value) {
+        if cfg!(debug_assertions) {
+            self.verify_value_repr(builder, id, val);
+        }
         self.value_map.insert(id, val);
+    }
+
+    /// Debug-only check: the Cranelift value type must match the MIR ownership.
+    ///
+    /// @guaranteed scalars are pointers (ptr_ty). @owned scalars are the scalar
+    /// type itself. A mismatch means a pointer leaked through without deref
+    /// (or a deref happened where a pointer was expected).
+    fn verify_value_repr(&self, builder: &FunctionBuilder, id: ValueId, val: Value) {
+        let vd = &self.body.values[id.index()];
+        let repr = self.ctx.tc.cached_repr(vd.ty);
+        let Some(TypeRepr::Scalar(expected_scalar)) = repr else { return };
+
+        let cl_ty = builder.func.dfg.value_type(val);
+        let ptr_ty = self.ctx.ptr_ty;
+
+        match vd.ownership {
+            kestrel_mir_3::value::Ownership::Owned => {
+                if cl_ty == ptr_ty && expected_scalar != ptr_ty {
+                    eprintln!(
+                        "VERIFY: @owned scalar {} mapped to ptr_ty (expected {:?}) in {}",
+                        id.index(), expected_scalar, self.func.name,
+                    );
+                }
+            }
+            kestrel_mir_3::value::Ownership::Guaranteed => {
+                if cl_ty != ptr_ty {
+                    eprintln!(
+                        "VERIFY: @guaranteed scalar {} mapped to {:?} (expected ptr_ty) in {}",
+                        id.index(), cl_ty, self.func.name,
+                    );
+                }
+            }
+        }
     }
 }
 

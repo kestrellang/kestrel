@@ -2,6 +2,7 @@ use kestrel_ast_builder::Intrinsic;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExprId};
 use kestrel_mir_3::{FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op, Signedness, ValueId};
+use kestrel_mir_3::inst::InstKind;
 
 use crate::body::OssaBodyCtx;
 
@@ -269,9 +270,17 @@ pub(crate) fn try_intrinsic(
         }
         "ptr_read" => {
             let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
             let arg = bctx.lower_expr(args.first()?.value);
-            // In OSSA, ptr_read emits a Load for trivial types
-            return Some(bctx.emit_load(arg, ty_arg));
+            // PtrRead produces a @guaranteed view into the pointed-to memory,
+            // immediately followed by CopyValue → @owned clone + EndBorrow.
+            // For Named types, CopyValue expands to clone (e.g. incrementing
+            // RcBoxStorage refcount), preventing double-frees.
+            let view = bctx.alloc_guaranteed(result_ty, arg);
+            bctx.push_inst(InstKind::Op1 { result: view, op: Op::PtrRead(ty_arg), arg });
+            let owned = bctx.emit_copy_value(view);
+            bctx.emit_end_borrow(view);
+            return Some(owned);
         }
         "drop_in_place" => {
             let ty_arg = *type_args.first()?;

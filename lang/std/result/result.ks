@@ -109,8 +109,8 @@ public enum Result[T, E]: Tryable {
     // UNWRAPPING - SUCCESS VALUE
     // ========================================================================
 
-    /// Returns the success value, panicking if `Err`. Use `unwrapOr`,
-    /// `unwrap(or:)`, or pattern matching unless you can prove the
+    /// Returns the success value, panicking if `Err`. Use
+    /// `unwrap(or:)` or pattern matching unless you can prove the
     /// result is `Ok`.
     ///
     /// # Errors
@@ -124,19 +124,19 @@ public enum Result[T, E]: Tryable {
     }
 
     /// Returns the success value or `default` on `Err`. `default` is
-    /// always evaluated — use `unwrap(or:)` if computing it is
+    /// always evaluated — use `unwrap(orElse:)` if computing it is
     /// expensive or depends on the error.
-    public func unwrapOr(default: T) -> T {
+    public func unwrap(or default: T) -> T {
         match self {
             .Ok(value) => value,
             .Err(_) => default
         }
     }
 
-    /// Like `unwrapOr`, but `defaultFn` receives the error value and is
+    /// Like `unwrap(or:)`, but `defaultFn` receives the error value and is
     /// only invoked on `Err`. Useful when the recovery value depends on
     /// what went wrong.
-    public func unwrap(or defaultFn: (E) -> T) -> T {
+    public func unwrap(orElse defaultFn: (E) -> T) -> T {
         match self {
             .Ok(value) => value,
             .Err(error) => defaultFn(error)

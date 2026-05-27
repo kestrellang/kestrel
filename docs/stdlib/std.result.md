@@ -475,8 +475,8 @@ public func unwrap() -> T
 ```
 
 Returns the wrapped value, panicking if `None`. Reach for
-`unwrapOr`, `unwrap(or:)`, the `??` operator, or pattern
-matching unless you can prove the value is `Some`.
+`unwrap(or:)`, the `??` operator, or pattern matching unless
+you can prove the value is `Some`.
 
 ##### Errors
 
@@ -494,36 +494,36 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `unwrap`
 
 ```kestrel
-public func unwrap(or: () -> T) -> T
-```
-
-Like `unwrapOr`, but `defaultFn` is only called on `None`. Use this
-when the default is expensive to compute or has side effects.
-
-##### Examples
-
-```
-Some(42).unwrap(or: { expensiveDefault() });   // 42, no call
-None.unwrap(or: { expensiveDefault() });       // calls fn
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `unwrapOr`
-
-```kestrel
-public func unwrapOr(T) -> T
+public func unwrap(or: T) -> T
 ```
 
 Returns the wrapped value or `default` when `None`. `default` is
-always evaluated — use `unwrap(or:)` if computing it is
+always evaluated — use `unwrap(orElse:)` if computing it is
 expensive.
 
 ##### Examples
 
 ```
-Some(42).unwrapOr(0);   // 42
-None.unwrapOr(0);       // 0
+Some(42).unwrap(or: 0);   // 42
+None.unwrap(or: 0);       // 0
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `unwrap`
+
+```kestrel
+public func unwrap(orElse: () -> T) -> T
+```
+
+Like `unwrap(or:)`, but `defaultFn` is only called on `None`. Use this
+when the default is expensive to compute or has side effects.
+
+##### Examples
+
+```
+Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
+None.unwrap(orElse: { expensiveDefault() });       // calls fn
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -2017,8 +2017,8 @@ _Defined in `lang/std/result/result.ks`._
 public func unwrap() -> T
 ```
 
-Returns the success value, panicking if `Err`. Use `unwrapOr`,
-`unwrap(or:)`, or pattern matching unless you can prove the
+Returns the success value, panicking if `Err`. Use
+`unwrap(or:)` or pattern matching unless you can prove the
 result is `Ok`.
 
 ##### Errors
@@ -2030,10 +2030,22 @@ _Defined in `lang/std/result/result.ks`._
 #### function `unwrap`
 
 ```kestrel
-public func unwrap(or: (E) -> T) -> T
+public func unwrap(or: T) -> T
 ```
 
-Like `unwrapOr`, but `defaultFn` receives the error value and is
+Returns the success value or `default` on `Err`. `default` is
+always evaluated — use `unwrap(orElse:)` if computing it is
+expensive or depends on the error.
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `unwrap`
+
+```kestrel
+public func unwrap(orElse: (E) -> T) -> T
+```
+
+Like `unwrap(or:)`, but `defaultFn` receives the error value and is
 only invoked on `Err`. Useful when the recovery value depends on
 what went wrong.
 
@@ -2051,18 +2063,6 @@ to assert that a call failed.
 ##### Errors
 
 Panics with `"called unwrapErr() on Ok"` when invoked on `.Ok`.
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `unwrapOr`
-
-```kestrel
-public func unwrapOr(T) -> T
-```
-
-Returns the success value or `default` on `Err`. `default` is
-always evaluated — use `unwrap(or:)` if computing it is
-expensive or depends on the error.
 
 _Defined in `lang/std/result/result.ks`._
 
