@@ -235,6 +235,82 @@ fn expand_function(
                     }
                 }
 
+                // DestroyAddr: load the value from the address, then call the drop shim.
+                // Expands to: take %tmp = *%addr; call __drop$T(%tmp)
+                InstKind::DestroyAddr { address, ty } => {
+                    let address = remap_value(*address, &value_remap);
+                    let ty = *ty;
+                    let span = inst.span.clone();
+
+                    if let MirTy::Named { entity, type_args } = ty_arena.get(ty) {
+                        if skip_nominal != Some(*entity) {
+                            let key = (*entity, type_args.clone());
+                            if let Some(&shim_id) = shim_lookup.get(&key) {
+                                let tmp = body.alloc_value(ValueDef::owned(ty));
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Take { result: tmp, address, ty },
+                                    span: span.clone(),
+                                });
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Call {
+                                        result: None,
+                                        callee: Callee::Resolved(shim_id),
+                                        args: vec![CallArg {
+                                            value: tmp,
+                                            convention: ParamConvention::Consuming,
+                                        }],
+                                    },
+                                    span,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // StoreAssign: destroy the old value at the address, then store the new one.
+                // Expands to: take %tmp = *%addr; call __drop$T(%tmp); store_init %addr, %new
+                // For non-Named or trivial types, falls through to a plain store_init.
+                InstKind::StoreAssign { address, value } => {
+                    let address = remap_value(*address, &value_remap);
+                    let value = remap_value(*value, &value_remap);
+                    let addr_ty = body.values[address.index()].ty;
+                    let span = inst.span.clone();
+
+                    let mut expanded = false;
+                    if let MirTy::Pointer(pointee) = ty_arena.get(addr_ty) {
+                        let pointee = *pointee;
+                        if let MirTy::Named { entity, type_args } = ty_arena.get(pointee) {
+                            if skip_nominal != Some(*entity) {
+                                let key = (*entity, type_args.clone());
+                                if let Some(&shim_id) = shim_lookup.get(&key) {
+                                    let tmp = body.alloc_value(ValueDef::owned(pointee));
+                                    new_insts.push(Instruction {
+                                        kind: InstKind::Take { result: tmp, address, ty: pointee },
+                                        span: span.clone(),
+                                    });
+                                    new_insts.push(Instruction {
+                                        kind: InstKind::Call {
+                                            result: None,
+                                            callee: Callee::Resolved(shim_id),
+                                            args: vec![CallArg {
+                                                value: tmp,
+                                                convention: ParamConvention::Consuming,
+                                            }],
+                                        },
+                                        span: span.clone(),
+                                    });
+                                    expanded = true;
+                                }
+                            }
+                        }
+                    }
+                    new_insts.push(Instruction {
+                        kind: if expanded { InstKind::StoreInit { address, value } }
+                              else { InstKind::StoreAssign { address, value } },
+                        span,
+                    });
+                }
+
                 InstKind::CopyValue { result, operand } => {
                     let result = *result;
                     let operand = *operand;

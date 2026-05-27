@@ -7,7 +7,7 @@
 //! TupleExtract, EnumPayload, Discriminant) to destructure values.
 
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirExprId, HirMatchArm};
+use kestrel_hir::body::{HirExprId, HirMatchArm, MatchSource};
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
 use kestrel_mir_3::terminator::{SwitchArm, SwitchCase};
@@ -32,7 +32,16 @@ impl OssaBodyCtx<'_, '_> {
         expr_id: HirExprId,
         scrutinee_expr: HirExprId,
         arms: &[HirMatchArm],
+        source: MatchSource,
     ) -> ValueId {
+        // Irrefutable single-arm destructures (let/param) don't need branching.
+        // Emit bindings directly so local_map entries survive past the match.
+        if matches!(source, MatchSource::LetDestructure | MatchSource::ParamDestructure)
+            && arms.len() == 1
+        {
+            return self.lower_irrefutable_destructure(expr_id, scrutinee_expr, &arms[0]);
+        }
+
         let result_ty = self.resolve_expr_type(expr_id);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
 
@@ -77,6 +86,58 @@ impl OssaBodyCtx<'_, '_> {
         self.tracker = saved_tracker;
         self.tracker.rebind(&live_vals, merge_live);
         result_param
+    }
+
+    /// Fast path for irrefutable single-arm destructures (`let (a, b) = expr`).
+    ///
+    /// No branching needed — emit bindings directly in the current block.
+    /// This keeps local_map entries alive for code after the match.
+    fn lower_irrefutable_destructure(
+        &mut self,
+        _expr_id: HirExprId,
+        scrutinee_expr: HirExprId,
+        arm: &HirMatchArm,
+    ) -> ValueId {
+        let scrutinee_val = self.lower_expr(scrutinee_expr);
+        let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
+        let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
+
+        let tree = kestrel_pattern_matching::compile_decision_tree(
+            &self.hir,
+            &self.ctx.query,
+            self.ctx.root,
+            &scrutinee_resolved_ty,
+            &[arm.clone()],
+        );
+
+        // Extract bindings from the decision tree's Success leaf.
+        let bindings = Self::extract_irrefutable_bindings(&tree);
+        self.emit_bindings(&bindings, scrutinee_val, scrutinee_ty);
+
+        // Lower the arm body (typically `()` for let destructures).
+        self.lower_expr(arm.body)
+    }
+
+    /// Walk a decision tree to find the Success leaf's bindings.
+    /// For irrefutable patterns the tree is a chain of single-case Switches
+    /// ending in Success.
+    fn extract_irrefutable_bindings(tree: &DecisionTree) -> Vec<Binding> {
+        match tree {
+            DecisionTree::Success { bindings, .. } => bindings.clone(),
+            DecisionTree::Switch { cases, default, .. } => {
+                if cases.len() == 1 {
+                    Self::extract_irrefutable_bindings(&cases[0].1)
+                } else if let Some(def) = default {
+                    Self::extract_irrefutable_bindings(def)
+                } else {
+                    Vec::new()
+                }
+            }
+            DecisionTree::Guard { success, .. } => {
+                Self::extract_irrefutable_bindings(success)
+            }
+            DecisionTree::Failure => Vec::new(),
+        }
     }
 
     /// Recursively emit a decision tree, threading live @owned values

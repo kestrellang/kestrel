@@ -50,6 +50,9 @@ pub fn verify_ossa(
     // Check 1: ValueId uniqueness — every value defined exactly once.
     check_value_uniqueness(body, func_name, entity, &mut errors);
 
+    // Check 1b: every operand must have a definition (block param or instruction result).
+    check_operands_defined(body, func_name, entity, &mut errors);
+
     // Forward BFS walk from the entry block.
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
@@ -126,6 +129,72 @@ fn check_value_uniqueness(
                 } else {
                     definitions.insert(result, block_id);
                 }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Check 1b: every operand has a definition
+// ---------------------------------------------------------------------------
+
+fn check_operands_defined(
+    body: &OssaBody,
+    func_name: &str,
+    entity: Entity,
+    errors: &mut Vec<VerifyError>,
+) {
+    // Collect all definitions: function params + block params + instruction results.
+    let mut definitions: HashSet<ValueId> = HashSet::new();
+    for i in 0..body.param_count {
+        definitions.insert(ValueId::new(i));
+    }
+    for block in &body.blocks {
+        for param in &block.params {
+            definitions.insert(param.value);
+        }
+        for inst in &block.insts {
+            for result in inst.kind.results() {
+                definitions.insert(result);
+            }
+        }
+    }
+
+    // Check instruction operands.
+    for (block_idx, block) in body.blocks.iter().enumerate() {
+        let block_id = BlockId::new(block_idx);
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            for operand in inst.kind.operands() {
+                if !definitions.contains(&operand) {
+                    errors.push(VerifyError {
+                        block: block_id,
+                        inst: Some(inst_idx as u32),
+                        message: format!(
+                            "operand {:?} used but never defined (no block param or instruction produces it)",
+                            operand,
+                        ),
+                        span: inst.span.clone(),
+                        func_name: func_name.to_string(),
+                        entity,
+                    });
+                }
+            }
+        }
+
+        // Check terminator operands.
+        for operand in block.terminator.kind.operands() {
+            if !definitions.contains(&operand) {
+                errors.push(VerifyError {
+                    block: block_id,
+                    inst: None,
+                    message: format!(
+                        "terminator operand {:?} used but never defined",
+                        operand,
+                    ),
+                    span: None,
+                    func_name: func_name.to_string(),
+                    entity,
+                });
             }
         }
     }

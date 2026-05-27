@@ -180,6 +180,20 @@ pub fn compile_inst(
                 // struct_extract computes field offsets, CopyValue loads from it.
                 let a = fc.resolve_scalar(builder, *arg);
                 fc.map_value(builder, *result, a);
+            } else if matches!(op, Op::PtrTo(_)) {
+                // PtrTo needs the ADDRESS of the arg, not the loaded value.
+                // The arg is @guaranteed (Borrow convention) — its codegen
+                // value is already the address we want.
+                let a = fc.get_value(builder, *arg);
+                let arg_is_guaranteed = fc.body.values[arg.index()].ownership
+                    == kestrel_mir_3::value::Ownership::Guaranteed;
+                if arg_is_guaranteed {
+                    fc.map_value(builder, *result, a);
+                } else {
+                    // @owned: spill to stack so the pointer is stable
+                    let val = compile_op1(fc, builder, *op, a)?;
+                    fc.map_value(builder, *result, val);
+                }
             } else {
                 let a = fc.resolve_scalar(builder, *arg);
                 let val = compile_op1(fc, builder, *op, a)?;

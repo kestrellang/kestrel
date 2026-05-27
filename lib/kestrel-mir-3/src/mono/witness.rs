@@ -193,7 +193,7 @@ pub fn match_pattern(
 /// Returns the witness index + pattern match bindings.
 ///
 /// Two-pass:
-/// 1. Exact protocol match
+/// 1. Exact protocol match (filtered by protocol type args)
 /// 2. Descendant protocol (protocol inheritance fallback)
 pub fn find_witness_with_method(
     arena: &TyArena,
@@ -202,10 +202,22 @@ pub fn find_witness_with_method(
     protocol: Entity,
     method: &WitnessMethodKey,
     self_type: TyId,
+    method_type_args: &[TyId],
 ) -> Result<(usize, HashMap<Entity, TyId>), MonoError> {
-    // Pass 1: exact protocol match
+    // Extract the protocol's type args from the call-site method_type_args.
+    // For `Convertible[Int64].init(from:)`, method_type_args[0] = Int64.
+    let proto_param_count = protocols.iter()
+        .find(|p| p.entity == protocol)
+        .map(|p| p.type_params.len())
+        .unwrap_or(0);
+    let expected_proto_args = &method_type_args[..method_type_args.len().min(proto_param_count)];
+
+    // Pass 1: exact protocol match with protocol type arg filtering
     for (i, witness) in witnesses.iter().enumerate() {
         if witness.protocol != protocol {
+            continue;
+        }
+        if !witness_proto_args_match(arena, witness, expected_proto_args) {
             continue;
         }
         let mut bindings = HashMap::new();
@@ -216,7 +228,8 @@ pub fn find_witness_with_method(
         }
     }
 
-    // Pass 2: descendant protocol (inheritance)
+    // Pass 2: descendant protocol (inheritance) — no proto arg filter
+    // since inherited witnesses carry the descendant's type args.
     for (i, witness) in witnesses.iter().enumerate() {
         if witness.protocol == protocol {
             continue;
@@ -242,6 +255,25 @@ pub fn find_witness_with_method(
     })
 }
 
+/// Check whether a witness's protocol type args match the expected concrete
+/// types from the call site. Empty expected matches any witness (back-compat
+/// for non-generic protocols). Witness args that are TypeParam wildcards
+/// (from `extend T: Proto[FreeParam]`) match anything.
+fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[TyId]) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
+    if witness.proto_type_args.is_empty() {
+        return true;
+    }
+    if witness.proto_type_args.len() != expected.len() {
+        return false;
+    }
+    witness.proto_type_args.iter().zip(expected.iter()).all(|(&w, &e)| {
+        matches!(arena.get(w), MirTy::TypeParam(_)) || w == e
+    })
+}
+
 /// Resolve a `Callee::Witness` to a concrete function entity + type_args + self_type.
 pub fn resolve_witness_call(
     arena: &mut TyArena,
@@ -255,7 +287,7 @@ pub fn resolve_witness_call(
     method_type_args: &[TyId],
 ) -> Result<ResolvedWitnessCall, MonoError> {
     let (witness_idx, bindings) =
-        find_witness_with_method(arena, witnesses, protocols, protocol, method, self_type)?;
+        find_witness_with_method(arena, witnesses, protocols, protocol, method, self_type, method_type_args)?;
 
     let witness = &witnesses[witness_idx];
     let binding = witness
@@ -608,6 +640,7 @@ mod tests {
             proto,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
+            &[],
         )
         .unwrap();
         assert_eq!(idx, 0);
@@ -643,6 +676,7 @@ mod tests {
             proto,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             concrete,
+            &[],
         )
         .unwrap();
         assert_eq!(idx, 0);
@@ -680,6 +714,7 @@ mod tests {
             equatable,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
+            &[],
         );
         assert!(result.is_ok());
     }
@@ -699,6 +734,7 @@ mod tests {
             proto,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
+            &[],
         );
         assert!(result.is_err());
     }

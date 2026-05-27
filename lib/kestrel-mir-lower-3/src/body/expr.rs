@@ -189,8 +189,8 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             HirExpr::Match {
-                scrutinee, arms, ..
-            } => self.lower_match(expr_id, *scrutinee, arms),
+                scrutinee, arms, source, ..
+            } => self.lower_match(expr_id, *scrutinee, arms, *source),
 
             // === Literals — delegate to literal module (stubbed until Phase E) ===
             HirExpr::Array { elements, .. } => {
@@ -549,8 +549,11 @@ impl OssaBodyCtx<'_, '_> {
                 }
             }
             HirExpr::Def(entity, _, _) => {
-                // Static stored field: `MyCounter._count = v`
-                if self.ctx.world.get::<kestrel_ast_builder::Static>(entity).is_some() {
+                // Static/global stored field: covers both `static var` members
+                // and module-level globals (which lack the Static component).
+                let is_global = self.ctx.world.get::<kestrel_ast_builder::Static>(entity).is_some()
+                    || self.ctx.module.statics.iter().any(|s| s.entity == entity);
+                if is_global {
                     self.ctx.register_name(entity);
                     let addr = self.emit_global_ref(entity);
                     self.emit_store_assign(addr, rhs);

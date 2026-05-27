@@ -234,6 +234,18 @@ impl<'a> CollectionContext<'a> {
                         let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
                         self.discover_drop_shim(concrete_ty, parent_self);
                     }
+                    InstKind::DestroyAddr { ty, .. } => {
+                        let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, *ty, &subst);
+                        self.discover_drop_shim(concrete_ty, parent_self);
+                    }
+                    InstKind::StoreAssign { address, .. } => {
+                        // The address is Pointer[T]; discover drop shim for T.
+                        let addr_ty = body.values[address.index()].ty;
+                        let concrete_addr = substitute_and_resolve(self.arena, self.witnesses, addr_ty, &subst);
+                        if let MirTy::Pointer(pointee) = self.arena.get(concrete_addr) {
+                            self.discover_drop_shim(*pointee, parent_self);
+                        }
+                    }
                     InstKind::CopyValue { operand, .. } => {
                         let operand_ty = body.values[operand.index()].ty;
                         let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
@@ -346,6 +358,7 @@ impl<'a> CollectionContext<'a> {
                             *protocol,
                             method,
                             concrete_self,
+                            &concrete_method_args,
                         ) {
                             self.witness_cache.insert(*protocol, concrete_self, widx, bindings);
                         }

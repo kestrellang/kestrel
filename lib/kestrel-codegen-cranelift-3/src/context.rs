@@ -147,6 +147,15 @@ impl<'m> CodegenCtx<'m> {
                     };
                     desc.define(bytes.into_boxed_slice());
                 }
+                ImmediateKind::FloatLiteral { bits, value } => {
+                    let bytes = match bits {
+                        kestrel_mir_3::FloatBits::F32 | kestrel_mir_3::FloatBits::F16 => {
+                            (*value as f32).to_le_bytes().to_vec()
+                        }
+                        kestrel_mir_3::FloatBits::F64 => value.to_le_bytes().to_vec(),
+                    };
+                    desc.define(bytes.into_boxed_slice());
+                }
                 ImmediateKind::BoolLiteral(b) => {
                     desc.define(vec![*b as u8].into_boxed_slice());
                 }

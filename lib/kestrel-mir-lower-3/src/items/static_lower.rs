@@ -7,12 +7,13 @@
 
 use std::path::PathBuf;
 
+use kestrel_ast::ast_body::{AstExpr, AstLiteral};
 use kestrel_ast_builder::{Attributes, Body, FileId, FilePath, Settable};
 use kestrel_hecs::Entity;
 use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::item::function::{FunctionDef, FunctionKind};
 use kestrel_mir_3::item::static_def::{FileConstantData, StaticDef};
-use kestrel_mir_3::{MirTy, TyId};
+use kestrel_mir_3::{Immediate, MirTy, TyId};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_type_annotation;
@@ -29,6 +30,8 @@ pub fn lower_static(ctx: &mut LowerCtx, entity: Entity) {
 
     if let Some(fc) = extract_file_constant(ctx, entity, ty) {
         def.file_constant_data = Some(fc);
+    } else if let Some(imm) = extract_literal_initializer(ctx, entity, ty) {
+        def.initializer = Some(imm);
     }
 
     ctx.module.add_static(def);
@@ -149,6 +152,40 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
 
     ctx.module.functions[func_idx].body = Some(body);
     func_idx
+}
+
+/// If the initializer body is a single literal expression (no statements),
+/// extract it as an Immediate so it can be baked into the static data section
+/// without needing an init thunk.
+fn extract_literal_initializer(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<Immediate> {
+    let body = &ctx.world.get::<Body>(entity)?.0;
+    if !body.statements.is_empty() {
+        return None;
+    }
+    let tail = body.tail_expr?;
+    match &body.exprs[tail] {
+        AstExpr::Literal { kind, .. } => match kind {
+            AstLiteral::Integer(s) => {
+                let v: i128 = s.parse().ok()?;
+                Some(match ctx.module.ty_arena.get(ty) {
+                    MirTy::I8 => Immediate::i8(v),
+                    MirTy::I16 => Immediate::i16(v),
+                    MirTy::I32 => Immediate::i32(v),
+                    _ => Immediate::i64(v),
+                })
+            }
+            AstLiteral::Float(s) => {
+                let v: f64 = s.parse().ok()?;
+                Some(match ctx.module.ty_arena.get(ty) {
+                    MirTy::F32 => Immediate::f32(v),
+                    _ => Immediate::f64(v),
+                })
+            }
+            AstLiteral::Bool(v) => Some(Immediate::bool(*v)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn extract_file_constant(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<FileConstantData> {
