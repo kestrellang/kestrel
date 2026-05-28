@@ -193,7 +193,6 @@ pub enum HirExpr {
     },
     Closure {
         params: Vec<HirClosureParam>,
-        captures: Vec<LocalId>,
         body: HirBlock,
         span: Span,
     },

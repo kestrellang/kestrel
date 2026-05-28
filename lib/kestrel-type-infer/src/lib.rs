@@ -9,6 +9,7 @@
 //! HIR Lowering (HirBody) → Type Inference (this crate) → TypedBody
 //! ```
 
+pub mod captures;
 pub mod compare;
 pub mod constraint;
 pub mod ctx;
@@ -34,6 +35,8 @@ use kestrel_span::Span;
 use ctx::InferCtx;
 use resolve::WorldResolver;
 use result::TypedBody;
+
+pub use captures::ClosureCaptures;
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;

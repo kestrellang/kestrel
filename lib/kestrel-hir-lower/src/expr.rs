@@ -1329,7 +1329,6 @@ impl LowerCtx<'_> {
         closure_body: &AstBlock,
         span: &Span,
     ) -> HirExprId {
-        let closure_entry_depth = self.scope_depth();
         self.push_scope();
 
         // For complex patterns (tuple, struct), create a synthetic local
@@ -1394,15 +1393,12 @@ impl LowerCtx<'_> {
             lowered_body.stmts = desugar_stmts;
         }
 
-        // Collect captured locals: any local referenced in the body that was
-        // defined at a scope depth <= closure_entry_depth (i.e., outside this closure)
-        let captures = self.collect_captures(&lowered_body, closure_entry_depth);
-
         self.pop_scope();
 
+        // Captures are computed post-inference by the `ClosureCaptures` query
+        // (kestrel-type-infer), the single source of truth — not recorded here.
         self.alloc_expr(HirExpr::Closure {
             params: hir_params,
-            captures,
             body: lowered_body,
             span: span.clone(),
         })

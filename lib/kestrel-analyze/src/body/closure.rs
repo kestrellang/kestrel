@@ -131,17 +131,25 @@ impl BodyCheck for ClosureAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
+        // Captures come from the single source of truth — the post-inference
+        // ClosureCaptures query (place-based). E603/E605 only need the set of
+        // captured *root* locals.
+        let capture_plan = cx.query.query(kestrel_type_infer::ClosureCaptures {
+            entity: cx.entity,
+            root: cx.root,
+        });
+
         // Walk all expressions looking for closures
         for (expr_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::Closure {
-                params,
-                captures,
-                body,
-                ..
-            } = expr
-            else {
+            let HirExpr::Closure { params, body, .. } = expr else {
                 continue;
             };
+
+            let mut capture_roots: Vec<LocalId> =
+                capture_plan.get(expr_id).iter().map(|c| c.key.root).collect();
+            capture_roots.sort_by_key(|l| l.raw());
+            capture_roots.dedup();
+            let captures = &capture_roots;
 
             // Check closure arity and types against expected function type.
             if let Some(ty) = cx.typed.expr_types.get(&expr_id) {

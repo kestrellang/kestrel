@@ -1,35 +1,54 @@
 //! Closure lowering — env struct, synthetic call function, ApplyPartial.
 //!
-//! Uses save/restore via `SavedState` to swap OssaBodyCtx state for the
-//! closure body. The closure body shares the parent's HirBody arena — we
-//! can't create a fresh OssaBodyCtx without conflicting borrows.
+//! Captures are decided by the post-inference `ClosureCaptures` query (see
+//! kestrel-type-infer/src/captures.rs) — the single source of truth. This
+//! module only *emits* that decision; it does not recompute captures.
 //!
-//! OSSA differences from MIR-2:
+//! Each captured item is one of:
+//! - a **whole local** (`Whole`) — captured by value if Copyable, else by
+//!   reference (a `Pointer[T]` to a stack snapshot);
+//! - a **projected place** (`Place`, e.g. `self.cap`) — always a Copyable,
+//!   read-only field captured by value. Non-Copyable or written places fall
+//!   back to whole-local capture (so behavior never regresses), because the
+//!   by-reference projection of an arbitrary place isn't expressible yet.
+//!
+//! OSSA notes:
 //! - Everything is ValueId, no Place/Operand/Rvalue.
-//! - Env fields are read via `emit_struct_extract` (copy captures) or
-//!   `emit_load` on a Pointer[T] extracted from the env (ref captures).
-//! - Parent materializes ref captures via `emit_begin_borrow` → the
-//!   resulting @guaranteed pointer is bitwise-copyable for ApplyPartial.
-//! - `emit_apply_partial(entity, captures, ty) → ValueId`.
+//! - Whole-local captures bind into `local_map`; projected captures bind into
+//!   `place_capture_map`, consulted when the body reads/borrows `self.cap`.
+//! - Parent materializes a projected capture by walking the access chain from
+//!   the real receiver (`StructExtract`), then copying the Copyable field —
+//!   the receiver itself is never duplicated.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem;
 
-use kestrel_hir::body::{HirBlock, HirClosureParam, HirExpr, HirExprId, HirStmt, HirStmtId};
+use kestrel_hir::body::{HirBlock, HirClosureParam, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir_3::value::ValueDef;
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
+use kestrel_type_infer::captures::{CaptureKind, CapturedPlace};
 
 use super::{LocalBinding, LoopInfo, OssaBodyCtx, ScopeFrame};
+
+/// One resolved capture slot for a closure, after applying copyability to the
+/// abstract `ClosureCaptures` plan.
+enum CaptureSlot {
+    /// Capture the whole local (by value if Copyable, else by reference).
+    Whole(HirLocalId),
+    /// Capture a Copyable, read-only projected place (e.g. `self.cap`) by value.
+    Place(CapturedPlace),
+}
 
 /// Saved parent state during closure body lowering.
 struct SavedState {
     body: OssaBody,
     current_block: Option<kestrel_mir_3::BlockId>,
     local_map: HashMap<HirLocalId, LocalBinding>,
+    place_capture_map: HashMap<kestrel_type_infer::captures::PlaceKey, ValueId>,
     loop_stack: Vec<LoopInfo>,
     scope_stack: Vec<ScopeFrame>,
     tracker: super::LiveTracker,
@@ -47,9 +66,8 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let closure_ty = self.resolve_expr_type(expr_id);
 
-        // Identify captured locals
-        let closure_param_locals: HashSet<HirLocalId> = params.iter().map(|p| p.local).collect();
-        let captured_locals = self.find_captures(body, &closure_param_locals);
+        // Captures decided post-inference; we only apply copyability here.
+        let slots = self.plan_slots(expr_id);
 
         let closure_idx = self.ctx.closure_counter;
         self.ctx.closure_counter += 1;
@@ -77,8 +95,11 @@ impl OssaBodyCtx<'_, '_> {
             },
         };
 
+        // Per-slot capture type (whole-local type, or projected place type).
+        let slot_tys: Vec<TyId> = slots.iter().map(|s| self.slot_ty(s)).collect();
+
         // Create env struct for captures
-        let env_struct_entity = if !captured_locals.is_empty() {
+        let env_struct_entity = if !slots.is_empty() {
             let env_struct_name = format!("{}.env", closure_name);
             let env_entity = self.ctx.next_synthetic_entity();
             self.ctx.module.register_name(env_entity, &env_struct_name);
@@ -91,16 +112,14 @@ impl OssaBodyCtx<'_, '_> {
                 .get(&self.func_entity)
                 .map(|f| f.type_params.clone())
                 .unwrap_or_default();
-            for &captured in &captured_locals {
-                let cap_ty = self.resolve_local_type(captured);
-                let cap_name = self.hir.locals[captured].name.clone();
-                // Non-copy captures are stored as pointers (by-ref)
+            for (i, &cap_ty) in slot_tys.iter().enumerate() {
+                // Non-copy (whole-local) captures are stored as pointers (by-ref).
                 let field_ty = if self.is_copy_type(cap_ty) {
                     cap_ty
                 } else {
                     self.ctx.module.ty_arena.pointer(cap_ty)
                 };
-                env_def.add_field(FieldDef::new(&cap_name, field_ty));
+                env_def.add_field(FieldDef::new(&format!("cap{i}"), field_ty));
             }
             let entity = env_def.entity;
             self.ctx.module.add_struct(env_def);
@@ -183,15 +202,6 @@ impl OssaBodyCtx<'_, '_> {
             closure_local_map.insert(cp.local, LocalBinding::Ssa(val));
         }
 
-        // Allocate ValueIds for captured locals (will be loaded from env in entry)
-        let mut capture_value_ids = Vec::new();
-        for &captured in &captured_locals {
-            let cap_ty = self.resolve_local_type(captured);
-            let val = closure_body.alloc_value(ValueDef::owned(cap_ty));
-            closure_local_map.insert(captured, LocalBinding::Ssa(val));
-            capture_value_ids.push(val);
-        }
-
         // Entry block
         let entry_block = closure_body.alloc_block();
         closure_body.entry = entry_block;
@@ -201,6 +211,7 @@ impl OssaBodyCtx<'_, '_> {
             body: mem::replace(&mut self.body, closure_body),
             current_block: self.current_block.take(),
             local_map: mem::replace(&mut self.local_map, closure_local_map),
+            place_capture_map: mem::take(&mut self.place_capture_map),
             loop_stack: mem::take(&mut self.loop_stack),
             scope_stack: mem::take(&mut self.scope_stack),
             tracker: mem::replace(&mut self.tracker, super::LiveTracker::from_live(&[])),
@@ -213,13 +224,11 @@ impl OssaBodyCtx<'_, '_> {
         // body_context already set to Normal by the mem::replace above
         self.push_scope();
 
-        // Emit loads from env struct for captured locals.
+        // Emit loads from env struct for captured slots.
         //
-        // Copy-captures: env field is T — extract the value directly via
-        // StructExtract on the dereferenced env pointer.
-        //
-        // Ref-captures: env field is Pointer[T] — extract the pointer,
-        // then load through it to get the T value.
+        // Copy-captures: env field is T — extract the value directly.
+        // Ref-captures (non-Copyable whole locals): env field is Pointer[T] —
+        // extract the pointer, then load through it to get the T value.
         if env_struct_entity.is_some() {
             // Load the env struct value from the env pointer
             let env_struct_ty = match self.ctx.module.ty_arena.get(env_ty) {
@@ -232,9 +241,8 @@ impl OssaBodyCtx<'_, '_> {
             // Each extract from a borrow produces @guaranteed; we copy to get @owned.
             let env_borrow = self.emit_begin_borrow(env_struct_val);
 
-            for (i, &captured) in captured_locals.iter().enumerate() {
-                let capture_val = capture_value_ids[i];
-                let cap_ty = self.body.value(capture_val).ty;
+            for (i, slot) in slots.iter().enumerate() {
+                let cap_ty = slot_tys[i];
                 let is_ref_capture = !self.is_copy_type(cap_ty);
                 let field_ty = if is_ref_capture {
                     self.ctx.module.ty_arena.pointer(cap_ty)
@@ -246,13 +254,21 @@ impl OssaBodyCtx<'_, '_> {
                 let field_val = self.emit_struct_extract(env_borrow, FieldIdx::new(i), field_ty);
                 let owned_field = self.emit_copy_value(field_val);
 
-                if is_ref_capture {
+                let value = if is_ref_capture {
                     let loaded = self.emit_load(owned_field, cap_ty);
-                    self.local_map.insert(captured, LocalBinding::Ssa(loaded));
                     self.emit_destroy_value(owned_field);
+                    loaded
                 } else {
-                    self.local_map
-                        .insert(captured, LocalBinding::Ssa(owned_field));
+                    owned_field
+                };
+
+                match slot {
+                    CaptureSlot::Whole(root) => {
+                        self.local_map.insert(*root, LocalBinding::Ssa(value));
+                    },
+                    CaptureSlot::Place(cp) => {
+                        self.place_capture_map.insert(cp.key.clone(), value);
+                    },
                 }
             }
 
@@ -271,6 +287,7 @@ impl OssaBodyCtx<'_, '_> {
         let completed_body = mem::replace(&mut self.body, saved.body);
         self.current_block = saved.current_block;
         self.local_map = saved.local_map;
+        self.place_capture_map = saved.place_capture_map;
         self.loop_stack = saved.loop_stack;
         self.scope_stack = saved.scope_stack;
         self.tracker = saved.tracker;
@@ -282,194 +299,129 @@ impl OssaBodyCtx<'_, '_> {
         func_def.body = Some(completed_body);
         self.ctx.module.add_function(func_def);
 
-        // Emit ApplyPartial in parent scope.
-        //
-        // Copy captures pass the value directly (emit_value_use copies @owned).
-        // Ref captures materialize a borrow — BeginBorrow produces a
-        // @guaranteed pointer that is bitwise-trivial, suitable for packing
-        // into the env struct.
+        // Emit ApplyPartial in parent scope — materialize each capture.
         let mut captures: Vec<ValueId> = Vec::new();
-        for &hir_local in &captured_locals {
-            let mir_val = self.map_local(hir_local);
-            let cap_ty = self.resolve_local_type(hir_local);
-            if self.is_copy_type(cap_ty) {
-                // Copy capture: snapshot the value.
-                // Var locals are address-based — load the value from the address
-                // so the closure captures the value, not the raw address pointer.
-                if self.is_var_local(&hir_local) {
-                    let loaded = self.emit_copy_addr(mir_val, cap_ty);
-                    captures.push(loaded);
-                } else {
-                    let use_val = self.emit_value_use(mir_val);
-                    captures.push(use_val);
-                }
-            } else {
-                // Ref capture: copy value into a stack slot, capture the address.
-                let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
-                let one = self.emit_literal(Immediate::i64(1));
-                let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
-                let copy = if self.is_var_local(&hir_local) {
-                    self.emit_copy_addr(mir_val, cap_ty)
-                } else {
-                    self.emit_copy_value(mir_val)
-                };
-                self.emit_store_init(addr, copy);
-                captures.push(addr);
-            }
+        for (i, slot) in slots.iter().enumerate() {
+            let cap = self.materialize_capture(slot, slot_tys[i]);
+            captures.push(cap);
         }
 
         self.emit_apply_partial(closure_entity, captures, closure_ty)
     }
 
-    // === Capture collection ===
-    // These methods only read HIR data and the local_map — no MIR types.
+    // === Capture planning ===
 
-    fn find_captures(
-        &self,
-        body: &HirBlock,
-        closure_params: &HashSet<HirLocalId>,
-    ) -> Vec<HirLocalId> {
-        let mut captures = Vec::new();
-        let mut seen = HashSet::new();
-        self.collect_captures_block(body, closure_params, &mut captures, &mut seen);
-        captures
+    /// Translate the abstract capture plan into concrete slots, applying
+    /// copyability (only the MIR layer knows it). A projected place is kept as
+    /// a by-value place capture only when it is Copyable and read-only;
+    /// otherwise the whole root is captured (preserving historical behavior).
+    fn plan_slots(&mut self, closure_id: HirExprId) -> Vec<CaptureSlot> {
+        let plan: Vec<CapturedPlace> = self.captures.get(closure_id).to_vec();
+
+        // First pass: which roots must be captured whole.
+        let mut whole_roots: std::collections::HashSet<HirLocalId> =
+            std::collections::HashSet::new();
+        for cp in &plan {
+            if cp.key.is_whole() {
+                whole_roots.insert(cp.key.root);
+                continue;
+            }
+            let pty = self.resolve_expr_type(cp.repr);
+            if !(self.is_copy_type(pty) && cp.kind == CaptureKind::Read) {
+                whole_roots.insert(cp.key.root);
+            }
+        }
+
+        // Second pass: build ordered, deduplicated slots (plan is already in a
+        // deterministic order).
+        let mut slots = Vec::new();
+        let mut added_whole: std::collections::HashSet<HirLocalId> =
+            std::collections::HashSet::new();
+        for cp in plan {
+            let root = cp.key.root;
+            if !cp.key.is_whole() && !whole_roots.contains(&root) {
+                slots.push(CaptureSlot::Place(cp));
+            } else if added_whole.insert(root) {
+                slots.push(CaptureSlot::Whole(root));
+            }
+        }
+        slots
     }
 
-    fn collect_captures_block(
-        &self,
-        block: &HirBlock,
-        closure_params: &HashSet<HirLocalId>,
-        captures: &mut Vec<HirLocalId>,
-        seen: &mut HashSet<HirLocalId>,
-    ) {
-        for &stmt_id in &block.stmts {
-            self.collect_captures_stmt(stmt_id, closure_params, captures, seen);
-        }
-        if let Some(tail) = block.tail_expr {
-            self.collect_captures_expr(tail, closure_params, captures, seen);
-        }
-    }
-
-    fn collect_captures_stmt(
-        &self,
-        stmt_id: HirStmtId,
-        closure_params: &HashSet<HirLocalId>,
-        captures: &mut Vec<HirLocalId>,
-        seen: &mut HashSet<HirLocalId>,
-    ) {
-        match &self.hir.stmts[stmt_id] {
-            HirStmt::Let { value, .. } => {
-                if let Some(expr) = value {
-                    self.collect_captures_expr(*expr, closure_params, captures, seen);
-                }
-            },
-            HirStmt::Expr { expr, .. } => {
-                self.collect_captures_expr(*expr, closure_params, captures, seen);
-            },
-            HirStmt::Deinit { .. } => {},
+    fn slot_ty(&mut self, slot: &CaptureSlot) -> TyId {
+        match slot {
+            CaptureSlot::Whole(root) => self.resolve_local_type(*root),
+            CaptureSlot::Place(cp) => self.resolve_expr_type(cp.repr),
         }
     }
 
-    fn collect_captures_expr(
-        &self,
-        expr_id: HirExprId,
-        closure_params: &HashSet<HirLocalId>,
-        captures: &mut Vec<HirLocalId>,
-        seen: &mut HashSet<HirLocalId>,
-    ) {
-        match &self.hir.exprs[expr_id] {
-            HirExpr::Local(local_id, _) => {
-                if !closure_params.contains(local_id)
-                    && self.local_map.contains_key(local_id)
-                    && seen.insert(*local_id)
-                {
-                    captures.push(*local_id);
+    /// Materialize a capture in the parent scope for packing into the env.
+    fn materialize_capture(&mut self, slot: &CaptureSlot, cap_ty: TyId) -> ValueId {
+        match slot {
+            CaptureSlot::Whole(root) => self.materialize_whole(*root, cap_ty),
+            CaptureSlot::Place(cp) => {
+                // By-value projection of a Copyable field — copy the field,
+                // never the receiver.
+                let v = self.lower_place_value_parent(cp.repr);
+                if self.body.value(v).ownership == kestrel_mir_3::value::Ownership::Guaranteed {
+                    self.emit_copy_value(v)
+                } else {
+                    v
                 }
             },
-            HirExpr::Call { callee, args, .. } => {
-                self.collect_captures_expr(*callee, closure_params, captures, seen);
-                for arg in args {
-                    self.collect_captures_expr(arg.value, closure_params, captures, seen);
-                }
+        }
+    }
+
+    fn materialize_whole(&mut self, root: HirLocalId, cap_ty: TyId) -> ValueId {
+        let mir_val = self.map_local(root);
+        if self.is_copy_type(cap_ty) {
+            // Copy capture: snapshot the value. Var locals are address-based —
+            // load the value from the address.
+            if self.is_var_local(&root) {
+                self.emit_copy_addr(mir_val, cap_ty)
+            } else {
+                self.emit_value_use(mir_val)
+            }
+        } else {
+            // Ref capture: copy value into a stack slot, capture the address.
+            let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+            let one = self.emit_literal(Immediate::i64(1));
+            let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
+            let copy = if self.is_var_local(&root) {
+                self.emit_copy_addr(mir_val, cap_ty)
+            } else {
+                self.emit_copy_value(mir_val)
+            };
+            self.emit_store_init(addr, copy);
+            addr
+        }
+    }
+
+    /// Project a place value from the *real* receiver in the parent scope
+    /// (walking `StructExtract`/`TupleExtract`), bypassing the body-side
+    /// capture interception. Used only for by-value projected captures.
+    fn lower_place_value_parent(&mut self, repr: HirExprId) -> ValueId {
+        match self.hir.exprs[repr].clone() {
+            HirExpr::Local(..) => self.lower_expr_for_borrow(repr),
+            HirExpr::Field { base, name, .. } => {
+                let base_val = self.lower_place_value_parent(base);
+                let base_ty = self.resolve_expr_type(base);
+                let result_ty = self.resolve_expr_type(repr);
+                let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
+                    MirTy::Named { entity, .. } => Some(*entity),
+                    _ => None,
+                };
+                let field_idx = struct_entity
+                    .and_then(|se| self.ctx.resolve_field_idx(se, name.as_str_or_empty()))
+                    .unwrap_or_else(|| FieldIdx::new(0));
+                self.emit_struct_extract(base_val, field_idx, result_ty)
             },
-            HirExpr::MethodCall { receiver, args, .. }
-            | HirExpr::ProtocolCall { receiver, args, .. } => {
-                self.collect_captures_expr(*receiver, closure_params, captures, seen);
-                for arg in args {
-                    self.collect_captures_expr(arg.value, closure_params, captures, seen);
-                }
+            HirExpr::TupleIndex { base, index, .. } => {
+                let base_val = self.lower_place_value_parent(base);
+                let result_ty = self.resolve_expr_type(repr);
+                self.emit_tuple_extract(base_val, index, result_ty)
             },
-            HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
-                self.collect_captures_expr(*base, closure_params, captures, seen);
-            },
-            HirExpr::If {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                self.collect_captures_expr(*condition, closure_params, captures, seen);
-                self.collect_captures_block(then_body, closure_params, captures, seen);
-                if let Some(eb) = else_body {
-                    self.collect_captures_block(eb, closure_params, captures, seen);
-                }
-            },
-            HirExpr::Loop { body, .. } => {
-                self.collect_captures_block(body, closure_params, captures, seen);
-            },
-            HirExpr::Match {
-                scrutinee, arms, ..
-            } => {
-                self.collect_captures_expr(*scrutinee, closure_params, captures, seen);
-                for arm in arms {
-                    if let Some(guard) = arm.guard {
-                        self.collect_captures_expr(guard, closure_params, captures, seen);
-                    }
-                    self.collect_captures_expr(arm.body, closure_params, captures, seen);
-                }
-            },
-            HirExpr::Block { body, .. } => {
-                self.collect_captures_block(body, closure_params, captures, seen);
-            },
-            HirExpr::Assign { target, value, .. } => {
-                self.collect_captures_expr(*target, closure_params, captures, seen);
-                self.collect_captures_expr(*value, closure_params, captures, seen);
-            },
-            HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
-                for &e in elements {
-                    self.collect_captures_expr(e, closure_params, captures, seen);
-                }
-            },
-            HirExpr::Dict { entries, .. } => {
-                for entry in entries {
-                    self.collect_captures_expr(entry.key, closure_params, captures, seen);
-                    self.collect_captures_expr(entry.value, closure_params, captures, seen);
-                }
-            },
-            HirExpr::Return { value, .. } => {
-                if let Some(v) = value {
-                    self.collect_captures_expr(*v, closure_params, captures, seen);
-                }
-            },
-            HirExpr::ImplicitMember { args, .. } => {
-                if let Some(call_args) = args {
-                    for arg in call_args {
-                        self.collect_captures_expr(arg.value, closure_params, captures, seen);
-                    }
-                }
-            },
-            HirExpr::Sugar { inner, .. } => {
-                self.collect_captures_expr(*inner, closure_params, captures, seen);
-            },
-            HirExpr::Closure { body, .. } => {
-                self.collect_captures_block(body, closure_params, captures, seen);
-            },
-            HirExpr::Literal { .. }
-            | HirExpr::Def(..)
-            | HirExpr::OverloadSet { .. }
-            | HirExpr::Break { .. }
-            | HirExpr::Continue { .. }
-            | HirExpr::Error { .. } => {},
+            _ => self.lower_expr(repr),
         }
     }
 }

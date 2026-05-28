@@ -83,10 +83,18 @@ impl OssaBodyCtx<'_, '_> {
             },
 
             HirExpr::Field { base, name, .. } => {
+                // A captured projected place (e.g. `self.cap`) reads the env
+                // value instead of projecting from a non-captured receiver.
+                if let Some(v) = self.captured_place_value(expr_id) {
+                    return self.emit_value_use(v);
+                }
                 self.lower_field_access(expr_id, *base, name.as_str_or_empty())
             },
 
             HirExpr::TupleIndex { base, index, .. } => {
+                if let Some(v) = self.captured_place_value(expr_id) {
+                    return self.emit_value_use(v);
+                }
                 let base_val = self.lower_expr_for_borrow(*base);
                 let result_ty = self.resolve_expr_type(expr_id);
                 self.emit_tuple_extract(base_val, *index, result_ty)

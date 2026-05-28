@@ -22,6 +22,7 @@ use kestrel_mir_3::{
     VariantIdx,
 };
 use kestrel_span::Span;
+use kestrel_type_infer::captures::{ClosureCaptureMap, PlaceKey};
 use kestrel_type_infer::result::TypedBody;
 
 use crate::context::LowerCtx;
@@ -234,6 +235,16 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// Remaining use count per SSA local — decremented on each lower_expr.
     /// When the count hits zero, the local is moved instead of copied.
     local_use_counts: HashMap<HirLocalId, usize>,
+    /// Place-based closure capture plan for this body, keyed by closure
+    /// `HirExprId`. Computed once (post-inference) and consumed by
+    /// `lower_closure_expr`.
+    pub(crate) captures: ClosureCaptureMap,
+    /// Inside a closure body: the env value loaded for each captured *place*
+    /// (e.g. `self.cap`). Consulted when lowering reads/borrows so projected
+    /// captures read the env value instead of projecting from a (non-captured)
+    /// receiver. Whole-local captures use `local_map` instead. Saved/restored
+    /// across nested closure bodies like `local_map`.
+    pub(crate) place_capture_map: HashMap<PlaceKey, ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -241,6 +252,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         ctx: &'a mut LowerCtx<'w>,
         hir: &'a HirBody,
         typed: Option<&'a TypedBody>,
+        captures: ClosureCaptureMap,
         func_entity: Entity,
         in_protocol_extension: bool,
     ) -> Self {
@@ -248,6 +260,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             ctx,
             hir: HirRef::Borrowed(hir),
             typed: typed.map(TypedRef::Borrowed),
+            captures,
+            place_capture_map: HashMap::new(),
             func_entity,
             body_context: if in_protocol_extension {
                 BodyContext::ProtocolExtension
@@ -1325,10 +1339,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.try_field_addr_chain(expr_id)
     }
 
+    /// Inside a closure body: if `expr_id` is a captured *projected* place
+    /// (e.g. `self.cap`), return the env value loaded for it. Returns `None`
+    /// when not in a closure, when the expr isn't a captured place, or for
+    /// whole-local captures (those bind through `local_map`).
+    pub(crate) fn captured_place_value(&self, expr_id: HirExprId) -> Option<ValueId> {
+        if self.place_capture_map.is_empty() {
+            return None;
+        }
+        let typed = self.typed.as_ref()?;
+        let key = kestrel_type_infer::captures::place_key_of(
+            &self.ctx.query,
+            typed,
+            &self.hir,
+            expr_id,
+        )?;
+        self.place_capture_map.get(&key).copied()
+    }
+
     /// Resolve an expression to a value suitable for borrowing — returns the
     /// original value without copying. For non-local expressions, falls back
     /// to lower_expr (which may copy).
     pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
+        // A captured projected place reads its env value directly.
+        if let Some(v) = self.captured_place_value(expr_id) {
+            return v;
+        }
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
             HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
@@ -1553,7 +1589,7 @@ pub(crate) fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
 pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_entity: Entity) {
     use kestrel_hir_lower::LowerBody;
     use kestrel_name_res::ExtensionTargetEntity;
-    use kestrel_type_infer::InferBody;
+    use kestrel_type_infer::{ClosureCaptures, InferBody};
 
     let Some(hir) = ctx.query.query(LowerBody {
         entity: hir_entity,
@@ -1563,6 +1599,13 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
     };
 
     let typed = ctx.query.query(InferBody {
+        entity: hir_entity,
+        root: ctx.root,
+    });
+
+    // Place-based closure capture plan (single source of truth — see
+    // kestrel-type-infer/src/captures.rs). Consumed by lower_closure_expr.
+    let captures = ctx.query.query(ClosureCaptures {
         entity: hir_entity,
         root: ctx.root,
     });
@@ -1589,6 +1632,7 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
         ctx,
         &hir,
         typed.as_ref(),
+        captures,
         func_entity,
         in_protocol_extension,
     );
