@@ -15,7 +15,7 @@ use crate::inst::InstKind;
 use crate::immediate::ImmediateKind;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
-use crate::{FunctionIdx, TyId};
+use crate::TyId;
 
 // -- Collection result --
 
@@ -53,10 +53,10 @@ impl WitnessCache {
 // -- BFS collection --
 
 pub fn collect_all(
-    functions: &[FunctionDef],
-    structs: &[StructDef],
-    enums: &[EnumDef],
-    protocols: &[ProtocolDef],
+    functions: &IndexMap<Entity, FunctionDef>,
+    structs: &IndexMap<Entity, StructDef>,
+    enums: &IndexMap<Entity, EnumDef>,
+    protocols: &IndexMap<Entity, ProtocolDef>,
     witnesses: &[WitnessDef],
     arena: &mut TyArena,
     entity_names: &IndexMap<Entity, String>,
@@ -75,14 +75,13 @@ pub fn collect_all(
 }
 
 struct CollectionContext<'a> {
-    functions: &'a [FunctionDef],
-    structs: &'a [StructDef],
-    enums: &'a [EnumDef],
-    protocols: &'a [ProtocolDef],
+    functions: &'a IndexMap<Entity, FunctionDef>,
+    structs: &'a IndexMap<Entity, StructDef>,
+    enums: &'a IndexMap<Entity, EnumDef>,
+    protocols: &'a IndexMap<Entity, ProtocolDef>,
     witnesses: &'a [WitnessDef],
     arena: &'a mut TyArena,
     entity_names: &'a IndexMap<Entity, String>,
-    entity_to_func: HashMap<Entity, FunctionIdx>,
     queue: VecDeque<InstantiationKey>,
     seen: IndexSet<InstantiationKey>,
     witness_cache: WitnessCache,
@@ -91,20 +90,14 @@ struct CollectionContext<'a> {
 
 impl<'a> CollectionContext<'a> {
     fn new(
-        functions: &'a [FunctionDef],
-        structs: &'a [StructDef],
-        enums: &'a [EnumDef],
-        protocols: &'a [ProtocolDef],
+        functions: &'a IndexMap<Entity, FunctionDef>,
+        structs: &'a IndexMap<Entity, StructDef>,
+        enums: &'a IndexMap<Entity, EnumDef>,
+        protocols: &'a IndexMap<Entity, ProtocolDef>,
         witnesses: &'a [WitnessDef],
         arena: &'a mut TyArena,
         entity_names: &'a IndexMap<Entity, String>,
     ) -> Self {
-        let entity_to_func: HashMap<Entity, FunctionIdx> = functions
-            .iter()
-            .enumerate()
-            .map(|(i, f)| (f.entity, FunctionIdx::new(i)))
-            .collect();
-
         Self {
             functions,
             structs,
@@ -113,7 +106,6 @@ impl<'a> CollectionContext<'a> {
             witnesses,
             arena,
             entity_names,
-            entity_to_func,
             queue: VecDeque::new(),
             seen: IndexSet::new(),
             witness_cache: WitnessCache::new(),
@@ -123,7 +115,7 @@ impl<'a> CollectionContext<'a> {
 
     fn collect(&mut self) {
         // Seed: all non-generic, non-closure, non-thunk entry points
-        for func in self.functions.iter() {
+        for func in self.functions.values() {
             if !func.type_params.is_empty() {
                 continue;
             }
@@ -158,12 +150,12 @@ impl<'a> CollectionContext<'a> {
             if let Some(parent_entity) = parent {
                 let is_concrete_nongeneric = self
                     .structs
-                    .iter()
-                    .any(|s| s.entity == parent_entity && s.type_params.is_empty())
+                    .get(&parent_entity)
+                    .is_some_and(|s| s.type_params.is_empty())
                     || self
                         .enums
-                        .iter()
-                        .any(|e| e.entity == parent_entity && e.type_params.is_empty());
+                        .get(&parent_entity)
+                        .is_some_and(|e| e.type_params.is_empty());
 
                 if !is_concrete_nongeneric {
                     continue;
@@ -193,10 +185,9 @@ impl<'a> CollectionContext<'a> {
     }
 
     fn process_instantiation(&mut self, key: &InstantiationKey) {
-        let Some(&func_idx) = self.entity_to_func.get(&key.func_entity) else {
+        let Some(func) = self.functions.get(&key.func_entity) else {
             return;
         };
-        let func = &self.functions[func_idx.index()];
 
         // Arity check
         if func.type_params.len() != key.type_args.len() {
@@ -272,11 +263,9 @@ impl<'a> CollectionContext<'a> {
                 type_args,
                 self_type,
             } => {
-                let Some(&func_idx) = self.entity_to_func.get(func) else {
+                let Some(callee_func) = self.functions.get(func) else {
                     return;
                 };
-
-                let callee_func = &self.functions[func_idx.index()];
 
                 // Lang intrinsics: no body, no extern — codegen handles as ops
                 if callee_func.body.is_none() && callee_func.extern_info.is_none() {
@@ -363,10 +352,9 @@ impl<'a> CollectionContext<'a> {
                             self.witness_cache.insert(*protocol, concrete_self, widx, bindings);
                         }
 
-                        let Some(&_func_idx) = self.entity_to_func.get(&resolved.func_entity)
-                        else {
+                        if !self.functions.contains_key(&resolved.func_entity) {
                             return;
-                        };
+                        }
 
                         if resolved.type_args.iter().any(|&t| has_type_param(self.arena, t)) {
                             return;
@@ -410,9 +398,9 @@ impl<'a> CollectionContext<'a> {
             self_type,
         } = imm
         {
-            let Some(&func_idx) = self.entity_to_func.get(func) else {
+            if !self.functions.contains_key(func) {
                 return;
-            };
+            }
 
             let concrete_type_args: Vec<TyId> = type_args
                 .iter()
@@ -431,7 +419,6 @@ impl<'a> CollectionContext<'a> {
             if self.seen.insert(key.clone()) {
                 self.queue.push_back(key);
             }
-            let _ = func_idx;
         }
     }
 
@@ -443,8 +430,8 @@ impl<'a> CollectionContext<'a> {
         subst: &SubstMap,
         parent_self: Option<TyId>,
     ) {
-        if let Some(callable_idx) = self.apply_partial_callable_for(func) {
-            let target = &self.functions[callable_idx.index()];
+        if let Some(callable_entity) = self.apply_partial_callable_for(func) {
+            let target = &self.functions[&callable_entity];
             let type_args: Vec<TyId> = target
                 .type_params
                 .iter()
@@ -452,7 +439,7 @@ impl<'a> CollectionContext<'a> {
                 .collect();
 
             let key = InstantiationKey::new(
-                self.functions[callable_idx.index()].entity,
+                callable_entity,
                 type_args,
                 parent_self,
             );
@@ -475,18 +462,17 @@ impl<'a> CollectionContext<'a> {
         false
     }
 
-    fn apply_partial_callable_for(&self, original: Entity) -> Option<FunctionIdx> {
+    fn apply_partial_callable_for(&self, original: Entity) -> Option<Entity> {
         // First look for a thunk wrapping this function
         self.functions
-            .iter()
-            .enumerate()
-            .find_map(|(i, func)| match &func.kind {
+            .values()
+            .find_map(|func| match &func.kind {
                 FunctionKind::Thunk {
                     original: thunk_target,
-                } if *thunk_target == original => Some(FunctionIdx::new(i)),
+                } if *thunk_target == original => Some(func.entity),
                 _ => None,
             })
-            .or_else(|| self.entity_to_func.get(&original).copied())
+            .or_else(|| if self.functions.contains_key(&original) { Some(original) } else { None })
     }
 
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
@@ -494,7 +480,7 @@ impl<'a> CollectionContext<'a> {
         if let MirTy::Named { entity, type_args } = self.arena.get(ty) {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(shim) = self.functions.iter().find(|f| {
+            if let Some(shim) = self.functions.values().find(|f| {
                 matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity)
             }) {
                 let key = InstantiationKey::new(shim.entity, type_args, parent_self);
@@ -511,9 +497,9 @@ impl<'a> CollectionContext<'a> {
             let entity = *entity;
             let type_args = type_args.clone();
             // Find clone shim or user clone method
-            let clone_func = self.functions.iter().find(|f| {
+            let clone_func = self.functions.values().find(|f| {
                 matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity)
-            }).or_else(|| self.functions.iter().find(|f| {
+            }).or_else(|| self.functions.values().find(|f| {
                 matches!(&f.kind, FunctionKind::Method { parent, .. } if *parent == entity)
                     && f.name.ends_with(".clone")
             }));
@@ -543,7 +529,7 @@ pub fn build_subst(
     type_args: &[TyId],
     self_type: Option<TyId>,
     arena: &mut TyArena,
-    protocols: &[ProtocolDef],
+    protocols: &IndexMap<Entity, ProtocolDef>,
     witnesses: &[WitnessDef],
 ) -> SubstMap {
     let mut subst = SubstMap::new();
@@ -560,7 +546,7 @@ pub fn build_subst(
         // Protocol extension methods on concrete structs: the body may reference
         // TypeParam(protocol_entity) but detect_implicit_protocol only catches
         // protocol default methods. Map every protocol that self_type conforms to.
-        for proto in protocols {
+        for proto in protocols.values() {
             if subst.type_params.contains_key(&proto.entity) {
                 continue;
             }
@@ -636,11 +622,11 @@ pub fn build_subst(
 pub fn detect_implicit_protocol(
     func: &FunctionDef,
     arena: &TyArena,
-    protocols: &[ProtocolDef],
+    protocols: &IndexMap<Entity, ProtocolDef>,
 ) -> Option<Entity> {
     if let Some(first_param) = func.params.first() {
         if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
-            if protocols.iter().any(|p| p.entity == *entity) {
+            if protocols.contains_key(entity) {
                 return Some(*entity);
             }
         }
@@ -656,7 +642,7 @@ pub fn detect_implicit_protocol(
     ) {
         return None;
     }
-    for proto in protocols {
+    for proto in protocols.values() {
         if proto.associated_types.is_empty() {
             continue;
         }
@@ -675,12 +661,12 @@ pub fn detect_implicit_protocol(
 pub fn populate_assoc_types(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &[ProtocolDef],
+    protocols: &IndexMap<Entity, ProtocolDef>,
     protocol: Entity,
     concrete_ty: TyId,
     subst: &mut SubstMap,
 ) {
-    let Some(proto_def) = protocols.iter().find(|p| p.entity == protocol) else {
+    let Some(proto_def) = protocols.get(&protocol) else {
         return;
     };
     for assoc in &proto_def.associated_types {
@@ -824,8 +810,19 @@ mod tests {
     use crate::callee::Callee;
     use crate::item::function::{FunctionDef, FunctionKind};
     use crate::item::struct_def::StructDef;
+    use crate::item::protocol::ProtocolDef;
     use crate::item::witness::{WitnessDef, WitnessMethodBinding};
     use crate::item::TypeParamDef;
+
+    fn func_map(funcs: Vec<FunctionDef>) -> IndexMap<Entity, FunctionDef> {
+        funcs.into_iter().map(|f| (f.entity, f)).collect()
+    }
+    fn struct_map(structs: Vec<StructDef>) -> IndexMap<Entity, StructDef> {
+        structs.into_iter().map(|s| (s.entity, s)).collect()
+    }
+    fn proto_map(protos: Vec<ProtocolDef>) -> IndexMap<Entity, ProtocolDef> {
+        protos.into_iter().map(|p| (p.entity, p)).collect()
+    }
     use crate::item::WitnessMethodKey;
     use crate::ValueId;
 
@@ -901,7 +898,7 @@ mod tests {
         };
 
         let result = collect_all(
-            &[func], &[], &[], &[], &[], &mut arena, &IndexMap::new(),
+            &func_map(vec![func]), &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
         ).unwrap();
 
         assert_eq!(result.instantiations.len(), 1);
@@ -929,7 +926,7 @@ mod tests {
         };
 
         let result = collect_all(
-            &[func], &[], &[], &[], &[], &mut arena, &IndexMap::new(),
+            &func_map(vec![func]), &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
         ).unwrap();
 
         assert!(result.instantiations.is_empty());
@@ -984,8 +981,8 @@ mod tests {
         };
 
         let result = collect_all(
-            &[main_fn, generic_fn],
-            &[], &[], &[], &[],
+            &func_map(vec![main_fn, generic_fn]),
+            &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[],
             &mut arena,
             &IndexMap::new(),
         ).unwrap();
@@ -1035,7 +1032,7 @@ mod tests {
         };
 
         let result = collect_all(
-            &[closure, thunk], &[], &[], &[], &[], &mut arena, &IndexMap::new(),
+            &func_map(vec![closure, thunk]), &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
         ).unwrap();
 
         assert!(result.instantiations.is_empty());
@@ -1054,7 +1051,7 @@ mod tests {
             name: "Point.x".into(),
             kind: FunctionKind::Method {
                 parent: entity(1),
-                receiver: crate::item::function::ReceiverConvention::Borrow,
+                receiver: crate::ty::ParamConvention::Borrow,
             },
             type_params: vec![],
             params: vec![],
@@ -1067,7 +1064,7 @@ mod tests {
         };
 
         let result = collect_all(
-            &[method], &[struct_def], &[], &[], &[], &mut arena, &IndexMap::new(),
+            &func_map(vec![method]), &struct_map(vec![struct_def]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
         ).unwrap();
 
         // Method on concrete non-generic parent is seeded
@@ -1141,9 +1138,9 @@ mod tests {
         names.insert(proto, "Equatable".to_string());
 
         let result = collect_all(
-            &[main_fn, impl_func],
-            &[], &[],
-            &[protocol],
+            &func_map(vec![main_fn, impl_func]),
+            &struct_map(vec![]), &IndexMap::new(),
+            &proto_map(vec![protocol]),
             &[witness],
             &mut arena,
             &names,

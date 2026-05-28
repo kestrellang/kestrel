@@ -122,7 +122,7 @@ impl OssaBodyCtx<'_, '_> {
     /// Look up param conventions for a callee from its FunctionDef or ECS Callable.
     pub(crate) fn collect_conventions(&self, callee_entity: Entity) -> Vec<ParamConvention> {
         // Try MIR FunctionDef first
-        if let Some(callee) = self.ctx.module.functions.iter().find(|f| f.entity == callee_entity) {
+        if let Some(callee) = self.ctx.module.functions.get(&callee_entity) {
             if callee.extern_info.is_some() {
                 // Extern: all Consuming
                 return callee.params.iter().map(|_| ParamConvention::Consuming).collect();
@@ -278,7 +278,7 @@ impl OssaBodyCtx<'_, '_> {
         expr_id: HirExprId,
         callee_expr: HirExprId,
     ) -> Vec<TyId> {
-        let _parent = if let Some(func_def) = self.ctx.module.functions.iter().find(|f| f.entity == func_entity) {
+        let _parent = if let Some(func_def) = self.ctx.module.functions.get(&func_entity) {
             if func_def.type_params.is_empty() {
                 return Vec::new();
             }
@@ -321,7 +321,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     pub(crate) fn is_init_function(&self, entity: Entity) -> Option<Entity> {
-        if let Some(f) = self.ctx.module.functions.iter().find(|f| f.entity == entity) {
+        if let Some(f) = self.ctx.module.functions.get(&entity) {
             match f.kind {
                 kestrel_mir_3::item::function::FunctionKind::Initializer { parent } => Some(parent),
                 _ => None,

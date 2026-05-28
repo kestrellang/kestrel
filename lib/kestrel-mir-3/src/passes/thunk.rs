@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use kestrel_hecs::Entity;
 
 use crate::block::BlockParam;
-use crate::body::{OssaBody, ownership_for_type};
+use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
@@ -17,7 +17,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
     let mut targets: Vec<Entity> = Vec::new();
     let mut seen = HashSet::new();
 
-    for func in &module.functions {
+    for func in module.functions.values() {
         let Some(body) = &func.body else { continue };
         for block in &body.blocks {
             for inst in &block.insts {
@@ -33,13 +33,13 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
     for target in &targets {
         let already_has_thunk = module
             .functions
-            .iter()
+            .values()
             .any(|f| matches!(&f.kind, FunctionKind::Thunk { original } if *original == *target));
         if already_has_thunk {
             continue;
         }
 
-        let Some(target_func) = module.functions.iter().find(|f| f.entity == *target) else {
+        let Some(target_func) = module.functions.get(target) else {
             continue;
         };
 
@@ -104,16 +104,15 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         }
 
         for param in &target_params {
-            let ownership = ownership_for_type(param.ty, &module.ty_arena, module);
             let val = body.alloc_value(ValueDef {
                 ty: param.ty,
-                ownership,
+                ownership: Ownership::Owned,
                 borrow_source: None,
             });
             body.block_mut(entry).params.push(BlockParam {
                 value: val,
                 ty: param.ty,
-                ownership,
+                ownership: Ownership::Owned,
             });
             thunk_def.params.push(ParamDef::new(
                 &param.name, val, param.ty, ParamConvention::Consuming,
@@ -151,10 +150,9 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
             body.block_mut(entry).terminator =
                 Terminator::new(TerminatorKind::Return(unit_val));
         } else {
-            let ret_ownership = ownership_for_type(ret_ty, &module.ty_arena, module);
             let result_val = body.alloc_value(ValueDef {
                 ty: ret_ty,
-                ownership: ret_ownership,
+                ownership: Ownership::Owned,
                 borrow_source: None,
             });
             insts.push(Instruction::new(InstKind::Call {
@@ -171,7 +169,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         module.add_function(thunk_def);
 
         // Rewrite ApplyPartial references to use the thunk entity
-        for func in &mut module.functions {
+        for func in module.functions.values_mut() {
             let Some(body) = &mut func.body else { continue };
             for block in &mut body.blocks {
                 for inst in &mut block.insts {
@@ -208,16 +206,15 @@ mod tests {
         let mut func = FunctionDef::new(entity, name, ret_ty);
 
         for (pname, pty, conv) in &params {
-            let ownership = ownership_for_type(*pty, &module.ty_arena, module);
             let val = body.alloc_value(ValueDef {
                 ty: *pty,
-                ownership,
+                ownership: Ownership::Owned,
                 borrow_source: None,
             });
             body.block_mut(entry).params.push(BlockParam {
                 value: val,
                 ty: *pty,
-                ownership,
+                ownership: Ownership::Owned,
             });
             func.params.push(ParamDef::new(pname, val, *pty, *conv));
             body.param_count += 1;
@@ -301,7 +298,7 @@ mod tests {
 
         let thunk = module
             .functions
-            .iter()
+            .values()
             .find(|f| matches!(&f.kind, FunctionKind::Thunk { original } if *original == add_entity));
         assert!(thunk.is_some(), "thunk should be generated");
 
@@ -369,7 +366,7 @@ mod tests {
 
         let thunk_count = module
             .functions
-            .iter()
+            .values()
             .filter(|f| matches!(&f.kind, FunctionKind::Thunk { .. }))
             .count();
         assert_eq!(thunk_count, 1, "should deduplicate thunks");
@@ -441,7 +438,7 @@ mod tests {
 
         let thunk = module
             .functions
-            .iter()
+            .values()
             .find(|f| matches!(&f.kind, FunctionKind::Thunk { .. }))
             .unwrap();
         let body = thunk.body.as_ref().unwrap();

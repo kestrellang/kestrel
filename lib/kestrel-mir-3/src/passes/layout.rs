@@ -1,3 +1,5 @@
+use kestrel_hecs::Entity;
+
 use crate::item::{Layout, TargetConfig};
 use crate::layout::{EnumLayout, StructLayout};
 use crate::ty::{MirTy, TyArena};
@@ -10,24 +12,29 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
     loop {
         let mut progress = false;
 
-        for i in 0..module.structs.len() {
-            if module.structs[i].type_info.layout.is_some() {
+        let struct_entities: Vec<Entity> = module.structs.keys().copied().collect();
+        for entity in struct_entities {
+            let s = &module.structs[&entity];
+            if s.type_info.layout.is_some() {
                 continue;
             }
-            if has_type_params(&module.ty_arena, &module.structs[i].fields.iter().map(|f| f.ty).collect::<Vec<_>>()) {
+            let field_tys: Vec<TyId> = s.fields.iter().map(|f| f.ty).collect();
+            if has_type_params(&module.ty_arena, &field_tys) {
                 continue;
             }
-            if let Some(layout) = compute_struct_layout(&module.ty_arena, module, &module.structs[i].fields.iter().map(|f| f.ty).collect::<Vec<_>>(), target) {
-                module.structs[i].type_info.layout = Some(Layout::Struct(layout));
+            if let Some(layout) = compute_struct_layout(&module.ty_arena, module, &field_tys, target) {
+                module.structs.get_mut(&entity).unwrap().type_info.layout = Some(Layout::Struct(layout));
                 progress = true;
             }
         }
 
-        for i in 0..module.enums.len() {
-            if module.enums[i].type_info.layout.is_some() {
+        let enum_entities: Vec<Entity> = module.enums.keys().copied().collect();
+        for entity in enum_entities {
+            let e = &module.enums[&entity];
+            if e.type_info.layout.is_some() {
                 continue;
             }
-            let case_fields: Vec<Vec<TyId>> = module.enums[i]
+            let case_fields: Vec<Vec<TyId>> = e
                 .cases
                 .iter()
                 .map(|c| c.payload_fields.iter().map(|f| f.ty).collect())
@@ -36,7 +43,7 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
                 continue;
             }
             if let Some(layout) = compute_enum_layout(&module.ty_arena, module, &case_fields, target) {
-                module.enums[i].type_info.layout = Some(Layout::Enum(layout));
+                module.enums.get_mut(&entity).unwrap().type_info.layout = Some(Layout::Enum(layout));
                 progress = true;
             }
         }
@@ -73,14 +80,10 @@ fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
     }
 }
 
-/// Get size and alignment of a type, if resolvable.
-pub fn size_and_align_of(
-    arena: &TyArena,
-    module: &MirModule,
-    ty: TyId,
-    target: &TargetConfig,
-) -> Option<(u64, u64)> {
-    match arena.get(ty) {
+/// Size and alignment of a primitive MirTy (scalars, pointers, function types).
+/// Returns None for composite types (Named, Tuple, TypeParam, etc.).
+pub fn primitive_size_and_align(ty: &MirTy, target: &TargetConfig) -> Option<(u64, u64)> {
+    match ty {
         MirTy::Bool => Some((1, 1)),
         MirTy::I8 => Some((1, 1)),
         MirTy::I16 => Some((2, 2)),
@@ -95,6 +98,21 @@ pub fn size_and_align_of(
         MirTy::FuncThin { .. } => Some((target.pointer_width, target.pointer_width)),
         MirTy::FuncThick { .. } => Some((target.pointer_width * 2, target.pointer_width)),
         MirTy::Error => Some((0, 1)),
+        _ => None,
+    }
+}
+
+/// Get size and alignment of a type, if resolvable.
+pub fn size_and_align_of(
+    arena: &TyArena,
+    module: &MirModule,
+    ty: TyId,
+    target: &TargetConfig,
+) -> Option<(u64, u64)> {
+    if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
+        return Some(sa);
+    }
+    match arena.get(ty) {
 
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
@@ -115,27 +133,22 @@ pub fn size_and_align_of(
                 return None;
             }
             let entity = *entity;
-            for s in &module.structs {
-                if s.entity == entity {
-                    let l = s.type_info.layout.as_ref()?;
-                    if let Layout::Struct(sl) = l {
-                        return Some((sl.size, sl.align));
-                    }
+            if let Some(s) = module.structs.get(&entity) {
+                if let Some(Layout::Struct(sl)) = &s.type_info.layout {
+                    return Some((sl.size, sl.align));
                 }
+                return None;
             }
-            for e in &module.enums {
-                if e.entity == entity {
-                    let l = e.type_info.layout.as_ref()?;
-                    if let Layout::Enum(el) = l {
-                        return Some((el.size, el.align));
-                    }
+            if let Some(e) = module.enums.get(&entity) {
+                if let Some(Layout::Enum(el)) = &e.type_info.layout {
+                    return Some((el.size, el.align));
                 }
+                return None;
             }
             None
         }
 
-        MirTy::TypeParam(_)
-        | MirTy::AssociatedProjection { .. } => None,
+        _ => None,
     }
 }
 
@@ -160,15 +173,7 @@ fn compute_enum_layout(
     case_fields: &[Vec<TyId>],
     target: &TargetConfig,
 ) -> Option<EnumLayout> {
-    let num_variants = case_fields.len();
-    let disc_width = discriminant_width(num_variants);
-    let disc_size = disc_width.byte_width();
-    let disc_align = disc_size;
-
-    let mut variant_layouts = Vec::with_capacity(num_variants);
-    let mut max_payload_size: u64 = 0;
-    let mut max_payload_align: u64 = 1;
-
+    let mut variant_layouts = Vec::with_capacity(case_fields.len());
     for fields in case_fields {
         let mut vl = StructLayout::new();
         for &ty in fields {
@@ -176,31 +181,47 @@ fn compute_enum_layout(
             vl.append_field(StructLayout::scalar(size, align));
         }
         vl.pad_to_align();
+        variant_layouts.push(vl);
+    }
+    Some(build_enum_layout(&variant_layouts, case_fields.len()))
+}
+
+/// Build an EnumLayout from pre-computed variant layouts.
+pub fn build_enum_layout(variant_layouts: &[StructLayout], num_variants: usize) -> EnumLayout {
+    let disc_width = discriminant_width(num_variants);
+    let disc_size = disc_width.byte_width();
+    let disc_align = disc_size;
+
+    let mut max_payload_size: u64 = 0;
+    let mut max_payload_align: u64 = 1;
+    for vl in variant_layouts {
         max_payload_size = max_payload_size.max(vl.size);
         max_payload_align = max_payload_align.max(vl.align);
-        variant_layouts.push(vl);
     }
 
     let overall_align = disc_align.max(max_payload_align);
-    let payload_offset = disc_size + (overall_align - disc_size % overall_align) % overall_align;
-    let payload_offset = if disc_size.is_multiple_of(max_payload_align) {
+    let payload_offset = if max_payload_align == 0 || disc_size.is_multiple_of(max_payload_align) {
         disc_size
     } else {
-        payload_offset
+        disc_size + (overall_align - disc_size % overall_align) % overall_align
     };
     let total_size = payload_offset + max_payload_size;
-    let padding = (overall_align - total_size % overall_align) % overall_align;
+    let padding = if overall_align == 0 {
+        0
+    } else {
+        (overall_align - total_size % overall_align) % overall_align
+    };
 
-    Some(EnumLayout {
+    EnumLayout {
         size: total_size + padding,
         align: overall_align,
         discriminant_width: disc_width,
         payload_offset,
-        variant_layouts,
-    })
+        variant_layouts: variant_layouts.to_vec(),
+    }
 }
 
-fn discriminant_width(num_variants: usize) -> IntBits {
+pub fn discriminant_width(num_variants: usize) -> IntBits {
     if num_variants <= 256 {
         IntBits::I8
     } else if num_variants <= 65536 {
@@ -233,7 +254,7 @@ mod tests {
         module.add_struct(def);
         run_layout_pass(&mut module, &target());
 
-        match module.structs[0].type_info.layout.as_ref().unwrap() {
+        match get_struct_layout(&module, s_entity) {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 16);
                 assert_eq!(sl.align, 8);
@@ -256,7 +277,7 @@ mod tests {
         module.add_struct(def);
         run_layout_pass(&mut module, &target());
 
-        match module.structs[0].type_info.layout.as_ref().unwrap() {
+        match get_struct_layout(&module, s_entity) {
             Layout::Struct(sl) => {
                 assert_eq!(sl.field_offsets, vec![0, 8]);
                 assert_eq!(sl.size, 16);
@@ -275,7 +296,7 @@ mod tests {
         module.add_struct(def);
         run_layout_pass(&mut module, &target());
 
-        match module.structs[0].type_info.layout.as_ref().unwrap() {
+        match get_struct_layout(&module, s_entity) {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 0);
                 assert_eq!(sl.align, 1);
@@ -304,8 +325,8 @@ mod tests {
 
         run_layout_pass(&mut module, &target());
 
-        assert!(module.structs[0].type_info.layout.is_some());
-        match module.structs[1].type_info.layout.as_ref().unwrap() {
+        assert!(module.structs[&inner_entity].type_info.layout.is_some());
+        match get_struct_layout(&module, outer_entity) {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 16);
                 assert_eq!(sl.field_offsets, vec![0, 8]);
@@ -326,7 +347,7 @@ mod tests {
         module.add_struct(def);
         run_layout_pass(&mut module, &target());
 
-        assert!(module.structs[0].type_info.layout.is_none());
+        assert!(module.structs[&s_entity].type_info.layout.is_none());
     }
 
     #[test]
@@ -345,7 +366,7 @@ mod tests {
         module.add_enum(def);
         run_layout_pass(&mut module, &target());
 
-        match module.enums[0].type_info.layout.as_ref().unwrap() {
+        match get_enum_layout(&module, e_entity) {
             Layout::Enum(el) => {
                 assert_eq!(el.discriminant_width, IntBits::I8);
                 assert!(el.size > 0);
@@ -368,7 +389,7 @@ mod tests {
         module.add_enum(def);
         run_layout_pass(&mut module, &target());
 
-        match module.enums[0].type_info.layout.as_ref().unwrap() {
+        match get_enum_layout(&module, e_entity) {
             Layout::Enum(el) => {
                 assert_eq!(el.discriminant_width, IntBits::I8);
                 assert_eq!(el.size, 1);
@@ -389,7 +410,7 @@ mod tests {
         module.add_struct(def);
         run_layout_pass(&mut module, &target());
 
-        match module.structs[0].type_info.layout.as_ref().unwrap() {
+        match get_struct_layout(&module, s_entity) {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 8);
                 assert_eq!(sl.align, 8);
@@ -424,4 +445,11 @@ mod tests {
     }
 
     use kestrel_hecs::Entity;
+
+    fn get_struct_layout(module: &MirModule, entity: Entity) -> &Layout {
+        module.structs[&entity].type_info.layout.as_ref().unwrap()
+    }
+    fn get_enum_layout(module: &MirModule, entity: Entity) -> &Layout {
+        module.enums[&entity].type_info.layout.as_ref().unwrap()
+    }
 }

@@ -631,7 +631,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         if let Some(entity) = entity {
-            if let Some(sdef) = self.ctx.module.structs.iter().find(|s| s.entity == entity) {
+            if let Some(sdef) = self.ctx.module.structs.get(&entity) {
                 if let Some(idx) = sdef.fields.iter().position(|f| f.name == field_name) {
                     let mut field_ty = sdef.fields[idx].ty;
 
@@ -685,7 +685,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         if let Some(entity) = entity {
-            if let Some(edef) = self.ctx.module.enums.iter().find(|e| e.entity == entity) {
+            if let Some(edef) = self.ctx.module.enums.get(&entity) {
                 if let Some(case) = edef.cases.get(variant_idx.index()) {
                     if let Some(idx) = case.payload_fields.iter().position(|f| f.name == field_name) {
                         let mut field_ty = case.payload_fields[idx].ty;
@@ -726,7 +726,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         if let Some(entity) = entity {
-            if let Some(edef) = self.ctx.module.enums.iter().find(|e| e.entity == entity) {
+            if let Some(edef) = self.ctx.module.enums.get(&entity) {
                 if let Some(case) = edef.cases.get(variant_idx.index()) {
                     if let Some(field) = case.payload_fields.get(field_idx.index()) {
                         let mut field_ty = field.ty;

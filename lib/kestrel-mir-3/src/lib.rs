@@ -23,8 +23,8 @@ use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
 pub use id::{
-    BlockId, EnumIdx, FieldIdx, FunctionIdx, MonoFuncId, ProtocolIdx, StaticIdx, StructIdx, TyId,
-    ValueId, VariantIdx, WitnessIdx,
+    BlockId, FieldIdx, MonoFuncId, TyId,
+    ValueId, VariantIdx,
 };
 pub use immediate::{Immediate, ImmediateKind};
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
@@ -46,12 +46,12 @@ use item::witness::WitnessDef;
 #[derive(Debug)]
 pub struct MirModule {
     pub name: String,
-    pub functions: Vec<FunctionDef>,
-    pub structs: Vec<StructDef>,
-    pub enums: Vec<EnumDef>,
-    pub protocols: Vec<ProtocolDef>,
+    pub functions: IndexMap<Entity, FunctionDef>,
+    pub structs: IndexMap<Entity, StructDef>,
+    pub enums: IndexMap<Entity, EnumDef>,
+    pub protocols: IndexMap<Entity, ProtocolDef>,
     pub witnesses: Vec<WitnessDef>,
-    pub statics: Vec<StaticDef>,
+    pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
 }
@@ -60,12 +60,12 @@ impl MirModule {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            functions: Vec::new(),
-            structs: Vec::new(),
-            enums: Vec::new(),
-            protocols: Vec::new(),
+            functions: IndexMap::new(),
+            structs: IndexMap::new(),
+            enums: IndexMap::new(),
+            protocols: IndexMap::new(),
             witnesses: Vec::new(),
-            statics: Vec::new(),
+            statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
         }
@@ -82,39 +82,37 @@ impl MirModule {
             .unwrap_or("<unknown>")
     }
 
-    pub fn add_function(&mut self, func: FunctionDef) -> FunctionIdx {
-        let idx = FunctionIdx::new(self.functions.len());
-        self.functions.push(func);
-        idx
+    pub fn add_function(&mut self, func: FunctionDef) -> Entity {
+        let entity = func.entity;
+        self.functions.insert(entity, func);
+        entity
     }
 
-    pub fn add_struct(&mut self, def: StructDef) -> StructIdx {
-        let idx = StructIdx::new(self.structs.len());
-        self.structs.push(def);
-        idx
+    pub fn add_struct(&mut self, def: StructDef) -> Entity {
+        let entity = def.entity;
+        self.structs.insert(entity, def);
+        entity
     }
 
-    pub fn add_enum(&mut self, def: EnumDef) -> EnumIdx {
-        let idx = EnumIdx::new(self.enums.len());
-        self.enums.push(def);
-        idx
+    pub fn add_enum(&mut self, def: EnumDef) -> Entity {
+        let entity = def.entity;
+        self.enums.insert(entity, def);
+        entity
     }
 
-    pub fn add_protocol(&mut self, def: ProtocolDef) -> ProtocolIdx {
-        let idx = ProtocolIdx::new(self.protocols.len());
-        self.protocols.push(def);
-        idx
+    pub fn add_protocol(&mut self, def: ProtocolDef) -> Entity {
+        let entity = def.entity;
+        self.protocols.insert(entity, def);
+        entity
     }
 
-    pub fn add_witness(&mut self, def: WitnessDef) -> WitnessIdx {
-        let idx = WitnessIdx::new(self.witnesses.len());
+    pub fn add_witness(&mut self, def: WitnessDef) {
         self.witnesses.push(def);
-        idx
     }
 
-    pub fn add_static(&mut self, def: StaticDef) -> StaticIdx {
-        let idx = StaticIdx::new(self.statics.len());
-        self.statics.push(def);
-        idx
+    pub fn add_static(&mut self, def: StaticDef) -> Entity {
+        let entity = def.entity;
+        self.statics.insert(entity, def);
+        entity
     }
 }

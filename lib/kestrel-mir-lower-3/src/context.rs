@@ -63,13 +63,13 @@ impl<'w> LowerCtx<'w> {
     /// Panics if the struct or field is not found — field names are validated
     /// upstream by name resolution.
     pub fn resolve_field_idx(&self, struct_entity: Entity, field_name: &str) -> Option<FieldIdx> {
-        let def = self.module.structs.iter().find(|s| s.entity == struct_entity)?;
+        let def = self.module.structs.get(&struct_entity)?;
         let idx = def.fields.iter().position(|f| f.name == field_name)?;
         Some(FieldIdx::new(idx))
     }
 
     pub fn resolve_field_ty(&self, struct_entity: Entity, field_idx: FieldIdx) -> Option<TyId> {
-        let def = self.module.structs.iter().find(|s| s.entity == struct_entity)?;
+        let def = self.module.structs.get(&struct_entity)?;
         def.fields.get(field_idx.index()).map(|f| f.ty)
     }
 
@@ -79,7 +79,7 @@ impl<'w> LowerCtx<'w> {
         enum_entity: Entity,
         case_name: &str,
     ) -> Option<VariantIdx> {
-        let def = self.module.enums.iter().find(|e| e.entity == enum_entity)?;
+        let def = self.module.enums.get(&enum_entity)?;
         let idx = def.cases.iter().position(|c| c.name == case_name)?;
         Some(VariantIdx::new(idx))
     }

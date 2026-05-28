@@ -128,7 +128,6 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub hir: HirRef<'a>,
     pub typed: Option<TypedRef<'a>>,
     pub func_entity: Entity,
-    pub func_idx: usize,
     pub in_protocol_extension: bool,
     pub body: OssaBody,
     pub current_block: Option<BlockId>,
@@ -157,7 +156,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         hir: &'a HirBody,
         typed: Option<&'a TypedBody>,
         func_entity: Entity,
-        func_idx: usize,
         in_protocol_extension: bool,
     ) -> Self {
         Self {
@@ -165,7 +163,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             hir: HirRef::Borrowed(hir),
             typed: typed.map(TypedRef::Borrowed),
             func_entity,
-            func_idx,
             in_protocol_extension,
             body: OssaBody::new(),
             current_block: None,
@@ -204,10 +201,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // and need var_locals treatment — reads go through Load, field
         // assignments use the address directly.
         let param_conventions: Vec<ParamConvention> = self.ctx.module.functions
-            .get(self.func_idx)
+            .get(&self.func_entity)
             .map(|f| f.params.iter().map(|p| p.convention).collect())
             .unwrap_or_default();
-        let is_init_body = self.ctx.module.functions.get(self.func_idx)
+        let is_init_body = self.ctx.module.functions.get(&self.func_entity)
             .map(|f| matches!(f.kind, kestrel_mir_3::item::function::FunctionKind::Initializer { .. }))
             .unwrap_or(false);
         for (i, (hir_id, _local)) in locals.iter().enumerate() {
@@ -357,7 +354,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn is_copy_type(&self, ty: TyId) -> bool {
-        let wc = self.ctx.module.functions.get(self.func_idx)
+        let wc = self.ctx.module.functions.get(&self.func_entity)
             .and_then(|f| f.where_clause.as_ref());
         matches!(
             kestrel_mir_3::ty_query::copy_behavior(&self.ctx.module.ty_arena, &self.ctx.module, ty, wc),
@@ -365,8 +362,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         )
     }
 
-    pub fn ownership_for(&self, ty: TyId) -> Ownership {
-        kestrel_mir_3::body::ownership_for_type(ty, &self.ctx.module.ty_arena, &self.ctx.module)
+    pub fn ownership_for(&self, _ty: TyId) -> Ownership {
+        Ownership::Owned
     }
 
     // ================================================================
@@ -724,7 +721,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     raw_ft
                 } else {
                     let mut subst = kestrel_mir_3::SubstMap::new();
-                    if let Some(def) = self.ctx.module.structs.iter().find(|s| s.entity == entity) {
+                    if let Some(def) = self.ctx.module.structs.get(&entity) {
                         for (tp, &ta) in def.type_params.iter().zip(type_args.iter()) {
                             subst.type_params.insert(tp.entity, ta);
                         }
@@ -1128,18 +1125,23 @@ pub(crate) fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
 }
 
 /// Lower a function body to OSSA.
-pub(crate) fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_idx: usize) {
+///
+/// `hir_entity` is the entity whose HIR body is lowered (used for LowerBody/InferBody queries).
+/// `func_entity` is the key in `module.functions` where the result is stored.
+/// For normal functions these are the same; for static init thunks they differ
+/// (the static's entity provides the body, the thunk's entity keys the function).
+pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_entity: Entity) {
     use kestrel_hir_lower::LowerBody;
     use kestrel_name_res::ExtensionTargetEntity;
     use kestrel_type_infer::InferBody;
 
-    let Some(hir) = ctx.query.query(LowerBody { entity, root: ctx.root }) else {
+    let Some(hir) = ctx.query.query(LowerBody { entity: hir_entity, root: ctx.root }) else {
         return;
     };
 
-    let typed = ctx.query.query(InferBody { entity, root: ctx.root });
+    let typed = ctx.query.query(InferBody { entity: hir_entity, root: ctx.root });
 
-    let in_protocol_extension = ctx.world.parent_of(entity).is_some_and(|parent| {
+    let in_protocol_extension = ctx.world.parent_of(hir_entity).is_some_and(|parent| {
         matches!(
             ctx.world.get::<kestrel_ast_builder::NodeKind>(parent),
             Some(kestrel_ast_builder::NodeKind::Extension)
@@ -1154,11 +1156,11 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, entity: Entity, func_idx: 
             })
     });
 
-    let mut bctx = OssaBodyCtx::new(ctx, &hir, typed.as_ref(), entity, func_idx, in_protocol_extension);
+    let mut bctx = OssaBodyCtx::new(ctx, &hir, typed.as_ref(), func_entity, in_protocol_extension);
     bctx.lower_body();
     let ossa_body = bctx.body;
 
-    let func = &mut ctx.module.functions[func_idx];
+    let func = ctx.module.functions.get_mut(&func_entity).unwrap();
     for (pi, param) in func.params.iter_mut().enumerate() {
         param.value = ValueId::new(pi);
         if pi < ossa_body.values.len() {

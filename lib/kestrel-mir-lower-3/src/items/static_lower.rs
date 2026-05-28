@@ -43,7 +43,7 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
     let with_init: Vec<(Entity, TyId)> = ctx
         .module
         .statics
-        .iter()
+        .values()
         .filter(|s| s.file_constant_data.is_none())
         .filter(|s| ctx.world.get::<Body>(s.entity).is_some())
         .map(|s| (s.entity, s.ty))
@@ -54,11 +54,11 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
     }
 
     // One thunk per static
-    let thunks: Vec<(Entity, usize, TyId)> = with_init
+    let thunks: Vec<(Entity, Entity, TyId)> = with_init
         .into_iter()
         .map(|(entity, ty)| {
-            let func_idx = synthesize_init_thunk(ctx, entity, ty);
-            (entity, func_idx, ty)
+            let thunk_entity = synthesize_init_thunk(ctx, entity, ty);
+            (entity, thunk_entity, ty)
         })
         .collect();
 
@@ -71,7 +71,7 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
 }
 
 /// Create `func __init$<name>() -> T { <initializer expr> }`.
-fn synthesize_init_thunk(ctx: &mut LowerCtx, static_entity: Entity, static_ty: TyId) -> usize {
+fn synthesize_init_thunk(ctx: &mut LowerCtx, static_entity: Entity, static_ty: TyId) -> Entity {
     let static_name = ctx.module.resolve_name(static_entity).to_string();
     let thunk_entity = ctx.next_synthetic_entity();
     let thunk_name = format!("__init${static_name}");
@@ -79,21 +79,22 @@ fn synthesize_init_thunk(ctx: &mut LowerCtx, static_entity: Entity, static_ty: T
 
     let mut def = FunctionDef::new(thunk_entity, &thunk_name, static_ty);
     def.kind = FunctionKind::Free;
-    let func_id = ctx.module.add_function(def);
-    let func_idx = func_id.index();
+    ctx.module.add_function(def);
 
-    crate::body::lower_function_body(ctx, static_entity, func_idx);
+    // Lower body using the static's entity (source of the init expression)
+    // but the thunk's entity is the function key in the module
+    crate::body::lower_function_body(ctx, static_entity, thunk_entity);
 
-    func_idx
+    thunk_entity
 }
 
 /// Create the master `__kestrel_init_statics()` that calls each thunk
 /// and stores the result into the corresponding global.
-fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) -> usize {
+fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, Entity, TyId)]) -> Entity {
     use kestrel_mir_3::callee::Callee;
     use kestrel_mir_3::inst::{InstKind, Instruction};
     use kestrel_mir_3::terminator::{Terminator, TerminatorKind};
-    use kestrel_mir_3::value::{Ownership, ValueDef};
+    use kestrel_mir_3::value::ValueDef;
     use kestrel_mir_3::Immediate;
 
     let entity = ctx.next_synthetic_entity();
@@ -102,24 +103,16 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
     let unit_ty = ctx.module.ty_arena.unit();
     let mut def = FunctionDef::new(entity, INIT_STATICS_NAME, unit_ty);
     def.kind = FunctionKind::Free;
-    let func_id = ctx.module.add_function(def);
-    let func_idx = func_id.index();
+    ctx.module.add_function(def);
 
     let mut body = OssaBody::new();
     let entry = body.alloc_block();
     body.entry = entry;
 
-    for &(static_entity, thunk_func_idx, static_ty) in thunks {
-        let thunk_entity = ctx.module.functions[thunk_func_idx].entity;
+    for &(static_entity, thunk_entity, static_ty) in thunks {
 
         // tmp = call __init$...()
-        let ownership = kestrel_mir_3::body::ownership_for_type(
-            static_ty, &ctx.module.ty_arena, &ctx.module,
-        );
-        let tmp = body.alloc_value(match ownership {
-            Ownership::Owned => ValueDef::owned(static_ty),
-            _ => ValueDef::owned(static_ty),
-        });
+        let tmp = body.alloc_value(ValueDef::owned(static_ty));
         body.block_mut(entry).insts.push(Instruction::new(InstKind::Call {
             result: Some(tmp),
             callee: Callee::direct(thunk_entity),
@@ -150,8 +143,8 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, usize, TyId)]) 
     ));
     body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
 
-    ctx.module.functions[func_idx].body = Some(body);
-    func_idx
+    ctx.module.functions.get_mut(&entity).unwrap().body = Some(body);
+    entity
 }
 
 /// If the initializer body is a single literal expression (no statements),

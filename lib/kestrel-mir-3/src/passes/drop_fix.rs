@@ -38,8 +38,13 @@ fn field_needs_drop(module: &MirModule, ty: crate::TyId) -> bool {
 
 fn fix_structs(module: &mut MirModule) -> bool {
     let mut changed = false;
-    for si in 0..module.structs.len() {
-        let droppable_fields: Vec<FieldIdx> = module.structs[si]
+
+    // Collect keys first so we can borrow `module` immutably for field_needs_drop,
+    // then mutably for the update.
+    let keys: Vec<_> = module.structs.keys().copied().collect();
+
+    for entity in keys {
+        let droppable_fields: Vec<FieldIdx> = module.structs[&entity]
             .fields
             .iter()
             .enumerate()
@@ -51,11 +56,12 @@ fn fix_structs(module: &mut MirModule) -> bool {
             continue;
         }
 
-        match &mut module.structs[si].type_info.drop {
+        let s = module.structs.get_mut(&entity).unwrap();
+        match &mut s.type_info.drop {
             DropBehavior::None => {
                 ktrace!("drop-fix", "promoting struct '{}' to droppable (fields: {:?})",
-                    module.structs[si].name, droppable_fields);
-                module.structs[si].type_info.drop = DropBehavior::StructDrop {
+                    s.name, droppable_fields);
+                s.type_info.drop = DropBehavior::StructDrop {
                     deinit: None,
                     fields: droppable_fields,
                 };
@@ -77,9 +83,14 @@ fn fix_structs(module: &mut MirModule) -> bool {
 
 fn fix_enums(module: &mut MirModule) -> bool {
     let mut changed = false;
-    for ei in 0..module.enums.len() {
+
+    // Collect keys first so we can borrow `module` immutably for field_needs_drop,
+    // then mutably for the update.
+    let keys: Vec<_> = module.enums.keys().copied().collect();
+
+    for entity in keys {
         let mut droppable_variants: Vec<(VariantIdx, Vec<FieldIdx>)> = Vec::new();
-        for (vi, case) in module.enums[ei].cases.iter().enumerate() {
+        for (vi, case) in module.enums[&entity].cases.iter().enumerate() {
             let droppable_fields: Vec<FieldIdx> = case
                 .payload_fields
                 .iter()
@@ -96,9 +107,10 @@ fn fix_enums(module: &mut MirModule) -> bool {
             continue;
         }
 
-        match &mut module.enums[ei].type_info.drop {
+        let e = module.enums.get_mut(&entity).unwrap();
+        match &mut e.type_info.drop {
             DropBehavior::None => {
-                module.enums[ei].type_info.drop = DropBehavior::EnumDrop {
+                e.type_info.drop = DropBehavior::EnumDrop {
                     deinit: None,
                     variants: droppable_variants,
                 };

@@ -198,7 +198,7 @@ pub fn match_pattern(
 pub fn find_witness_with_method(
     arena: &TyArena,
     witnesses: &[WitnessDef],
-    protocols: &[ProtocolDef],
+    protocols: &indexmap::IndexMap<Entity, ProtocolDef>,
     protocol: Entity,
     method: &WitnessMethodKey,
     self_type: TyId,
@@ -206,8 +206,7 @@ pub fn find_witness_with_method(
 ) -> Result<(usize, HashMap<Entity, TyId>), MonoError> {
     // Extract the protocol's type args from the call-site method_type_args.
     // For `Convertible[Int64].init(from:)`, method_type_args[0] = Int64.
-    let proto_param_count = protocols.iter()
-        .find(|p| p.entity == protocol)
+    let proto_param_count = protocols.get(&protocol)
         .map(|p| p.type_params.len())
         .unwrap_or(0);
     let expected_proto_args = &method_type_args[..method_type_args.len().min(proto_param_count)];
@@ -278,8 +277,8 @@ fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[T
 pub fn resolve_witness_call(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &[ProtocolDef],
-    functions: &[FunctionDef],
+    protocols: &indexmap::IndexMap<Entity, ProtocolDef>,
+    functions: &indexmap::IndexMap<Entity, FunctionDef>,
     entity_names: &indexmap::IndexMap<Entity, String>,
     protocol: Entity,
     method: &WitnessMethodKey,
@@ -308,8 +307,7 @@ pub fn resolve_witness_call(
     // For `extend Int64: SeqIndex[T]`, proto_type_args = [TypeParam(T_ext)]
     // and method_type_args = [String]. This creates T_ext → String.
     let proto_tp_entities = protocols
-        .iter()
-        .find(|p| p.entity == protocol)
+        .get(&protocol)
         .map(|p| &p.type_params[..])
         .unwrap_or(&[]);
     for (i, proto_tp) in proto_tp_entities.iter().enumerate() {
@@ -328,7 +326,7 @@ pub fn resolve_witness_call(
         }
     }
 
-    let concrete_func = functions.iter().find(|f| f.entity == binding.func);
+    let concrete_func = functions.get(&binding.func);
 
     // Determine if self_type should be propagated. Protocol default methods
     // need self_type because their Self param is TypeParam(protocol_entity).
@@ -435,7 +433,7 @@ pub fn resolve_associated_type(
 
 /// Check if `candidate` protocol inherits from `target` protocol (BFS).
 pub fn protocol_inherits(
-    protocols: &[ProtocolDef],
+    protocols: &indexmap::IndexMap<Entity, ProtocolDef>,
     candidate: Entity,
     target: Entity,
 ) -> bool {
@@ -449,7 +447,7 @@ pub fn protocol_inherits(
         if !seen.insert(proto) {
             continue;
         }
-        let Some(def) = protocols.iter().find(|p| p.entity == proto) else {
+        let Some(def) = protocols.get(&proto) else {
             continue;
         };
         for &parent in &def.parent_protocols {
@@ -473,6 +471,14 @@ mod tests {
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
+    }
+
+    fn proto_map(protos: Vec<ProtocolDef>) -> indexmap::IndexMap<Entity, ProtocolDef> {
+        protos.into_iter().map(|p| (p.entity, p)).collect()
+    }
+
+    fn func_map(funcs: Vec<FunctionDef>) -> indexmap::IndexMap<Entity, FunctionDef> {
+        funcs.into_iter().map(|f| (f.entity, f)).collect()
     }
 
     // -- match_pattern --
@@ -582,7 +588,7 @@ mod tests {
 
     #[test]
     fn inherits_self() {
-        let protos: Vec<ProtocolDef> = vec![];
+        let protos = proto_map(vec![]);
         assert!(protocol_inherits(&protos, entity(1), entity(1)));
     }
 
@@ -591,7 +597,7 @@ mod tests {
         let mut comparable = ProtocolDef::new(entity(1), "Comparable");
         comparable.parent_protocols.push(entity(2));
         let equatable = ProtocolDef::new(entity(2), "Equatable");
-        let protos = vec![comparable, equatable];
+        let protos = proto_map(vec![comparable, equatable]);
         assert!(protocol_inherits(&protos, entity(1), entity(2)));
     }
 
@@ -602,7 +608,7 @@ mod tests {
         let mut b = ProtocolDef::new(entity(2), "B");
         b.parent_protocols.push(entity(3));
         let c = ProtocolDef::new(entity(3), "C");
-        let protos = vec![a, b, c];
+        let protos = proto_map(vec![a, b, c]);
         assert!(protocol_inherits(&protos, entity(1), entity(3)));
     }
 
@@ -610,7 +616,7 @@ mod tests {
     fn no_inheritance() {
         let a = ProtocolDef::new(entity(1), "A");
         let b = ProtocolDef::new(entity(2), "B");
-        let protos = vec![a, b];
+        let protos = proto_map(vec![a, b]);
         assert!(!protocol_inherits(&protos, entity(1), entity(2)));
     }
 
@@ -631,7 +637,7 @@ mod tests {
         ));
 
         let witnesses = vec![witness];
-        let protocols = vec![ProtocolDef::new(proto, "Equatable")];
+        let protocols = proto_map(vec![ProtocolDef::new(proto, "Equatable")]);
 
         let (idx, bindings) = find_witness_with_method(
             &a,
@@ -667,7 +673,7 @@ mod tests {
         ));
 
         let witnesses = vec![witness];
-        let protocols = vec![ProtocolDef::new(proto, "Equatable")];
+        let protocols = proto_map(vec![ProtocolDef::new(proto, "Equatable")]);
 
         let (idx, bindings) = find_witness_with_method(
             &a,
@@ -695,7 +701,7 @@ mod tests {
         let mut comparable_def = ProtocolDef::new(comparable, "Comparable");
         comparable_def.parent_protocols.push(equatable);
         let equatable_def = ProtocolDef::new(equatable, "Equatable");
-        let protocols = vec![comparable_def, equatable_def];
+        let protocols = proto_map(vec![comparable_def, equatable_def]);
 
         // Witness is for Comparable but has the Equatable method
         let mut witness = WitnessDef::new(comparable, i64);
@@ -725,7 +731,7 @@ mod tests {
         let proto = entity(1);
         let i64 = a.i64();
         let witnesses: Vec<WitnessDef> = vec![];
-        let protocols = vec![ProtocolDef::new(proto, "Equatable")];
+        let protocols = proto_map(vec![ProtocolDef::new(proto, "Equatable")]);
 
         let result = find_witness_with_method(
             &a,
@@ -774,8 +780,8 @@ mod tests {
         let resolved = resolve_witness_call(
             &mut a,
             &[witness],
-            &[ProtocolDef::new(iterator, "Iterator")],
-            &[func],
+            &proto_map(vec![ProtocolDef::new(iterator, "Iterator")]),
+            &func_map(vec![func]),
             &indexmap::IndexMap::new(),
             iterator,
             &WitnessMethodKey::new("flatMap", vec![Some("as".into())]),

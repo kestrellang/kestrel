@@ -8,7 +8,7 @@ pub mod witness;
 pub use collect::CollectionResult;
 pub use types::{
     InstantiationKey, MonoEnum, MonoEnumCase, MonoField, MonoFunction, MonoModule, MonoParam,
-    MonoStatic, MonoStruct,
+    MonoStruct, MonoTypeKey,
 };
 pub use verify::{MonoVerifyError, MonoVerifyResult};
 pub use witness::MonoError;
@@ -28,11 +28,11 @@ use crate::item::struct_def::StructDef;
 use crate::item::enum_def::EnumDef;
 use crate::item::witness::WitnessDef;
 use crate::item::{Layout, TargetConfig};
-use crate::layout::{EnumLayout, StructLayout};
+use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
 use crate::value::Ownership;
-use crate::{FunctionIdx, MirModule, MonoFuncId, TyId};
+use crate::{MirModule, MonoFuncId, TyId};
 
 
 /// Check if a function needs self_type in its InstantiationKey.
@@ -69,13 +69,6 @@ pub fn monomorphize(
         &entity_names,
     )?;
 
-    // Build entity->index map once (shared by Phase 2 and Phase 3)
-    let entity_to_func: HashMap<Entity, FunctionIdx> = functions
-        .iter()
-        .enumerate()
-        .map(|(i, f)| (f.entity, FunctionIdx::new(i)))
-        .collect();
-
     // Phase 2: Body monomorphization
     let mut mono_bodies: Vec<MonoBodyResult> = Vec::with_capacity(instantiations.len());
 
@@ -87,7 +80,6 @@ pub fn monomorphize(
             &protocols,
             &witnesses,
             &entity_names,
-            &entity_to_func,
             key,
         );
         mono_bodies.push(result);
@@ -122,7 +114,7 @@ pub fn monomorphize(
     );
 
     // Phase 5: Assembly
-    let mut mono_module = MonoModule::new(ty_arena, entity_names.clone());
+    let mut mono_module = MonoModule::new(ty_arena);
 
     for (i, key) in instantiations.iter().enumerate() {
         let body_result = &mono_bodies[i];
@@ -132,10 +124,7 @@ pub fn monomorphize(
             .unwrap_or("<unknown>");
 
         // Determine receiver convention for mangling
-        let func_idx = functions
-            .iter()
-            .position(|f| f.entity == key.func_entity);
-        let receiver = func_idx.and_then(|fi| match &functions[fi].kind {
+        let receiver = functions.get(&key.func_entity).and_then(|f| match &f.kind {
             FunctionKind::Method { receiver, .. } => Some(*receiver),
             _ => None,
         });
@@ -173,12 +162,13 @@ pub fn monomorphize(
         });
     }
 
+    mono_module.entity_names = entity_names;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
 
-    // Copy statics
-    for s in &statics {
-        mono_module.statics.push(MonoStatic::from_static_def(s));
+    // Copy statics (statics aren't monomorphized — use StaticDef directly)
+    for s in statics.values() {
+        mono_module.statics.insert(s.entity, s.clone());
     }
 
     Ok(mono_module)
@@ -197,17 +187,15 @@ struct MonoBodyResult {
 
 fn monomorphize_body(
     arena: &mut TyArena,
-    functions: &[FunctionDef],
-    protocols: &[ProtocolDef],
+    functions: &IndexMap<Entity, FunctionDef>,
+    protocols: &IndexMap<Entity, ProtocolDef>,
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
-    entity_to_func: &HashMap<Entity, FunctionIdx>,
     key: &InstantiationKey,
 ) -> MonoBodyResult {
-    let func_idx = entity_to_func
+    let func = functions
         .get(&key.func_entity)
         .expect("instantiation key must reference a valid function");
-    let func = &functions[func_idx.index()];
 
     let subst = collect::build_subst(func, &key.type_args, key.self_type, arena, protocols, witnesses);
 
@@ -313,8 +301,8 @@ fn monomorphize_body(
 fn substitute_inst(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &[ProtocolDef],
-    functions: &[FunctionDef],
+    protocols: &IndexMap<Entity, ProtocolDef>,
+    functions: &IndexMap<Entity, FunctionDef>,
     entity_names: &IndexMap<Entity, String>,
     kind: &mut InstKind,
     subst: &SubstMap,
@@ -427,8 +415,8 @@ fn substitute_op_type(arena: &mut TyArena, op: &mut crate::op::Op, subst: &Subst
 fn substitute_callee_and_resolve(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &[ProtocolDef],
-    functions: &[FunctionDef],
+    protocols: &IndexMap<Entity, ProtocolDef>,
+    functions: &IndexMap<Entity, FunctionDef>,
     entity_names: &IndexMap<Entity, String>,
     callee: &mut Callee,
     subst: &SubstMap,
@@ -452,7 +440,7 @@ fn substitute_callee_and_resolve(
             // Nested callees (closures/thunks) inherit parent's self_type
             // so rewrite_callee can look them up with the correct key.
             if self_type.is_none() && parent_self.is_some() {
-                if let Some(f) = functions.iter().find(|f| f.entity == *func) {
+                if let Some(f) = functions.get(func) {
                     if matches!(
                         f.kind,
                         FunctionKind::Closure { .. }
@@ -597,12 +585,12 @@ fn rewrite_callee(
 
 fn resolve_types_and_layouts(
     arena: &mut TyArena,
-    structs: &[StructDef],
-    enums: &[EnumDef],
+    structs: &IndexMap<Entity, StructDef>,
+    enums: &IndexMap<Entity, EnumDef>,
     witnesses: &[WitnessDef],
     mono_bodies: &[MonoBodyResult],
     target: &TargetConfig,
-) -> (Vec<MonoStruct>, Vec<MonoEnum>) {
+) -> (IndexMap<MonoTypeKey, MonoStruct>, IndexMap<MonoTypeKey, MonoEnum>) {
     // Collect all concrete Named types from monomorphized bodies
     let mut concrete_types: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
@@ -613,8 +601,8 @@ fn resolve_types_and_layouts(
     }
 
     // Compute layouts for concrete types (fixed-point loop)
-    let mut mono_structs = Vec::new();
-    let mut mono_enums = Vec::new();
+    let mut mono_structs: IndexMap<MonoTypeKey, MonoStruct> = IndexMap::new();
+    let mut mono_enums: IndexMap<MonoTypeKey, MonoEnum> = IndexMap::new();
     let mut layout_cache: HashMap<(Entity, Vec<TyId>), (u64, u64)> = HashMap::new();
 
     // Fixed-point: loop until no progress (handles dependency chains)
@@ -628,8 +616,8 @@ fn resolve_types_and_layouts(
             }
 
             match kind {
-                ConcreteTypeKind::Struct(struct_idx) => {
-                    let sdef = &structs[*struct_idx];
+                ConcreteTypeKind::Struct(struct_entity) => {
+                    let sdef = &structs[struct_entity];
                     let subst = build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), type_args);
 
                     let mut layout = StructLayout::new();
@@ -655,12 +643,12 @@ fn resolve_types_and_layouts(
                         ms.fields = fields;
                         ms.type_info = sdef.type_info.clone();
                         ms.type_info.layout = Some(Layout::Struct(layout));
-                        mono_structs.push(ms);
+                        mono_structs.insert((*entity, type_args.clone()), ms);
                         progress = true;
                     }
                 }
-                ConcreteTypeKind::Enum(enum_idx) => {
-                    let edef = &enums[*enum_idx];
+                ConcreteTypeKind::Enum(enum_entity) => {
+                    let edef = &enums[enum_entity];
                     let subst = build_type_subst(edef.type_params.iter().map(|tp| tp.entity), type_args);
 
                     let mut all_resolved = true;
@@ -697,8 +685,7 @@ fn resolve_types_and_layouts(
                         me.cases = cases;
                         me.type_info = edef.type_info.clone();
                         me.type_info.layout = Some(Layout::Enum(enum_layout.clone()));
-                        me.payload_offset = enum_layout.payload_offset as u32;
-                        mono_enums.push(me);
+                        mono_enums.insert((*entity, type_args.clone()), me);
                         progress = true;
                     }
                 }
@@ -714,8 +701,8 @@ fn resolve_types_and_layouts(
 }
 
 enum ConcreteTypeKind {
-    Struct(usize),
-    Enum(usize),
+    Struct(Entity),
+    Enum(Entity),
 }
 
 /// Walk an OssaBody and collect all concrete Named types.
@@ -723,8 +710,8 @@ fn collect_named_types(
     arena: &TyArena,
     body: &OssaBody,
     out: &mut IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind>,
-    structs: &[StructDef],
-    enums: &[EnumDef],
+    structs: &IndexMap<Entity, StructDef>,
+    enums: &IndexMap<Entity, EnumDef>,
 ) {
     // Walk value types
     for value in &body.values {
@@ -769,8 +756,8 @@ fn collect_named_type_from_ty(
     arena: &TyArena,
     ty: TyId,
     out: &mut IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind>,
-    structs: &[StructDef],
-    enums: &[EnumDef],
+    structs: &IndexMap<Entity, StructDef>,
+    enums: &IndexMap<Entity, EnumDef>,
 ) {
     match arena.get(ty) {
         MirTy::Named { entity, type_args } => {
@@ -778,10 +765,10 @@ fn collect_named_type_from_ty(
             let type_args = type_args.clone();
             let key = (entity, type_args.clone());
             if !out.contains_key(&key) {
-                if let Some(idx) = structs.iter().position(|s| s.entity == entity) {
-                    out.insert(key, ConcreteTypeKind::Struct(idx));
-                } else if let Some(idx) = enums.iter().position(|e| e.entity == entity) {
-                    out.insert(key, ConcreteTypeKind::Enum(idx));
+                if structs.contains_key(&entity) {
+                    out.insert(key, ConcreteTypeKind::Struct(entity));
+                } else if enums.contains_key(&entity) {
+                    out.insert(key, ConcreteTypeKind::Enum(entity));
                 }
             }
             // Recurse into type args
@@ -812,50 +799,8 @@ fn build_type_subst(
     subst
 }
 
-fn discriminant_width(num_variants: usize) -> crate::op::IntBits {
-    use crate::op::IntBits;
-    if num_variants <= 256 {
-        IntBits::I8
-    } else if num_variants <= 65536 {
-        IntBits::I16
-    } else {
-        IntBits::I32
-    }
-}
-
-fn build_enum_layout(variant_layouts: &[StructLayout], num_variants: usize) -> EnumLayout {
-    let disc_width = discriminant_width(num_variants);
-    let disc_size = disc_width.byte_width();
-    let disc_align = disc_size;
-
-    let mut max_payload_size: u64 = 0;
-    let mut max_payload_align: u64 = 1;
-    for vl in variant_layouts {
-        max_payload_size = max_payload_size.max(vl.size);
-        max_payload_align = max_payload_align.max(vl.align);
-    }
-
-    let overall_align = disc_align.max(max_payload_align);
-    let payload_offset = if max_payload_align == 0 || disc_size.is_multiple_of(max_payload_align) {
-        disc_size
-    } else {
-        disc_size + (overall_align - disc_size % overall_align) % overall_align
-    };
-    let total_size = payload_offset + max_payload_size;
-    let padding = if overall_align == 0 {
-        0
-    } else {
-        (overall_align - total_size % overall_align) % overall_align
-    };
-
-    EnumLayout {
-        size: total_size + padding,
-        align: overall_align,
-        discriminant_width: disc_width,
-        payload_offset,
-        variant_layouts: variant_layouts.to_vec(),
-    }
-}
+// Reuse layout functions from passes/layout.rs
+use crate::passes::layout::{build_enum_layout, primitive_size_and_align};
 
 /// Compute size and alignment for a concrete type, looking up mono layouts.
 fn mono_size_and_align(
@@ -864,22 +809,10 @@ fn mono_size_and_align(
     target: &TargetConfig,
     layout_cache: &HashMap<(Entity, Vec<TyId>), (u64, u64)>,
 ) -> Option<(u64, u64)> {
+    if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
+        return Some(sa);
+    }
     match arena.get(ty) {
-        MirTy::Bool => Some((1, 1)),
-        MirTy::I8 => Some((1, 1)),
-        MirTy::I16 => Some((2, 2)),
-        MirTy::I32 => Some((4, 4)),
-        MirTy::I64 => Some((8, 8)),
-        MirTy::F16 => Some((2, 2)),
-        MirTy::F32 => Some((4, 4)),
-        MirTy::F64 => Some((8, 8)),
-        MirTy::Never => Some((0, 1)),
-        MirTy::Str => Some((target.pointer_width * 2, target.pointer_width)),
-        MirTy::Pointer(_) => Some((target.pointer_width, target.pointer_width)),
-        MirTy::FuncThin { .. } => Some((target.pointer_width, target.pointer_width)),
-        MirTy::FuncThick { .. } => Some((target.pointer_width * 2, target.pointer_width)),
-        MirTy::Error => Some((0, 1)),
-
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             if elems.is_empty() {

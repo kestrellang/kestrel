@@ -159,7 +159,7 @@ impl OssaBodyCtx<'_, '_> {
             }
         } else {
             let mut type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
-            if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == resolved) {
+            if let Some(mir_func) = self.ctx.module.functions.get(&resolved) {
                 type_args.truncate(mir_func.type_params.len());
             }
             Callee::direct_with_args(resolved, type_args, None)
@@ -186,8 +186,7 @@ impl OssaBodyCtx<'_, '_> {
 
         // Stored field: extract the field value and use it as the receiver
         if let Some(field_idx) = self.ctx.resolve_field_idx(recv_entity, field_name) {
-            let field_ty = self.ctx.module.structs.iter()
-                .find(|s| s.entity == recv_entity)
+            let field_ty = self.ctx.module.structs.get(&recv_entity)
                 .and_then(|s| s.fields.get(field_idx.index()))
                 .map(|f| f.ty);
 
@@ -197,7 +196,7 @@ impl OssaBodyCtx<'_, '_> {
 
             if let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(receiver_ty) {
                 let type_args = type_args.clone();
-                if let Some(sdef) = self.ctx.module.structs.iter().find(|s| s.entity == recv_entity) {
+                if let Some(sdef) = self.ctx.module.structs.get(&recv_entity) {
                     let mut subst = kestrel_mir_3::substitute::SubstMap::new();
                     for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
                         subst.type_params.insert(tp.entity, arg);
@@ -353,7 +352,7 @@ impl OssaBodyCtx<'_, '_> {
             let callee = if has_receiver {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
                 let mut ta = self.prepend_receiver_type_args(receiver_ty, type_args);
-                if let Some(mir_func) = self.ctx.module.functions.iter().find(|f| f.entity == entity) {
+                if let Some(mir_func) = self.ctx.module.functions.get(&entity) {
                     ta.truncate(mir_func.type_params.len());
                 }
                 Callee::direct_with_args(entity, ta, None)

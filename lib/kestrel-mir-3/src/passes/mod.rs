@@ -22,7 +22,7 @@ pub fn run_pipeline(
     layout::run_layout_pass(module, target);
 
     let mut errors = Vec::new();
-    for func in &module.functions {
+    for func in module.functions.values() {
         if let Some(body) = &func.body {
             if body.values.is_empty() || body.blocks.is_empty() {
                 continue;

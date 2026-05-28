@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use kestrel_hecs::Entity;
 
 use crate::block::BlockParam;
-use crate::body::{OssaBody, ownership_for_type};
+use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
@@ -18,7 +18,7 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
     module.ty_arena.unit();
 
     // Pre-intern Named types so shim generation can find them.
-    for s in &module.structs {
+    for s in module.structs.values() {
         let type_args: Vec<TyId> = s.type_params.iter()
             .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
             .collect();
@@ -27,7 +27,7 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
             type_args,
         });
     }
-    for e in &module.enums {
+    for e in module.enums.values() {
         let type_args: Vec<TyId> = e.type_params.iter()
             .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
             .collect();
@@ -41,7 +41,7 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
     module.ty_arena.i32();
 
     // Pre-intern Pointer(Named(entity)) for types with deinit (needed by BeginMutBorrow)
-    for s in &module.structs {
+    for s in module.structs.values() {
         if let DropBehavior::StructDrop { deinit: Some(_), .. } = &s.type_info.drop {
             let tp_ty_ids: Vec<TyId> = s.type_params.iter()
                 .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
@@ -53,7 +53,7 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
             module.ty_arena.pointer(named_ty);
         }
     }
-    for e in &module.enums {
+    for e in module.enums.values() {
         if let DropBehavior::EnumDrop { deinit: Some(_), .. } = &e.type_info.drop {
             let tp_ty_ids: Vec<TyId> = e.type_params.iter()
                 .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
@@ -66,15 +66,15 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
         }
     }
 
-    let mut shim_map: HashMap<Entity, usize> = HashMap::new();
+    let mut shim_map: HashMap<Entity, Entity> = HashMap::new();
     let mut worklist: Vec<Entity> = Vec::new();
 
-    for s in &module.structs {
+    for s in module.structs.values() {
         if s.type_info.drop != DropBehavior::None {
             worklist.push(s.entity);
         }
     }
-    for e in &module.enums {
+    for e in module.enums.values() {
         if e.type_info.drop != DropBehavior::None {
             worklist.push(e.entity);
         }
@@ -91,11 +91,10 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
         let (func, field_type_entities) =
             generate_shim(module, type_entity, shim_entity, next_entity);
 
-        let func_idx = module.functions.len();
         let name = func.name.clone();
         module.register_name(shim_entity, &name);
-        module.functions.push(func);
-        shim_map.insert(type_entity, func_idx);
+        module.add_function(func);
+        shim_map.insert(type_entity, shim_entity);
 
         for field_entity in field_type_entities {
             if !shim_map.contains_key(&field_entity) {
@@ -113,15 +112,11 @@ fn generate_shim(
     shim_entity: Entity,
     next_entity: &mut u32,
 ) -> (FunctionDef, Vec<Entity>) {
-    for s in &module.structs {
-        if s.entity == type_entity {
-            return generate_struct_shim(module, s, shim_entity, next_entity);
-        }
+    if let Some(s) = module.structs.get(&type_entity) {
+        return generate_struct_shim(module, s, shim_entity, next_entity);
     }
-    for e in &module.enums {
-        if e.entity == type_entity {
-            return generate_enum_shim(module, e, shim_entity, next_entity);
-        }
+    if let Some(e) = module.enums.get(&type_entity) {
+        return generate_enum_shim(module, e, shim_entity, next_entity);
     }
     panic!("drop shim requested for unknown type entity {type_entity:?}");
 }
@@ -211,7 +206,7 @@ fn generate_struct_shim(
         let ownership = if fields.contains(&fi) {
             Ownership::Owned
         } else {
-            ownership_for_type(field_def.ty, &module.ty_arena, module)
+            Ownership::Owned
         };
         field_vals.push(body.alloc_value(ValueDef {
             ty: field_def.ty,
@@ -366,8 +361,7 @@ fn generate_enum_shim(
         // Destroy the forwarded discriminant — no longer needed.
         variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: variant_disc }));
 
-        // Destructure the enum for this variant. All payload values are @owned
-        // since ownership_for_type always returns Owned.
+        // Destructure the enum for this variant. All payload values are @owned.
         let case_def = &enum_def.cases[variant_idx.index()];
         let payload_count = case_def.payload_fields.len();
         let droppable_set: std::collections::HashSet<FieldIdx> = field_indices.iter().copied().collect();
@@ -377,7 +371,7 @@ fn generate_enum_shim(
             let ownership = if field_indices.contains(&fi) {
                 Ownership::Owned
             } else {
-                ownership_for_type(pf.ty, &module.ty_arena, module)
+                Ownership::Owned
             };
             payload_vals.push(body.alloc_value(ValueDef {
                 ty: pf.ty,
@@ -465,13 +459,8 @@ fn generate_enum_shim(
 }
 
 /// Replace placeholder callee entities in drop shim Call instructions.
-fn patch_shim_callees(module: &mut MirModule, shim_map: &HashMap<Entity, usize>) {
-    let entity_map: HashMap<Entity, Entity> = shim_map
-        .iter()
-        .map(|(&type_entity, &func_idx)| (type_entity, module.functions[func_idx].entity))
-        .collect();
-
-    for func in &mut module.functions {
+fn patch_shim_callees(module: &mut MirModule, shim_map: &HashMap<Entity, Entity>) {
+    for func in module.functions.values_mut() {
         if !matches!(func.kind, FunctionKind::DropShim { .. }) {
             continue;
         }
@@ -484,7 +473,7 @@ fn patch_shim_callees(module: &mut MirModule, shim_map: &HashMap<Entity, usize>)
                     callee: Callee::Direct { func: callee_entity, .. },
                     ..
                 } = &mut inst.kind
-                    && let Some(&shim_entity) = entity_map.get(callee_entity)
+                    && let Some(&shim_entity) = shim_map.get(callee_entity)
                 {
                     *callee_entity = shim_entity;
                 }
@@ -497,7 +486,7 @@ fn patch_shim_callees(module: &mut MirModule, shim_map: &HashMap<Entity, usize>)
 pub fn find_drop_shim(module: &MirModule, type_entity: Entity) -> Option<Entity> {
     module
         .functions
-        .iter()
+        .values()
         .find(|f| matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == type_entity))
         .map(|f| f.entity)
 }
@@ -513,7 +502,7 @@ mod tests {
     fn find_shim_by_name<'a>(module: &'a MirModule, name_substr: &str) -> &'a FunctionDef {
         module
             .functions
-            .iter()
+            .values()
             .find(|f| f.name.contains(name_substr))
             .unwrap_or_else(|| panic!("no shim containing '{name_substr}'"))
     }
@@ -762,7 +751,7 @@ mod tests {
         assert!(find_shim_by_name(&module, "__drop$B").body.is_some());
         assert!(find_shim_by_name(&module, "__drop$C").body.is_some());
 
-        for func in &module.functions {
+        for func in module.functions.values() {
             if matches!(func.kind, FunctionKind::DropShim { .. }) {
                 verify_shim(&module, func);
             }

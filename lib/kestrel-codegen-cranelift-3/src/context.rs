@@ -115,13 +115,13 @@ impl<'m> CodegenCtx<'m> {
     // -- Statics --
 
     fn define_all_statics(&mut self) -> Result<(), CodegenError> {
-        for s in &self.module.statics {
+        for s in self.module.statics.values() {
             self.define_static(s)?;
         }
         Ok(())
     }
 
-    fn define_static(&mut self, s: &kestrel_mir_3::mono::MonoStatic) -> Result<(), CodegenError> {
+    fn define_static(&mut self, s: &kestrel_mir_3::item::static_def::StaticDef) -> Result<(), CodegenError> {
         let repr = self.tc.repr(s.ty, &self.module.ty_arena, self.module);
         let size = repr.size().max(1) as usize;
 
@@ -177,7 +177,7 @@ impl<'m> CodegenCtx<'m> {
 
     fn define_file_constant(
         &mut self,
-        s: &kestrel_mir_3::mono::MonoStatic,
+        s: &kestrel_mir_3::item::static_def::StaticDef,
         fcd: &kestrel_mir_3::item::FileConstantData,
         _size: usize,
     ) -> Result<(), CodegenError> {

@@ -38,15 +38,11 @@ pub fn copy_behavior(
 
         MirTy::Named { entity, .. } => {
             let entity = *entity;
-            for s in &module.structs {
-                if s.entity == entity {
-                    return s.type_info.copy.clone();
-                }
+            if let Some(s) = module.structs.get(&entity) {
+                return s.type_info.copy.clone();
             }
-            for e in &module.enums {
-                if e.entity == entity {
-                    return e.type_info.copy.clone();
-                }
+            if let Some(e) = module.enums.get(&entity) {
+                return e.type_info.copy.clone();
             }
             CopyBehavior::Bitwise
         }
@@ -111,15 +107,11 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 
         MirTy::Named { entity, .. } => {
             let entity = *entity;
-            for s in &module.structs {
-                if s.entity == entity {
-                    return s.type_info.drop != DropBehavior::None;
-                }
+            if let Some(s) = module.structs.get(&entity) {
+                return s.type_info.drop != DropBehavior::None;
             }
-            for e in &module.enums {
-                if e.entity == entity {
-                    return e.type_info.drop != DropBehavior::None;
-                }
+            if let Some(e) = module.enums.get(&entity) {
+                return e.type_info.drop != DropBehavior::None;
             }
             false
         }
@@ -131,14 +123,14 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 }
 
 pub fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module.protocols.iter().any(|p| p.entity == entity && p.name.ends_with("Cloneable"))
+    module.protocols.get(&entity).is_some_and(|p| p.name.ends_with("Cloneable"))
 }
 
 pub fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module.protocols.iter().any(|p| p.entity == entity && p.name.ends_with("Copyable"))
+    module.protocols.get(&entity).is_some_and(|p| p.name.ends_with("Copyable"))
 }
 
 pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
-    module.protocols.iter().find(|p| p.name.ends_with("Cloneable")).map(|p| p.entity)
+    module.protocols.values().find(|p| p.name.ends_with("Cloneable")).map(|p| p.entity)
 }
 

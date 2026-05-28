@@ -558,7 +558,7 @@ impl OssaBodyCtx<'_, '_> {
                 // Static/global stored field: covers both `static var` members
                 // and module-level globals (which lack the Static component).
                 let is_global = self.ctx.world.get::<kestrel_ast_builder::Static>(entity).is_some()
-                    || self.ctx.module.statics.iter().any(|s| s.entity == entity);
+                    || self.ctx.module.statics.contains_key(&entity);
                 if is_global {
                     self.ctx.register_name(entity);
                     let addr = self.emit_global_ref(entity);
@@ -855,8 +855,7 @@ impl OssaBodyCtx<'_, '_> {
             .ctx
             .module
             .structs
-            .iter()
-            .find(|s| s.entity == recv_entity)
+            .get(&recv_entity)
             .and_then(|s| s.fields.get(field_idx.index()))
             .map(|f| f.ty)?;
 
@@ -867,8 +866,7 @@ impl OssaBodyCtx<'_, '_> {
                 .ctx
                 .module
                 .structs
-                .iter()
-                .find(|s| s.entity == recv_entity)
+                .get(&recv_entity)
             {
                 let mut subst = kestrel_mir_3::SubstMap::new();
                 for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {

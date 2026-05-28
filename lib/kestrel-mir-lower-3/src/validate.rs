@@ -13,7 +13,7 @@ use crate::context::LowerCtx;
 pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
     let mut n = 0usize;
 
-    for s in &module.structs {
+    for s in module.structs.values() {
         for field in &s.fields {
             if is_error(&module, field.ty) {
                 emit(ctx, &mut n, s.entity, format!("field '{}.{}'", s.name, field.name));
@@ -21,7 +21,7 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
         }
     }
 
-    for e in &module.enums {
+    for e in module.enums.values() {
         for case in &e.cases {
             for field in &case.payload_fields {
                 if is_error(&module, field.ty) {
@@ -36,13 +36,13 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
         }
     }
 
-    for st in &module.statics {
+    for st in module.statics.values() {
         if is_error(&module, st.ty) {
             emit(ctx, &mut n, st.entity, format!("static '{}'", st.name));
         }
     }
 
-    for f in &module.functions {
+    for f in module.functions.values() {
         if is_error(&module, f.ret) {
             emit(ctx, &mut n, f.entity, format!("return type of '{}'", f.name));
         }

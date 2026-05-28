@@ -72,30 +72,6 @@ define_id!(
     /// Index into `MonoModule.functions`.
     MonoFuncId
 );
-define_id!(
-    /// Index into `MirModule.functions`.
-    FunctionIdx
-);
-define_id!(
-    /// Index into `MirModule.structs`.
-    StructIdx
-);
-define_id!(
-    /// Index into `MirModule.enums`.
-    EnumIdx
-);
-define_id!(
-    /// Index into `MirModule.protocols`.
-    ProtocolIdx
-);
-define_id!(
-    /// Index into `MirModule.witnesses`.
-    WitnessIdx
-);
-define_id!(
-    /// Index into `MirModule.statics`.
-    StaticIdx
-);
 
 define_idx!(
     /// Index into `StructDef.fields` or `EnumCaseDef.payload_fields`.

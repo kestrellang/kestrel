@@ -6,19 +6,12 @@ use crate::{ValueId, TyId};
 
 use super::TypeParamDef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReceiverConvention {
-    Borrow,
-    MutBorrow,
-    Consuming,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum FunctionKind {
     Free,
     Method {
         parent: Entity,
-        receiver: ReceiverConvention,
+        receiver: ParamConvention,
     },
     StaticMethod {
         parent: Entity,

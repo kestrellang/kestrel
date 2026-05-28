@@ -20,7 +20,7 @@ pub fn lower_witnesses(ctx: &mut LowerCtx) {
     let type_entities: Vec<(Entity, TyId, Vec<TypeParamDef>)> = ctx
         .module
         .structs
-        .iter()
+        .values()
         .map(|s| {
             let type_args: Vec<TyId> = s
                 .type_params
@@ -35,7 +35,7 @@ pub fn lower_witnesses(ctx: &mut LowerCtx) {
     let enum_entities: Vec<(Entity, TyId, Vec<TypeParamDef>)> = ctx
         .module
         .enums
-        .iter()
+        .values()
         .map(|e| {
             let type_args: Vec<TyId> = e
                 .type_params

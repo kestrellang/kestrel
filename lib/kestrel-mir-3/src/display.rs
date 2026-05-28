@@ -25,14 +25,16 @@ pub fn display_module(module: &MirModule) -> String {
 /// Pretty-print functions whose name contains `filter` (empty = all).
 pub fn display_module_filtered(module: &MirModule, filter: &str) -> String {
     let mut out = String::new();
-    for (i, func) in module.functions.iter().enumerate() {
+    let mut first = true;
+    for func in module.functions.values() {
         if let Some(body) = &func.body {
             if !filter.is_empty() && !func.name.contains(filter) {
                 continue;
             }
-            if i > 0 {
+            if !first {
                 out.push('\n');
             }
+            first = false;
             writeln!(out, "; function: {}", func.name).unwrap();
             out.push_str(&display_body(body, module));
             out.push('\n');

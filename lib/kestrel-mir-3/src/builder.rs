@@ -76,8 +76,7 @@ impl OssaBuilder {
 
     /// Allocate a value with ownership derived from type.
     pub fn new_value_auto(&mut self, ty: TyId) -> ValueId {
-        let ownership = crate::body::ownership_for_type(ty, &self.module.ty_arena, &self.module);
-        self.new_value(ty, ownership)
+        self.new_value(ty, Ownership::Owned)
     }
 
     // -- Block management --
@@ -238,50 +237,43 @@ impl OssaBuilder {
     }
 
     pub fn emit_struct(&mut self, ty: TyId, fields: Vec<(FieldIdx, ValueId)>) -> ValueId {
-        let ownership = crate::body::ownership_for_type(ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(ty, ownership);
+        let result = self.new_value(ty, Ownership::Owned);
         self.emit(InstKind::Struct { result, ty, fields });
         result
     }
 
     pub fn emit_tuple(&mut self, ty: TyId, elements: Vec<ValueId>) -> ValueId {
-        let ownership = crate::body::ownership_for_type(ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(ty, ownership);
+        let result = self.new_value(ty, Ownership::Owned);
         self.emit(InstKind::Tuple { result, elements });
         result
     }
 
     pub fn emit_enum(&mut self, enum_ty: TyId, variant: VariantIdx, payload: Vec<ValueId>) -> ValueId {
-        let ownership = crate::body::ownership_for_type(enum_ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(enum_ty, ownership);
+        let result = self.new_value(enum_ty, Ownership::Owned);
         self.emit(InstKind::Enum { result, enum_ty, variant, payload });
         result
     }
 
     pub fn emit_array(&mut self, element_ty: TyId, elements: Vec<ValueId>, array_ty: TyId) -> ValueId {
-        let ownership = crate::body::ownership_for_type(array_ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(array_ty, ownership);
+        let result = self.new_value(array_ty, Ownership::Owned);
         self.emit(InstKind::Array { result, element_ty, elements });
         result
     }
 
     pub fn emit_struct_extract(&mut self, operand: ValueId, field: FieldIdx, result_ty: TyId) -> ValueId {
-        let ownership = crate::body::ownership_for_type(result_ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(result_ty, ownership);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::StructExtract { result, operand, field });
         result
     }
 
     pub fn emit_tuple_extract(&mut self, operand: ValueId, index: u32, result_ty: TyId) -> ValueId {
-        let ownership = crate::body::ownership_for_type(result_ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(result_ty, ownership);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::TupleExtract { result, operand, index });
         result
     }
 
     pub fn emit_enum_payload(&mut self, operand: ValueId, variant: VariantIdx, field: FieldIdx, result_ty: TyId) -> ValueId {
-        let ownership = crate::body::ownership_for_type(result_ty, &self.module.ty_arena, &self.module);
-        let result = self.new_value(result_ty, ownership);
+        let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::EnumPayload { result, operand, variant, field });
         result
     }

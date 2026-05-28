@@ -811,11 +811,8 @@ impl<'a> BlockVerifier<'a> {
     fn struct_field_count(&self, ty: TyId) -> Option<usize> {
         let mir_ty = self._module.ty_arena.get(ty);
         if let crate::ty::MirTy::Named { entity, .. } = mir_ty {
-            let entity = *entity;
-            for s in &self._module.structs {
-                if s.entity == entity {
-                    return Some(s.fields.len());
-                }
+            if let Some(s) = self._module.structs.get(entity) {
+                return Some(s.fields.len());
             }
         }
         None

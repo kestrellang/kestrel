@@ -2,11 +2,10 @@ use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
 use crate::item::function::ExternInfo;
-use crate::item::static_def::FileConstantData;
 use crate::item::TypeInfo;
 use crate::op::IntBits;
 use crate::ty::{ParamConvention, TyArena};
-use crate::{Immediate, MonoFuncId, TyId};
+use crate::{MonoFuncId, TyId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InstantiationKey {
@@ -25,25 +24,28 @@ impl InstantiationKey {
     }
 }
 
+/// Key for monomorphized struct/enum: (source entity, concrete type args).
+pub type MonoTypeKey = (Entity, Vec<TyId>);
+
 #[derive(Debug)]
 pub struct MonoModule {
     pub functions: Vec<MonoFunction>,
-    pub structs: Vec<MonoStruct>,
-    pub enums: Vec<MonoEnum>,
-    pub statics: Vec<MonoStatic>,
+    pub structs: IndexMap<MonoTypeKey, MonoStruct>,
+    pub enums: IndexMap<MonoTypeKey, MonoEnum>,
+    pub statics: IndexMap<Entity, crate::item::static_def::StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
 }
 
 impl MonoModule {
-    pub fn new(ty_arena: TyArena, entity_names: IndexMap<Entity, String>) -> Self {
+    pub fn new(ty_arena: TyArena) -> Self {
         Self {
             functions: Vec::new(),
-            structs: Vec::new(),
-            enums: Vec::new(),
-            statics: Vec::new(),
+            structs: IndexMap::new(),
+            enums: IndexMap::new(),
+            statics: IndexMap::new(),
             ty_arena,
-            entity_names,
+            entity_names: IndexMap::new(),
         }
     }
 
@@ -144,7 +146,6 @@ pub struct MonoEnum {
     pub cases: Vec<MonoEnumCase>,
     pub type_info: TypeInfo,
     pub discriminant_width: IntBits,
-    pub payload_offset: u32,
 }
 
 impl MonoEnum {
@@ -155,47 +156,17 @@ impl MonoEnum {
             cases: Vec::new(),
             type_info: TypeInfo::none(),
             discriminant_width,
-            payload_offset: 0,
+        }
+    }
+
+    pub fn payload_offset(&self) -> u64 {
+        match &self.type_info.layout {
+            Some(crate::item::Layout::Enum(el)) => el.payload_offset,
+            _ => 0,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct MonoStatic {
-    pub entity: Entity,
-    pub name: String,
-    pub ty: TyId,
-    pub is_mutable: bool,
-    pub initializer: Option<Immediate>,
-    pub init_order: u32,
-    pub file_constant_data: Option<FileConstantData>,
-}
-
-impl MonoStatic {
-    pub fn new(entity: Entity, name: impl Into<String>, ty: TyId) -> Self {
-        Self {
-            entity,
-            name: name.into(),
-            ty,
-            is_mutable: false,
-            initializer: None,
-            init_order: 0,
-            file_constant_data: None,
-        }
-    }
-
-    pub fn from_static_def(def: &crate::item::static_def::StaticDef) -> Self {
-        Self {
-            entity: def.entity,
-            name: def.name.clone(),
-            ty: def.ty,
-            is_mutable: def.is_mutable,
-            initializer: def.initializer.clone(),
-            init_order: def.init_order,
-            file_constant_data: def.file_constant_data.clone(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -244,8 +215,7 @@ mod tests {
     #[test]
     fn mono_module_new() {
         let arena = TyArena::new();
-        let names = IndexMap::new();
-        let module = MonoModule::new(arena, names);
+        let module = MonoModule::new(arena);
         assert!(module.functions.is_empty());
         assert!(module.structs.is_empty());
         assert!(module.enums.is_empty());
@@ -256,8 +226,7 @@ mod tests {
     fn mono_module_add_function() {
         let mut arena = TyArena::new();
         let ret = arena.unit();
-        let names = IndexMap::new();
-        let mut module = MonoModule::new(arena, names);
+        let mut module = MonoModule::new(arena);
         let func = MonoFunction {
             name: "_K04_main".into(),
             source: entity(1),
@@ -277,9 +246,8 @@ mod tests {
     #[test]
     fn mono_module_resolve_name() {
         let arena = TyArena::new();
-        let mut names = IndexMap::new();
-        names.insert(entity(1), "std.Array".to_string());
-        let module = MonoModule::new(arena, names);
+        let mut module = MonoModule::new(arena);
+        module.entity_names.insert(entity(1), "std.Array".to_string());
         assert_eq!(module.resolve_name(entity(1)), "std.Array");
         assert_eq!(module.resolve_name(entity(999)), "<unknown>");
     }
@@ -324,11 +292,4 @@ mod tests {
         assert_eq!(c.payload_fields.len(), 1);
     }
 
-    #[test]
-    fn mono_static_new() {
-        let s = MonoStatic::new(entity(1), "VERSION", TyId::new(0));
-        assert_eq!(s.name, "VERSION");
-        assert!(!s.is_mutable);
-        assert!(s.initializer.is_none());
-    }
 }

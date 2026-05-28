@@ -1,7 +1,6 @@
 use crate::block::BasicBlock;
-use crate::ty::{MirTy, TyArena};
-use crate::value::{Ownership, ValueDef};
-use crate::{BlockId, MirModule, TyId, ValueId};
+use crate::value::ValueDef;
+use crate::{BlockId, ValueId};
 
 #[derive(Debug, Clone)]
 pub struct OssaBody {
@@ -50,29 +49,4 @@ impl Default for OssaBody {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Determine ownership for a type: always Owned (Guaranteed is for borrows only).
-pub fn ownership_for_type(_ty: TyId, _arena: &TyArena, _module: &MirModule) -> Ownership {
-    Ownership::Owned
-}
-
-/// Shorthand: is this type trivially copyable (Bitwise)?
-pub fn is_trivial(ty: TyId, arena: &TyArena) -> bool {
-    matches!(
-        arena.get(ty),
-        MirTy::I8
-            | MirTy::I16
-            | MirTy::I32
-            | MirTy::I64
-            | MirTy::F16
-            | MirTy::F32
-            | MirTy::F64
-            | MirTy::Bool
-            | MirTy::Never
-            | MirTy::Str
-            | MirTy::Pointer(_)
-            | MirTy::FuncThin { .. }
-            | MirTy::Error
-    )
 }

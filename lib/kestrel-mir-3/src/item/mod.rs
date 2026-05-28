@@ -12,7 +12,7 @@ use crate::{FieldIdx, VariantIdx};
 
 pub use enum_def::{EnumCaseDef, EnumDef};
 pub use function::{
-    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, ReceiverConvention,
+    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef,
     WhereClause, WhereConstraint,
 };
 pub use protocol::{AssociatedTypeDef, ProtocolDef, ProtocolMethodDef};

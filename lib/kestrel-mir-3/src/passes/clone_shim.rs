@@ -24,7 +24,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     };
 
     // Pre-intern Pointer(Named(entity)) for all candidate types (needed by BeginBorrow)
-    for s in &module.structs {
+    for s in module.structs.values() {
         if s.type_info.copy == CopyBehavior::None {
             continue;
         }
@@ -37,7 +37,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         });
         module.ty_arena.pointer(named_ty);
     }
-    for e in &module.enums {
+    for e in module.enums.values() {
         if e.type_info.copy == CopyBehavior::None {
             continue;
         }
@@ -68,7 +68,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
 
     // Build worklist: all structs/enums that don't already have a user clone.
     // Skip closure envs and types with unresolvable fields.
-    let closure_env_entities: std::collections::HashSet<Entity> = module.functions.iter()
+    let closure_env_entities: std::collections::HashSet<Entity> = module.functions.values()
         .filter_map(|f| match &f.kind {
             FunctionKind::ClosureCall { env_struct } => Some(*env_struct),
             _ => None,
@@ -76,7 +76,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         .collect();
 
     let mut worklist: Vec<Entity> = Vec::new();
-    for s in &module.structs {
+    for s in module.structs.values() {
         if has_user_clone.contains(&s.entity)
             || closure_env_entities.contains(&s.entity)
             || s.type_info.copy == CopyBehavior::None
@@ -86,7 +86,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         }
         worklist.push(s.entity);
     }
-    for e in &module.enums {
+    for e in module.enums.values() {
         if has_user_clone.contains(&e.entity)
             || e.type_info.copy == CopyBehavior::None
             || has_unresolvable_fields_enum(e, &module.ty_arena)
@@ -96,7 +96,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         worklist.push(e.entity);
     }
 
-    let mut shim_map: HashMap<Entity, usize> = HashMap::new();
+    let mut shim_map: HashMap<Entity, Entity> = HashMap::new();
 
     while let Some(type_entity) = worklist.pop() {
         if shim_map.contains_key(&type_entity) {
@@ -110,17 +110,15 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
             continue;
         };
 
-        let func_idx = module.functions.len();
         let name = func.name.clone();
         module.register_name(shim_entity, &name);
-        module.functions.push(func);
-        shim_map.insert(type_entity, func_idx);
+        module.functions.insert(shim_entity, func);
+        shim_map.insert(type_entity, shim_entity);
     }
 
     // Register each shim as a Cloneable witness
-    for (&type_entity, &func_idx) in &shim_map {
-        let func = &module.functions[func_idx];
-        let shim_entity = func.entity;
+    for (&type_entity, &shim_entity) in &shim_map {
+        let func = &module.functions[&shim_entity];
         let tp_ty_ids: Vec<TyId> = func.type_params.iter()
             .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
                 .expect("TypeParam should be interned"))
@@ -142,17 +140,22 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // Set CopyBehavior::Clone for all shim'd types that have non-trivial fields.
     // Types with only primitive fields stay Bitwise — the expand pass handles them.
     for (&type_entity, _) in &shim_map {
-        for s in &mut module.structs {
-            if s.entity == type_entity && needs_clone_shim_struct(s, &module.ty_arena) {
-                s.type_info.copy = CopyBehavior::Clone(cloneable_proto);
-                break;
-            }
+        // Compute predicate with shared borrow, then mutate separately
+        let needs_struct = module.structs.get(&type_entity)
+            .map(|s| needs_clone_shim_struct(s, &module.ty_arena))
+            .unwrap_or(false);
+        if needs_struct {
+            module.structs.get_mut(&type_entity).unwrap().type_info.copy =
+                CopyBehavior::Clone(cloneable_proto);
+            continue;
         }
-        for e in &mut module.enums {
-            if e.entity == type_entity && needs_clone_shim_enum(e, &module.ty_arena) {
-                e.type_info.copy = CopyBehavior::Clone(cloneable_proto);
-                break;
-            }
+
+        let needs_enum = module.enums.get(&type_entity)
+            .map(|e| needs_clone_shim_enum(e, &module.ty_arena))
+            .unwrap_or(false);
+        if needs_enum {
+            module.enums.get_mut(&type_entity).unwrap().type_info.copy =
+                CopyBehavior::Clone(cloneable_proto);
         }
     }
 }
@@ -162,15 +165,11 @@ fn generate_clone_shim(
     type_entity: Entity,
     shim_entity: Entity,
 ) -> Option<FunctionDef> {
-    for s in &module.structs {
-        if s.entity == type_entity {
-            return Some(generate_struct_clone_shim(module, s, shim_entity));
-        }
+    if let Some(s) = module.structs.get(&type_entity) {
+        return Some(generate_struct_clone_shim(module, s, shim_entity));
     }
-    for e in &module.enums {
-        if e.entity == type_entity {
-            return Some(generate_enum_clone_shim(module, e, shim_entity));
-        }
+    if let Some(e) = module.enums.get(&type_entity) {
+        return Some(generate_enum_clone_shim(module, e, shim_entity));
     }
     None
 }

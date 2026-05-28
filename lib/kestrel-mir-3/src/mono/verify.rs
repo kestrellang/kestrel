@@ -41,26 +41,26 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
     }
 
     // Check all structs have layouts
-    for (i, s) in module.structs.iter().enumerate() {
+    for s in module.structs.values() {
         if s.type_info.layout.is_none() {
             errors.push(MonoVerifyError {
                 func_idx: 0,
                 block: None,
                 inst: None,
-                message: format!("MonoStruct[{i}] ({:?}) missing layout", s.source),
+                message: format!("MonoStruct({:?}, {:?}) missing layout", s.source, s.type_args),
                 span: None,
             });
         }
     }
 
     // Check all enums have layouts
-    for (i, e) in module.enums.iter().enumerate() {
+    for e in module.enums.values() {
         if e.type_info.layout.is_none() {
             errors.push(MonoVerifyError {
                 func_idx: 0,
                 block: None,
                 inst: None,
-                message: format!("MonoEnum[{i}] ({:?}) missing layout", e.source),
+                message: format!("MonoEnum({:?}, {:?}) missing layout", e.source, e.type_args),
                 span: None,
             });
         }
@@ -312,7 +312,7 @@ mod tests {
     use crate::mono::types::{MonoFunction, MonoModule, MonoParam, MonoStruct};
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::{ParamConvention, TyArena};
-    use crate::value::ValueDef;
+    use crate::value::{Ownership, ValueDef};
     use crate::{MonoFuncId, ValueId};
     use indexmap::IndexMap;
     use kestrel_hecs::Entity;
@@ -337,7 +337,7 @@ mod tests {
 
     fn make_module() -> MonoModule {
         let arena = TyArena::new();
-        MonoModule::new(arena, IndexMap::new())
+        MonoModule::new(arena)
     }
 
     // -- Tests --
@@ -357,7 +357,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
         });
-        module.structs.push(MonoStruct {
+        module.structs.insert((entity(2), vec![]), MonoStruct {
             source: entity(2),
             type_args: vec![],
             fields: vec![],
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn verify_struct_missing_layout() {
         let mut module = make_module();
-        module.structs.push(MonoStruct {
+        module.structs.insert((entity(1), vec![]), MonoStruct {
             source: entity(1),
             type_args: vec![],
             fields: vec![],

@@ -376,7 +376,7 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         };
         let entity = *entity;
-        let init_func = self.ctx.module.functions.iter().find(|f| {
+        let init_func = self.ctx.module.functions.values().find(|f| {
             let FunctionKind::Initializer { parent } = f.kind else {
                 return false;
             };
@@ -405,7 +405,7 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         };
         let entity = *entity;
-        let init_func = self.ctx.module.functions.iter().find(|f| {
+        let init_func = self.ctx.module.functions.values().find(|f| {
             let FunctionKind::Initializer { parent } = f.kind else {
                 return false;
             };

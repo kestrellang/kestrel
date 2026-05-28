@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use cranelift_codegen::ir;
 use kestrel_hecs::Entity;
 use kestrel_mir_3::mono::MonoModule;
@@ -42,31 +40,16 @@ impl TypeRepr {
     }
 }
 
-enum LayoutEntry {
-    Struct(usize),
-    Enum(usize),
-}
-
 pub struct TypeCache {
     reprs: Vec<Option<TypeRepr>>,
-    layout_map: HashMap<(Entity, Vec<TyId>), LayoutEntry>,
     pub ptr_ty: ir::Type,
     pub ptr_size: u64,
 }
 
 impl TypeCache {
     pub fn new(module: &MonoModule, ptr_ty: ir::Type, ptr_size: u64) -> Self {
-        let mut layout_map = HashMap::new();
-        for (i, s) in module.structs.iter().enumerate() {
-            layout_map.insert((s.source, s.type_args.clone()), LayoutEntry::Struct(i));
-        }
-        for (i, e) in module.enums.iter().enumerate() {
-            layout_map.insert((e.source, e.type_args.clone()), LayoutEntry::Enum(i));
-        }
-
         Self {
             reprs: vec![None; module.ty_arena.len()],
-            layout_map,
             ptr_ty,
             ptr_size,
         }
@@ -89,22 +72,6 @@ impl TypeCache {
         match self.repr(ty, arena, module) {
             TypeRepr::Scalar(t) => t,
             TypeRepr::Aggregate { .. } | TypeRepr::Zst => self.ptr_ty,
-        }
-    }
-
-    pub fn find_struct_idx(&self, entity: Entity, type_args: &[TyId]) -> Option<usize> {
-        let key = (entity, type_args.to_vec());
-        match self.layout_map.get(&key) {
-            Some(LayoutEntry::Struct(idx)) => Some(*idx),
-            _ => None,
-        }
-    }
-
-    pub fn find_enum_idx(&self, entity: Entity, type_args: &[TyId]) -> Option<usize> {
-        let key = (entity, type_args.to_vec());
-        match self.layout_map.get(&key) {
-            Some(LayoutEntry::Enum(idx)) => Some(*idx),
-            _ => None,
         }
     }
 
@@ -178,24 +145,18 @@ impl TypeCache {
         module: &MonoModule,
     ) -> TypeRepr {
         let key = (entity, type_args.to_vec());
-        let Some(entry) = self.layout_map.get(&key) else {
+
+        let (layout, is_single_field) = if let Some(s) = module.structs.get(&key) {
+            (s.type_info.layout.as_ref(), s.fields.len() <= 1)
+        } else if let Some(e) = module.enums.get(&key) {
+            let pure_disc = e.cases.iter().all(|c| c.payload_fields.is_empty());
+            (e.type_info.layout.as_ref(), pure_disc)
+        } else {
             let name = module.entity_names.get(&entity).map(|s| s.as_str()).unwrap_or("?");
             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                 eprintln!("[classify_named] MISSING layout for {name} entity={entity:?} type_args={type_args:?} → Scalar fallback");
             }
             return TypeRepr::Scalar(self.ptr_ty);
-        };
-
-        let (layout, is_single_field) = match entry {
-            LayoutEntry::Struct(idx) => {
-                let s = &module.structs[*idx];
-                (s.type_info.layout.as_ref(), s.fields.len() <= 1)
-            }
-            LayoutEntry::Enum(idx) => {
-                let e = &module.enums[*idx];
-                let pure_disc = e.cases.iter().all(|c| c.payload_fields.is_empty());
-                (e.type_info.layout.as_ref(), pure_disc)
-            }
         };
 
         let Some(layout) = layout else {

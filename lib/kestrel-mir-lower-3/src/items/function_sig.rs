@@ -10,7 +10,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::Entity;
 use kestrel_mir_3::item::function::{
-    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, ReceiverConvention,
+    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef,
     WhereClause, WhereConstraint,
 };
 use kestrel_mir_3::{ParamConvention, TyId, TypeParamDef, ValueId};
@@ -124,11 +124,11 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
         return;
     }
 
-    let func_id = ctx.module.add_function(def);
+    ctx.module.add_function(def);
 
     // Lower function body if present
     if ctx.world.get::<kestrel_ast_builder::Body>(entity).is_some() {
-        crate::body::lower_function_body(ctx, entity, func_id.index());
+        crate::body::lower_function_body(ctx, entity, entity);
     }
 }
 
@@ -161,13 +161,13 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                         if callable.receiver.is_some() {
                             let receiver = match callable.receiver.as_ref().unwrap() {
                                 kestrel_ast_builder::ReceiverKind::Borrowing => {
-                                    ReceiverConvention::Borrow
+                                    ParamConvention::Borrow
                                 }
                                 kestrel_ast_builder::ReceiverKind::Mutating => {
-                                    ReceiverConvention::MutBorrow
+                                    ParamConvention::MutBorrow
                                 }
                                 kestrel_ast_builder::ReceiverKind::Consuming => {
-                                    ReceiverConvention::Consuming
+                                    ParamConvention::Consuming
                                 }
                             };
                             FunctionKind::Method { parent, receiver }
@@ -187,12 +187,12 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
                 if let Some(receiver) = &callable.receiver {
                     let conv = match receiver {
-                        kestrel_ast_builder::ReceiverKind::Borrowing => ReceiverConvention::Borrow,
+                        kestrel_ast_builder::ReceiverKind::Borrowing => ParamConvention::Borrow,
                         kestrel_ast_builder::ReceiverKind::Mutating => {
-                            ReceiverConvention::MutBorrow
+                            ParamConvention::MutBorrow
                         }
                         kestrel_ast_builder::ReceiverKind::Consuming => {
-                            ReceiverConvention::Consuming
+                            ParamConvention::Consuming
                         }
                     };
                     FunctionKind::Method {

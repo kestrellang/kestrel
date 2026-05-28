@@ -38,7 +38,7 @@ struct SavedState {
     loop_stack: Vec<LoopInfo>,
     scope_stack: Vec<ScopeFrame>,
     tracker: super::LiveTracker,
-    func_idx: usize,
+    func_entity: kestrel_hecs::Entity,
     temp_counter: u32,
     in_protocol_extension: bool,
 }
@@ -59,7 +59,9 @@ impl OssaBodyCtx<'_, '_> {
 
         let closure_idx = self.ctx.closure_counter;
         self.ctx.closure_counter += 1;
-        let parent_name = self.ctx.module.functions[self.func_idx].name.clone();
+        let parent_name = self.ctx.module.functions.get(&self.func_entity)
+            .map(|f| f.name.clone())
+            .unwrap_or_default();
         let closure_name = format!("{}.closure.{}", parent_name, closure_idx);
 
         // Determine param and return types from the closure's function type
@@ -85,9 +87,9 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.module.register_name(env_entity, &env_struct_name);
 
             let mut env_def = StructDef::new(env_entity, &env_struct_name);
-            env_def.type_params = self.ctx.module.functions[self.func_idx]
-                .type_params
-                .clone();
+            env_def.type_params = self.ctx.module.functions.get(&self.func_entity)
+                .map(|f| f.type_params.clone())
+                .unwrap_or_default();
             for &captured in &captured_locals {
                 let cap_ty = self.resolve_local_type(captured);
                 let cap_name = self.hir.locals[captured].name.clone();
@@ -111,9 +113,9 @@ impl OssaBodyCtx<'_, '_> {
         self.ctx.module.register_name(closure_entity, &closure_name);
 
         let mut func_def = FunctionDef::new(closure_entity, &closure_name, ret_ty);
-        func_def.type_params = self.ctx.module.functions[self.func_idx]
-            .type_params
-            .clone();
+        func_def.type_params = self.ctx.module.functions.get(&self.func_entity)
+            .map(|f| f.type_params.clone())
+            .unwrap_or_default();
         func_def.kind = if let Some(env_entity) = env_struct_entity {
             FunctionKind::ClosureCall { env_struct: env_entity }
         } else {
@@ -128,11 +130,10 @@ impl OssaBodyCtx<'_, '_> {
         // Env parameter — first value in the closure body.
         // Type is Pointer[EnvStruct] or Pointer[Unit] for no-capture closures.
         let env_ty = if let Some(env_entity) = env_struct_entity {
-            let tp_entities: Vec<kestrel_hecs::Entity> = self.ctx.module.functions[self.func_idx]
-                .type_params
-                .iter()
-                .map(|tp| tp.entity)
-                .collect();
+            let tp_entities: Vec<kestrel_hecs::Entity> = self.ctx.module.functions
+                .get(&self.func_entity)
+                .map(|f| f.type_params.iter().map(|tp| tp.entity).collect())
+                .unwrap_or_default();
             let env_type_args: Vec<TyId> = tp_entities
                 .iter()
                 .map(|&e| self.ctx.intern(MirTy::TypeParam(e)))
@@ -194,7 +195,7 @@ impl OssaBodyCtx<'_, '_> {
             loop_stack: mem::take(&mut self.loop_stack),
             scope_stack: mem::take(&mut self.scope_stack),
             tracker: mem::replace(&mut self.tracker, super::LiveTracker::from_live(&[])),
-            func_idx: self.func_idx,
+            func_entity: self.func_entity,
             temp_counter: self.temp_counter,
             in_protocol_extension: self.in_protocol_extension,
         };
@@ -264,7 +265,7 @@ impl OssaBodyCtx<'_, '_> {
         self.loop_stack = saved.loop_stack;
         self.scope_stack = saved.scope_stack;
         self.tracker = saved.tracker;
-        self.func_idx = saved.func_idx;
+        self.func_entity = saved.func_entity;
         self.temp_counter = saved.temp_counter;
         self.in_protocol_extension = saved.in_protocol_extension;
 

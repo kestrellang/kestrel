@@ -644,7 +644,7 @@ fn compile_enum(
             let type_args = type_args.clone();
             if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
                 let disc = e.cases[variant.index()].discriminant;
-                (int_bits_to_cl(e.discriminant_width), e.payload_offset as u64, disc as i64)
+                (int_bits_to_cl(e.discriminant_width), e.payload_offset(), disc as i64)
             } else {
                 (ir::types::I8, 0u64, variant.index() as i64)
             }
@@ -901,7 +901,7 @@ fn compile_enum_payload(
         let entity = *entity;
         let type_args = type_args.clone();
         if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
-            let payload_offset = e.payload_offset as u64;
+            let payload_offset = e.payload_offset();
             if let Some(Layout::Enum(el)) = &e.type_info.layout {
                 if let Some(vl) = el.variant_layouts.get(variant.index()) {
                     let field_offset = vl.field_offsets[field.index()];
@@ -1422,18 +1422,16 @@ pub fn find_mono_struct<'m>(
     entity: &Entity,
     type_args: &[TyId],
     module: &'m MonoModule,
-    tc: &TypeCache,
+    _tc: &TypeCache,
 ) -> Option<&'m MonoStruct> {
-    tc.find_struct_idx(*entity, type_args)
-        .map(|idx| &module.structs[idx])
+    module.structs.get(&(*entity, type_args.to_vec()))
 }
 
 pub fn find_mono_enum<'m>(
     entity: &Entity,
     type_args: &[TyId],
     module: &'m MonoModule,
-    tc: &TypeCache,
+    _tc: &TypeCache,
 ) -> Option<&'m MonoEnum> {
-    tc.find_enum_idx(*entity, type_args)
-        .map(|idx| &module.enums[idx])
+    module.enums.get(&(*entity, type_args.to_vec()))
 }

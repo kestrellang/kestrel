@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
-use crate::item::function::ReceiverConvention;
 use crate::mono::types::MonoParam;
 use crate::ty::{MirTy, ParamConvention, TyArena};
 use crate::TyId;
@@ -18,7 +17,7 @@ pub fn mangle_function(
     self_type: Option<TyId>,
     params: &[MonoParam],
     ret: TyId,
-    receiver: Option<ReceiverConvention>,
+    receiver: Option<ParamConvention>,
 ) -> String {
     let mut out = String::with_capacity(64);
     out.push_str("_K0");
@@ -27,9 +26,9 @@ pub fn mangle_function(
 
     if let Some(recv) = receiver {
         match recv {
-            ReceiverConvention::Borrow => out.push('r'),
-            ReceiverConvention::MutBorrow => out.push('m'),
-            ReceiverConvention::Consuming => out.push('c'),
+            ParamConvention::Borrow => out.push('r'),
+            ParamConvention::MutBorrow => out.push('m'),
+            ParamConvention::Consuming => out.push('c'),
         }
     }
 
@@ -416,7 +415,7 @@ mod tests {
             None,
             &[],
             unit,
-            Some(ReceiverConvention::Borrow),
+            Some(ParamConvention::Borrow),
         );
         assert_eq!(result, "_K0N3_std5_Array5_countErRTvE");
     }
@@ -435,7 +434,7 @@ mod tests {
             None,
             &[],
             unit,
-            Some(ReceiverConvention::Borrow),
+            Some(ParamConvention::Borrow),
         );
         assert_eq!(result, "_K0N5_Array6_appendErRTvEIi8E");
     }

@@ -23,7 +23,7 @@ use crate::{MonoFuncId, TyId, ValueId};
 /// Must run after `monomorphize()` and before `verify_mono()`.
 pub fn expand_destroy_copy(
     module: &mut MonoModule,
-    generic_functions: &[FunctionDef],
+    generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
 ) {
     let shim_lookup = build_drop_shim_lookup(module, generic_functions);
     let clone_lookup = build_clone_lookup(module, generic_functions);
@@ -45,10 +45,10 @@ pub fn expand_destroy_copy(
     }
 
     // Collect not-Copyable nominals — CopyValue on these is a move, not a copy.
-    let not_copyable: HashSet<Entity> = module.structs.iter()
+    let not_copyable: HashSet<Entity> = module.structs.values()
         .filter(|s| matches!(s.type_info.copy, CopyBehavior::None))
         .map(|s| s.source)
-        .chain(module.enums.iter()
+        .chain(module.enums.values()
             .filter(|e| matches!(e.type_info.copy, CopyBehavior::None))
             .map(|e| e.source))
         .collect();
@@ -69,23 +69,23 @@ type DropShimLookup = HashMap<(Entity, Vec<TyId>), MonoFuncId>;
 /// won't expand to Call(T.clone).
 fn build_method_to_nominal_map(
     module: &MonoModule,
-    generic_functions: &[FunctionDef],
+    generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
 ) -> HashMap<Entity, Entity> {
     // Collect nominal entities that have drop shims or clone behavior
     let mut relevant: HashSet<Entity> = HashSet::new();
-    for s in &module.structs {
+    for s in module.structs.values() {
         if s.type_info.drop != DropBehavior::None || matches!(s.type_info.copy, CopyBehavior::Clone(_)) {
             relevant.insert(s.source);
         }
     }
-    for e in &module.enums {
+    for e in module.enums.values() {
         if e.type_info.drop != DropBehavior::None {
             relevant.insert(e.source);
         }
     }
 
     let mut map = HashMap::new();
-    for f in generic_functions {
+    for f in generic_functions.values() {
         let parent = match &f.kind {
             FunctionKind::Method { parent, .. }
             | FunctionKind::Deinit { parent }
@@ -109,12 +109,12 @@ fn build_method_to_nominal_map(
 /// via FunctionKind matching.
 fn build_clone_lookup(
     module: &MonoModule,
-    generic_functions: &[FunctionDef],
+    generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
 ) -> DropShimLookup {
     // Map clone function entity → nominal parent.
     // Include ALL clone shims and user .clone() methods regardless of CopyBehavior.
     let mut clone_func_to_parent: HashMap<Entity, Entity> = HashMap::new();
-    for f in generic_functions {
+    for f in generic_functions.values() {
         match &f.kind {
             FunctionKind::CloneShim { nominal } => {
                 clone_func_to_parent.insert(f.entity, *nominal);
@@ -129,7 +129,7 @@ fn build_clone_lookup(
     if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
         eprintln!("[clone_lookup] clone_func_to_parent: {} entries", clone_func_to_parent.len());
         for (func_entity, parent) in &clone_func_to_parent {
-            let name = generic_functions.iter().find(|f| f.entity == *func_entity).map(|f| f.name.as_str()).unwrap_or("?");
+            let name = generic_functions.get(func_entity).map(|f| f.name.as_str()).unwrap_or("?");
             let parent_name = module.entity_names.get(parent).map(|s| s.as_str()).unwrap_or("?");
             eprintln!("  clone func: {name} → parent={parent_name}");
         }
@@ -137,10 +137,10 @@ fn build_clone_lookup(
 
     // Collect entities that don't need clone shim calls:
     // Bitwise types (trivial copy) and not-Copyable types (move, never clone).
-    let skip_clone_nominals: HashSet<Entity> = module.structs.iter()
+    let skip_clone_nominals: HashSet<Entity> = module.structs.values()
         .filter(|s| matches!(s.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
         .map(|s| s.source)
-        .chain(module.enums.iter()
+        .chain(module.enums.values()
             .filter(|e| matches!(e.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
             .map(|e| e.source))
         .collect();
@@ -175,10 +175,10 @@ fn build_clone_lookup(
 /// monomorphized counterparts in the MonoModule.
 fn build_drop_shim_lookup(
     module: &MonoModule,
-    generic_functions: &[FunctionDef],
+    generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
 ) -> DropShimLookup {
     let shim_to_nominal: HashMap<Entity, Entity> = generic_functions
-        .iter()
+        .values()
         .filter_map(|f| match &f.kind {
             FunctionKind::DropShim { nominal } => Some((f.entity, *nominal)),
             _ => None,
@@ -609,7 +609,7 @@ mod tests {
     }
 
     fn make_module() -> MonoModule {
-        MonoModule::new(TyArena::new(), IndexMap::new())
+        MonoModule::new(TyArena::new())
     }
 
     fn make_body(insts: Vec<Instruction>, ret_val: ValueId, values: Vec<ValueDef>) -> OssaBody {
@@ -657,7 +657,7 @@ mod tests {
             vec![ValueDef::owned(unit), ValueDef::owned(i64_ty)],
         );
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-        expand_destroy_copy(&mut module, &[]);
+        expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         assert!(matches!(body.blocks[0].insts[0].kind, InstKind::Literal { .. }));
@@ -676,15 +676,17 @@ mod tests {
         let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::owned(unit)]);
         module.add_function(make_mono_func("__drop$MyStruct", entity(20), vec![], unit, Some(shim_body)));
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-        let generic_functions = vec![FunctionDef {
+        let mut generic_functions = indexmap::IndexMap::new();
+        generic_functions.insert(entity(20), FunctionDef {
             entity: entity(20),
             name: "__drop$MyStruct".into(),
             kind: FunctionKind::DropShim { nominal: entity(10) },
             type_params: vec![], params: vec![], ret: unit,
             where_clause: None, body: None, extern_info: None,
-        }];
+        });
         expand_destroy_copy(&mut module, &generic_functions);
-        let body = module.functions[1].body.as_ref().unwrap();
+        let test_func = module.functions.iter().find(|f| f.name == "test").unwrap();
+        let body = test_func.body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         match &body.blocks[0].insts[0].kind {
             InstKind::Call { callee, args, result } => {
@@ -718,7 +720,7 @@ mod tests {
             vec![ValueDef::owned(unit), ValueDef::owned(i64_ty), ValueDef::owned(i64_ty), ValueDef::owned(v3_ty)],
         );
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-        expand_destroy_copy(&mut module, &[]);
+        expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 2);
         match &body.blocks[0].insts[1].kind {
@@ -738,7 +740,7 @@ mod tests {
             vec![ValueDef::owned(unit), ValueDef::owned(named_ty), ValueDef::owned(named_ty)],
         );
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-        expand_destroy_copy(&mut module, &[]);
+        expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         assert!(matches!(body.blocks[0].insts[0].kind, InstKind::CopyValue { .. }));
@@ -763,7 +765,7 @@ mod tests {
             param_count: 0,
         };
         module.add_function(make_mono_func("test", entity(1), vec![], i64_ty, Some(body)));
-        expand_destroy_copy(&mut module, &[]);
+        expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         match &body.blocks[0].terminator.kind {
@@ -786,16 +788,18 @@ mod tests {
         let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::owned(unit)]);
         module.add_function(make_mono_func("__drop$Array_Int64", entity(20), vec![i64_ty], unit, Some(shim_body)));
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
-        let generic_functions = vec![FunctionDef {
+        let mut generic_functions = indexmap::IndexMap::new();
+        generic_functions.insert(entity(20), FunctionDef {
             entity: entity(20),
             name: "__drop$Array".into(),
             kind: FunctionKind::DropShim { nominal: entity(10) },
             type_params: vec![TypeParamDef::new(entity(30), "T")],
             params: vec![], ret: unit,
             where_clause: None, body: None, extern_info: None,
-        }];
+        });
         expand_destroy_copy(&mut module, &generic_functions);
-        let body = module.functions[1].body.as_ref().unwrap();
+        let test_func = module.functions.iter().find(|f| f.name == "test").unwrap();
+        let body = test_func.body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         assert!(matches!(
             &body.blocks[0].insts[0].kind,
