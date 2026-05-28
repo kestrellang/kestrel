@@ -38,9 +38,6 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         def.add_field(FieldDef::new(field_name, field_ty));
     }
 
-    if std::env::var("KESTREL_DEBUG_CLONE").is_ok() && def.name.contains("RcBoxStorage") {
-        eprintln!("[lower_struct] {}: entity={:?} copy={:?} drop={:?}", def.name, def.entity, def.type_info.copy, def.type_info.drop);
-    }
     ctx.module.add_struct(def);
 }
 

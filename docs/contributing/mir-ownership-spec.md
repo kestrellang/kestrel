@@ -134,12 +134,9 @@ fn emit_call(&mut self, callee: Callee, args: Vec<(Val, ParamConvention)>, resul
         };
         CallArg { value: adapted.into(), convention: conv }
     }).collect();
-    // emit Call, end borrows, drain deferred borrows
+    // emit Call, end borrows
 }
 ```
-
-Deferred borrow drain is automatic — triggered by `push_inst` when it sees a
-`Call` instruction, or by the unified `emit_call` method.
 
 ---
 
@@ -172,6 +169,13 @@ forget scope cleanup.
 `destroy_scope_except` and `destroy_scopes_to_depth` emit via `push_inst`, not
 by pushing directly to `block.insts`. This gives them the `is_terminated()`
 guard and span attachment.
+
+### No deferred borrows
+
+PtrRead scopes its borrow locally: `Op1(PtrRead) → CopyValue → EndBorrow`.
+The `deferred_end_borrows` field and `drain_deferred_borrows()` mechanism are
+removed. PtrRead borrows work like any other borrow — scoped at the creation
+site, not drained at arbitrary call boundaries.
 
 ---
 

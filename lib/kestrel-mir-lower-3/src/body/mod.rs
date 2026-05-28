@@ -6,7 +6,7 @@ pub mod literal;
 pub mod pattern;
 pub mod stmt;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId};
@@ -67,18 +67,59 @@ impl std::ops::Deref for TypedRef<'_> {
     }
 }
 
-pub(crate) struct ScopeFrame {
-    pub tracked_values: Vec<ValueId>,
-    /// Stack-allocated var locals needing DestroyAddr on scope exit.
-    pub var_addrs: Vec<(ValueId, TyId)>,
+/// How a local variable is bound: directly as an SSA value, or
+/// indirectly through a stack address (for mutable vars/mutating params).
+#[derive(Clone, Copy)]
+pub(crate) enum LocalBinding {
+    Ssa(ValueId),
+    Var(ValueId),
 }
 
-/// Snapshot of the scope stack + local_map for save/restore across
-/// parallel control flow arms (if/else, match).
+impl LocalBinding {
+    pub fn value(self) -> ValueId {
+        match self { LocalBinding::Ssa(v) | LocalBinding::Var(v) => v }
+    }
+}
+
+/// What kind of function body we're lowering — determines receiver type
+/// resolution and field store semantics.
+#[derive(Clone)]
+pub(crate) enum BodyContext {
+    Normal,
+    ProtocolExtension,
+    Initializer { self_addr: ValueId },
+    ProtocolExtensionInit { self_addr: ValueId },
+}
+
+impl BodyContext {
+    pub fn is_protocol_extension(&self) -> bool {
+        matches!(self, BodyContext::ProtocolExtension | BodyContext::ProtocolExtensionInit { .. })
+    }
+
+    pub fn init_self_addr(&self) -> Option<ValueId> {
+        match self {
+            BodyContext::Initializer { self_addr } | BodyContext::ProtocolExtensionInit { self_addr } => Some(*self_addr),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum ScopeEntry {
+    Owned(ValueId),
+    Var { addr: ValueId, ty: TyId },
+    /// @guaranteed borrow needing EndBorrow at scope exit.
+    Borrow(ValueId),
+}
+
+pub(crate) struct ScopeFrame {
+    pub entries: Vec<ScopeEntry>,
+}
+
 #[derive(Clone)]
 pub(crate) struct ScopeSnapshot {
-    pub scopes: Vec<Vec<ValueId>>,
-    pub local_map: HashMap<HirLocalId, ValueId>,
+    pub scopes: Vec<Vec<ScopeEntry>>,
+    pub local_map: HashMap<HirLocalId, LocalBinding>,
     pub tracker: LiveTracker,
 }
 
@@ -128,26 +169,16 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub hir: HirRef<'a>,
     pub typed: Option<TypedRef<'a>>,
     pub func_entity: Entity,
-    pub in_protocol_extension: bool,
+    pub body_context: BodyContext,
     pub body: OssaBody,
     pub current_block: Option<BlockId>,
-    pub local_map: HashMap<HirLocalId, ValueId>,
-    /// Locals using address semantics (MutBorrow params, var locals).
-    /// Reads go through Load, field assignments use the address directly.
-    pub var_locals: HashSet<HirLocalId>,
+    pub local_map: HashMap<HirLocalId, LocalBinding>,
     pub loop_stack: Vec<LoopInfo>,
     pub scope_stack: Vec<ScopeFrame>,
-    /// Shared tracker for threading @owned values through control flow.
-    /// Updated by rebind_scope_values, saved/restored with snapshots.
     pub tracker: LiveTracker,
-    /// @guaranteed values from PtrRead that need EndBorrow after the
-    /// enclosing call completes. Drained by emit_call_returning.
     pub deferred_end_borrows: Vec<ValueId>,
     pub temp_counter: u32,
     pub current_span: Option<Span>,
-    /// Self-param address in init bodies (param 0). Field stores on this
-    /// address use StoreInit because the memory is uninitialized.
-    pub init_self_addr: Option<ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -163,18 +194,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             hir: HirRef::Borrowed(hir),
             typed: typed.map(TypedRef::Borrowed),
             func_entity,
-            in_protocol_extension,
+            body_context: if in_protocol_extension { BodyContext::ProtocolExtension } else { BodyContext::Normal },
             body: OssaBody::new(),
             current_block: None,
             local_map: HashMap::new(),
-            var_locals: HashSet::new(),
             loop_stack: Vec::new(),
             scope_stack: Vec::new(),
             tracker: LiveTracker::from_live(&[]),
             deferred_end_borrows: Vec::new(),
             temp_counter: 0,
             current_span: None,
-            init_self_addr: None,
         }
     }
 
@@ -198,7 +227,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // leaking through scope snapshots across match/if-let boundaries.
         // Check param conventions from the MIR function def.
         // MutBorrow params (mutating self, mutating args) receive an address
-        // and need var_locals treatment — reads go through Load, field
+        // and are bound as LocalBinding::Var — reads go through Load, field
         // assignments use the address directly.
         let param_conventions: Vec<ParamConvention> = self.ctx.module.functions
             .get(&self.func_entity)
@@ -219,11 +248,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
                     });
-                    self.local_map.insert(*hir_id, val);
-                    self.var_locals.insert(*hir_id);
-                    // In init bodies, self (param 0) points to uninitialized memory.
+                    self.local_map.insert(*hir_id, LocalBinding::Var(val));
                     if is_init_body && i == 0 {
-                        self.init_self_addr = Some(val);
+                        self.body_context = match self.body_context {
+                            BodyContext::ProtocolExtension => BodyContext::ProtocolExtensionInit { self_addr: val },
+                            _ => BodyContext::Initializer { self_addr: val },
+                        };
                     }
                 }
                 ParamConvention::Borrow => {
@@ -232,12 +262,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
                     });
-                    self.local_map.insert(*hir_id, val);
+                    self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
                 }
                 ParamConvention::Consuming => {
                     let ownership = self.ownership_for(ty);
                     let val = self.alloc_value(ty, ownership);
-                    self.local_map.insert(*hir_id, val);
+                    self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
                     self.track_owned(val);
                 }
             }
@@ -270,6 +300,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     } else {
                         value
                     };
+
                     self.drain_deferred_borrows();
                     let prev = self.current_span.replace(tail_span);
                     self.destroy_scopes_to_depth(0, &[value]);
@@ -340,16 +371,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.ctx.module.ty_arena.error()
     }
 
+    pub fn is_var_local(&self, hir_id: &HirLocalId) -> bool {
+        matches!(self.local_map.get(hir_id), Some(LocalBinding::Var(_)))
+    }
+
     pub fn map_local(&mut self, hir_id: HirLocalId) -> ValueId {
-        if let Some(&val) = self.local_map.get(&hir_id) {
-            return val;
+        if let Some(&binding) = self.local_map.get(&hir_id) {
+            return binding.value();
         }
         // Lazy allocation for locals referenced before their let-statement
         // (e.g. deinit of an uninitialized local, closure captures).
         let ty = self.resolve_local_type(hir_id);
         let ownership = self.ownership_for(ty);
         let val = self.alloc_value(ty, ownership);
-        self.local_map.insert(hir_id, val);
+        self.local_map.insert(hir_id, LocalBinding::Ssa(val));
         val
     }
 
@@ -392,15 +427,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn push_scope(&mut self) {
-        self.scope_stack.push(ScopeFrame {
-            tracked_values: Vec::new(),
-            var_addrs: Vec::new(),
-        });
+        self.scope_stack.push(ScopeFrame { entries: Vec::new() });
     }
 
     pub fn track_var(&mut self, address: ValueId, content_ty: TyId) {
         if let Some(frame) = self.scope_stack.last_mut() {
-            frame.var_addrs.push((address, content_ty));
+            frame.entries.push(ScopeEntry::Var { addr: address, ty: content_ty });
         }
     }
 
@@ -409,17 +441,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return;
         }
         if let Some(frame) = self.scope_stack.last_mut() {
-            if !frame.tracked_values.contains(&value) {
-                frame.tracked_values.push(value);
+            let already = frame.entries.iter().any(|e| matches!(e, ScopeEntry::Owned(v) if *v == value));
+            if !already {
+                frame.entries.push(ScopeEntry::Owned(value));
             }
         }
     }
 
-    /// Mark a value as consumed — removes from scope tracking.
     pub fn consume(&mut self, value: ValueId) {
         for scope in self.scope_stack.iter_mut().rev() {
-            if let Some(pos) = scope.tracked_values.iter().position(|&v| v == value) {
-                scope.tracked_values.remove(pos);
+            if let Some(pos) = scope.entries.iter().position(|e| matches!(e, ScopeEntry::Owned(v) if *v == value)) {
+                scope.entries.remove(pos);
+                return;
+            }
+        }
+    }
+
+    pub fn track_borrow(&mut self, value: ValueId) {
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.entries.push(ScopeEntry::Borrow(value));
+        }
+    }
+
+    fn untrack_borrow(&mut self, value: ValueId) {
+        for scope in self.scope_stack.iter_mut().rev() {
+            if let Some(pos) = scope.entries.iter().position(|e| matches!(e, ScopeEntry::Borrow(v) if *v == value)) {
+                scope.entries.remove(pos);
                 return;
             }
         }
@@ -431,64 +478,80 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn destroy_scope_except(&mut self, keep: &[ValueId]) {
         if let Some(scope) = self.scope_stack.last_mut() {
-            let mut surviving = Vec::new();
-            for &value in scope.tracked_values.iter().rev() {
-                if keep.contains(&value) {
-                    surviving.push(value);
-                } else {
-                    self.body.block_mut(self.current_block.unwrap()).insts.push(
-                        Instruction::new(InstKind::DestroyValue { operand: value }),
-                    );
-                }
+            let borrows: Vec<ValueId> = scope.entries.iter().rev()
+                .filter_map(|e| match e { ScopeEntry::Borrow(v) => Some(*v), _ => None })
+                .collect();
+            let to_destroy: Vec<ValueId> = scope.entries.iter().rev()
+                .filter_map(|e| match e {
+                    ScopeEntry::Owned(v) if !keep.contains(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            scope.entries.retain(|e| match e {
+                ScopeEntry::Owned(v) => keep.contains(v),
+                ScopeEntry::Var { .. } => true,
+                ScopeEntry::Borrow(_) => false,
+            });
+            for v in borrows {
+                self.push_inst(InstKind::EndBorrow { operand: v });
             }
-            surviving.reverse();
-            scope.tracked_values = surviving;
+            for value in to_destroy {
+                self.push_inst(InstKind::DestroyValue { operand: value });
+            }
         }
     }
 
     pub fn destroy_scopes_to_depth(&mut self, target_depth: usize, keep: &[ValueId]) {
-        for scope in self.scope_stack[target_depth..].iter().rev() {
-            for &value in scope.tracked_values.iter().rev() {
-                if !keep.contains(&value) {
-                    self.body.block_mut(self.current_block.unwrap()).insts.push(
-                        Instruction::new(InstKind::DestroyValue { operand: value }),
-                    );
-                }
+        let entries: Vec<ScopeEntry> = self.scope_stack[target_depth..].iter().rev()
+            .flat_map(|scope| scope.entries.iter().rev().cloned())
+            .collect();
+        // End borrows first — they may reference values we're about to destroy.
+        for entry in &entries {
+            if let ScopeEntry::Borrow(v) = entry {
+                self.push_inst(InstKind::EndBorrow { operand: *v });
             }
-            for &(address, ty) in scope.var_addrs.iter().rev() {
-                self.body.block_mut(self.current_block.unwrap()).insts.push(
-                    Instruction::new(InstKind::DestroyAddr { address, ty }),
-                );
+        }
+        for entry in &entries {
+            match entry {
+                ScopeEntry::Owned(v) if !keep.contains(v) => {
+                    self.push_inst(InstKind::DestroyValue { operand: *v });
+                }
+                ScopeEntry::Var { addr, ty } => {
+                    self.push_inst(InstKind::DestroyAddr { address: *addr, ty: *ty });
+                }
+                _ => {}
             }
         }
     }
 
-    /// All tracked values for threading through block params.
     pub fn all_live_tracked(&self) -> Vec<(ValueId, TyId, Ownership)> {
         self.scope_stack
             .iter()
             .flat_map(|s| {
-                s.tracked_values.iter()
-                    .map(|&v| (v, self.body.value(v).ty, Ownership::Owned))
+                s.entries.iter().filter_map(|e| match e {
+                    ScopeEntry::Owned(v) => Some((*v, self.body.value(*v).ty, Ownership::Owned)),
+                    _ => None,
+                })
             })
             .collect()
     }
 
-    /// Save scope stack + local_map + tracker for restoration between parallel arms.
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
-            scopes: self.scope_stack.iter().map(|s| s.tracked_values.clone()).collect(),
+            scopes: self.scope_stack.iter().map(|s| s.entries.clone()).collect(),
             local_map: self.local_map.clone(),
             tracker: self.tracker.clone(),
         }
     }
 
-    /// Restore scope stack + local_map + tracker from a snapshot.
-    /// Truncates extra frames that may remain from terminated arms.
     pub fn restore_scope(&mut self, snapshot: &ScopeSnapshot) {
         self.scope_stack.truncate(snapshot.scopes.len());
         for (i, frame) in self.scope_stack.iter_mut().enumerate() {
-            frame.tracked_values = snapshot.scopes[i].clone();
+            // Borrows can't cross block boundaries — strip on restore.
+            frame.entries = snapshot.scopes[i].iter()
+                .filter(|e| !matches!(e, ScopeEntry::Borrow(_)))
+                .cloned()
+                .collect();
         }
         self.local_map = snapshot.local_map.clone();
         self.tracker = snapshot.tracker.clone();
@@ -498,18 +561,38 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Updates scope stack, local_map, AND the shared LiveTracker.
     pub fn rebind_scope_values(&mut self, old_vals: &[ValueId], new_vals: &[ValueId]) {
         for scope in self.scope_stack.iter_mut() {
-            for val in scope.tracked_values.iter_mut() {
-                if let Some(pos) = old_vals.iter().position(|&v| v == *val) {
-                    *val = new_vals[pos];
+            for entry in scope.entries.iter_mut() {
+                if let ScopeEntry::Owned(v) = entry {
+                    if let Some(pos) = old_vals.iter().position(|&old| old == *v) {
+                        *v = new_vals[pos];
+                    }
                 }
             }
         }
-        for (_, val) in self.local_map.iter_mut() {
-            if let Some(pos) = old_vals.iter().position(|&v| v == *val) {
-                *val = new_vals[pos];
+        for (_, binding) in self.local_map.iter_mut() {
+            let v = binding.value();
+            if let Some(pos) = old_vals.iter().position(|&old| old == v) {
+                match binding {
+                    LocalBinding::Ssa(val) => *val = new_vals[pos],
+                    LocalBinding::Var(val) => *val = new_vals[pos],
+                }
             }
         }
         self.tracker.rebind(old_vals, new_vals);
+    }
+
+    /// Destroy current scope except result + tracker values, then jump to merge block.
+    pub fn jump_to_merge(&mut self, merge_block: BlockId, result: ValueId) {
+        let result = if self.body.value(result).ownership == Ownership::Guaranteed {
+            self.emit_copy_value(result)
+        } else { result };
+        let tracker_vals = self.tracker.values();
+        let mut keep = vec![result];
+        keep.extend(&tracker_vals);
+        self.destroy_scope_except(&keep);
+        let mut args = vec![result];
+        args.extend(tracker_vals);
+        self.emit_jump(merge_block, args);
     }
 
     // ================================================================
@@ -568,14 +651,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_end_borrow(&mut self, operand: ValueId) {
         self.deferred_end_borrows.retain(|&v| v != operand);
+        self.untrack_borrow(operand);
         self.push_inst(InstKind::EndBorrow { operand });
-
     }
 
-    /// EndBorrow all deferred borrows (from PtrRead etc.).
     pub fn drain_deferred_borrows(&mut self) {
         let borrows: Vec<ValueId> = self.deferred_end_borrows.drain(..).collect();
         for v in borrows {
+            self.untrack_borrow(v);
             self.push_inst(InstKind::EndBorrow { operand: v });
         }
     }
@@ -795,17 +878,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // Emit calls
     // ================================================================
 
-    /// Emit a call and return the result ValueId. Handles borrow insertion.
-    /// If the callee returns Never, emits Unreachable after the call.
-    pub fn emit_call_returning(
+    fn emit_call_inner(
         &mut self,
         callee: Callee,
         args: Vec<CallArg>,
-        result_ty: TyId,
-    ) -> ValueId {
-        let ownership = self.ownership_for(result_ty);
-        let result = self.alloc_value(result_ty, ownership);
-        // Collect @guaranteed values from args AND callee for EndBorrow
+        result_ty: Option<TyId>,
+    ) -> Option<ValueId> {
+        let result = result_ty.map(|ty| {
+            let ownership = self.ownership_for(ty);
+            self.alloc_value(ty, ownership)
+        });
         let mut borrows: Vec<ValueId> = args.iter()
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
             .map(|a| a.value)
@@ -815,16 +897,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 borrows.push(cv);
             }
         }
-        // Consuming args are consumed by the call — remove from scope tracking
         let consuming: Vec<ValueId> = args.iter()
             .filter(|a| a.convention == ParamConvention::Consuming)
             .map(|a| a.value)
             .collect();
-        self.push_inst(InstKind::Call {
-            result: Some(result),
-            callee,
-            args,
-        });
+        self.push_inst(InstKind::Call { result, callee, args });
         for v in consuming {
             self.consume(v);
         }
@@ -832,43 +909,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.emit_end_borrow(borrow_val);
         }
         self.drain_deferred_borrows();
-        // Never-returning calls terminate the block — destroy all live values first
-        if matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Never) {
-            self.destroy_scopes_to_depth(0, &[]);
-            self.set_terminator(TerminatorKind::Panic("noreturn".to_string()));
-            return result;
+        if let (Some(ty), Some(r)) = (result_ty, result) {
+            if matches!(self.ctx.module.ty_arena.get(ty), MirTy::Never) {
+                self.destroy_scopes_to_depth(0, &[]);
+                self.set_terminator(TerminatorKind::Panic("noreturn".to_string()));
+                return Some(r);
+            }
+            self.track_owned(r);
         }
-        self.track_owned(result);
         result
     }
 
-    /// Emit a void call (no result).
+    pub fn emit_call_returning(
+        &mut self,
+        callee: Callee,
+        args: Vec<CallArg>,
+        result_ty: TyId,
+    ) -> ValueId {
+        self.emit_call_inner(callee, args, Some(result_ty)).unwrap()
+    }
+
     pub fn emit_call_void(&mut self, callee: Callee, args: Vec<CallArg>) {
-        let mut borrows: Vec<ValueId> = args.iter()
-            .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
-            .map(|a| a.value)
-            .collect();
-        // Consuming args are consumed by the call — remove from scope tracking
-        let consuming: Vec<ValueId> = args.iter()
-            .filter(|a| a.convention == ParamConvention::Consuming)
-            .map(|a| a.value)
-            .collect();
-        if let Some(cv) = callee.value() {
-            if self.body.value(cv).ownership == Ownership::Guaranteed {
-                borrows.push(cv);
-            }
-        }
-        self.push_inst(InstKind::Call {
-            result: None,
-            callee,
-            args,
-        });
-        for v in consuming {
-            self.consume(v);
-        }
-        for borrow_val in borrows {
-            self.emit_end_borrow(borrow_val);
-        }
+        self.emit_call_inner(callee, args, None);
     }
 
     // ================================================================
@@ -927,10 +989,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let expr = self.hir.exprs[expr_id].clone();
         match expr {
             kestrel_hir::body::HirExpr::Local(hir_local, _) => {
-                if self.var_locals.contains(&hir_local) {
-                    self.local_map.get(&hir_local).copied()
-                } else {
-                    None
+                match self.local_map.get(&hir_local).copied() {
+                    Some(LocalBinding::Var(addr)) => Some(addr),
+                    _ => None,
                 }
             }
             kestrel_hir::body::HirExpr::Field { base, name, .. } => {
@@ -961,7 +1022,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
-            HirExpr::Local(hir_local, _) if !self.var_locals.contains(hir_local) => {
+            HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
                 self.map_local(*hir_local)
             }
             _ => self.lower_expr(expr_id),
@@ -975,7 +1036,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn lower_expr_for_consuming(&mut self, expr_id: HirExprId) -> ValueId {
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
-            HirExpr::Local(hir_local, _) if !self.var_locals.contains(hir_local) => {
+            HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
                 let val = self.map_local(*hir_local);
                 self.consume(val);
                 val

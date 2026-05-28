@@ -54,17 +54,7 @@ impl OssaBodyCtx<'_, '_> {
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
         if !self.is_terminated() {
-            // Copy @guaranteed result to @owned for the merge block
-            let then_val = if self.body.value(then_val).ownership == Ownership::Guaranteed {
-                self.emit_copy_value(then_val)
-            } else { then_val };
-            let tracker_vals = self.tracker.values();
-            let mut keep = vec![then_val];
-            keep.extend(&tracker_vals);
-            self.destroy_scope_except(&keep);
-            let mut args = vec![then_val];
-            args.extend(tracker_vals);
-            self.emit_jump(merge_block, args);
+            self.jump_to_merge(merge_block, then_val);
         }
         self.pop_scope();
 
@@ -76,22 +66,11 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
             if !self.is_terminated() {
-                let else_val = if self.body.value(else_val).ownership == Ownership::Guaranteed {
-                    self.emit_copy_value(else_val)
-                } else { else_val };
-                let tracker_vals = self.tracker.values();
-                let mut keep = vec![else_val];
-                keep.extend(&tracker_vals);
-                self.destroy_scope_except(&keep);
-                let mut args = vec![else_val];
-                args.extend(tracker_vals);
-                self.emit_jump(merge_block, args);
+                self.jump_to_merge(merge_block, else_val);
             }
         } else {
             let unit = self.emit_literal(Immediate::unit());
-            let mut args = vec![unit];
-            args.extend(self.tracker.values());
-            self.emit_jump(merge_block, args);
+            self.jump_to_merge(merge_block, unit);
         }
         self.pop_scope();
 

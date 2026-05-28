@@ -336,17 +336,7 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(arm) = arms.get(*arm_index) {
                     let body_val = self.lower_expr(arm.body);
                     if !self.is_terminated() {
-                        // Copy @guaranteed result to @owned for the merge block
-                        let body_val = if self.body.value(body_val).ownership == Ownership::Guaranteed {
-                            self.emit_copy_value(body_val)
-                        } else { body_val };
-                        let tracker_vals = self.tracker.values();
-                        let mut keep = vec![body_val];
-                        keep.extend(&tracker_vals);
-                        self.destroy_scope_except(&keep);
-                        let mut args = vec![body_val];
-                        args.extend(tracker_vals);
-                        self.emit_jump(join_block, args);
+                        self.jump_to_merge(join_block, body_val);
                     }
                 }
                 self.pop_scope();
@@ -376,6 +366,7 @@ impl OssaBodyCtx<'_, '_> {
                         self.switch_to(success_block);
                         self.rebind_scope_values(&guard_live, &success_params);
                         let rebound = rebound_value(scrutinee, &guard_live, &success_params);
+                        self.pop_scope();
                         self.emit_decision_tree_threaded(
                             success, rebound, scrutinee_ty, arms, result_ty,
                             join_block,
@@ -448,7 +439,7 @@ impl OssaBodyCtx<'_, '_> {
                 extracted
             };
 
-            self.local_map.insert(hir_local, bound_val);
+            self.local_map.insert(hir_local, super::LocalBinding::Ssa(bound_val));
         }
     }
 

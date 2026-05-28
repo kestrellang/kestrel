@@ -272,15 +272,11 @@ pub(crate) fn try_intrinsic(
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
             let arg = bctx.lower_expr(args.first()?.value);
-            // PtrRead produces a @guaranteed view into the pointed-to memory.
-            // EndBorrow is deferred — drained after calls (emit_call_returning),
-            // before scope destruction (return paths), and before block
-            // terminators (set_terminator). This avoids eager CopyValue→clone
-            // that would allocate independent buffers whose deinit frees
-            // resources the caller is still using.
+            // PtrRead produces @guaranteed. Tracked in scope so
+            // EndBorrow fires at scope exit, not at the next call.
             let view = bctx.alloc_guaranteed(result_ty, arg);
             bctx.push_inst(InstKind::Op1 { result: view, op: Op::PtrRead(ty_arg), arg });
-            bctx.deferred_end_borrows.push(view);
+            bctx.track_borrow(view);
             return Some(view);
         }
         "drop_in_place" => {

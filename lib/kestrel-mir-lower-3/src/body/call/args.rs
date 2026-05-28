@@ -8,7 +8,30 @@ use kestrel_mir_3::{Immediate, MirTy, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::InferBody;
 
 use crate::body::{HirRef, OssaBodyCtx, TypedRef};
+use crate::items::function_sig::receiver_convention;
 use crate::ty::{lower_type, resolve_type_annotation};
+
+fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamConvention> {
+    if is_extern {
+        let count = callable.receiver.as_ref().map_or(0, |_| 1) + callable.params.len();
+        return vec![ParamConvention::Consuming; count];
+    }
+    let mut convs = Vec::new();
+    if let Some(recv) = &callable.receiver {
+        convs.push(receiver_convention(recv));
+    }
+    for param in &callable.params {
+        let conv = if param.is_consuming {
+            ParamConvention::Consuming
+        } else if param.is_mut {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
+        convs.push(conv);
+    }
+    convs
+}
 
 impl OssaBodyCtx<'_, '_> {
     /// Lower call args with the callee's resolved conventions.
@@ -103,7 +126,7 @@ impl OssaBodyCtx<'_, '_> {
         for (hir_id, _local) in &default_locals {
             let ty = self.resolve_local_type(*hir_id);
             let val = self.alloc_value_auto(ty);
-            self.local_map.insert(*hir_id, val);
+            self.local_map.insert(*hir_id, crate::body::LocalBinding::Ssa(val));
         }
 
         let result = if let Some(tail_id) = tail {
@@ -124,7 +147,6 @@ impl OssaBodyCtx<'_, '_> {
         // Try MIR FunctionDef first
         if let Some(callee) = self.ctx.module.functions.get(&callee_entity) {
             if callee.extern_info.is_some() {
-                // Extern: all Consuming
                 return callee.params.iter().map(|_| ParamConvention::Consuming).collect();
             }
             return callee.params.iter().map(|p| p.convention).collect();
@@ -135,30 +157,7 @@ impl OssaBodyCtx<'_, '_> {
         };
         let is_extern = self.ctx.world.get::<Attributes>(callee_entity)
             .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
-        if is_extern {
-            return callable.params.iter().map(|_| ParamConvention::Consuming).collect();
-        }
-
-        let mut convs = Vec::new();
-        if callable.receiver.is_some() {
-            let conv = match callable.receiver.as_ref().unwrap() {
-                kestrel_ast_builder::ReceiverKind::Borrowing => ParamConvention::Borrow,
-                kestrel_ast_builder::ReceiverKind::Mutating => ParamConvention::MutBorrow,
-                kestrel_ast_builder::ReceiverKind::Consuming => ParamConvention::Consuming,
-            };
-            convs.push(conv);
-        }
-        for param in &callable.params {
-            let conv = if param.is_consuming {
-                ParamConvention::Consuming
-            } else if param.is_mut {
-                ParamConvention::MutBorrow
-            } else {
-                ParamConvention::Borrow
-            };
-            convs.push(conv);
-        }
-        convs
+        conventions_from_callable(callable, is_extern)
     }
 
     /// Look up param conventions for a witness (protocol method) call.
@@ -173,27 +172,7 @@ impl OssaBodyCtx<'_, '_> {
         let Some(callable) = self.ctx.world.get::<Callable>(method_entity) else {
             return Vec::new();
         };
-
-        let mut conventions = Vec::new();
-        if let Some(ref receiver) = callable.receiver {
-            let conv = match receiver {
-                kestrel_ast_builder::ReceiverKind::Borrowing => ParamConvention::Borrow,
-                kestrel_ast_builder::ReceiverKind::Mutating => ParamConvention::MutBorrow,
-                kestrel_ast_builder::ReceiverKind::Consuming => ParamConvention::Consuming,
-            };
-            conventions.push(conv);
-        }
-        for param in &callable.params {
-            let conv = if param.is_consuming {
-                ParamConvention::Consuming
-            } else if param.is_mut {
-                ParamConvention::MutBorrow
-            } else {
-                ParamConvention::Borrow
-            };
-            conventions.push(conv);
-        }
-        conventions
+        conventions_from_callable(callable, false)
     }
 
     pub(crate) fn find_protocol_method_entity(

@@ -22,25 +22,24 @@ use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
-use kestrel_mir_3::value::{Ownership, ValueDef};
+use kestrel_mir_3::value::ValueDef;
 use kestrel_mir_3::{
     FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId,
 };
 
-use super::{LoopInfo, OssaBodyCtx, ScopeFrame};
+use super::{LocalBinding, LoopInfo, OssaBodyCtx, ScopeFrame};
 
 /// Saved parent state during closure body lowering.
 struct SavedState {
     body: OssaBody,
     current_block: Option<kestrel_mir_3::BlockId>,
-    local_map: HashMap<HirLocalId, ValueId>,
-    var_locals: HashSet<HirLocalId>,
+    local_map: HashMap<HirLocalId, LocalBinding>,
     loop_stack: Vec<LoopInfo>,
     scope_stack: Vec<ScopeFrame>,
     tracker: super::LiveTracker,
     func_entity: kestrel_hecs::Entity,
     temp_counter: u32,
-    in_protocol_extension: bool,
+    body_context: super::BodyContext,
 }
 
 impl OssaBodyCtx<'_, '_> {
@@ -151,14 +150,10 @@ impl OssaBodyCtx<'_, '_> {
         closure_body.param_count += 1;
 
         // Closure params — sequential ValueIds after env
-        let mut closure_local_map = HashMap::new();
+        let mut closure_local_map: HashMap<HirLocalId, LocalBinding> = HashMap::new();
         for (i, cp) in params.iter().enumerate() {
             let ty = param_tys.get(i).copied().unwrap_or_else(|| self.ctx.module.ty_arena.error());
-            let ownership = self.ownership_for(ty);
-            let val = closure_body.alloc_value(match ownership {
-                Ownership::Owned => ValueDef::owned(ty),
-                _ => ValueDef::owned(ty),
-            });
+            let val = closure_body.alloc_value(ValueDef::owned(ty));
             func_def.params.push(ParamDef::new(
                 &self.hir.locals[cp.local].name,
                 val,
@@ -166,19 +161,15 @@ impl OssaBodyCtx<'_, '_> {
                 ParamConvention::Consuming,
             ));
             closure_body.param_count += 1;
-            closure_local_map.insert(cp.local, val);
+            closure_local_map.insert(cp.local, LocalBinding::Ssa(val));
         }
 
         // Allocate ValueIds for captured locals (will be loaded from env in entry)
         let mut capture_value_ids = Vec::new();
         for &captured in &captured_locals {
             let cap_ty = self.resolve_local_type(captured);
-            let ownership = self.ownership_for(cap_ty);
-            let val = closure_body.alloc_value(match ownership {
-                Ownership::Owned => ValueDef::owned(cap_ty),
-                _ => ValueDef::owned(cap_ty),
-            });
-            closure_local_map.insert(captured, val);
+            let val = closure_body.alloc_value(ValueDef::owned(cap_ty));
+            closure_local_map.insert(captured, LocalBinding::Ssa(val));
             capture_value_ids.push(val);
         }
 
@@ -191,17 +182,16 @@ impl OssaBodyCtx<'_, '_> {
             body: mem::replace(&mut self.body, closure_body),
             current_block: self.current_block.take(),
             local_map: mem::replace(&mut self.local_map, closure_local_map),
-            var_locals: mem::take(&mut self.var_locals),
             loop_stack: mem::take(&mut self.loop_stack),
             scope_stack: mem::take(&mut self.scope_stack),
             tracker: mem::replace(&mut self.tracker, super::LiveTracker::from_live(&[])),
             func_entity: self.func_entity,
             temp_counter: self.temp_counter,
-            in_protocol_extension: self.in_protocol_extension,
+            body_context: std::mem::replace(&mut self.body_context, super::BodyContext::Normal),
         };
         self.current_block = Some(entry_block);
         self.temp_counter = 0;
-        self.in_protocol_extension = false;
+        // body_context already set to Normal by the mem::replace above
         self.push_scope();
 
         // Emit loads from env struct for captured locals.
@@ -239,10 +229,10 @@ impl OssaBodyCtx<'_, '_> {
 
                 if is_ref_capture {
                     let loaded = self.emit_load(owned_field, cap_ty);
-                    self.local_map.insert(captured, loaded);
+                    self.local_map.insert(captured, LocalBinding::Ssa(loaded));
                     self.emit_destroy_value(owned_field);
                 } else {
-                    self.local_map.insert(captured, owned_field);
+                    self.local_map.insert(captured, LocalBinding::Ssa(owned_field));
                 }
             }
 
@@ -261,13 +251,12 @@ impl OssaBodyCtx<'_, '_> {
         let completed_body = mem::replace(&mut self.body, saved.body);
         self.current_block = saved.current_block;
         self.local_map = saved.local_map;
-        self.var_locals = saved.var_locals;
         self.loop_stack = saved.loop_stack;
         self.scope_stack = saved.scope_stack;
         self.tracker = saved.tracker;
         self.func_entity = saved.func_entity;
         self.temp_counter = saved.temp_counter;
-        self.in_protocol_extension = saved.in_protocol_extension;
+        self.body_context = saved.body_context;
 
         // Attach body and register function
         func_def.body = Some(completed_body);
@@ -287,7 +276,7 @@ impl OssaBodyCtx<'_, '_> {
                 // Copy capture: snapshot the value.
                 // Var locals are address-based — load the value from the address
                 // so the closure captures the value, not the raw address pointer.
-                if self.var_locals.contains(&hir_local) {
+                if self.is_var_local(&hir_local) {
                     let loaded = self.emit_copy_addr(mir_val, cap_ty);
                     captures.push(loaded);
                 } else {
@@ -296,12 +285,10 @@ impl OssaBodyCtx<'_, '_> {
                 }
             } else {
                 // Ref capture: copy value into a stack slot, capture the address.
-                // Var locals are address-based — load first so we copy the value,
-                // not the raw address pointer.
                 let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
                 let one = self.emit_literal(Immediate::i64(1));
                 let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
-                let copy = if self.var_locals.contains(&hir_local) {
+                let copy = if self.is_var_local(&hir_local) {
                     self.emit_copy_addr(mir_val, cap_ty)
                 } else {
                     self.emit_copy_value(mir_val)

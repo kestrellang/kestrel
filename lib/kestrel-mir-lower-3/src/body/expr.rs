@@ -15,7 +15,7 @@
 use kestrel_ast_builder::{Callable, NodeKind, Settable};
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir_3::callee::Callee;
-use kestrel_mir_3::inst::{CallArg, InstKind};
+use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
@@ -61,8 +61,7 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
 
             HirExpr::Local(hir_local, _) => {
-                if self.var_locals.contains(hir_local) {
-                    // MutBorrow param or var local: load from address
+                if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
                     let ownership = self.ownership_for(ty);
@@ -333,7 +332,7 @@ impl OssaBodyCtx<'_, '_> {
         let field_idx = struct_entity
             .and_then(|se| self.ctx.resolve_field_idx(se, field_name))
             .unwrap_or_else(|| {
-                eprintln!("ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
+                debug_assert!(false, "ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
                 FieldIdx::new(0)
             });
 
@@ -506,11 +505,11 @@ impl OssaBodyCtx<'_, '_> {
         let target_expr = self.hir.exprs[target].clone();
         match target_expr {
             HirExpr::Local(hir_local, _) => {
-                if self.var_locals.contains(&hir_local) {
-                    let addr = self.local_map[&hir_local];
+                if self.is_var_local(&hir_local) {
+                    let addr = self.local_map[&hir_local].value();
                     self.emit_store_assign(addr, rhs);
                 } else {
-                    let old_val = self.local_map.get(&hir_local).copied();
+                    let old_val = self.local_map.get(&hir_local).map(|b| b.value());
                     if let Some(old) = old_val {
                         let ownership = self.body.value(old).ownership;
                         if ownership == kestrel_mir_3::value::Ownership::Owned {
@@ -518,7 +517,7 @@ impl OssaBodyCtx<'_, '_> {
                         }
                         self.tracker.rebind(&[old], &[rhs]);
                     }
-                    self.local_map.insert(hir_local, rhs);
+                    self.local_map.insert(hir_local, super::LocalBinding::Ssa(rhs));
                 }
             }
             HirExpr::Field { ref base, ref name, .. } => {
@@ -533,14 +532,14 @@ impl OssaBodyCtx<'_, '_> {
                 let field_idx = struct_entity
                     .and_then(|e| self.ctx.resolve_field_idx(e, &field_name))
                     .unwrap_or_else(|| {
-                        eprintln!("ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
+                        debug_assert!(false, "ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
                         kestrel_mir_3::FieldIdx::new(0)
                     });
 
                 if let Some(base_addr) = self.try_field_addr_chain(base) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     // In init bodies, self fields are uninitialized — use store_init.
-                    let is_init_self = self.init_self_addr == Some(base_addr);
+                    let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
                         self.emit_store_init(field_addr, rhs);
                     } else {

@@ -19,6 +19,14 @@ use kestrel_name_res::resolve_type::{ResolveTypePath, TypeResolution};
 use crate::context::LowerCtx;
 use crate::ty::{resolve_callable_return_type, resolve_callable_types};
 
+pub(crate) fn receiver_convention(kind: &kestrel_ast_builder::ReceiverKind) -> ParamConvention {
+    match kind {
+        kestrel_ast_builder::ReceiverKind::Borrowing => ParamConvention::Borrow,
+        kestrel_ast_builder::ReceiverKind::Mutating => ParamConvention::MutBorrow,
+        kestrel_ast_builder::ReceiverKind::Consuming => ParamConvention::Consuming,
+    }
+}
+
 /// Lower a function entity into a MIR FunctionDef (signature only, no body).
 pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
@@ -58,11 +66,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
             let convention = if is_user_deinit {
                 ParamConvention::MutBorrow
             } else {
-                match receiver {
-                    kestrel_ast_builder::ReceiverKind::Borrowing => ParamConvention::Borrow,
-                    kestrel_ast_builder::ReceiverKind::Mutating => ParamConvention::MutBorrow,
-                    kestrel_ast_builder::ReceiverKind::Consuming => ParamConvention::Consuming,
-                }
+                receiver_convention(receiver)
             };
             let self_ty = resolve_self_type_for_function(ctx, entity);
             let value_id = ValueId::new(0); // placeholder
@@ -158,18 +162,8 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                     if ctx.world.get::<Static>(entity).is_some() {
                         FunctionKind::StaticMethod { parent }
                     } else if let Some(callable) = ctx.world.get::<Callable>(entity) {
-                        if callable.receiver.is_some() {
-                            let receiver = match callable.receiver.as_ref().unwrap() {
-                                kestrel_ast_builder::ReceiverKind::Borrowing => {
-                                    ParamConvention::Borrow
-                                }
-                                kestrel_ast_builder::ReceiverKind::Mutating => {
-                                    ParamConvention::MutBorrow
-                                }
-                                kestrel_ast_builder::ReceiverKind::Consuming => {
-                                    ParamConvention::Consuming
-                                }
-                            };
+                        if let Some(recv) = &callable.receiver {
+                            let receiver = receiver_convention(recv);
                             FunctionKind::Method { parent, receiver }
                         } else {
                             FunctionKind::StaticMethod { parent }
@@ -185,19 +179,10 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
         NodeKind::Field | NodeKind::Subscript | NodeKind::Setter => {
             let parent = accessor_enclosing_container(ctx, entity).unwrap_or(ctx.root);
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
-                if let Some(receiver) = &callable.receiver {
-                    let conv = match receiver {
-                        kestrel_ast_builder::ReceiverKind::Borrowing => ParamConvention::Borrow,
-                        kestrel_ast_builder::ReceiverKind::Mutating => {
-                            ParamConvention::MutBorrow
-                        }
-                        kestrel_ast_builder::ReceiverKind::Consuming => {
-                            ParamConvention::Consuming
-                        }
-                    };
+                if let Some(recv) = &callable.receiver {
                     FunctionKind::Method {
                         parent,
-                        receiver: conv,
+                        receiver: receiver_convention(recv),
                     }
                 } else {
                     FunctionKind::StaticMethod { parent }

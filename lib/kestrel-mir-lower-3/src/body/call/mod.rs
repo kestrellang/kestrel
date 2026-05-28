@@ -45,7 +45,7 @@ impl OssaBodyCtx<'_, '_> {
         let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        if self.in_protocol_extension {
+        if self.body_context.is_protocol_extension() {
             if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(receiver_ty).clone() {
                 if type_args.is_empty()
                     && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
@@ -509,15 +509,18 @@ impl OssaBodyCtx<'_, '_> {
 
         // Build the init return type: Optional[()] or Result[(), E]
         let unit_ty = self.ctx.module.ty_arena.unit();
+        let err_ty = match &effect {
+            InitEffect::Throwing => match self.ctx.module.ty_arena.get(result_ty) {
+                MirTy::Named { type_args, .. } if type_args.len() >= 2 => type_args[1],
+                _ => unit_ty,
+            },
+            _ => unit_ty,
+        };
         let init_ret_ty = match &effect {
             InitEffect::Failable => {
                 self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty])
             }
             InitEffect::Throwing => {
-                let err_ty = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { type_args, .. } if type_args.len() >= 2 => type_args[1],
-                    _ => unit_ty,
-                };
                 self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty, err_ty])
             }
         };
@@ -578,8 +581,9 @@ impl OssaBodyCtx<'_, '_> {
 
         let snapshot = self.snapshot_scope();
 
-        // Find self_addr's position in live_vals so we can use the rebound version
+        // Find positions in live_vals so we can use rebound versions after branch
         let self_addr_pos = live_vals.iter().position(|&v| v == self_addr);
+        let init_ret_pos = live_vals.iter().position(|&v| v == init_ret);
 
         // -- Success: take self from the pointer, wrap in Some/Ok --
         self.switch_to(success_block);
@@ -601,9 +605,14 @@ impl OssaBodyCtx<'_, '_> {
         let none_val = if failure_name == "None" {
             self.emit_enum_variant(result_ty, failure_idx, vec![])
         } else {
-            // Throwing: extract error payload from init_ret and re-wrap
-            let unit = self.emit_literal(Immediate::unit());
-            self.emit_enum_variant(result_ty, failure_idx, vec![unit])
+            // Throwing: extract error payload from init_ret and re-wrap as Result[T, E]
+            let rebound_init_ret = init_ret_pos
+                .map(|pos| failure_params[pos])
+                .unwrap_or(init_ret);
+            let error_payload = self.emit_enum_payload(
+                rebound_init_ret, failure_idx, FieldIdx::new(0), err_ty,
+            );
+            self.emit_enum_variant(result_ty, failure_idx, vec![error_payload])
         };
         let tracker_vals = self.tracker.values();
         let mut args = vec![none_val];
