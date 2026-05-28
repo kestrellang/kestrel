@@ -44,10 +44,19 @@ pub fn expand_destroy_copy(
         }
     }
 
+    // Collect not-Copyable nominals — CopyValue on these is a move, not a copy.
+    let not_copyable: HashSet<Entity> = module.structs.iter()
+        .filter(|s| matches!(s.type_info.copy, CopyBehavior::None))
+        .map(|s| s.source)
+        .chain(module.enums.iter()
+            .filter(|e| matches!(e.type_info.copy, CopyBehavior::None))
+            .map(|e| e.source))
+        .collect();
+
     for fi in 0..module.functions.len() {
         let source = module.functions[fi].source;
         let skip_nominal = method_to_nominal.get(&source).copied();
-        expand_function(&mut module.functions[fi], &module.ty_arena, &shim_lookup, &clone_lookup, skip_nominal);
+        expand_function(&mut module.functions[fi], &module.ty_arena, &shim_lookup, &clone_lookup, skip_nominal, &not_copyable);
     }
 }
 
@@ -126,21 +135,22 @@ fn build_clone_lookup(
         }
     }
 
-    // Collect entities of Bitwise types — these don't need clone shim calls
-    let bitwise_nominals: HashSet<Entity> = module.structs.iter()
-        .filter(|s| matches!(s.type_info.copy, CopyBehavior::Bitwise))
+    // Collect entities that don't need clone shim calls:
+    // Bitwise types (trivial copy) and not-Copyable types (move, never clone).
+    let skip_clone_nominals: HashSet<Entity> = module.structs.iter()
+        .filter(|s| matches!(s.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
         .map(|s| s.source)
         .chain(module.enums.iter()
-            .filter(|e| matches!(e.type_info.copy, CopyBehavior::Bitwise))
+            .filter(|e| matches!(e.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
             .map(|e| e.source))
         .collect();
 
     let mut lookup = DropShimLookup::new();
     for (mi, mf) in module.functions.iter().enumerate() {
         if let Some(&nominal) = clone_func_to_parent.get(&mf.source) {
-            if bitwise_nominals.contains(&nominal) {
+            if skip_clone_nominals.contains(&nominal) {
                 if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                    eprintln!("[clone_lookup] SKIPPED (bitwise): {} source={:?} nominal={:?} type_args={:?}", mf.name, mf.source, nominal, mf.type_args);
+                    eprintln!("[clone_lookup] SKIPPED (bitwise/not-copyable): {} source={:?} nominal={:?} type_args={:?}", mf.name, mf.source, nominal, mf.type_args);
                 }
                 continue;
             }
@@ -199,11 +209,15 @@ fn expand_function(
     shim_lookup: &DropShimLookup,
     clone_lookup: &DropShimLookup,
     skip_nominal: Option<Entity>,
+    not_copyable: &HashSet<Entity>,
 ) {
     let Some(body) = &mut func.body else { return };
 
     // value_remap tracks CopyValue removals: result -> operand
     let mut value_remap: HashMap<ValueId, ValueId> = HashMap::new();
+    // Values that were moved via CopyValue on not-Copyable types.
+    // DestroyValue on these is a no-op (ownership already transferred).
+    let mut moved_values: HashSet<ValueId> = HashSet::new();
 
     for block_idx in 0..body.blocks.len() {
         let old_insts = std::mem::take(&mut body.blocks[block_idx].insts);
@@ -213,6 +227,16 @@ fn expand_function(
             match &inst.kind {
                 InstKind::DestroyValue { operand } => {
                     let operand = *operand;
+                    let remapped = remap_value(operand, &value_remap);
+
+                    // Skip destroy on values that were moved (not-Copyable copy_value).
+                    if moved_values.contains(&remapped) {
+                        if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                            eprintln!("[expand] SKIP destroy on moved value {remapped:?} (orig {operand:?}) in {}", func.name);
+                        }
+                        continue;
+                    }
+
                     let value_def = &body.values[operand.index()];
 
                     match ty_arena.get(value_def.ty) {
@@ -334,6 +358,9 @@ fn expand_function(
                                 }
                             }
                             if let Some(&clone_id) = clone_lookup.get(&key) {
+                                if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                                    eprintln!("[expand] CopyValue EXPANDED to clone call for {entity:?} in func {}", func.name);
+                                }
                                 let remapped_operand = remap_value(operand, &value_remap);
 
                                 let ptr_ty = ty_arena.find(|t| matches!(t, MirTy::Pointer(p) if *p == value_def.ty))
@@ -360,6 +387,20 @@ fn expand_function(
                                 }));
                                 continue;
                             }
+                        }
+                    }
+
+                    // not-Copyable Named types: CopyValue is a move (alias).
+                    // The source is marked as moved so DestroyValue becomes a no-op.
+                    if let MirTy::Named { entity, .. } = ty_arena.get(value_def.ty) {
+                        if not_copyable.contains(entity) {
+                            let target = remap_value(operand, &value_remap);
+                            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                                eprintln!("[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}", func.name);
+                            }
+                            value_remap.insert(result, target);
+                            moved_values.insert(target);
+                            continue;
                         }
                     }
 

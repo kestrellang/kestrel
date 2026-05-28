@@ -79,6 +79,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     for s in &module.structs {
         if has_user_clone.contains(&s.entity)
             || closure_env_entities.contains(&s.entity)
+            || s.type_info.copy == CopyBehavior::None
             || has_unresolvable_fields_struct(s, &module.ty_arena)
         {
             continue;
@@ -87,6 +88,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     }
     for e in &module.enums {
         if has_user_clone.contains(&e.entity)
+            || e.type_info.copy == CopyBehavior::None
             || has_unresolvable_fields_enum(e, &module.ty_arena)
         {
             continue;

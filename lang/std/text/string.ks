@@ -199,8 +199,8 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     private func ptr() -> Pointer[UInt8] {
         self.storage.valuePtr().with { (storage) in storage.ptr }
     }
-    private func len() -> Int64 { self.storage.read().len }
-    private func cap() -> Int64 { self.storage.read().cap }
+    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
+    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
 
     // ========================================================================
     // CONSTRUCTORS

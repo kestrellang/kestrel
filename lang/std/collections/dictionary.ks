@@ -339,11 +339,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     private var storage: CowBox[DictionaryStorage[K, V, H]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.read().buckets }
+    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.valuePtr().with { (s) in s.buckets } }
     /// Returns the live-entry count from storage. Internal helper.
-    private func len() -> Int64 { self.storage.read().len }
+    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
     /// Returns the total bucket capacity from storage. Internal helper.
-    private func cap() -> Int64 { self.storage.read().cap }
+    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {

@@ -182,7 +182,7 @@ public struct Pointer[T]: Equatable, Hashable {
         Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
-    /// Reads `T` from the address. Same safety preconditions as `pointee.get`.
+    /// Reads `T` from the address via borrow — `T.deinit` does not run.
     public func read() -> T {
         lang.ptr_read(self._raw)
     }

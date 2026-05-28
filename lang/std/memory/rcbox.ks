@@ -9,7 +9,7 @@ import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
 
 // Storage block backing an RcBox: the refcount lives next to the value,
 // in a single allocation, so clones bump a counter rather than copying T.
-struct RcBoxStorage[T] {
+struct RcBoxStorage[T]: not Copyable {
     var refCount: Int64  // TODO: Should be atomic
     var value: T
 }
@@ -77,10 +77,10 @@ public struct RcBox[T]: Cloneable {
     }
 
     /// Reads the wrapped value out of storage. Returns a copy — the
-    /// underlying `T` is read through a pointer, so callers see a
-    /// snapshot, not a live reference.
+    /// underlying `T` is borrowed through `Pointer.with`, so no
+    /// temporary `RcBoxStorage` is created or dropped.
     public func getValue() -> T {
-        self.ptr.read().value
+        self.ptr.with { (storage) in storage.value }
     }
 
     /// Returns a pointer to the wrapped value on the heap. The pointer
@@ -98,33 +98,25 @@ public struct RcBox[T]: Cloneable {
     /// calling this and `deepClone` otherwise.
     /// Takes `value` by consuming — the caller's copy is dead after this.
     public func setValue(consuming value: T) {
-        var storage = self.ptr.read();
-        storage.value = value;
-        self.ptr.write(storage);
+        self.valuePtr().write(value);
     }
 
     /// Returns `true` when no other clone is sharing storage. The litmus
     /// test for "safe to mutate in place" in COW collections.
     public func isUnique() -> Bool {
-        // Read only the refCount field to avoid creating a full
-        // RcBoxStorage copy (whose drop would deinit the shared value).
-        let rcPtr = self.ptr.asRaw().cast[Int64]();
-        rcPtr.read() == 1
+        self.ptr.with { (storage) in storage.refCount == 1 }
     }
 
     /// Current strong reference count. Mostly useful for tests and
     /// diagnostics; production COW logic should branch on `isUnique`.
     public func refCount() -> Int64 {
-        let rcPtr = self.ptr.asRaw().cast[Int64]();
-        rcPtr.read()
+        self.ptr.with { (storage) in storage.refCount }
     }
 
     /// Bumps the refcount and returns a second `RcBox` pointing at the
     /// same storage. The receiver and the returned box now both reference
     /// the value; the next mutation should test `isUnique`.
     public func clone() -> RcBox[T] {
-        // Read/write only the refCount field to avoid creating a full
-        // RcBoxStorage copy (whose drop would deinit the shared value).
         let rcPtr = self.ptr.asRaw().cast[Int64]();
         let count = rcPtr.read();
         rcPtr.write(count + 1);
@@ -135,14 +127,12 @@ public struct RcBox[T]: Cloneable {
     /// types when `isUnique()` returns `false` — splits off a private
     /// copy so the caller can mutate without affecting other clones.
     public func deepClone() -> RcBox[T] {
-        RcBox(self.ptr.read().value)
+        RcBox(self.ptr.with { (storage) in storage.value })
     }
 
     // Drop one reference; deallocate storage when the count hits zero.
     // Called from deinit; not exposed publicly.
     private func release() {
-        // Read/write only the refCount field to avoid creating a full
-        // RcBoxStorage copy (whose drop would deinit the shared value).
         let rcPtr = self.ptr.asRaw().cast[Int64]();
         let count = rcPtr.read();
         let newCount = count - 1;

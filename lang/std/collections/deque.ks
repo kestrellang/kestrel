@@ -196,11 +196,11 @@ public struct Deque[T]: Iterable, Cloneable {
     // -- internal helpers --
 
     /// Reads the current element count from the COW storage.
-    fileprivate func len() -> Int64 { self.storage.read().len }
+    fileprivate func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
     /// Reads the current buffer capacity from the COW storage.
-    fileprivate func cap() -> Int64 { self.storage.read().cap }
+    fileprivate func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
     /// Reads the ring-buffer head offset from the COW storage.
-    fileprivate func head() -> Int64 { self.storage.read().head }
+    fileprivate func head() -> Int64 { self.storage.valuePtr().with { (s) in s.head } }
     /// Reads the raw element pointer from the COW storage.
     fileprivate func rawPtr() -> Pointer[T] { self.storage.valuePtr().with { (s) in s.ptr } }
 

@@ -539,7 +539,13 @@ impl OssaBodyCtx<'_, '_> {
 
                 if let Some(base_addr) = self.try_field_addr_chain(base) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-                    self.emit_store_assign(field_addr, rhs);
+                    // In init bodies, self fields are uninitialized — use store_init.
+                    let is_init_self = self.init_self_addr == Some(base_addr);
+                    if is_init_self {
+                        self.emit_store_init(field_addr, rhs);
+                    } else {
+                        self.emit_store_assign(field_addr, rhs);
+                    }
                 } else {
                     let base_val = self.lower_expr(base);
                     let base_addr = self.emit_begin_mut_borrow(base_val);

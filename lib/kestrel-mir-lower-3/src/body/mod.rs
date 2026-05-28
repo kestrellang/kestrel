@@ -146,6 +146,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub deferred_end_borrows: Vec<ValueId>,
     pub temp_counter: u32,
     pub current_span: Option<Span>,
+    /// Self-param address in init bodies (param 0). Field stores on this
+    /// address use StoreInit because the memory is uninitialized.
+    pub init_self_addr: Option<ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -174,6 +177,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             deferred_end_borrows: Vec::new(),
             temp_counter: 0,
             current_span: None,
+            init_self_addr: None,
         }
     }
 
@@ -203,6 +207,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .get(self.func_idx)
             .map(|f| f.params.iter().map(|p| p.convention).collect())
             .unwrap_or_default();
+        let is_init_body = self.ctx.module.functions.get(self.func_idx)
+            .map(|f| matches!(f.kind, kestrel_mir_3::item::function::FunctionKind::Initializer { .. }))
+            .unwrap_or(false);
         for (i, (hir_id, _local)) in locals.iter().enumerate() {
             if i >= params_len { break; }
             let ty = self.resolve_local_type(*hir_id);
@@ -217,6 +224,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     });
                     self.local_map.insert(*hir_id, val);
                     self.var_locals.insert(*hir_id);
+                    // In init bodies, self (param 0) points to uninitialized memory.
+                    if is_init_body && i == 0 {
+                        self.init_self_addr = Some(val);
+                    }
                 }
                 ParamConvention::Borrow => {
                     let val = self.body.alloc_value(ValueDef {
@@ -236,23 +247,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         self.body.param_count = params_len;
 
-        // Promote consuming params to var_locals so mutating method calls
-        // (e.g. self.next() in `consuming func collect()`) modify in place.
-        // Done after param_count is set so codegen maps params correctly.
-        for (i, (hir_id, _local)) in locals.iter().enumerate() {
-            if i >= params_len { break; }
-            let convention = param_conventions.get(i).copied()
-                .unwrap_or(ParamConvention::Borrow);
-            if convention == ParamConvention::Consuming {
-                let val = self.local_map[hir_id];
-                let ty = self.resolve_local_type(*hir_id);
-                let addr = self.emit_uninit(ty);
-                self.emit_store_init(addr, val);
-                self.consume(val);
-                self.local_map.insert(*hir_id, addr);
-                self.var_locals.insert(*hir_id);
-            }
-        }
+        // Consuming params stay as SSA @owned values — no var_local
+        // promotion. Mutating calls use BeginMutBorrow on the SSA value
+        // directly, and last-use forwarding avoids unnecessary clones.
 
         // Lower top-level statements
         for &stmt_id in &statements {
@@ -715,7 +712,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_field_addr(&mut self, base: ValueId, ty: TyId, field: FieldIdx) -> ValueId {
-        let ptr_ty = self.ctx.module.ty_arena.pointer(ty);
+        // Result type is Pointer[field_type], not Pointer[struct_type].
+        // The expand pass uses the pointer's pointee type to decide which
+        // drop shim to call for StoreAssign; using the struct type would
+        // destroy the whole struct starting at the field's address.
+        let field_ty = if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(ty) {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            if let Some(raw_ft) = self.ctx.resolve_field_ty(entity, field) {
+                if type_args.is_empty() {
+                    raw_ft
+                } else {
+                    let mut subst = kestrel_mir_3::SubstMap::new();
+                    if let Some(def) = self.ctx.module.structs.iter().find(|s| s.entity == entity) {
+                        for (tp, &ta) in def.type_params.iter().zip(type_args.iter()) {
+                            subst.type_params.insert(tp.entity, ta);
+                        }
+                    }
+                    kestrel_mir_3::substitute(&mut self.ctx.module.ty_arena, raw_ft, &subst)
+                }
+            } else {
+                ty
+            }
+        } else {
+            ty
+        };
+        let ptr_ty = self.ctx.module.ty_arena.pointer(field_ty);
         let result = self.alloc_value(ptr_ty, Ownership::Owned);
         self.push_inst(InstKind::FieldAddr { result, base, ty, field });
         self.track_owned(result);

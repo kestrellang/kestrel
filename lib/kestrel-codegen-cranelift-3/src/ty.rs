@@ -179,6 +179,10 @@ impl TypeCache {
     ) -> TypeRepr {
         let key = (entity, type_args.to_vec());
         let Some(entry) = self.layout_map.get(&key) else {
+            let name = module.entity_names.get(&entity).map(|s| s.as_str()).unwrap_or("?");
+            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                eprintln!("[classify_named] MISSING layout for {name} entity={entity:?} type_args={type_args:?} → Scalar fallback");
+            }
             return TypeRepr::Scalar(self.ptr_ty);
         };
 
@@ -195,6 +199,10 @@ impl TypeCache {
         };
 
         let Some(layout) = layout else {
+            let name = module.entity_names.get(&entity).map(|s| s.as_str()).unwrap_or("?");
+            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                eprintln!("[classify_named] NO LAYOUT for {name} entity={entity:?} → Scalar fallback");
+            }
             return TypeRepr::Scalar(self.ptr_ty);
         };
 
