@@ -11,7 +11,36 @@ use kestrel_mir_3::{BlockId, Immediate, TyId, ValueId};
 
 use super::{LoopInfo, OssaBodyCtx};
 
+/// Exit state of one branch arm that reaches the merge. `slots[i]` is the
+/// `(current value, alive)` of the i-th pre-branch live value at the arm's
+/// exit — `alive == false` means the value was moved in this arm.
+struct ArmExit {
+    block: BlockId,
+    result: ValueId,
+    slots: Vec<(ValueId, bool)>,
+}
+
 impl OssaBodyCtx<'_, '_> {
+    /// Finish lowering a branch arm: drop arm-local owned values and capture the
+    /// arm's exit state. Returns `None` if the arm diverged (already terminated).
+    fn capture_arm_exit(&mut self, result: ValueId) -> Option<ArmExit> {
+        if self.is_terminated() {
+            return None;
+        }
+        // A merge param can't carry a borrow — materialize an @owned result.
+        let result = if self.body.value(result).ownership == Ownership::Guaranteed {
+            self.emit_copy_value(result)
+        } else {
+            result
+        };
+        // Drop owned values local to this arm; keep the result + threaded values.
+        let mut keep = vec![result];
+        keep.extend(self.tracker.values());
+        self.destroy_scope_except(&keep);
+        let block = self.current_block.expect("arm has a current block");
+        Some(ArmExit { block, result, slots: self.tracker.slot_states() })
+    }
+
     // ================================================================
     // If / Else
     // ================================================================
@@ -32,13 +61,10 @@ impl OssaBodyCtx<'_, '_> {
         self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
         let live_vals = self.tracker.values();
         let descs = self.tracker.descs();
+        let n = live_vals.len();
 
         let (then_block, then_params) = self.new_block_with_params(&descs);
         let (else_block, else_params) = self.new_block_with_params(&descs);
-        let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, result_ownership)];
-        merge_descs.extend(&descs);
-        let (merge_block, merge_param_vals) = self.new_block_with_params(&merge_descs);
-        let result_param = merge_param_vals[0];
 
         self.emit_branch(
             cond_val,
@@ -50,14 +76,12 @@ impl OssaBodyCtx<'_, '_> {
 
         let snapshot = self.snapshot_scope();
 
-        // -- Then arm --
+        // -- Then arm: lower into its block, capture exit, defer the jump --
         self.switch_to(then_block);
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
-        if !self.is_terminated() {
-            self.jump_to_merge(merge_block, then_val);
-        }
+        let then_exit = self.capture_arm_exit(then_val);
         self.pop_scope();
 
         // -- Else arm --
@@ -65,29 +89,69 @@ impl OssaBodyCtx<'_, '_> {
         self.switch_to(else_block);
         self.rebind_scope_values(&live_vals, &else_params);
         self.push_scope();
-        if let Some(else_body) = else_body {
+        let else_exit = if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
-            if !self.is_terminated() {
-                self.jump_to_merge(merge_block, else_val);
-            }
+            self.capture_arm_exit(else_val)
         } else {
             let unit = self.emit_literal(Immediate::unit());
-            self.jump_to_merge(merge_block, unit);
-        }
+            self.capture_arm_exit(unit)
+        };
         self.pop_scope();
+
+        // -- Reconcile divergent liveness: a value is live at the merge only if
+        // it survived on every reaching edge. Values moved on some edge are dead
+        // at the merge and are dropped on the edges where they survived. --
+        let reaching: Vec<&ArmExit> = [&then_exit, &else_exit].into_iter().flatten().collect();
+        let mut merge_mask = vec![true; n];
+        for exit in &reaching {
+            for i in 0..n {
+                merge_mask[i] &= exit.slots[i].1;
+            }
+        }
+        let merge_idx: Vec<usize> = (0..n).filter(|&i| merge_mask[i]).collect();
+
+        let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, result_ownership)];
+        merge_descs.extend(merge_idx.iter().map(|&i| descs[i]));
+        let (merge_block, merge_param_vals) = self.new_block_with_params(&merge_descs);
+        let result_param = merge_param_vals[0];
+        let merge_live_params: Vec<ValueId> = merge_param_vals[1..].to_vec();
+
+        for exit in &reaching {
+            self.switch_to(exit.block);
+            // Drop values this edge kept live but that are dead at the merge.
+            for i in 0..n {
+                if exit.slots[i].1 && !merge_mask[i] {
+                    self.emit_destroy_value(exit.slots[i].0);
+                }
+            }
+            let mut args = vec![exit.result];
+            args.extend(merge_idx.iter().map(|&i| exit.slots[i].0));
+            self.emit_jump(merge_block, args);
+        }
 
         // -- Merge --
         self.restore_scope(&snapshot);
         self.switch_to(merge_block);
-        let merge_live = &merge_param_vals[1..];
-        self.rebind_scope_values(&live_vals, merge_live);
+        let merge_live_orig: Vec<ValueId> = merge_idx.iter().map(|&i| live_vals[i]).collect();
+        self.rebind_scope_values(&merge_live_orig, &merge_live_params);
+        // Values dead at the merge were dropped on every edge — stop tracking them.
+        for i in 0..n {
+            if !merge_mask[i] {
+                self.consume(live_vals[i]);
+            }
+        }
         if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
 
-        // Restore outer tracker with current values propagated
+        // Restore outer tracker, propagating survivors and dropping the dead.
         self.tracker = saved_tracker;
-        self.tracker.rebind(&live_vals, merge_live);
+        self.tracker.rebind(&merge_live_orig, &merge_live_params);
+        for i in 0..n {
+            if !merge_mask[i] {
+                self.tracker.remove(live_vals[i]);
+            }
+        }
         result_param
     }
 
@@ -109,7 +173,7 @@ impl OssaBodyCtx<'_, '_> {
 
         if !self.is_terminated() {
             for &v in &initial_args {
-                self.consume(v);
+                self.pop_owned_from_scope(v);
             }
             self.emit_jump(header_block, initial_args.clone());
         }
@@ -139,7 +203,7 @@ impl OssaBodyCtx<'_, '_> {
             self.destroy_scope_except(&back_edge_vals);
             self.pop_scope();
             for &v in &back_edge_vals {
-                self.consume(v);
+                self.pop_owned_from_scope(v);
             }
             self.emit_jump(header_block, back_edge_vals);
         } else {

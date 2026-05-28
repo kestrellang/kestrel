@@ -140,41 +140,79 @@ pub(crate) struct ScopeSnapshot {
 /// always receives the correct number of arguments, regardless of what values
 /// are created or consumed during arm execution.
 #[derive(Clone)]
+struct TrackerSlot {
+    value: ValueId,
+    ty: TyId,
+    ownership: Ownership,
+    /// False once the value has been moved/consumed. Dead slots keep their
+    /// position so callers can reason about liveness positionally across
+    /// nested control flow (which rebinds slots in place), but are excluded
+    /// from `values()` / `descs()` so they are no longer forwarded.
+    alive: bool,
+}
+
+#[derive(Clone)]
 pub(crate) struct LiveTracker {
-    slots: Vec<(ValueId, TyId, Ownership)>,
+    slots: Vec<TrackerSlot>,
 }
 
 impl LiveTracker {
     pub fn from_live(live: &[(ValueId, TyId, Ownership)]) -> Self {
         Self {
-            slots: live.to_vec(),
+            slots: live
+                .iter()
+                .map(|&(value, ty, ownership)| TrackerSlot { value, ty, ownership, alive: true })
+                .collect(),
         }
     }
 
-    /// Current values to forward as block args.
+    /// Current values to forward as block args (alive slots only).
     pub fn values(&self) -> Vec<ValueId> {
-        self.slots.iter().map(|&(v, _, _)| v).collect()
+        self.slots.iter().filter(|s| s.alive).map(|s| s.value).collect()
     }
 
-    /// Type descriptors for creating block params.
+    /// Type descriptors for creating block params (alive slots only).
     pub fn descs(&self) -> Vec<(TyId, Ownership)> {
         self.slots
             .iter()
-            .map(|&(_, ty, ownership)| (ty, ownership))
+            .filter(|s| s.alive)
+            .map(|s| (s.ty, s.ownership))
             .collect()
     }
 
     /// Update slots when entering a new block whose params replace old values.
     pub fn rebind(&mut self, old: &[ValueId], new: &[ValueId]) {
         for slot in &mut self.slots {
-            if let Some(pos) = old.iter().position(|&v| v == slot.0) {
-                slot.0 = new[pos];
+            if let Some(pos) = old.iter().position(|&v| v == slot.value) {
+                slot.value = new[pos];
             }
         }
     }
 
+    /// Number of values currently forwarded (alive slots).
     pub fn len(&self) -> usize {
-        self.slots.len()
+        self.slots.iter().filter(|s| s.alive).count()
+    }
+
+    /// Positional view over all slots (alive and dead) as `(current value,
+    /// alive)`, used to reconcile divergent liveness at a branch merge.
+    pub fn slot_states(&self) -> Vec<(ValueId, bool)> {
+        self.slots.iter().map(|s| (s.value, s.alive)).collect()
+    }
+
+    /// Mark a value dead (e.g. when it has been moved) so it is no longer
+    /// forwarded. The slot keeps its position for positional liveness checks.
+    pub fn remove(&mut self, value: ValueId) {
+        for slot in &mut self.slots {
+            if slot.value == value {
+                slot.alive = false;
+            }
+        }
+    }
+
+    /// Whether `value` is still alive in the forwarded set.
+    pub fn contains(&self, value: ValueId) -> bool {
+        self.slots.iter().any(|s| s.alive && s.value == value)
     }
 }
 
@@ -463,22 +501,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         val
     }
 
-    pub fn is_copy_type(&self, ty: TyId) -> bool {
+    fn copy_behavior_of(&self, ty: TyId) -> CopyBehavior {
         let wc = self
             .ctx
             .module
             .functions
             .get(&self.func_entity)
             .and_then(|f| f.where_clause.as_ref());
-        matches!(
-            kestrel_mir_3::ty_query::copy_behavior(
-                &self.ctx.module.ty_arena,
-                &self.ctx.module,
-                ty,
-                wc
-            ),
-            CopyBehavior::Bitwise
-        )
+        kestrel_mir_3::ty_query::copy_behavior(&self.ctx.module.ty_arena, &self.ctx.module, ty, wc)
+    }
+
+    pub fn is_copy_type(&self, ty: TyId) -> bool {
+        matches!(self.copy_behavior_of(ty), CopyBehavior::Bitwise)
+    }
+
+    /// A `not Copyable` type has no clone shim — duplicating it is illegal, so
+    /// an @owned transfer of such a value must be a move, never a copy.
+    pub fn is_non_copyable(&self, ty: TyId) -> bool {
+        matches!(self.copy_behavior_of(ty), CopyBehavior::None)
     }
 
     pub fn ownership_for(&self, _ty: TyId) -> Ownership {
@@ -545,6 +585,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn consume(&mut self, value: ValueId) {
+        // A genuinely consumed (moved) value must no longer be forwarded
+        // through a branch merge.
+        self.tracker.remove(value);
+        self.pop_owned_from_scope(value);
+    }
+
+    /// Remove an owned value from scope tracking WITHOUT marking it dead in the
+    /// `tracker`. Used for re-threading bookkeeping (e.g. loop block params),
+    /// where the value lives on as a block parameter rather than being moved.
+    pub fn pop_owned_from_scope(&mut self, value: ValueId) {
         for scope in self.scope_stack.iter_mut().rev() {
             if let Some(pos) = scope
                 .entries
@@ -743,8 +793,25 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
         let ty = self.body.value(operand).ty;
+        // A copy of a non-Copyable @owned value is illegal (no clone shim). Such
+        // a transfer is a move: consume the operand instead of duplicating it.
+        if self.body.value(operand).ownership == Ownership::Owned && self.is_non_copyable(ty) {
+            return self.emit_move_value(operand);
+        }
         let result = self.alloc_value(ty, Ownership::Owned);
         self.push_inst(InstKind::CopyValue { result, operand });
+        self.track_owned(result);
+        result
+    }
+
+    /// Move an @owned value: produces a fresh @owned result and consumes the
+    /// operand (removing it from scope + tracker so it isn't dropped or
+    /// forwarded again). Used for non-Copyable transfers.
+    pub fn emit_move_value(&mut self, operand: ValueId) -> ValueId {
+        let ty = self.body.value(operand).ty;
+        let result = self.alloc_value(ty, Ownership::Owned);
+        self.push_inst(InstKind::MoveValue { result, operand });
+        self.consume(operand);
         self.track_owned(result);
         result
     }
@@ -918,6 +985,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 operand: borrow,
                 field,
             });
+            if self.is_non_copyable(result_ty) {
+                // A non-Copyable field can't be duplicated — hand back the
+                // @guaranteed view. The borrow is left open (ended at scope
+                // exit via the tracker) so the field_ref stays valid for reads.
+                return field_ref;
+            }
             let result = self.emit_copy_value(field_ref);
             self.emit_end_borrow(borrow);
             result

@@ -205,7 +205,7 @@ extend Iterator {
     /// [1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
     /// ["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
     /// ```
-    public func map[U](as transform: (Item) -> U) -> MapIterator[Self, U] {
+    public func map[U](consuming as transform: (Item) -> U) -> MapIterator[Self, U] {
         MapIterator(inner: self, as: transform)
     }
 
@@ -217,7 +217,7 @@ extend Iterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
     /// ```
-    public func filter(where predicate: (Item) -> Bool) -> FilterIterator[Self] {
+    public func filter(consuming where predicate: (Item) -> Bool) -> FilterIterator[Self] {
         FilterIterator(inner: self, where: predicate)
     }
 
@@ -232,7 +232,7 @@ extend Iterator {
     ///     .filterMap { Int64.parse(it) }
     ///     .collect();   // [1, 3]
     /// ```
-    public func filterMap[U](as transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
+    public func filterMap[U](consuming as transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
         FilterMapIterator(inner: self, as: transform)
     }
 
@@ -280,7 +280,7 @@ extend Iterator {
     ///     .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
     ///     .collect();   // [2, 2]
     /// ```
-    public func flatMap[U](as transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
+    public func flatMap[U](consuming as transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
         FlatMapIterator(inner: self, as: transform)
     }
 
@@ -296,7 +296,7 @@ extend Iterator {
     ///     .scan(from: 0) { (acc, x) in acc + x }
     ///     .collect();   // [1, 3, 6, 10]
     /// ```
-    public func scan[Acc](from initial: Acc, by combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
+    public func scan[Acc](from initial: Acc, consuming by combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
         ScanIterator(inner: self, from: initial, by: combine)
     }
 }
@@ -331,7 +331,7 @@ extend Iterator {
     ///     .takeWhile { it < 4 }
     ///     .collect();   // [1, 2, 3]
     /// ```
-    public func takeWhile(where predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
+    public func takeWhile(consuming where predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
         TakeWhileIterator(inner: self, where: predicate)
     }
 
@@ -358,7 +358,7 @@ extend Iterator {
     ///     .skipWhile { it < 3 }
     ///     .collect();   // [3, 4, 1, 2]
     /// ```
-    public func skipWhile(where predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
+    public func skipWhile(consuming where predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
         SkipWhileIterator(inner: self, where: predicate)
     }
 }
@@ -442,7 +442,7 @@ extend Iterator {
     ///     .inspect { print("after filter: \{it}") }
     ///     .collect();
     /// ```
-    public func inspect(inspector: (Item) -> ()) -> InspectIterator[Self] {
+    public func inspect(consuming inspector: (Item) -> ()) -> InspectIterator[Self] {
         InspectIterator(inner: self, inspector: inspector)
     }
 
@@ -492,7 +492,7 @@ extend Iterator {
     ///     .intersperseWith { counter += 1; counter * 10 }
     ///     .collect();   // [1, 10, 2, 20, 3]
     /// ```
-    public func intersperseWith(with separator: () -> Item) -> IntersperseWithIterator[Self] {
+    public func intersperseWith(consuming with separator: () -> Item) -> IntersperseWithIterator[Self] {
         IntersperseWithIterator(inner: self, with: separator)
     }
 }
@@ -668,7 +668,7 @@ extend Iterator {
     ///     File.delete(path)   // Result[(), IoError]
     /// };   // stops on first failure
     /// ```
-    public mutating func tryForEach[E](action: (Item) -> Result[(), E]) -> Result[(), E] {
+    public mutating func tryForEach[E](consuming action: (Item) -> Result[(), E]) -> Result[(), E] {
         self.tryFold(from: (), by: { (_, item) in action(item) })
     }
 }
@@ -1007,7 +1007,7 @@ extend Iterator {
     /// let words = ["a", "bb", "ccc"];
     /// words.iter().isSorted { it.count };   // true
     /// ```
-    public consuming func isSorted[K](byKey key: (Item) -> K) -> Bool where K: Comparable {
+    public consuming func isSorted[K](consuming byKey key: (Item) -> K) -> Bool where K: Comparable {
         self.isSorted(by: { (a, b) in key(a).compare(key(b)) != Ordering.Greater })
     }
 }

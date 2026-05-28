@@ -750,7 +750,7 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
     ) -> ValueId {
         let callee_ty = self.resolve_expr_type(callee_expr);
-        let callee_val = self.lower_expr(callee_expr);
+        let callee_val = self.lower_callee_value(callee_expr);
         let result_ty = self.resolve_expr_type(expr_id);
         let call_args = self.lower_call_args_default(args);
 
@@ -760,6 +760,20 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         self.emit_call_returning(callee, call_args, result_ty)
+    }
+
+    /// Lower a call's callee to its value. A call reads (does not consume) its
+    /// callee, so a non-var local — e.g. a captured closure called more than
+    /// once — is used directly rather than moved/copied. The callee value is
+    /// not an OSSA operand of `Call`, so leaving it @owned and live is correct:
+    /// it is dropped once at scope exit.
+    fn lower_callee_value(&mut self, callee_expr: HirExprId) -> ValueId {
+        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr] {
+            if !self.is_var_local(hir_local) {
+                return self.map_local(*hir_local);
+            }
+        }
+        self.lower_expr(callee_expr)
     }
 
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {

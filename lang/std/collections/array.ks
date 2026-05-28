@@ -1701,7 +1701,7 @@ extend Array[T] {
     /// var people = [Person("Alice", 30), Person("Bob", 25)];
     /// people.sort(byKey: { (p) in p.age });
     /// ```
-    public mutating func sort[K](byKey key: (T) -> K) where K: Comparable {
+    public mutating func sort[K](consuming byKey key: (T) -> K) where K: Comparable {
         self.sort(by: { (a, b) in key(a) < key(b) })
     }
 
@@ -1714,7 +1714,7 @@ extend Array[T] {
     /// let words = ["hi", "hello", "hey"];
     /// let byLen = words.sorted(byKey: { (w) in w.count });
     /// ```
-    public func sorted[K](byKey key: (T) -> K) -> Array[T] where K: Comparable {
+    public func sorted[K](consuming byKey key: (T) -> K) -> Array[T] where K: Comparable {
         self.sorted(by: { (a, b) in key(a) < key(b) })
     }
 }
