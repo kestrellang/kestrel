@@ -8,6 +8,7 @@
 
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirExprId, HirMatchArm, MatchSource};
+use kestrel_hir::res::LocalId;
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
 use kestrel_mir_3::terminator::{SwitchArm, SwitchCase};
@@ -21,12 +22,30 @@ use kestrel_type_infer::result::ResolvedTy;
 use super::OssaBodyCtx;
 use crate::ty::lower_resolved_ty;
 
+/// One pattern binding being moved out of an aggregate: its access path
+/// (relative to the value currently being destructured) and target local.
+struct MoveItem {
+    path: Vec<PathElement>,
+    local_id: LocalId,
+}
+
+/// How an aggregate type is destructured for move-out.
+enum AggKind {
+    Enum,
+    Struct,
+    Tuple,
+    Other,
+}
+
 impl OssaBodyCtx<'_, '_> {
     /// Lower a match expression.
     ///
-    /// The result is threaded via a block parameter on the merge block
-    /// (same pattern as `lower_if`). Each arm jumps to the merge block
-    /// passing its result value.
+    /// Mirrors `lower_if`'s deferred-merge reconciliation: each arm is lowered
+    /// into its own block and its exit state captured (without jumping); after
+    /// the whole decision tree is walked, the merge block is built from the
+    /// intersection of values that stayed live on *every* reaching edge, and
+    /// each edge drops the values it kept that are dead at the merge. This lets
+    /// an arm consume (move out of) the scrutinee on some edges but not others.
     pub fn lower_match(
         &mut self,
         expr_id: HirExprId,
@@ -53,12 +72,9 @@ impl OssaBodyCtx<'_, '_> {
         let saved_tracker = self.tracker.clone();
         self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
         let live_vals = self.tracker.values();
-
-        let ownership = self.ownership_for(result_ty);
-        let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, ownership)];
-        merge_descs.extend(self.tracker.descs());
-        let (join_block, join_params) = self.new_block_with_params(&merge_descs);
-        let result_param = join_params[0];
+        let descs = self.tracker.descs();
+        let n = live_vals.len();
+        let result_ownership = self.ownership_for(result_ty);
 
         let tree = kestrel_pattern_matching::compile_decision_tree(
             &self.hir,
@@ -70,27 +86,64 @@ impl OssaBodyCtx<'_, '_> {
 
         let snapshot = self.snapshot_scope();
 
-        self.emit_decision_tree_threaded(
-            &tree,
-            scrutinee_val,
-            scrutinee_ty,
-            arms,
-            result_ty,
-            join_block,
-        );
+        // Walk the tree, collecting each reaching arm's exit (block, result,
+        // per-slot liveness) instead of jumping to a pre-built merge block.
+        let mut exits: Vec<super::ArmExit> = Vec::new();
+        self.emit_decision_tree_threaded(&tree, scrutinee_val, scrutinee_ty, arms, &mut exits);
 
-        // Continue from merge block
+        // A slot is live at the merge only if it survived on every reaching edge.
+        let mut merge_mask = vec![true; n];
+        for exit in &exits {
+            for i in 0..n {
+                merge_mask[i] &= exit.slots[i].1;
+            }
+        }
+        let merge_idx: Vec<usize> = (0..n).filter(|&i| merge_mask[i]).collect();
+
+        let mut merge_descs: Vec<(TyId, Ownership)> = vec![(result_ty, result_ownership)];
+        merge_descs.extend(merge_idx.iter().map(|&i| descs[i]));
+        let (merge_block, merge_param_vals) = self.new_block_with_params(&merge_descs);
+        let result_param = merge_param_vals[0];
+        let merge_live_params: Vec<ValueId> = merge_param_vals[1..].to_vec();
+
+        // If `exits` is empty (every arm diverged / pure Failure) the merge block
+        // has no predecessors — an unreachable join, same as `lower_if`.
+        for exit in &exits {
+            self.switch_to(exit.block);
+            // Drop values this edge kept live but that are dead at the merge.
+            for i in 0..n {
+                if exit.slots[i].1 && !merge_mask[i] {
+                    self.emit_destroy_value(exit.slots[i].0);
+                }
+            }
+            let mut args = vec![exit.result];
+            args.extend(merge_idx.iter().map(|&i| exit.slots[i].0));
+            self.emit_jump(merge_block, args);
+        }
+
+        // Continue from the merge block.
         self.restore_scope(&snapshot);
-        self.switch_to(join_block);
-        let merge_live = &join_params[1..];
-        self.rebind_scope_values(&live_vals, merge_live);
-        if ownership == Ownership::Owned {
+        self.switch_to(merge_block);
+        let merge_live_orig: Vec<ValueId> = merge_idx.iter().map(|&i| live_vals[i]).collect();
+        self.rebind_scope_values(&merge_live_orig, &merge_live_params);
+        // Values dead at the merge were dropped on every edge — stop tracking them.
+        for i in 0..n {
+            if !merge_mask[i] {
+                self.consume(live_vals[i]);
+            }
+        }
+        if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
 
-        // Restore outer tracker with values propagated through the match
+        // Restore outer tracker, propagating survivors and dropping the dead.
         self.tracker = saved_tracker;
-        self.tracker.rebind(&live_vals, merge_live);
+        self.tracker.rebind(&merge_live_orig, &merge_live_params);
+        for i in 0..n {
+            if !merge_mask[i] {
+                self.tracker.remove(live_vals[i]);
+            }
+        }
         result_param
     }
 
@@ -145,15 +198,16 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Recursively emit a decision tree, threading live @owned values
-    /// through every branch/switch as block parameters.
+    /// through every branch/switch as block parameters. Each reaching arm's
+    /// exit (block, result, per-slot liveness) is pushed to `exits` rather than
+    /// jumped to a merge block — `lower_match` builds the merge afterward.
     fn emit_decision_tree_threaded(
         &mut self,
         tree: &DecisionTree,
         scrutinee: ValueId,
         scrutinee_ty: TyId,
         arms: &[HirMatchArm],
-        result_ty: TyId,
-        join_block: kestrel_mir_3::BlockId,
+        exits: &mut Vec<super::ArmExit>,
     ) {
         match tree {
             DecisionTree::Switch {
@@ -162,7 +216,24 @@ impl OssaBodyCtx<'_, '_> {
                 cases,
                 default,
             } => {
-                let (test_val, _test_ty) = self.apply_access_path(scrutinee, scrutinee_ty, path);
+                // A switch with no constructor cases (or one case and no
+                // default) is degenerate — it always falls through. Recurse
+                // without extracting/testing, which also avoids copying a
+                // non-Copyable value just to compute an unused discriminant.
+                if cases.is_empty() {
+                    if let Some(def_tree) = default {
+                        self.emit_decision_tree_threaded(
+                            def_tree,
+                            scrutinee,
+                            scrutinee_ty,
+                            arms,
+                            exits,
+                        );
+                    } else {
+                        self.emit_panic("match failure: empty switch");
+                    }
+                    return;
+                }
 
                 if cases.len() == 1 && default.is_none() {
                     self.emit_decision_tree_threaded(
@@ -170,8 +241,7 @@ impl OssaBodyCtx<'_, '_> {
                         scrutinee,
                         scrutinee_ty,
                         arms,
-                        result_ty,
-                        join_block,
+                        exits,
                     );
                     return;
                 }
@@ -181,6 +251,8 @@ impl OssaBodyCtx<'_, '_> {
                     && matches!(&cases[0].0, Constructor::True)
                     && matches!(&cases[1].0, Constructor::False)
                 {
+                    // Bool is Copyable — extract-copy is fine here.
+                    let (test_val, _) = self.apply_access_path(scrutinee, scrutinee_ty, path);
                     let branch_snapshot = self.snapshot_scope();
                     let current_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
@@ -207,8 +279,7 @@ impl OssaBodyCtx<'_, '_> {
                         rebound,
                         scrutinee_ty,
                         arms,
-                        result_ty,
-                        join_block,
+                        exits,
                     );
 
                     self.restore_scope(&branch_snapshot);
@@ -220,8 +291,7 @@ impl OssaBodyCtx<'_, '_> {
                         rebound,
                         scrutinee_ty,
                         arms,
-                        result_ty,
-                        join_block,
+                        exits,
                     );
                     return;
                 }
@@ -231,6 +301,8 @@ impl OssaBodyCtx<'_, '_> {
                     .iter()
                     .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
                 {
+                    // String is Copyable — extract-copy is fine here.
+                    let (test_val, _) = self.apply_access_path(scrutinee, scrutinee_ty, path);
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     let mut current_scrutinee = scrutinee;
                     // Snapshot before the chain so each iteration starts clean.
@@ -282,8 +354,7 @@ impl OssaBodyCtx<'_, '_> {
                             rebound,
                             scrutinee_ty,
                             arms,
-                            result_ty,
-                            join_block,
+                            exits,
                         );
 
                         self.restore_scope(&chain_snapshot);
@@ -298,8 +369,7 @@ impl OssaBodyCtx<'_, '_> {
                             current_scrutinee,
                             scrutinee_ty,
                             arms,
-                            result_ty,
-                            join_block,
+                            exits,
                         );
                     } else {
                         self.emit_panic("match failure: non-exhaustive string patterns");
@@ -307,8 +377,21 @@ impl OssaBodyCtx<'_, '_> {
                     return;
                 }
 
-                // General switch
-                let discriminant = self.emit_discriminant(test_val);
+                // General switch — read the discriminant via a borrow so a
+                // non-Copyable scrutinee/payload is never illegally copied just
+                // to be inspected. The borrow is closed right after the read.
+                let (disc_operand, borrow_to_end) = if path.is_empty() {
+                    (scrutinee, None)
+                } else if self.body.value(scrutinee).ownership == Ownership::Guaranteed {
+                    (self.apply_access_path(scrutinee, scrutinee_ty, path).0, None)
+                } else {
+                    let borrow = self.emit_begin_borrow(scrutinee);
+                    (self.apply_access_path(borrow, scrutinee_ty, path).0, Some(borrow))
+                };
+                let discriminant = self.emit_discriminant(disc_operand);
+                if let Some(borrow) = borrow_to_end {
+                    self.emit_end_borrow(borrow);
+                }
 
                 // Snapshot and live set after discriminant so it's included
                 let branch_snapshot = self.snapshot_scope();
@@ -374,8 +457,7 @@ impl OssaBodyCtx<'_, '_> {
                         rebound,
                         scrutinee_ty,
                         arms,
-                        result_ty,
-                        join_block,
+                        exits,
                     );
                 }
 
@@ -394,8 +476,7 @@ impl OssaBodyCtx<'_, '_> {
                         rebound,
                         scrutinee_ty,
                         arms,
-                        result_ty,
-                        join_block,
+                        exits,
                     );
                 }
             },
@@ -404,92 +485,91 @@ impl OssaBodyCtx<'_, '_> {
                 arm_index,
                 bindings,
             } => {
-                self.push_scope();
-                self.emit_bindings(bindings, scrutinee, scrutinee_ty);
-                if let Some(arm) = arms.get(*arm_index) {
-                    let body_val = self.lower_expr(arm.body);
-                    if !self.is_terminated() {
-                        self.jump_to_merge(join_block, body_val);
-                    }
-                }
-                self.pop_scope();
+                self.emit_success_leaf(*arm_index, bindings, scrutinee, scrutinee_ty, arms, exits);
             },
 
             DecisionTree::Guard {
                 arm_index,
                 bindings,
-                success,
                 failure,
+                ..
             } => {
+                // `success` is always a `Success { bindings: [] }` leaf (the
+                // bindings are hoisted onto this Guard node), so we commit the
+                // arm directly in the success branch using the guard's bindings.
+                let guard_expr = arms.get(*arm_index).and_then(|a| a.guard);
+                let Some(guard_expr) = guard_expr else {
+                    // No guard expression — behave as a plain success leaf.
+                    self.emit_success_leaf(*arm_index, bindings, scrutinee, scrutinee_ty, arms, exits);
+                    return;
+                };
+
+                // Bind non-consumingly (borrow views) so the guard can read the
+                // pattern variables without consuming the scrutinee — a failing
+                // guard must leave it intact for the remaining patterns.
                 self.push_scope();
-                self.emit_bindings(bindings, scrutinee, scrutinee_ty);
-                if let Some(arm) = arms.get(*arm_index) {
-                    if let Some(guard_expr) = arm.guard {
-                        let guard_val = self.lower_expr(guard_expr);
-                        let guard_snapshot = self.snapshot_scope();
-                        let guard_live: Vec<ValueId> =
-                            self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
-                        let guard_descs: Vec<(TyId, Ownership)> = guard_live
-                            .iter()
-                            .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
-                            .collect();
-                        let (success_block, success_params) =
-                            self.new_block_with_params(&guard_descs);
-                        let (failure_block, failure_params) =
-                            self.new_block_with_params(&guard_descs);
-                        self.emit_branch(
-                            guard_val,
-                            success_block,
-                            guard_live.clone(),
-                            failure_block,
-                            guard_live.clone(),
-                        );
+                self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
+                let guard_val = self.lower_expr(guard_expr);
+                let guard_snapshot = self.snapshot_scope();
+                let guard_live: Vec<ValueId> =
+                    self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
+                let guard_descs: Vec<(TyId, Ownership)> = guard_live
+                    .iter()
+                    .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                    .collect();
+                let (success_block, success_params) = self.new_block_with_params(&guard_descs);
+                let (failure_block, failure_params) = self.new_block_with_params(&guard_descs);
+                self.emit_branch(
+                    guard_val,
+                    success_block,
+                    guard_live.clone(),
+                    failure_block,
+                    guard_live.clone(),
+                );
 
-                        self.switch_to(success_block);
-                        self.rebind_scope_values(&guard_live, &success_params);
-                        let rebound = rebound_value(scrutinee, &guard_live, &success_params);
-                        self.pop_scope();
-                        self.emit_decision_tree_threaded(
-                            success,
-                            rebound,
-                            scrutinee_ty,
-                            arms,
-                            result_ty,
-                            join_block,
-                        );
-
-                        self.restore_scope(&guard_snapshot);
-                        self.switch_to(failure_block);
-                        self.rebind_scope_values(&guard_live, &failure_params);
-                        let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
-                        self.pop_scope();
-                        self.emit_decision_tree_threaded(
-                            failure,
-                            rebound,
-                            scrutinee_ty,
-                            arms,
-                            result_ty,
-                            join_block,
-                        );
-                        return;
-                    } else {
-                        self.emit_decision_tree_threaded(
-                            success,
-                            scrutinee,
-                            scrutinee_ty,
-                            arms,
-                            result_ty,
-                            join_block,
-                        );
-                    }
-                }
+                // Success: commit the arm — move-out bindings, body, capture exit.
+                self.switch_to(success_block);
+                self.rebind_scope_values(&guard_live, &success_params);
+                let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                 self.pop_scope();
+                self.emit_success_leaf(*arm_index, bindings, rebound, scrutinee_ty, arms, exits);
+
+                // Failure: scrutinee untouched — continue matching other patterns.
+                self.restore_scope(&guard_snapshot);
+                self.switch_to(failure_block);
+                self.rebind_scope_values(&guard_live, &failure_params);
+                let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
+                self.pop_scope();
+                self.emit_decision_tree_threaded(failure, rebound, scrutinee_ty, arms, exits);
             },
 
             DecisionTree::Failure => {
                 self.emit_panic("match failure: non-exhaustive patterns");
             },
         }
+    }
+
+    /// Emit one matched arm: bind its pattern variables (move-out for
+    /// non-Copyable @owned payloads), lower the body, and capture the arm's
+    /// exit. Shared by the plain `Success` leaf and a guard's success branch.
+    fn emit_success_leaf(
+        &mut self,
+        arm_index: usize,
+        bindings: &[Binding],
+        scrutinee: ValueId,
+        scrutinee_ty: TyId,
+        arms: &[HirMatchArm],
+        exits: &mut Vec<super::ArmExit>,
+    ) {
+        self.push_scope();
+        self.emit_bindings(bindings, scrutinee, scrutinee_ty);
+        if let Some(arm) = arms.get(arm_index) {
+            let body_val = self.lower_expr(arm.body);
+            if let Some(exit) = self.capture_arm_exit(body_val) {
+                exits.push(exit);
+            }
+        }
+        self.pop_scope();
     }
 }
 
@@ -507,28 +587,338 @@ fn rebound_value(val: ValueId, old: &[ValueId], new: &[ValueId]) -> ValueId {
 impl OssaBodyCtx<'_, '_> {
     /// Emit SSA bindings for a matched arm.
     ///
-    /// Each binding's access path is applied to the scrutinee via consuming
-    /// extraction — the result has the correct ownership (@owned for
-    /// non-trivial types). For @owned results, we copy so the binding
-    /// has its own lifetime independent of the scrutinee.
+    /// Each binding's access path is applied to the scrutinee. When the
+    /// scrutinee is @owned and any binding extracts a non-Copyable component
+    /// (which can't be copied), the whole leaf is **moved out** of the
+    /// scrutinee via consuming destructure (`emit_moveout`), consuming it.
+    /// Otherwise the per-binding borrow-extract-copy path runs unchanged
+    /// (Copyable matches and @guaranteed/borrowed scrutinees).
     fn emit_bindings(&mut self, bindings: &[Binding], scrutinee: ValueId, scrutinee_ty: TyId) {
+        let owned = self.body.value(scrutinee).ownership == Ownership::Owned;
+        let needs_moveout = owned
+            && bindings
+                .iter()
+                .any(|b| self.path_extracts_noncopyable(scrutinee_ty, &b.path));
+
+        if needs_moveout {
+            let items: Vec<MoveItem> = bindings
+                .iter()
+                .map(|b| MoveItem {
+                    path: b.path.clone(),
+                    local_id: b.local_id,
+                })
+                .collect();
+            self.emit_moveout(scrutinee, scrutinee_ty, items);
+        } else {
+            for binding in bindings {
+                self.bind_path_copy(scrutinee, scrutinee_ty, &binding.path, binding.local_id);
+            }
+        }
+    }
+
+    /// Borrow-extract-copy a single binding from `base` and insert it into the
+    /// local map. @owned results are copied (so the binding owns its value);
+    /// @guaranteed results are used directly.
+    fn bind_path_copy(
+        &mut self,
+        base: ValueId,
+        base_ty: TyId,
+        path: &[PathElement],
+        local_id: LocalId,
+    ) {
+        let (extracted, _) = self.apply_access_path(base, base_ty, path);
+        let bound_val = if self.body.value(extracted).ownership == Ownership::Owned {
+            self.emit_copy_value(extracted)
+        } else {
+            extracted
+        };
+        self.local_map
+            .insert(local_id, super::LocalBinding::Ssa(bound_val));
+    }
+
+    /// Bind pattern variables for a guard condition **without consuming** the
+    /// scrutinee: borrow it once and navigate by @guaranteed views. A failing
+    /// guard must leave the scrutinee intact for the remaining patterns, so we
+    /// cannot move out here. The borrow is closed at the branch terminator.
+    fn emit_bindings_for_guard(
+        &mut self,
+        bindings: &[Binding],
+        scrutinee: ValueId,
+        scrutinee_ty: TyId,
+    ) {
+        if bindings.is_empty() {
+            return;
+        }
+        let base = if self.body.value(scrutinee).ownership == Ownership::Owned {
+            self.emit_begin_borrow(scrutinee)
+        } else {
+            scrutinee
+        };
         for binding in bindings {
-            let hir_local = binding.local_id;
-            let (extracted, _) = self.apply_access_path(scrutinee, scrutinee_ty, &binding.path);
+            let (view, _) = self.apply_access_path(base, scrutinee_ty, &binding.path);
+            self.local_map
+                .insert(binding.local_id, super::LocalBinding::Ssa(view));
+        }
+    }
 
-            let ownership = self.body.value(extracted).ownership;
+    /// True if applying `path` to a value of `root_ty` would extract a
+    /// non-Copyable component at any step. Such an extraction from an @owned
+    /// value can't be copied — it must be moved out (see `emit_moveout`).
+    /// Mirrors `apply_access_path`'s type resolution without emitting code.
+    fn path_extracts_noncopyable(&mut self, root_ty: TyId, path: &[PathElement]) -> bool {
+        let mut current_ty = root_ty;
+        let mut pending_downcast: Option<VariantIdx> = None;
+        for elem in path {
+            match elem {
+                PathElement::Downcast(name) => {
+                    let variant_idx = self
+                        .ty_entity(current_ty)
+                        .and_then(|e| self.ctx.resolve_variant_idx(e, name))
+                        .unwrap_or(VariantIdx::new(0));
+                    pending_downcast = Some(variant_idx);
+                },
+                PathElement::Field(name) => {
+                    let field_ty = if let Some(variant_idx) = pending_downcast.take() {
+                        self.resolve_enum_payload_field(current_ty, variant_idx, name).1
+                    } else {
+                        self.resolve_struct_field(current_ty, name).1
+                    };
+                    if self.is_non_copyable(field_ty) {
+                        return true;
+                    }
+                    current_ty = field_ty;
+                },
+                PathElement::Index(i) => {
+                    let field_ty = if let Some(variant_idx) = pending_downcast.take() {
+                        self.resolve_enum_payload_field_by_index(
+                            current_ty,
+                            variant_idx,
+                            FieldIdx::new(*i),
+                        )
+                    } else {
+                        self.resolve_tuple_element(current_ty, *i)
+                    };
+                    if self.is_non_copyable(field_ty) {
+                        return true;
+                    }
+                    current_ty = field_ty;
+                },
+                // Array suffix/rest patterns aren't aggregate destructures.
+                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
+            }
+        }
+        false
+    }
 
-            // For @owned types, copy the extracted value so the binding
-            // owns its own value. @guaranteed values are used directly.
-            let bound_val = if ownership == Ownership::Owned {
-                self.emit_copy_value(extracted)
-            } else {
-                extracted
+    /// Recursively move bindings out of an @owned aggregate `value`, consuming
+    /// it. Destructures `value` into its components (one consuming op per
+    /// level), binds the components named by `items` (recursing for deeper
+    /// paths), and drops every component with no binding. This is the
+    /// move-out path for non-Copyable payloads.
+    fn emit_moveout(&mut self, value: ValueId, value_ty: TyId, items: Vec<MoveItem>) {
+        // A binding that ends here owns the whole (already @owned) value.
+        if let Some(item) = items.iter().find(|it| it.path.is_empty()) {
+            self.local_map
+                .insert(item.local_id, super::LocalBinding::Ssa(value));
+            return;
+        }
+
+        let (results, comp_tys, enum_variant): (Vec<ValueId>, Vec<TyId>, Option<VariantIdx>) =
+            match self.aggregate_kind(value_ty) {
+                AggKind::Enum => {
+                    let variant_name = items.iter().find_map(|it| match it.path.first() {
+                        Some(PathElement::Downcast(n)) => Some(n.clone()),
+                        _ => None,
+                    });
+                    let Some(vname) = variant_name else {
+                        // Unexpected shape — fall back to per-item copy.
+                        for it in &items {
+                            self.bind_path_copy(value, value_ty, &it.path, it.local_id);
+                        }
+                        return;
+                    };
+                    let variant_idx = self
+                        .ty_entity(value_ty)
+                        .and_then(|e| self.ctx.resolve_variant_idx(e, &vname))
+                        .unwrap_or(VariantIdx::new(0));
+                    let comp_tys = self.enum_variant_payload_tys(value_ty, variant_idx);
+                    let results = self.emit_destructure_enum(value, variant_idx, &comp_tys);
+                    (results, comp_tys, Some(variant_idx))
+                },
+                AggKind::Struct => {
+                    let comp_tys = self.struct_field_tys(value_ty);
+                    let results = self.emit_destructure_struct(value, &comp_tys);
+                    (results, comp_tys, None)
+                },
+                AggKind::Tuple => {
+                    let comp_tys = self.tuple_elem_tys(value_ty);
+                    let results = self.emit_destructure_tuple(value, &comp_tys);
+                    (results, comp_tys, None)
+                },
+                AggKind::Other => {
+                    // Not a destructurable aggregate (e.g. array pattern) — fall
+                    // back to per-item copy from the original value.
+                    for it in &items {
+                        self.bind_path_copy(value, value_ty, &it.path, it.local_id);
+                    }
+                    return;
+                },
             };
 
-            self.local_map
-                .insert(hir_local, super::LocalBinding::Ssa(bound_val));
+        // Route each item to its component, stripping the consumed prefix.
+        let mut by_comp: Vec<Vec<MoveItem>> = (0..results.len()).map(|_| Vec::new()).collect();
+        for it in items {
+            let (comp_idx, rest) = self.route_item(value_ty, enum_variant, &it.path);
+            match comp_idx {
+                Some(ci) if ci < by_comp.len() => by_comp[ci].push(MoveItem {
+                    path: rest,
+                    local_id: it.local_id,
+                }),
+                _ => {
+                    // Shouldn't happen for a well-formed pattern; the component
+                    // is dropped below since nothing routed into it.
+                },
+            }
         }
+
+        for (ci, sub) in by_comp.into_iter().enumerate() {
+            if sub.is_empty() {
+                self.emit_destroy_value(results[ci]);
+            } else {
+                self.emit_moveout(results[ci], comp_tys[ci], sub);
+            }
+        }
+    }
+
+    /// Map an item's leading path element to a component index of the just-
+    /// destructured `value_ty`, returning the remaining (stripped) path.
+    fn route_item(
+        &mut self,
+        value_ty: TyId,
+        enum_variant: Option<VariantIdx>,
+        path: &[PathElement],
+    ) -> (Option<usize>, Vec<PathElement>) {
+        if let Some(variant_idx) = enum_variant {
+            // Enum payload paths are `[Downcast(V), accessor, ...rest]`.
+            if path.len() >= 2 && matches!(path[0], PathElement::Downcast(_)) {
+                let comp = match &path[1] {
+                    PathElement::Index(i) => Some(*i),
+                    PathElement::Field(name) => {
+                        Some(self.resolve_enum_payload_field(value_ty, variant_idx, name).0.index())
+                    },
+                    _ => None,
+                };
+                return (comp, path[2..].to_vec());
+            }
+            return (None, path.to_vec());
+        }
+        // Struct/tuple paths are `[accessor, ...rest]`.
+        if let Some(first) = path.first() {
+            let comp = match first {
+                PathElement::Index(i) => Some(*i),
+                PathElement::Field(name) => Some(self.resolve_struct_field(value_ty, name).0.index()),
+                _ => None,
+            };
+            return (comp, path[1..].to_vec());
+        }
+        (None, path.to_vec())
+    }
+
+    /// Classify an aggregate type for destructuring.
+    fn aggregate_kind(&self, ty: TyId) -> AggKind {
+        match self.ctx.module.ty_arena.get(ty) {
+            MirTy::Named { entity, .. } => {
+                let e = *entity;
+                if self.ctx.module.enums.contains_key(&e) {
+                    AggKind::Enum
+                } else if self.ctx.module.structs.contains_key(&e) {
+                    AggKind::Struct
+                } else {
+                    AggKind::Other
+                }
+            },
+            MirTy::Tuple(_) => AggKind::Tuple,
+            _ => AggKind::Other,
+        }
+    }
+
+    /// All payload field types of an enum variant, with generic substitution.
+    fn enum_variant_payload_tys(&mut self, enum_ty: TyId, variant_idx: VariantIdx) -> Vec<TyId> {
+        let (entity, type_args) = match self.ctx.module.ty_arena.get(enum_ty) {
+            MirTy::Named {
+                entity, type_args, ..
+            } => (Some(*entity), type_args.clone()),
+            _ => (None, vec![]),
+        };
+        let Some(entity) = entity else {
+            return vec![];
+        };
+        // Collect raw field tys + type-param entities, releasing the edef borrow
+        // before substituting (which needs &mut ty_arena).
+        let (raw_tys, tp_entities): (Vec<TyId>, Vec<Entity>) = match self
+            .ctx
+            .module
+            .enums
+            .get(&entity)
+            .and_then(|edef| edef.cases.get(variant_idx.index()).map(|c| (c, edef)))
+        {
+            Some((case, edef)) => (
+                case.payload_fields.iter().map(|f| f.ty).collect(),
+                edef.type_params.iter().map(|tp| tp.entity).collect(),
+            ),
+            None => (vec![], vec![]),
+        };
+        self.substitute_all(raw_tys, &tp_entities, &type_args)
+    }
+
+    /// All field types of a struct, with generic substitution.
+    fn struct_field_tys(&mut self, struct_ty: TyId) -> Vec<TyId> {
+        let (entity, type_args) = match self.ctx.module.ty_arena.get(struct_ty) {
+            MirTy::Named {
+                entity, type_args, ..
+            } => (Some(*entity), type_args.clone()),
+            _ => (None, vec![]),
+        };
+        let Some(entity) = entity else {
+            return vec![];
+        };
+        let (raw_tys, tp_entities): (Vec<TyId>, Vec<Entity>) =
+            match self.ctx.module.structs.get(&entity) {
+                Some(sdef) => (
+                    sdef.fields.iter().map(|f| f.ty).collect(),
+                    sdef.type_params.iter().map(|tp| tp.entity).collect(),
+                ),
+                None => (vec![], vec![]),
+            };
+        self.substitute_all(raw_tys, &tp_entities, &type_args)
+    }
+
+    /// All element types of a tuple type.
+    fn tuple_elem_tys(&self, tuple_ty: TyId) -> Vec<TyId> {
+        match self.ctx.module.ty_arena.get(tuple_ty) {
+            MirTy::Tuple(elements) => elements.clone(),
+            _ => vec![],
+        }
+    }
+
+    /// Substitute generic type params into a batch of field/element types.
+    fn substitute_all(
+        &mut self,
+        raw_tys: Vec<TyId>,
+        tp_entities: &[Entity],
+        type_args: &[TyId],
+    ) -> Vec<TyId> {
+        if type_args.is_empty() || tp_entities.is_empty() {
+            return raw_tys;
+        }
+        let mut subst = kestrel_mir_3::SubstMap::new();
+        for (&tp, &arg) in tp_entities.iter().zip(type_args.iter()) {
+            subst.type_params.insert(tp, arg);
+        }
+        raw_tys
+            .iter()
+            .map(|&t| kestrel_mir_3::substitute(&mut self.ctx.module.ty_arena, t, &subst))
+            .collect()
     }
 
     /// Resolve the `ResolvedTy` for an HIR expression.

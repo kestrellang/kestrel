@@ -162,14 +162,23 @@ impl LiveTracker {
         Self {
             slots: live
                 .iter()
-                .map(|&(value, ty, ownership)| TrackerSlot { value, ty, ownership, alive: true })
+                .map(|&(value, ty, ownership)| TrackerSlot {
+                    value,
+                    ty,
+                    ownership,
+                    alive: true,
+                })
                 .collect(),
         }
     }
 
     /// Current values to forward as block args (alive slots only).
     pub fn values(&self) -> Vec<ValueId> {
-        self.slots.iter().filter(|s| s.alive).map(|s| s.value).collect()
+        self.slots
+            .iter()
+            .filter(|s| s.alive)
+            .map(|s| s.value)
+            .collect()
     }
 
     /// Type descriptors for creating block params (alive slots only).
@@ -215,6 +224,16 @@ impl LiveTracker {
     pub fn contains(&self, value: ValueId) -> bool {
         self.slots.iter().any(|s| s.alive && s.value == value)
     }
+}
+
+/// Exit state of one branch/arm that reaches a merge. `slots[i]` is the
+/// `(current value, alive)` of the i-th pre-branch live value at the exit —
+/// `alive == false` means the value was moved/consumed on this edge. Shared by
+/// `lower_if` (control.rs) and `lower_match` (pattern.rs).
+pub(crate) struct ArmExit {
+    pub block: BlockId,
+    pub result: ValueId,
+    pub slots: Vec<(ValueId, bool)>,
 }
 
 pub(crate) struct OssaBodyCtx<'a, 'w> {
@@ -764,20 +783,30 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.tracker.rebind(old_vals, new_vals);
     }
 
-    /// Destroy current scope except result + tracker values, then jump to merge block.
-    pub fn jump_to_merge(&mut self, merge_block: BlockId, result: ValueId) {
+    /// Finish a branch/arm: materialize an @owned result, drop arm-local owned
+    /// values (keeping the result + threaded tracker values), and capture the
+    /// arm's exit state. Returns `None` if the arm diverged (already terminated).
+    /// Shared by `lower_if` and the match decision-tree walk.
+    pub fn capture_arm_exit(&mut self, result: ValueId) -> Option<ArmExit> {
+        if self.is_terminated() {
+            return None;
+        }
+        // A merge param can't carry a borrow — materialize an @owned result.
         let result = if self.body.value(result).ownership == Ownership::Guaranteed {
             self.emit_copy_value(result)
         } else {
             result
         };
-        let tracker_vals = self.tracker.values();
+        // Drop owned values local to this arm; keep the result + threaded values.
         let mut keep = vec![result];
-        keep.extend(&tracker_vals);
+        keep.extend(self.tracker.values());
         self.destroy_scope_except(&keep);
-        let mut args = vec![result];
-        args.extend(tracker_vals);
-        self.emit_jump(merge_block, args);
+        let block = self.current_block.expect("arm has a current block");
+        Some(ArmExit {
+            block,
+            result,
+            slots: self.tracker.slot_states(),
+        })
     }
 
     // ================================================================
@@ -1034,6 +1063,69 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.emit_end_borrow(borrow);
             result
         }
+    }
+
+    /// Consume an @owned enum value, moving ALL payload fields of `variant` out
+    /// as @owned results (one per `field_tys`). Used by match move-out so a
+    /// non-Copyable payload is moved rather than illegally copied.
+    pub fn emit_destructure_enum(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field_tys: &[TyId],
+    ) -> Vec<ValueId> {
+        let results: Vec<ValueId> = field_tys
+            .iter()
+            .map(|&ty| self.alloc_value(ty, Ownership::Owned))
+            .collect();
+        self.push_inst(InstKind::DestructureEnum {
+            results: results.clone(),
+            operand,
+            variant,
+        });
+        self.consume(operand);
+        for &r in &results {
+            self.track_owned(r);
+        }
+        results
+    }
+
+    /// Consume an @owned struct value, moving ALL fields out as @owned results.
+    pub fn emit_destructure_struct(
+        &mut self,
+        operand: ValueId,
+        field_tys: &[TyId],
+    ) -> Vec<ValueId> {
+        let results: Vec<ValueId> = field_tys
+            .iter()
+            .map(|&ty| self.alloc_value(ty, Ownership::Owned))
+            .collect();
+        self.push_inst(InstKind::DestructureStruct {
+            results: results.clone(),
+            operand,
+        });
+        self.consume(operand);
+        for &r in &results {
+            self.track_owned(r);
+        }
+        results
+    }
+
+    /// Consume an @owned tuple value, moving ALL elements out as @owned results.
+    pub fn emit_destructure_tuple(&mut self, operand: ValueId, elem_tys: &[TyId]) -> Vec<ValueId> {
+        let results: Vec<ValueId> = elem_tys
+            .iter()
+            .map(|&ty| self.alloc_value(ty, Ownership::Owned))
+            .collect();
+        self.push_inst(InstKind::DestructureTuple {
+            results: results.clone(),
+            operand,
+        });
+        self.consume(operand);
+        for &r in &results {
+            self.track_owned(r);
+        }
+        results
     }
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
@@ -1348,12 +1440,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return None;
         }
         let typed = self.typed.as_ref()?;
-        let key = kestrel_type_infer::captures::place_key_of(
-            &self.ctx.query,
-            typed,
-            &self.hir,
-            expr_id,
-        )?;
+        let key =
+            kestrel_type_infer::captures::place_key_of(&self.ctx.query, typed, &self.hir, expr_id)?;
         self.place_capture_map.get(&key).copied()
     }
 

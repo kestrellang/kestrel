@@ -396,6 +396,12 @@ impl Compiler {
 
     /// Lower to MIR-3 (OSSA), run the pass pipeline, and verify.
     #[allow(clippy::result_large_err)]
+    /// Raw MIR-3 lowering with NO pass pipeline or verification — for
+    /// inspecting lowering output even when other functions fail to verify.
+    pub fn lower_to_mir3_raw(&self) -> kestrel_mir_3::MirModule {
+        kestrel_mir_lower_3::lower_module(self.world(), self.root())
+    }
+
     pub fn lower_to_mir3(&self) -> Result<kestrel_mir_3::MirModule, kestrel_codegen_cranelift_3::CodegenError> {
         let mut mir = kestrel_mir_lower_3::lower_module(self.world(), self.root());
         let target = kestrel_mir_3::TargetConfig::host_64();

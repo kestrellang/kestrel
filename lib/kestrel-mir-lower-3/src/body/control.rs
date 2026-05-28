@@ -9,38 +9,9 @@ use kestrel_hir::body::{HirBlock, HirExprId};
 use kestrel_mir_3::value::Ownership;
 use kestrel_mir_3::{BlockId, Immediate, TyId, ValueId};
 
-use super::{LoopInfo, OssaBodyCtx};
-
-/// Exit state of one branch arm that reaches the merge. `slots[i]` is the
-/// `(current value, alive)` of the i-th pre-branch live value at the arm's
-/// exit — `alive == false` means the value was moved in this arm.
-struct ArmExit {
-    block: BlockId,
-    result: ValueId,
-    slots: Vec<(ValueId, bool)>,
-}
+use super::{ArmExit, LoopInfo, OssaBodyCtx};
 
 impl OssaBodyCtx<'_, '_> {
-    /// Finish lowering a branch arm: drop arm-local owned values and capture the
-    /// arm's exit state. Returns `None` if the arm diverged (already terminated).
-    fn capture_arm_exit(&mut self, result: ValueId) -> Option<ArmExit> {
-        if self.is_terminated() {
-            return None;
-        }
-        // A merge param can't carry a borrow — materialize an @owned result.
-        let result = if self.body.value(result).ownership == Ownership::Guaranteed {
-            self.emit_copy_value(result)
-        } else {
-            result
-        };
-        // Drop owned values local to this arm; keep the result + threaded values.
-        let mut keep = vec![result];
-        keep.extend(self.tracker.values());
-        self.destroy_scope_except(&keep);
-        let block = self.current_block.expect("arm has a current block");
-        Some(ArmExit { block, result, slots: self.tracker.slot_states() })
-    }
-
     // ================================================================
     // If / Else
     // ================================================================

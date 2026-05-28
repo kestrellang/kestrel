@@ -282,16 +282,14 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
         // representative expr always exists.
         let mut kept: HashMap<Vec<ProjElem>, CapturedPlace> = HashMap::new();
         for u in &group {
-            let subsumed = group
-                .iter()
-                .any(|v| v.key.path.len() < u.key.path.len() && prefix_of(&v.key.path, &u.key.path));
+            let subsumed = group.iter().any(|v| {
+                v.key.path.len() < u.key.path.len() && prefix_of(&v.key.path, &u.key.path)
+            });
             if subsumed {
                 continue;
             }
             // Write-ness propagates from any use at or below this kept prefix.
-            let write = group
-                .iter()
-                .any(|v| u.key.is_prefix_of(&v.key) && v.write);
+            let write = group.iter().any(|v| u.key.is_prefix_of(&v.key) && v.write);
             kept.entry(u.key.path.clone()).or_insert(CapturedPlace {
                 key: u.key.clone(),
                 kind: if write {
@@ -430,7 +428,9 @@ impl Recorder<'_> {
                 }
             },
             HirExpr::Return { value: Some(v), .. } => self.walk_expr(*v, force_whole),
-            HirExpr::ImplicitMember { args: Some(args), .. } => {
+            HirExpr::ImplicitMember {
+                args: Some(args), ..
+            } => {
                 for arg in args {
                     self.walk_expr(arg.value, force_whole);
                 }
@@ -547,7 +547,9 @@ fn collect_bound_locals_expr(
             }
         },
         HirExpr::Return { value: Some(v), .. } => collect_bound_locals_expr(hir, *v, out),
-        HirExpr::ImplicitMember { args: Some(args), .. } => {
+        HirExpr::ImplicitMember {
+            args: Some(args), ..
+        } => {
             for arg in args {
                 collect_bound_locals_expr(hir, arg.value, out);
             }

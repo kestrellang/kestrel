@@ -1175,7 +1175,10 @@ impl LowerCtx<'_> {
                     ElseBody::Block(block) => self.lower_block(body, block),
                     ElseBody::ElseIf(expr_id) => {
                         let lowered = self.lower_expr(body, *expr_id);
-                        HirBlock { stmts: Vec::new(), tail_expr: Some(lowered) }
+                        HirBlock {
+                            stmts: Vec::new(),
+                            tail_expr: Some(lowered),
+                        }
                     },
                 });
                 let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
@@ -1220,8 +1223,16 @@ impl LowerCtx<'_> {
                 return self.alloc_expr(HirExpr::Match {
                     scrutinee: lowered_value,
                     arms: vec![
-                        HirMatchArm { pattern: lowered_pat, guard: None, body: then_arm_body },
-                        HirMatchArm { pattern: wildcard, guard: None, body: else_arm_body },
+                        HirMatchArm {
+                            pattern: lowered_pat,
+                            guard: None,
+                            body: then_arm_body,
+                        },
+                        HirMatchArm {
+                            pattern: wildcard,
+                            guard: None,
+                            body: else_arm_body,
+                        },
                     ],
                     source: MatchSource::IfLet,
                     span: span.clone(),
@@ -1466,9 +1477,16 @@ impl LowerCtx<'_> {
                     if conditions.len() == 1
                     && matches!(&conditions[0], IfCondition::Let { .. })
             );
-            if !is_guard_let { continue; }
+            if !is_guard_let {
+                continue;
+            }
 
-            let AstStmt::Guard { conditions, else_body, span } = &body.stmts[stmt_id] else {
+            let AstStmt::Guard {
+                conditions,
+                else_body,
+                span,
+            } = &body.stmts[stmt_id]
+            else {
                 unreachable!();
             };
             let IfCondition::Let { pattern, value } = &conditions[0] else {
@@ -1483,17 +1501,28 @@ impl LowerCtx<'_> {
 
             // CPS: wrap remaining stmts + tail as the pattern arm body
             let match_expr = self.lower_guard_let_cps(
-                body, *pattern, *value, else_body,
-                &stmts[i + 1..], tail_expr, span,
+                body,
+                *pattern,
+                *value,
+                else_body,
+                &stmts[i + 1..],
+                tail_expr,
+                span,
             );
 
-            return HirBlock { stmts: prev, tail_expr: Some(match_expr) };
+            return HirBlock {
+                stmts: prev,
+                tail_expr: Some(match_expr),
+            };
         }
 
         // No guard-let found — lower everything normally
         let lowered: Vec<HirStmtId> = stmts.iter().map(|&id| self.lower_stmt(body, id)).collect();
         let tail = tail_expr.map(|id| self.lower_expr(body, id));
-        HirBlock { stmts: lowered, tail_expr: tail }
+        HirBlock {
+            stmts: lowered,
+            tail_expr: tail,
+        }
     }
 
     /// CPS-desugar `guard let <pattern> = <value> else { <else_body> }`:
@@ -1529,8 +1558,16 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Match {
             scrutinee,
             arms: vec![
-                HirMatchArm { pattern: pat, guard: None, body: cont_body },
-                HirMatchArm { pattern: wildcard, guard: None, body: else_arm_body },
+                HirMatchArm {
+                    pattern: pat,
+                    guard: None,
+                    body: cont_body,
+                },
+                HirMatchArm {
+                    pattern: wildcard,
+                    guard: None,
+                    body: else_arm_body,
+                },
             ],
             source: MatchSource::GuardLet,
             span: span.clone(),

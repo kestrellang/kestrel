@@ -77,3 +77,17 @@ from HIR here.
 that reads a var_local must load from the address (`emit_copy_addr`).
 Closures capturing var_locals must snapshot the value, not capture the
 raw address.
+
+## Closure captures — query, don't recompute
+
+Closure captures come from the post-inference `ClosureCaptures` query
+(`kestrel-type-infer/src/captures.rs`, the single source of truth). It is
+place-based (RFC 2229): a closure reading `self.cap` captures the *field*, not
+the whole `self` — that's what lets a closure over a non-Copyable receiver
+compile. `lower_closure_expr` consumes the plan via `self.captures` and binds
+projected places into `place_capture_map` (whole-local captures into
+`local_map`); body reads are intercepted by `captured_place_value`. **Don't**
+re-walk the body to recompute captures here, and `HirExpr::Closure` has **no**
+`captures` field anymore. MIR applies copyability: a projected place is a
+by-value capture only when Copyable + read-only; non-Copyable or written places
+fall back to whole-local capture.

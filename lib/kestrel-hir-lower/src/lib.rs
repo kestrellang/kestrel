@@ -104,9 +104,8 @@ impl QueryFn for LowerBody {
 
         // Lower all top-level statements via lower_block_stmts so that
         // guard-let CPS transformation applies at the function body level.
-        let body_block = lower.lower_block_stmts(
-            ast_body, &ast_body.statements, ast_body.tail_expr,
-        );
+        let body_block =
+            lower.lower_block_stmts(ast_body, &ast_body.statements, ast_body.tail_expr);
         let mut statements: Vec<_> = param_desugar_stmts;
         statements.extend(body_block.stmts);
 

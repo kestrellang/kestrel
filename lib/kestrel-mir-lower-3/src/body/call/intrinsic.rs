@@ -1050,10 +1050,14 @@ pub(crate) fn try_intrinsic(
             );
         },
         "f32_nan" => {
-            return Some(bctx.emit_literal(Immediate::new(ImmediateKind::FloatNan(FloatBits::F32))));
+            return Some(
+                bctx.emit_literal(Immediate::new(ImmediateKind::FloatNan(FloatBits::F32))),
+            );
         },
         "f64_nan" => {
-            return Some(bctx.emit_literal(Immediate::new(ImmediateKind::FloatNan(FloatBits::F64))));
+            return Some(
+                bctx.emit_literal(Immediate::new(ImmediateKind::FloatNan(FloatBits::F64))),
+            );
         },
         _ => {},
     }

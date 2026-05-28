@@ -985,8 +985,7 @@ fn gen_struct_init(
     let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
 
     // Constrain fresh type args with explicit type args or deferred defaults
-    for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate()
-    {
+    for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate() {
         if let Some(hir_ty) = explicit_type_args.get(i) {
             let explicit_tv = lower_hir_ty(ctx, hir_ty);
             ctx.equal(fresh_tv, explicit_tv, span.clone());

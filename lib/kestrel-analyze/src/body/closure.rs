@@ -145,8 +145,11 @@ impl BodyCheck for ClosureAnalyzer {
                 continue;
             };
 
-            let mut capture_roots: Vec<LocalId> =
-                capture_plan.get(expr_id).iter().map(|c| c.key.root).collect();
+            let mut capture_roots: Vec<LocalId> = capture_plan
+                .get(expr_id)
+                .iter()
+                .map(|c| c.key.root)
+                .collect();
             capture_roots.sort_by_key(|l| l.raw());
             capture_roots.dedup();
             let captures = &capture_roots;

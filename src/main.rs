@@ -272,10 +272,14 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
     match args.kind {
         DumpKind::Mir => {
-            let mir = compiler.lower_to_mir3().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
+            let mir = if std::env::var_os("KESTREL_MIR3_RAW").is_some() {
+                compiler.lower_to_mir3_raw()
+            } else {
+                compiler.lower_to_mir3().map_err(|e| {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                })?
+            };
             if let Some(ref filter) = args.function_filter {
                 print!("{}", kestrel_mir_3::display::display_module_filtered(&mir, filter));
             } else {

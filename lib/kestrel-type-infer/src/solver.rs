@@ -1987,9 +1987,7 @@ fn emit_resolved_call(
             if !subs.iter().any(|(e, _)| *e == tp) {
                 let tv = ctx.fresh();
                 // Defer default: apply only if unconstrained after solving
-                if let Some(default_ty) =
-                    qctx.query(LowerTypeAnnotation { entity: tp, root })
-                {
+                if let Some(default_ty) = qctx.query(LowerTypeAnnotation { entity: tp, root }) {
                     ctx.type_param_defaults.push((tv, default_ty));
                 }
                 subs.push((tp, tv));
@@ -3245,7 +3243,10 @@ fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let defaults = std::mem::take(&mut ctx.type_param_defaults);
     for (tv, hir_ty) in &defaults {
         let resolved = ctx.resolve(*tv);
-        if matches!(ctx.types[resolved.0 as usize], TySlot::Unresolved { literal: None }) {
+        if matches!(
+            ctx.types[resolved.0 as usize],
+            TySlot::Unresolved { literal: None }
+        ) {
             let default_tv = crate::generate::lower_hir_ty(ctx, hir_ty);
             ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
             progress = true;

@@ -68,7 +68,12 @@ impl BodyCheck for GuardDivergenceAnalyzer {
         // Check CPS guard-let Match expressions (MatchSource::GuardLet).
         // The wildcard arm (last arm) is the else body that must diverge.
         for (_, expr) in cx.hir.exprs.iter() {
-            if let HirExpr::Match { arms, source: MatchSource::GuardLet, .. } = expr {
+            if let HirExpr::Match {
+                arms,
+                source: MatchSource::GuardLet,
+                ..
+            } = expr
+            {
                 if let Some(else_arm) = arms.last() {
                     if !expr_diverges(cx.hir, else_arm.body) {
                         let arm_span = util::expr_span(cx.hir, else_arm.body);
